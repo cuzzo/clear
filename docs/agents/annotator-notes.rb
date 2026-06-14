@@ -64,9 +64,9 @@
 # - Not changed: Kernel.raise / raise sites that enforce compiler invariants
 #   stay as hard failures. They are not source diagnostics and should not route
 #   through error! unless they become recoverable user-facing errors.
-# - Not changed: legacy @reentrant bridging. The parser, clear-fix migration,
-#   function-type constraints, and stack/FSM tests still intentionally exercise
-#   the migration path. Deleting it is a separate language compatibility change.
+# - Fixed: legacy @reentrant bridging was removed. The parser rejects legacy
+#   function annotations and function-type reentrance markers; supported syntax
+#   is EFFECTS REENTRANT[:VARIANT] and REQUIRES <param>: NON_REENTRANT.
 # - Not changed: semantic_index remains the frontend result handoff used by the
 #   compiler frontend and importer. Removing the ivar should be part of a broader
 #   API change that returns an annotation result object.

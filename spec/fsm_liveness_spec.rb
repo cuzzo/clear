@@ -1,11 +1,11 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/ast/lexer'
-require_relative '../src/ast/parser'
-require_relative '../src/ast/type'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_transform/segments'
-require_relative '../src/mir/fsm_transform/liveness'
+require_relative '../src/ast/lexer' unless defined?(Lexer)
+require_relative '../src/ast/parser' unless defined?(ClearParser)
+require_relative '../src/ast/type' unless defined?(Type)
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_transform/segments' unless defined?(FsmTransform::Segments::SplitResult)
+require_relative '../src/mir/fsm_transform/liveness' unless defined?(FsmTransform::Liveness::CrossSegmentVarFact)
 
 # Tests for FsmTransform::Liveness, the cross-segment live-set analysis
 # that drives FSM ctx field decls. The analysis MUST flag:
@@ -153,17 +153,118 @@ RSpec.describe FsmTransform::Liveness do
       expect(result.cross_segment_vars).not_to have_key("needle")
     end
 
+    it "excludes captured names even when the body declares and reads them across segments" do
+      cap_def = bind_decl("needle", AST::Literal.new(1, :Int64), full_type: :Int64)
+      cap_use = ident("needle")
+      seg0 = FsmTransform::Segments::Segment.new(0, [cap_def],
+        FsmTransform::Segments::IoSuspend.new(io_call("sleep", [], io_def), io_def, nil))
+      seg1 = FsmTransform::Segments::Segment.new(1, [cap_use],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1],
+        { captured: { "needle" => :placeholder } })
+
+      expect(result.cross_segment_vars).not_to have_key("needle")
+    end
+
+    it "treats NEXT result variables as cross-segment definitions" do
+      promise = io_call("p", [], { suspends: true, fsm_setup: [] })
+      seg0 = FsmTransform::Segments::Segment.new(0, [],
+        FsmTransform::Segments::NextSuspend.new(promise, "result"))
+      seg1 = FsmTransform::Segments::Segment.new(1, [ident("result")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1], { captured: {} })
+
+      fact = result.cross_segment_vars.fetch("result")
+      expect(fact.type_info).to be_nil
+      expect(fact.first_def_seg).to eq(0)
+      expect(fact.last_use_seg).to eq(1)
+    end
+
+    it "does not treat IO result variables as body-local cross-segment definitions" do
+      seg0 = FsmTransform::Segments::Segment.new(0, [],
+        FsmTransform::Segments::IoSuspend.new(io_call("readFile", [], io_def), io_def, "result"))
+      seg1 = FsmTransform::Segments::Segment.new(1, [ident("result")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1], { captured: {} })
+
+      expect(result.cross_segment_vars).not_to have_key("result")
+    end
+
+    it "preserves earliest definition, first type, and latest use" do
+      first_def = bind_decl("item", AST::Literal.new(1, :Int64), full_type: :Int64)
+      later_def = bind_decl("item", AST::Literal.new("two", :String), full_type: :String)
+      seg0 = FsmTransform::Segments::Segment.new(0, [first_def],
+        FsmTransform::Segments::Goto.new(1))
+      seg1 = FsmTransform::Segments::Segment.new(1, [later_def],
+        FsmTransform::Segments::IoSuspend.new(io_call("sleep", [], io_def), io_def, nil))
+      seg2 = FsmTransform::Segments::Segment.new(2, [ident("item")],
+        FsmTransform::Segments::Goto.new(3))
+      seg3 = FsmTransform::Segments::Segment.new(3, [ident("item")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1, seg2, seg3], { captured: {} })
+
+      fact = result.cross_segment_vars.fetch("item")
+      expect(fact.type_info).to eq(Type.new(:Int64))
+      expect(fact.first_def_seg).to eq(0)
+      expect(fact.last_use_seg).to eq(3)
+    end
+
+    it "defaults to an empty capture set when context omits captured names" do
+      pre_x = bind_decl("x", AST::Literal.new(42, :Int64), full_type: :Int64)
+      seg0 = FsmTransform::Segments::Segment.new(0, [pre_x],
+        FsmTransform::Segments::IoSuspend.new(io_call("sleep", [], io_def), io_def, nil))
+      seg1 = FsmTransform::Segments::Segment.new(1, [ident("x")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1], {})
+
+      expect(result.cross_segment_vars).to have_key("x")
+    end
+
+    it "continues past non-promoted locals when later locals cross segments" do
+      local_def = bind_decl("local", AST::Literal.new(1, :Int64), full_type: :Int64)
+      local_use = ident("local")
+      cross_def = bind_decl("cross", AST::Literal.new(2, :Int64), full_type: :Int64)
+      seg0 = FsmTransform::Segments::Segment.new(0, [local_def, local_use, cross_def],
+        FsmTransform::Segments::IoSuspend.new(io_call("sleep", [], io_def), io_def, nil))
+      seg1 = FsmTransform::Segments::Segment.new(1, [ident("cross")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1], { captured: {} })
+
+      expect(result.cross_segment_vars.keys).to eq(["cross"])
+    end
+
+    it "continues past captured locals when later locals cross segments" do
+      captured_def = bind_decl("captured", AST::Literal.new(1, :Int64), full_type: :Int64)
+      captured_use = ident("captured")
+      cross_def = bind_decl("cross", AST::Literal.new(2, :Int64), full_type: :Int64)
+      seg0 = FsmTransform::Segments::Segment.new(0, [captured_def, captured_use, cross_def],
+        FsmTransform::Segments::IoSuspend.new(io_call("sleep", [], io_def), io_def, nil))
+      seg1 = FsmTransform::Segments::Segment.new(1, [ident("cross")],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1],
+        { captured: { "captured" => :placeholder } })
+
+      expect(result.cross_segment_vars.keys).to eq(["cross"])
+    end
+
     it "records string-target assignments as definitions" do
       defs = {}
       stmt = AST::Assignment.new(nil, "slot", ident("source"))
 
-      FsmTransform::Liveness.collect_defs(stmt, defs)
+      FsmTransform::Liveness.send(:collect_defs, stmt, defs)
 
       expect(defs).to eq("slot" => nil)
     end
 
     it "normalizes raw declaration types into Type facts" do
-      expect(FsmTransform::Liveness.stmt_decl_type(bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
+      expect(FsmTransform::Liveness.send(:stmt_decl_type, bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
     end
   end
 end

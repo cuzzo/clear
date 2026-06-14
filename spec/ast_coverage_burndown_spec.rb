@@ -2,17 +2,17 @@ require "rspec"
 require "set"
 require "tempfile"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/diagnostic_buckets"
-require_relative "../src/ast/diagnostic_examples"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/std_lib"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/ast/type"
-require_relative "../src/annotator/helpers/function_signature"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/diagnostic_buckets" unless defined?(DiagnosticBuckets)
+require_relative "../src/ast/diagnostic_examples" unless defined?(DiagnosticExamples::FixScan)
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
 RSpec.describe "AST coverage burndown" do
   def token(type = :VAR_ID, value = "x", line: 1, column: 1)
@@ -20,7 +20,7 @@ RSpec.describe "AST coverage burndown" do
   end
 
   def parser_for(source)
-    Parser.new(Lexer.new(source).tokenize, source)
+    ClearParser.new(Lexer.new(source).tokenize, source)
   end
 
   def parse_expr(source)
@@ -63,7 +63,7 @@ RSpec.describe "AST coverage burndown" do
       RUBY
       file.close
 
-      expect(DiagnosticExamples.load!([file.path])).to eq({})
+      expect(DiagnosticExamples.send(:load!, [file.path])).to eq({})
     ensure
       file&.unlink
     end
@@ -323,10 +323,10 @@ RSpec.describe "AST coverage burndown" do
     end
 
     it "exposes stable semantic type ids at phase boundaries" do
-      number_id = Type.new(:Number).type_id
-      float_id = Type.new(:Float64).type_id
-      shared_string_id = Type.new(:String, ownership: :shared).type_id
-      plain_string_id = Type.new(:String).type_id
+      number_id = Type.new(:Number).send(:type_id)
+      float_id = Type.new(:Float64).send(:type_id)
+      shared_string_id = Type.new(:String, ownership: :shared).send(:type_id)
+      plain_string_id = Type.new(:String).send(:type_id)
 
       expect(number_id.key).to eq(float_id.key)
       expect(number_id.to_s).to eq(float_id.key)
@@ -337,7 +337,7 @@ RSpec.describe "AST coverage burndown" do
         return_type: :String,
         reentrant: true
       )
-      fn_id = Type.new(fn_sig).type_id.key
+      fn_id = Type.new(fn_sig).send(:type_id).key
 
       expect(fn_id).to include("fn(")
       expect(fn_id).to include("Int64")
@@ -372,9 +372,9 @@ RSpec.describe "AST coverage burndown" do
     end
   end
 
-  describe Parser do
+  describe ClearParser do
     it "covers token-level parser helpers and parser-only predicate suffixes" do
-      underscore = Parser.new([
+      underscore = ClearParser.new([
         token(:UNDERSCORE, "_"),
         token(:EOF, nil),
       ], "_").send(:consume_literal, "_")
@@ -394,7 +394,7 @@ RSpec.describe "AST coverage burndown" do
         token(:CHAR, ")"),
         token(:EOF, nil),
       ]
-      method_call = Parser.new(manual_tokens, "obj.check?()").send(:parse_expression)
+      method_call = ClearParser.new(manual_tokens, "obj.check?()").send(:parse_expression)
       expect(method_call).to be_a(AST::MethodCall)
       expect(method_call.name).to eq("check?")
 
@@ -405,7 +405,7 @@ RSpec.describe "AST coverage burndown" do
         token(:CHAR, ")"),
         token(:EOF, nil),
       ]
-      func_call = Parser.new(call_tokens, "check?()").send(:parse_expression)
+      func_call = ClearParser.new(call_tokens, "check?()").send(:parse_expression)
       expect(func_call).to be_a(AST::FuncCall)
       expect(func_call.name).to eq("check?")
     end
@@ -456,7 +456,7 @@ RSpec.describe "AST coverage burndown" do
 
       lhs = AST::Identifier.new(token, "value")
       op_tok = token(:KEYWORD, "AS")
-      bad_rhs_parser = Parser.new([
+      bad_rhs_parser = ClearParser.new([
         token(:VAR_ID, "fn"),
         token(:CHAR, "("),
         token(:CHAR, ")"),
@@ -552,7 +552,7 @@ RSpec.describe "AST coverage burndown" do
       expect(parser_for("PASS").send(:parse_lock_action).action).to eq(:pass)
 
       expect {
-        Parser.new([
+        ClearParser.new([
           token(:CHAR, ":"),
           token(:KEYWORD, "RETURN"),
           token(:EOF, nil),
@@ -612,7 +612,7 @@ RSpec.describe "AST coverage burndown" do
       expect(float_result.right_coercion).to be_nil
 
       fallback_result = Type.binary_op(:MUL, Type.new(:String), Type.new(:Bool))
-      expect(fallback_result.type.resolved).to eq(:Float64)
+      expect(fallback_result.error).to include("numeric operands")
       expect(Type.binary_op(:NOPE, Type.new(:Int64), Type.new(:Int64)).error).to include("Unknown operator")
     end
 

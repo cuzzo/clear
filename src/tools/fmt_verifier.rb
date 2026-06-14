@@ -19,7 +19,7 @@
 # CLI: `clear fmt --verify <file-or-dir>` wires through to this module.
 
 require_relative '../backends/transpiler'
-require_relative '../backends/importer'
+require_relative '../compiler/module_importer'
 require_relative 'formatter'
 require 'tempfile'
 
@@ -32,14 +32,13 @@ module FmtVerifier
     end
   end
 
-  module_function
 
   # Verify a single .cht file. Returns a Result struct.
   #
   # source_dir: directory used by the importer to resolve REQUIRE paths.
   # Defaults to the file's containing directory, which is what `clear`
   # itself uses when transpiling that file directly.
-  def verify(cht_path, source_dir: nil)
+  def self.verify(cht_path, source_dir: nil)
     abs_path   = File.expand_path(cht_path)
     source_dir ||= File.dirname(abs_path)
     source     = File.read(abs_path)
@@ -70,7 +69,7 @@ module FmtVerifier
   #
   # Rule of thumb: any comment line whose only purpose is "remember
   # where the emitter was when it wrote this," normalize away.
-  def normalize_for_compare(zig_source)
+  def self.normalize_for_compare(zig_source)
     zig_source
       .gsub(%r{^\s*// CLR:\d+\n}, '')
       .gsub(%r{^\s*// CLEAR_PROFILE_TASK_SITE\b[^\n]*\n}, '')
@@ -86,7 +85,7 @@ module FmtVerifier
   # Verify every .cht file under `dir` (recursive). Useful for sweeping
   # large corpora like benchmarks/ or examples/. Returns an Array of
   # Results in path order.
-  def verify_dir(dir)
+  def self.verify_dir(dir)
     paths = Dir.glob(File.join(dir, '**', '*.cht')).sort
     paths.map { |p| verify(p) }
   end
@@ -94,7 +93,7 @@ module FmtVerifier
   # Print a one-line summary per result and a totals footer.
   # Returns the count of non-OK results so callers can use it as an
   # exit code: zero on clean, positive on any failure.
-  def report(results, io: $stdout)
+  def self.report(results, io: $stdout)
     fail_count = 0
     results.each do |r|
       label = r.ok ? "\e[32mOK\e[0m" : "\e[31m#{r.status_label}\e[0m"
@@ -119,7 +118,7 @@ module FmtVerifier
 
   # ---- internals ----
 
-  def transpile(cheat_code, source_dir)
+  def self.transpile(cheat_code, source_dir)
     importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
     ZigTranspiler.new(importer: importer, source_dir: source_dir).transpile(cheat_code)
   end
@@ -127,9 +126,9 @@ module FmtVerifier
   # Use shell `diff -u` for a familiar unified diff. Truncates to the
   # first ~40 lines of context — enough to see what shifted, not so
   # much that a sweep of N files spams the terminal.
-  def diff_excerpt(before, after, max_lines: 40)
-    Tempfile.create('before') do |bf|
-      Tempfile.create('after') do |af|
+  def self.diff_excerpt(before, after, max_lines: 40)
+    Tempfile.create do |bf|
+      Tempfile.create do |af|
         bf.write(before); bf.flush
         af.write(after);  af.flush
         out = `diff -u #{bf.path} #{af.path} 2>&1`
@@ -140,4 +139,6 @@ module FmtVerifier
       end
     end
   end
+  private_class_method :normalize_for_compare
+
 end

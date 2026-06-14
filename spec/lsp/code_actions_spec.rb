@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../../src/lsp/code_actions"
-require_relative "../../src/lsp/document_store"
-require_relative "../../src/lsp/analyzer"
-require_relative "../../src/ast/fixable_error"
+require_relative "../../src/lsp/code_actions" unless defined?(LSP::CodeActions)
+require_relative "../../src/lsp/document_store" unless defined?(LSP::DocumentStore)
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
+require_relative "../../src/ast/fixable_error" unless defined?(FixCollector)
 
 # CodeActions converts FixableFindings to LSP CodeActions. The unit
 # tests below feed canned findings; the server-level integration tests
@@ -15,7 +15,7 @@ RSpec.describe LSP::CodeActions do
     store = LSP::DocumentStore.new
     store.open("file:///t.cht", text, 1)
     doc = store.get("file:///t.cht")
-    doc.cached_findings = LSP::Analyzer::Result.new(findings: findings, fatal_error: nil)
+    doc.cached_findings = LSP::AnalysisResult.new(findings: findings, fatal_error: nil)
     doc
   end
 
@@ -72,12 +72,57 @@ RSpec.describe LSP::CodeActions do
       expect(LSP::CodeActions.for_range(doc, request_range)).to eq([])
     end
 
+    it "skips no-fix findings without computing diagnostics and continues to later findings" do
+      no_fix = StubFinding.new(
+        level: :error,
+        message: "bad finding",
+        token: nil,
+        category: :type,
+        fixes: [],
+      )
+      with_fix = finding_with(auto_fix, line: 1, col: 1, value: "x")
+      doc = make_doc(findings: [no_fix, with_fix])
+
+      out = LSP::CodeActions.for_range(doc, request_range)
+
+      expect(out.size).to eq(1)
+      expect(out.first[:title]).to eq("Add MUTABLE")
+    end
+
     it "skips findings whose range doesn't overlap the request" do
       # Finding on line 5, request on line 1 → no overlap.
       f = finding_with(auto_fix, line: 5, col: 1, value: "x")
       doc = make_doc(findings: [f])
       out = LSP::CodeActions.for_range(doc, request_range(start_line: 0, end_line: 0))
       expect(out).to eq([])
+    end
+
+    it "continues after an out-of-range finding" do
+      out_of_range = finding_with(auto_fix(desc: "ignore"), line: 5, col: 1, value: "x")
+      in_range = finding_with(auto_fix(desc: "apply"), line: 1, col: 1, value: "x")
+      doc = make_doc(findings: [out_of_range, in_range])
+
+      out = LSP::CodeActions.for_range(doc, request_range(start_line: 0, end_line: 0))
+
+      expect(out.map { |action| action[:title] }).to eq(["apply"])
+    end
+
+    it "uses document text for UTF-16 diagnostic and edit ranges" do
+      text = "ééabc\n"
+      fix = auto_fix(line: 1, col: 5, length: 1, replacement: "A")
+      f = finding_with(fix, line: 1, col: 5, value: "a")
+      doc = make_doc(text, findings: [f])
+
+      out = LSP::CodeActions.for_range(
+        doc,
+        request_range(start_line: 0, start_char: 2, end_line: 0, end_char: 3),
+      )
+
+      edit = out.first[:edit][:documentChanges].first[:edits].first
+      expect(edit[:range]).to eq(
+        start: { line: 0, character: 2 },
+        end: { line: 0, character: 3 },
+      )
     end
 
     it "produces one CodeAction per Fix on overlapping findings" do
@@ -155,6 +200,19 @@ RSpec.describe LSP::CodeActions do
   end
 
   describe "range overlap" do
+    def lsp_range(start_line, start_char, end_line, end_char, string_keys: false)
+      range = {
+        start: { line: start_line, character: start_char },
+        end: { line: end_line, character: end_char },
+      }
+      return range unless string_keys
+
+      {
+        "start" => { "line" => start_line, "character" => start_char },
+        "end" => { "line" => end_line, "character" => end_char },
+      }
+    end
+
     it "considers ranges overlapping when one end matches the other start" do
       # Action range: line 0 char 0..1; request: line 0 char 1..5.
       # Touching boundaries count as overlapping.
@@ -162,6 +220,21 @@ RSpec.describe LSP::CodeActions do
       doc = make_doc(findings: [f])
       out = LSP::CodeActions.for_range(doc, request_range(start_line: 0, start_char: 1, end_line: 0, end_char: 5))
       expect(out.size).to eq(1)
+
+      expect(
+        LSP::CodeActions.send(
+          :ranges_overlap?,
+          lsp_range(0, 0, 0, 1),
+          lsp_range(0, 1, 0, 5, string_keys: true),
+        ),
+      ).to be(true)
+      expect(
+        LSP::CodeActions.send(
+          :ranges_overlap?,
+          lsp_range(0, 1, 0, 5),
+          lsp_range(0, 0, 0, 1, string_keys: true),
+        ),
+      ).to be(true)
     end
 
     it "considers ranges non-overlapping when one ends strictly before the other starts" do
@@ -170,6 +243,21 @@ RSpec.describe LSP::CodeActions do
       doc = make_doc(findings: [f])
       out = LSP::CodeActions.for_range(doc, request_range(start_line: 0, start_char: 5, end_line: 0, end_char: 10))
       expect(out).to eq([])
+
+      expect(
+        LSP::CodeActions.send(
+          :ranges_overlap?,
+          lsp_range(0, 0, 0, 1),
+          lsp_range(0, 2, 0, 5, string_keys: true),
+        ),
+      ).to be(false)
+      expect(
+        LSP::CodeActions.send(
+          :ranges_overlap?,
+          lsp_range(0, 5, 0, 10),
+          lsp_range(0, 0, 0, 4, string_keys: true),
+        ),
+      ).to be(false)
     end
   end
 end

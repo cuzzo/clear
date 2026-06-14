@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 require_relative "../../ast/lexer"
 require_relative "../../backends/zig_type"
+require_relative "../../compiler/entrypoint"
 require_relative "../../semantic/capability_plan"
 
 module MIRLoweringCapabilities
@@ -41,7 +42,7 @@ module MIRLoweringCapabilities
     const :retries, T.nilable(Integer)
     const :matched_types, T::Array[Symbol]
     const :bubble_types, T::Array[Symbol]
-    const :action_mir, T.nilable(T::Array[MIR::Emittable])
+    const :action_mir, T::Array[MIR::Emittable], default: []
     const :exit_msg_mir, T.nilable(MIR::Emittable)
   end
 
@@ -240,17 +241,17 @@ module MIRLoweringCapabilities
       materialization.add_binding(shared_capability_binding(context))
     when :EXCLUSIVE
       exclusive = exclusive_capability_binding(context)
-      materialization.add_binding(exclusive) if exclusive
-      append_fallible_clause(materialization, context) if exclusive && context.clause
+      materialization.add_binding(exclusive) unless exclusive.empty?
+      append_fallible_clause(materialization, context) if !exclusive.empty? && context.clause
     when :write_locked_read
       read_lock = read_locked_capability_binding(context)
-      materialization.add_binding(read_lock) if read_lock
-      append_fallible_clause(materialization, context) if read_lock && context.clause
+      materialization.add_binding(read_lock) unless read_lock.empty?
+      append_fallible_clause(materialization, context) if !read_lock.empty? && context.clause
     when :BORROWED
       materialization.add_binding(borrowed_capability_binding(context))
     when :RESTRICT
       restrict = restrict_capability_binding(context)
-      materialization.add_binding(restrict) if restrict
+      materialization.add_binding(restrict) unless restrict.empty?
     when :VIEW
       materialization.add_binding(view_capability_binding(context))
     when :SNAPSHOT
@@ -291,7 +292,7 @@ module MIRLoweringCapabilities
   sig { params(alias_name: String).returns(String) }
   def safe_with_capability_alias(alias_name)
     cleaned = (alias_name.end_with?("!") || alias_name.end_with?("?")) ? T.must(alias_name[0..-2]) : alias_name
-    cleaned = "clearMain" if cleaned == "main"
+    cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
     ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
@@ -359,17 +360,17 @@ module MIRLoweringCapabilities
     context.node.polymorphic && is_param ? nil : context.var_sync
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def exclusive_capability_binding(context)
-    return nil if context.needs_sort
+    return [] if context.needs_sort
 
     plan = lock_binding_plan(context, exclusive_lock_expr(context), exclusive_lock_sync(context))
     render_lock_binding(plan, MIR::LockAcquire.new(plan.lock_expr, plan.lock_sync, !plan.clause.nil?))
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def read_locked_capability_binding(context)
-    return nil if context.needs_sort
+    return [] if context.needs_sort
 
     is_arc = SymbolEntry.rc_storage?(context.var_storage) || context.resolved_type&.any_rc?
     lock_expr = MIR::CapabilityLockTarget.new(with_capability_source_mir(context.var_node), is_arc, false)
@@ -384,26 +385,31 @@ module MIRLoweringCapabilities
     safe_alias = safe_with_capability_alias(context.alias_name)
     aliased_value = if context.node.polymorphic
       MIR::CapabilityUnwrap.new(source_mir)
-    elsif borrowed_const_param_alias?(context, is_param)
-      MIR::Deref.new(source_mir)
-    else
-      source_mir
-    end
+	    elsif borrowed_const_param_alias?(context, is_param)
+	      MIR::Deref.new(source_mir)
+	    else
+	      source_mir
+	    end
     [MIR::Let.new(safe_alias, aliased_value, false, nil, nil), MIR::Suppress.new(safe_alias)]
   end
 
   sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
-  def borrowed_const_param_alias?(context, is_param)
-    return false unless is_param
-    return false unless context.var_sync.nil? || context.var_sync == :local
+	  def borrowed_const_param_alias?(context, is_param)
+	    return false unless is_param
+	    return false unless context.var_sync.nil? || context.var_sync == :local
 
-    sym = context.var_node.symbol
-    !!(sym && !sym.mutable)
-  end
+	    sym = context.var_node.symbol
+	    return false unless sym && !sym.mutable
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
+	    source_type = Type.new(sym.type)
+	    return false if source_type.non_string_array? && !source_type.collection?
+
+	    true
+	  end
+
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def restrict_capability_binding(context)
-    return nil unless context.var_sync.nil? || context.var_sync == :local
+    return [] unless context.var_sync.nil? || context.var_sync == :local
 
     source_mir = with_capability_source_mir(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
@@ -465,7 +471,7 @@ module MIRLoweringCapabilities
     source_mir = with_capability_source_mir(context.var_node, raw_atomic: true)
     safe_alias = safe_with_capability_alias(context.alias_name)
     guard_var = "__#{context.var_name}_snap_#{context.node.object_id.abs}"
-    MIR::SnapshotRead.new(MIR::CapabilityUnwrap.new(source_mir), context.rt_name, safe_alias, guard_var, nil)
+    MIR::SnapshotRead.new(MIR::CapabilityUnwrap.new(source_mir), context.rt_name, safe_alias, guard_var, [])
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T::Array[WithBindingNode]) }
@@ -655,11 +661,11 @@ module MIRLoweringCapabilities
   sig { params(var_name: String, alias_name: String, clause: AST::ErrorClause).returns(FallibleClauseFact) }
   def build_fallible_clause_mir(var_name, alias_name, clause)
     T.bind(self, MIRLowering) rescue nil
-    action_mir = T.let(nil, T.nilable(T::Array[MIR::Emittable]))
+    action_mir = T.let([], T::Array[MIR::Emittable])
     exit_msg_mir = T.let(nil, T.nilable(MIR::Emittable))
     case clause.action
     when :block
-      action_mir = lower_body(T.must(clause.body))
+      action_mir = lower_body(clause.body)
     when :exit
       exit_msg_mir = lower(T.must(clause.message))
     end
@@ -809,7 +815,7 @@ module MIRLoweringCapabilities
       ], false, MIR::CallableContract.no_ownership(4)), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :block
-      result.concat(lower_body(T.must(clause.body)))
+      result.concat(lower_body(clause.body))
     else
       result
     end
@@ -905,11 +911,11 @@ module MIRLoweringCapabilities
            .reduce { |acc, e| MIR::BinOp.new("and", acc, e) }
   end
 
-  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T::Array[MIR::Emittable]) }
   def guard_fail_body(node, with_label)
     T.bind(self, MIRLowering) rescue nil
     clause = node.lock_error_clause
-    return nil unless clause && clause.matched_types.include?(:GuardFail)
+    return [] unless clause && clause.matched_types.include?(:GuardFail)
 
     error_action_stmts(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
   end
@@ -947,7 +953,7 @@ module MIRLoweringCapabilities
     when :return
       [MIR::ReturnStmt.new(lower(T.must(clause.value)))]
     when :block
-      lower_body(T.must(clause.body)) + [MIR::BreakStmt.new(T.must(with_label), nil)]
+      lower_body(clause.body) + [MIR::BreakStmt.new(T.must(with_label), nil)]
     else
       raise "Internal: unknown lock action #{clause.action}"
     end
@@ -1066,7 +1072,7 @@ module MIRLoweringCapabilities
     when :return
       return_mir = T.cast(lower(T.must(clause.value)), MIR::Emittable)
     when :block
-      body_mir = lower_body(T.must(clause.body))
+      body_mir = lower_body(clause.body)
     end
     MIR::FailureAction.new(
       kind: kind,
@@ -1159,5 +1165,51 @@ module MIRLoweringCapabilities
     )
   end
 
+  private :emit_snapshot_mutable_call,
+    :polymorphic_flow_required?
+
+  private :append_fallible_clause
+  private :assemble_with_block
+  private :ast_contains_return?
+  private :borrowed_capability_binding
+  private :borrowed_const_param_alias?
+  private :build_fallible_clause_mir
+  private :build_field_path_zig
+  private :build_sorted_acquire_entries
+  private :coop_yield_mir
+  private :default_failure_action
+  private :error_action_stmts
+  private :exclusive_capability_binding
+  private :exclusive_lock_expr
+  private :exclusive_lock_sync
+  private :failure_action_kind
+  private :guard_fail_flow_body
+  private :lower_polymorphic_universal
+  private :lower_with_match_block
+  private :materialize_sorted_lock_bindings
+  private :materialize_with_capability_binding
+  private :materialized_view_capability_bindings
+  private :multi_mutable_snapshot_txn
+  private :mutable_snapshot_cap
+  private :mutable_snapshot_plan
+  private :mutable_snapshot_with?
+  private :read_locked_capability_binding
+  private :restrict_capability_binding
+  private :safe_with_capability_alias
+  private :shared_capability_binding
+  private :single_mutable_snapshot_txn
+  private :snapshot_capability_binding
+  private :sorted_lock_acquire
+  private :structured_with_bindings
+  private :view_capability_binding
+  private :with_binding_materialization
+  private :with_block_body_stmts
+  private :with_block_control_label
+  private :with_block_inline_bindings
+  private :with_cap_is_param?
+  private :with_cap_zig_target
+  private :with_capability_alias_maps
+  private :with_capability_binding_context
+  private :with_capability_specs
 
 end

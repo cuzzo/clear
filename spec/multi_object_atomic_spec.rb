@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # True-Sync-Polymorphism (#333): generalized rejection of multi-object
 # WITH where any sync-constrained binding could be `@atomic` /
@@ -18,7 +18,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

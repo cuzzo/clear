@@ -52,7 +52,7 @@ require_relative "../mir/alloc"
 require_relative "helpers/method_analysis"
 require_relative "helpers/union"
 require_relative "helpers/auto_inference"
-require_relative "../backends/importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
+require_relative "../compiler/module_importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -235,6 +235,21 @@ class SemanticAnnotator
     T.must(current_fn_ctx)
   end
 
+  sig { returns(T::Array[Symbol]) }
+  def current_function_type_params
+    ctx = current_fn_ctx
+    ctx ? ctx.type_params : []
+  end
+  private :current_function_type_params
+
+  sig { params(type_name: T.nilable(Symbol)).returns(T::Boolean) }
+  def current_function_type_param?(type_name)
+    return false unless type_name
+
+    current_function_type_params.include?(type_name)
+  end
+  private :current_function_type_param?
+
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
     @receiver_state.function_contexts << ctx
@@ -323,6 +338,7 @@ class SemanticAnnotator
       @receiver_state.loop_depth -= 1
     end
   end
+  private :with_loop_context
 
   sig do
     params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean)
@@ -528,11 +544,10 @@ class SemanticAnnotator
     @receiver_state = T.let(ReceiverState.new, ReceiverState)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
+    @program = T.let(nil, T.nilable(AST::Program))
     # WITH validations on parameter bindings need caller-sync propagation first.
     @branch_terminated = T.let(false, T::Boolean)
-    effects_init!
-    capability_audit_init!
-    initialize_builtin_environment!
+    reset_compilation_state!
   end
 
   sig { params(node: AST::Program).returns(NilClass) }
@@ -541,6 +556,7 @@ class SemanticAnnotator
     # parallel, multi-program test harness) doesn't leak in. Stdlib
     # types are preserved.
     AST.reset_user_types!
+    reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     visit(node)
     finalize_auto_types!(node)
@@ -557,6 +573,18 @@ class SemanticAnnotator
   end
 
 private
+
+  sig { void }
+  def reset_compilation_state!
+    @receiver_state = ReceiverState.new
+    @function_registry = Annotator::FunctionRegistry.new
+    @semantic_index = nil
+    @program = nil
+    @branch_terminated = false
+    effects_init!
+    capability_audit_init!
+    initialize_builtin_environment!
+  end
 
   sig { returns(T.nilable(ModuleImporter)) }
   def active_importer
@@ -625,6 +653,7 @@ private
     result = unifier.resolve!
 
     unifier.stamp_map_pairs!(result.resolved)
+    apply_auto_resolution_stamps!(program_node, result.resolved)
 
     # Resolved slots: emit :info findings with :auto fix (replace
     # the Auto keyword span with the resolved type's source form).
@@ -695,8 +724,8 @@ private
     # hoisted so bodies can call later definitions.
     register_program_signatures(declarations)
 
-    # Bridge legacy `@reentrant` and new `EFFECTS REENTRANT` after
-    # @fn_nodes is populated and before function bodies are checked.
+    # Stamp `EFFECTS REENTRANT` metadata after @fn_nodes is populated and
+    # before function bodies are checked.
     bridge_reentrance!(node)
 
     # Stamps the resolved SYNC POLICY, user-written or default, so later
@@ -738,9 +767,8 @@ private
   # @return [Symbol] The final resolved/inferred return type
   #
   # Visit a statement body.
-  sig { params(stmts: T.nilable(T::Array[AST::Node])).void }
+  sig { params(stmts: T::Array[AST::Node]).void }
   def visit_stmts(stmts)
-    return unless stmts
     stmts.each do |stmt|
       visit(stmt)
     end
@@ -806,5 +834,9 @@ private
   def og_pop_scope(archive: false)
     ownership_graph.pop_scope!(archive: archive)
   end
+
+  private :current_fn_ctx
+  private :current_held_lock_types
+  private :semantic_function_registry
 
 end

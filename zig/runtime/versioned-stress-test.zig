@@ -15,11 +15,13 @@
 //!   - Lost / leaked retires under CAS contention.
 //!   - Reclamation stuck because the active-thread check is wrong.
 //!
-//! DebugAllocator (`testing.allocator`) catches any pointer that
-//! survives `ctx.deinit`. So a leak shows up as a test failure.
+//! DebugAllocator (`std.testing.allocator`) catches any pointer that
+//! survives `ctx.deinit` in normal runs. TSan runs use libc allocation
+//! so sanitizer allocation/free ownership is visible across threads.
 
 const std = @import("std");
 const testing = std.testing;
+const builtin = @import("builtin");
 
 const ebr_mod = @import("../lib/ebr.zig");
 const versioned = @import("versioned.zig");
@@ -27,6 +29,10 @@ const Runtime = @import("runtime.zig").Runtime;
 
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
+
+fn stressAllocator() std.mem.Allocator {
+    return if (builtin.sanitize_thread) std.heap.c_allocator else testing.allocator;
+}
 
 // ============================================================
 // Shared payload with a structural invariant
@@ -63,12 +69,12 @@ const ReaderArgs = struct {
 
 fn readerThread(args: *ReaderArgs) void {
     var frame: [4096]u8 = undefined;
-    var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch |err| {
+    var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch |err| {
         std.debug.print("readerThread: Runtime.initFromSlice failed: {s}\n", .{@errorName(err)});
         return;
     };
     defer rt.deinit();
-    args.ctx.register(testing.allocator, rt.ebr) catch |err| {
+    args.ctx.register(stressAllocator(), rt.ebr) catch |err| {
         std.debug.print("readerThread: register failed: {s}\n", .{@errorName(err)});
         return;
     };
@@ -84,7 +90,7 @@ fn readerThread(args: *ReaderArgs) void {
         g.release();
 
         // Periodic local reclaim to keep limbo bounded for long runs.
-        if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(testing.allocator);
+        if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(stressAllocator());
     }
     _ = args.done;
 }
@@ -99,12 +105,12 @@ const WriterArgs = struct {
 
 fn writerThread(args: *WriterArgs) void {
     var frame: [4096]u8 = undefined;
-    var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch |err| {
+    var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch |err| {
         std.debug.print("writerThread: Runtime.initFromSlice failed: {s}\n", .{@errorName(err)});
         return;
     };
     defer rt.deinit();
-    args.ctx.register(testing.allocator, rt.ebr) catch |err| {
+    args.ctx.register(stressAllocator(), rt.ebr) catch |err| {
         std.debug.print("writerThread: register failed: {s}\n", .{@errorName(err)});
         return;
     };
@@ -113,7 +119,7 @@ fn writerThread(args: *WriterArgs) void {
     var i: usize = 0;
     while (i < args.iters) : (i += 1) {
         const v = args.base + @as(i64, @intCast(i));
-        args.s.update(&rt, testing.allocator, writeSample, .{v}) catch |err| switch (err) {
+        args.s.update(&rt, stressAllocator(), writeSample, .{v}) catch |err| switch (err) {
             // 64-retry exhaustion is a contention signal under TSan
             // slowdown; not a torn-state failure.
             error.UpdateRetriesExhausted => continue,
@@ -124,20 +130,20 @@ fn writerThread(args: *WriterArgs) void {
         };
 
         if ((i & 0xFFF) == 0xFFF) {
-            rt.ebr.reclaimLocal(testing.allocator);
-            args.ctx.reclaim(testing.allocator);
+            rt.ebr.reclaimLocal(stressAllocator());
+            args.ctx.reclaim(stressAllocator());
         }
     }
 }
 
-// Fully drain limbo + orphans on a Runtime so testing.allocator
-// can verify zero leak at test exit.
+// Fully drain limbo + orphans on a Runtime so normal runs can verify
+// zero leaks at test exit through std.testing.allocator.
 fn drain(ctx: *EbrContext, rt: *Runtime) void {
     // Bump global past any pending epoch so reclaimLocal frees.
     var i: usize = 0;
     while (i < 4) : (i += 1) {
-        ctx.reclaim(testing.allocator);
-        rt.ebr.reclaimLocal(testing.allocator);
+        ctx.reclaim(stressAllocator());
+        rt.ebr.reclaimLocal(stressAllocator());
     }
 }
 
@@ -147,21 +153,21 @@ fn drain(ctx: *EbrContext, rt: *Runtime) void {
 
 test "Versioned(Sample): 4 readers + 1 writer, no torn reads, no leak" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     // The Shared lives on the heap so it has a stable address all
     // threads can share. The "main" runtime is what owns its
     // teardown via deinit-via-EBR.
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var s = try versioned.Versioned(Sample).init(testing.allocator, .{ .a = 0, .b = 0 });
+    var s = try versioned.Versioned(Sample).init(stressAllocator(), .{ .a = 0, .b = 0 });
     defer {
         // Final teardown: retire the live pointer + drain.
-        s.deinit(&main_rt, testing.allocator) catch unreachable;
+        s.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -200,17 +206,17 @@ test "Versioned(Sample): 4 readers + 1 writer, no torn reads, no leak" {
 
 test "Versioned(Sample): 1 reader + 4 writers under CAS contention, no torn reads" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var s = try versioned.Versioned(Sample).init(testing.allocator, .{ .a = 0, .b = 0 });
+    var s = try versioned.Versioned(Sample).init(stressAllocator(), .{ .a = 0, .b = 0 });
     defer {
-        s.deinit(&main_rt, testing.allocator) catch unreachable;
+        s.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -249,17 +255,17 @@ test "Versioned(Sample): 1 reader + 4 writers under CAS contention, no torn read
 
 test "Versioned(Sample): 3 readers + 3 writers chaos, invariant + no leak" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var s = try versioned.Versioned(Sample).init(testing.allocator, .{ .a = 0, .b = 0 });
+    var s = try versioned.Versioned(Sample).init(stressAllocator(), .{ .a = 0, .b = 0 });
     defer {
-        s.deinit(&main_rt, testing.allocator) catch unreachable;
+        s.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -310,19 +316,19 @@ const HoldArgs = struct {
 
 fn writerWithReclaim(args: *HoldArgs) void {
     var frame: [4096]u8 = undefined;
-    var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch return;
+    var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch return;
     defer rt.deinit();
-    args.ctx.register(testing.allocator, rt.ebr) catch return;
+    args.ctx.register(stressAllocator(), rt.ebr) catch return;
     defer args.ctx.unregister(rt.ebr);
 
     while (!args.started.load(.seq_cst)) std.Thread.yield() catch {};
 
     var i: usize = 0;
     while (i < args.write_iters) : (i += 1) {
-        args.s.update(&rt, testing.allocator, writeSample, .{@as(i64, @intCast(i + 1))}) catch continue;
+        args.s.update(&rt, stressAllocator(), writeSample, .{@as(i64, @intCast(i + 1))}) catch continue;
         if ((i & 0xFF) == 0xFF) {
-            rt.ebr.reclaimLocal(testing.allocator);
-            args.ctx.reclaim(testing.allocator);
+            rt.ebr.reclaimLocal(stressAllocator());
+            args.ctx.reclaim(stressAllocator());
         }
     }
     args.end.store(true, .seq_cst);
@@ -330,17 +336,17 @@ fn writerWithReclaim(args: *HoldArgs) void {
 
 test "Versioned(Sample): reader's snapshot survives concurrent retire+reclaim (C2 contract)" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var s = try versioned.Versioned(Sample).init(testing.allocator, .{ .a = 42, .b = 84 });
+    var s = try versioned.Versioned(Sample).init(stressAllocator(), .{ .a = 42, .b = 84 });
     defer {
-        s.deinit(&main_rt, testing.allocator) catch unreachable;
+        s.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -403,9 +409,9 @@ const TxnArgs = struct {
 
 fn txnTransferThread(args: *TxnArgs) void {
     var frame: [4096]u8 = undefined;
-    var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch return;
+    var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch return;
     defer rt.deinit();
-    args.ctx.register(testing.allocator, rt.ebr) catch return;
+    args.ctx.register(stressAllocator(), rt.ebr) catch return;
     defer args.ctx.unregister(rt.ebr);
 
     var prng = std.Random.DefaultPrng.init(args.seed);
@@ -429,9 +435,9 @@ fn txnTransferThread(args: *TxnArgs) void {
             }
         };
         const result = if (reverse)
-            versioned.updateMulti(.{ args.b, args.a }, &rt, testing.allocator, Helper.reverse_, .{amount})
+            versioned.updateMulti(.{ args.b, args.a }, &rt, stressAllocator(), Helper.reverse_, .{amount})
         else
-            versioned.updateMulti(.{ args.a, args.b }, &rt, testing.allocator, Helper.forward, .{amount});
+            versioned.updateMulti(.{ args.a, args.b }, &rt, stressAllocator(), Helper.forward, .{amount});
         result catch |err| switch (err) {
             // Retry-budget exhaustion is a contention signal, not an
             // invariant break. The 64-retry default (post-True-Sync-
@@ -446,8 +452,8 @@ fn txnTransferThread(args: *TxnArgs) void {
             },
         };
         if ((i & 0xFFF) == 0xFFF) {
-            rt.ebr.reclaimLocal(testing.allocator);
-            args.ctx.reclaim(testing.allocator);
+            rt.ebr.reclaimLocal(stressAllocator());
+            args.ctx.reclaim(stressAllocator());
         }
     }
 }
@@ -463,9 +469,9 @@ const TxnReaderArgs = struct {
 
 fn txnReaderThread(args: *TxnReaderArgs) void {
     var frame: [4096]u8 = undefined;
-    var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch return;
+    var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch return;
     defer rt.deinit();
-    args.ctx.register(testing.allocator, rt.ebr) catch return;
+    args.ctx.register(stressAllocator(), rt.ebr) catch return;
     defer args.ctx.unregister(rt.ebr);
 
     var i: usize = 0;
@@ -490,7 +496,7 @@ fn txnReaderThread(args: *TxnReaderArgs) void {
                 }
             }
         };
-        versioned.updateMulti(.{ args.a, args.b }, &rt, testing.allocator, ReadCheck.run, .{ args.expected_total, args.violations }) catch |err| switch (err) {
+        versioned.updateMulti(.{ args.a, args.b }, &rt, stressAllocator(), ReadCheck.run, .{ args.expected_total, args.violations }) catch |err| switch (err) {
             // Same rationale as the writer side: 64-retry exhaustion is
             // a contention signal, not a torn-snapshot. Only the
             // ReadCheck.run body's vio.fetchAdd is authoritative for
@@ -500,28 +506,28 @@ fn txnReaderThread(args: *TxnReaderArgs) void {
             error.UpdateRetriesExhausted => continue,
             else => _ = args.violations.fetchAdd(1, .seq_cst),
         };
-        if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(testing.allocator);
+        if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(stressAllocator());
     }
 }
 
 test "updateMulti: 4 writers + 2 readers preserve a + b invariant" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var a = try versioned.Versioned(i64).init(testing.allocator, 500);
+    var a = try versioned.Versioned(i64).init(stressAllocator(), 500);
     defer {
-        a.deinit(&main_rt, testing.allocator) catch unreachable;
+        a.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
-    var b = try versioned.Versioned(i64).init(testing.allocator, 500);
+    var b = try versioned.Versioned(i64).init(stressAllocator(), 500);
     defer {
-        b.deinit(&main_rt, testing.allocator) catch unreachable;
+        b.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
     const TOTAL: i64 = 1000;
@@ -570,22 +576,22 @@ test "updateMulti: single-cell update racing multi-cell commit -- no torn state"
     // non-overlapping: single-cell spins past the tag, multi-cell
     // CAS-detects the single-cell race and retries.
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var a = try versioned.Versioned(i64).init(testing.allocator, 0);
+    var a = try versioned.Versioned(i64).init(stressAllocator(), 0);
     defer {
-        a.deinit(&main_rt, testing.allocator) catch unreachable;
+        a.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
-    var b = try versioned.Versioned(i64).init(testing.allocator, 0);
+    var b = try versioned.Versioned(i64).init(stressAllocator(), 0);
     defer {
-        b.deinit(&main_rt, testing.allocator) catch unreachable;
+        b.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -602,19 +608,21 @@ test "updateMulti: single-cell update racing multi-cell commit -- no torn state"
     const single_thread = struct {
         fn run(sa: *SingleArgs) void {
             var frame: [4096]u8 = undefined;
-            var rt = Runtime.initFromSlice(&frame, sa.ctx, testing.allocator, 0) catch return;
+            var rt = Runtime.initFromSlice(&frame, sa.ctx, stressAllocator(), 0) catch return;
             defer rt.deinit();
-            sa.ctx.register(testing.allocator, rt.ebr) catch return;
+            sa.ctx.register(stressAllocator(), rt.ebr) catch return;
             defer sa.ctx.unregister(rt.ebr);
             var i: usize = 0;
             while (i < sa.iters) : (i += 1) {
-                sa.s.update(&rt, testing.allocator, struct {
-                    fn inc(p: *i64, _: u8) void { p.* += 1; }
+                sa.s.update(&rt, stressAllocator(), struct {
+                    fn inc(p: *i64, _: u8) void {
+                        p.* += 1;
+                    }
                 }.inc, .{@as(u8, 0)}) catch |err| switch (err) {
                     error.UpdateRetriesExhausted => {},
                     else => _ = sa.failed.fetchAdd(1, .seq_cst),
                 };
-                if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(testing.allocator);
+                if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(stressAllocator());
             }
         }
     }.run;
@@ -670,17 +678,17 @@ test "updateMulti: single-cell update racing multi-cell commit -- no torn state"
 
 test "Versioned(i64): retry-path leak safety under 32-writer pathological contention" {
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(stressAllocator());
 
     var main_frame: [4096]u8 = undefined;
-    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, testing.allocator, 0);
+    var main_rt = try Runtime.initFromSlice(&main_frame, &ctx, stressAllocator(), 0);
     defer main_rt.deinit();
-    try ctx.register(testing.allocator, main_rt.ebr);
+    try ctx.register(stressAllocator(), main_rt.ebr);
     defer ctx.unregister(main_rt.ebr);
 
-    var s = try versioned.Versioned(i64).init(testing.allocator, 0);
+    var s = try versioned.Versioned(i64).init(stressAllocator(), 0);
     defer {
-        s.deinit(&main_rt, testing.allocator) catch unreachable;
+        s.deinit(&main_rt, stressAllocator()) catch unreachable;
         drain(&ctx, &main_rt);
     }
 
@@ -708,16 +716,18 @@ test "Versioned(i64): retry-path leak safety under 32-writer pathological conten
     const writer_fn = struct {
         fn run(args: *Args) void {
             var frame: [4096]u8 = undefined;
-            var rt = Runtime.initFromSlice(&frame, args.ctx, testing.allocator, 0) catch return;
+            var rt = Runtime.initFromSlice(&frame, args.ctx, stressAllocator(), 0) catch return;
             defer rt.deinit();
-            args.ctx.register(testing.allocator, rt.ebr) catch return;
+            args.ctx.register(stressAllocator(), rt.ebr) catch return;
             defer args.ctx.unregister(rt.ebr);
 
             var i: usize = 0;
             while (i < args.iters) : (i += 1) {
                 _ = args.attempted.fetchAdd(1, .monotonic);
-                args.s.update(&rt, testing.allocator, struct {
-                    fn inc(p: *i64, _: u8) void { p.* += 1; }
+                args.s.update(&rt, stressAllocator(), struct {
+                    fn inc(p: *i64, _: u8) void {
+                        p.* += 1;
+                    }
                 }.inc, .{@as(u8, 0)}) catch |e| {
                     // The ONLY error we expect under pathological
                     // contention. Allocator failures shouldn't fire
@@ -725,7 +735,7 @@ test "Versioned(i64): retry-path leak safety under 32-writer pathological conten
                     std.debug.assert(e == error.UpdateRetriesExhausted);
                     _ = args.failed.fetchAdd(1, .seq_cst);
                 };
-                if ((i & 0x1F) == 0x1F) rt.ebr.reclaimLocal(testing.allocator);
+                if ((i & 0x1F) == 0x1F) rt.ebr.reclaimLocal(stressAllocator());
             }
         }
     }.run;

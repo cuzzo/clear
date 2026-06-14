@@ -309,6 +309,7 @@ class PipelineMaterializer
       context: "pipeline owned append item",
     )
     if fact
+      fact.mark.scope = MIR::Placement.heap?(fact.alloc) ? :heap : :function
       temp_name = fact.mark.name.to_s
       entry = CleanupEntry.build(:uniform,
         alloc: fact.alloc,
@@ -557,4 +558,7 @@ class PipelineMaterializer
       MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_mat"), true), false, nil, nil),
     ]
   end
+  private :item_kind
+  private :item_setup_stmts
+
 end

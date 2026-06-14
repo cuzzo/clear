@@ -3,6 +3,8 @@
 
 module NilKill
   class Report
+    FALLIBILITY_DISPLAY_SCORE = 10
+
     def initialize(argv = [], evidence: nil)
       @argv = argv.dup
       @evidence_override = evidence
@@ -38,6 +40,7 @@ module NilKill
       append_param_origin_report(lines, evidence)
       append_foreign_class_pressure(lines, evidence)
       append_type_normalizer_report(lines, evidence)
+      append_fallibility_pressure_report(lines, evidence)
       append_struct_report(lines, evidence)
       append_collection_report(lines, evidence)
       append_tuple_report(lines, evidence)
@@ -289,6 +292,7 @@ module NilKill
       append_project_action_summary(lines, "Nil Source Fixes", actions.select { |action| action["kind"] == "nil_param_observed" }, "`T.nilable` slot(s)")
       append_project_action_summary(lines, "Union / T.any Candidates", actions.select { |action| %w[union_observed bad_input_type_candidate].include?(action["kind"]) }, "union slot(s)")
       append_project_hash_summary(lines, evidence)
+      append_project_fallibility_summary(lines, evidence)
     end
 
     def grouped_action_priorities(actions)
@@ -329,6 +333,22 @@ module NilKill
       summary += "; top candidate #{top["struct_name"]} has pressure #{top["total_pressure"]}" if top
       summary += "; #{unmatched} pressure record(s) without a literal shape cluster" if unmatched.positive?
       lines << "- #{report_section_link("Hash Record Struct Candidates (Shapes + Pressure)")}: #{summary}"
+    end
+
+    def append_project_fallibility_summary(lines, evidence)
+      all_rows = Array(evidence.dig("facts", "fallibility_pressure"))
+      rows = fallibility_display_rows(all_rows)
+      return if all_rows.empty?
+
+      top = rows.first
+      hidden = all_rows.size - rows.size
+      summary = "#{rows.size} material fallibility root(s), #{all_rows.size} total"
+      summary += ", #{hidden} low-tail hidden" if hidden.positive?
+      if top
+        summary += "; top root #{top["label"]} participates in #{top["handler_pressure"].to_i} handler(s)"
+        summary += " and leaks to #{Array(top["fallible_callers"]).size} caller(s)"
+      end
+      lines << "- #{report_section_link("Fallibility Pressure (#{rows.size})")}: #{summary}"
     end
 
     def report_section_link(title)
@@ -1234,6 +1254,63 @@ module NilKill
           lines << "  - line #{site["line"]} #{method}: #{site["code"]}"
         end
         lines << "  - ... #{sites.size - 5} more" if sites.size > 5
+      end
+    end
+
+    def append_fallibility_pressure_report(lines, evidence)
+      all_rows = Array(evidence.dig("facts", "fallibility_pressure"))
+      rows = fallibility_display_rows(all_rows)
+      hidden = all_rows.size - rows.size
+      lines << ""
+      lines << "## Fallibility Pressure (#{rows.size})"
+      lines << "- pressure: direct failure roots ranked by static raises, runtime raises, unhandled caller fan-out, and rescue/fallback handler participation"
+      lines << "- handler participation is shared attribution: a root participates in a rescue if a protected project call can reach it; shared handlers may have other causes too"
+      lines << "- display threshold: score >= #{FALLIBILITY_DISPLAY_SCORE}, or any handler/runtime raise pressure; hidden low-tail roots: #{hidden}" if hidden.positive?
+      if all_rows.empty?
+        lines << "- none"
+        return
+      end
+      if rows.empty?
+        lines << "- none above display threshold"
+        return
+      end
+
+      rows.first(50).each do |row|
+        runtime = row["runtime"] || {}
+        direct_sources = Array(row["direct_sources"])
+        callers = Array(row["fallible_callers"])
+        handlers = Array(row["handlers"])
+        raised = "#{runtime["raised_calls"].to_i}/#{runtime["calls"].to_i}"
+        classes = Array(runtime["raised_classes"]).first(4).join(", ")
+        class_text = classes.empty? ? "" : "; raised #{classes}"
+        lines << "- #{row["path"]}:#{row["line"]} #{row["label"]}: score #{row["score"].to_i}; " \
+                 "direct sources #{direct_sources.size}; runtime raises #{raised} (#{runtime["raised_rate"].to_f}%#{class_text}); " \
+                 "handlers #{row["handler_pressure"].to_i} (exclusive #{row["exclusive_handlers"].to_i}, shared #{row["shared_handlers"].to_i}); " \
+                 "unhandled callers #{callers.size}"
+        direct_sources.first(3).each do |source|
+          lines << "  - source: #{source["path"]}:#{source["line"]} #{source["kind"]} `#{source["code"]}`"
+        end
+        lines << "  - ... #{direct_sources.size - 3} more source(s)" if direct_sources.size > 3
+        handlers.first(3).each do |handler|
+          shared = Array(handler["roots"]).size > 1 ? "shared" : "exclusive"
+          protected_calls = Array(handler["protected_calls"]).first(4).join(" | ")
+          roots = Array(handler["roots"]).first(4).join(" | ")
+          lines << "  - handler: #{handler["path"]}:#{handler["line"]} #{handler["method"]} #{shared}; protected #{protected_calls}; roots #{roots}"
+        end
+        lines << "  - ... #{handlers.size - 3} more handler(s)" if handlers.size > 3
+        unless callers.empty?
+          preview = callers.first(5).join(" | ")
+          lines << "  - unhandled callers: #{preview}#{callers.size > 5 ? " | ..." : ""}"
+        end
+      end
+      lines << "- ... #{rows.size - 50} more fallibility root(s)" if rows.size > 50
+    end
+
+    def fallibility_display_rows(rows)
+      rows.select do |row|
+        row["score"].to_i >= FALLIBILITY_DISPLAY_SCORE ||
+          row["handler_pressure"].to_i.positive? ||
+          row.dig("runtime", "raised_calls").to_i.positive?
       end
     end
 

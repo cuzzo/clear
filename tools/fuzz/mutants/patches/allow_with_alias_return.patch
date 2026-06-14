@@ -1,12 +1,12 @@
-diff --git a/src/annotator.rb b/src/annotator.rb
---- a/src/annotator.rb
-+++ b/src/annotator.rb
-@@ -2240,7 +2240,7 @@ class SemanticAnnotator
-     # SymbolEntry#non_escaping flag is set on every WITH alias by
-     # declare_capability_scope!; it's the same flag ensure_owned_value!
-     # already uses to prevent storing WITH-scoped values in containers.
--    if (@with_block_depth || 0) > 0
-+    if false && (@with_block_depth || 0) > 0
-       val = node.value
-       if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
-         error!(node, :RETURN_FROM_WITH_SCOPED, name: val.name, hint: "WITH aliases are borrows of locked data and cannot escape their scope.")
+diff --git a/src/annotator/domains/errors.rb b/src/annotator/domains/errors.rb
+--- a/src/annotator/domains/errors.rb
++++ b/src/annotator/domains/errors.rb
+@@ -411,7 +411,7 @@
+         # SymbolEntry#non_escaping flag is set on every WITH alias by
+         # declare_capability_scope!; it's the same flag ensure_owned_value!
+         # already uses to prevent storing WITH-scoped values in containers.
+-        if inside_with_block?
++        if false && inside_with_block?
+           if value.is_a?(AST::Identifier) && value.symbol&.non_escaping
+             error!(node, :RETURN_FROM_WITH_SCOPED,
+               name: value.name)

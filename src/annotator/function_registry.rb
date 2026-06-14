@@ -14,6 +14,7 @@ module Annotator
 
     sig { params(node: AST::FunctionDef).returns(AST::FunctionDef) }
     def register!(node)
+      raise "duplicate function node '#{node.name}'" if nodes.key?(node.name)
       nodes[node.name] = node
       node
     end
@@ -55,11 +56,6 @@ module Annotator
     def record_body_summary!(summary)
       body_summaries[summary.name] = summary
       summary
-    end
-
-    sig { params(name: String).returns(T.nilable(Annotator::Phases::FunctionBodySummary)) }
-    def body_summary_for(name)
-      body_summaries[name]
     end
 
     sig { returns(T::Hash[String, T::Set[String]]) }

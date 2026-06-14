@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/diagnostic_buckets"
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/diagnostic_buckets" unless defined?(DiagnosticBuckets)
 
 RSpec.describe DiagnosticBuckets do
   it "every bucketed code is in the diagnostic registry" do
@@ -42,6 +42,10 @@ RSpec.describe DiagnosticBuckets do
     end
   end
 
+  it "returns no buckets for an unknown category" do
+    expect(DiagnosticBuckets.for_category(:missing_category)).to eq([])
+  end
+
   it "bucket frequency is in 1..5 and alien_factor is :low/:medium/:high" do
     bad = DiagnosticBuckets::BUCKETS.reject { |b|
       (1..5).include?(b[:frequency]) && %i[low medium high].include?(b[:alien_factor])
@@ -55,5 +59,43 @@ RSpec.describe DiagnosticBuckets do
     ids = DiagnosticBuckets::BUCKETS.map { |b| b[:id] }
     duplicates = ids.tally.select { |_, n| n > 1 }.keys
     expect(duplicates).to be_empty, "Duplicate bucket ids: #{duplicates.inspect}"
+  end
+
+  it "renders frequency ranks as five-position stars" do
+    expect(DiagnosticBuckets.frequency_stars(1)).to eq("★☆☆☆☆")
+    expect(DiagnosticBuckets.frequency_stars(3)).to eq("★★★☆☆")
+    expect(DiagnosticBuckets.frequency_stars(5)).to eq("★★★★★")
+  end
+
+  it "renders alien factor labels with a fallback" do
+    expect(DiagnosticBuckets.alien_label(:low)).to eq("Low")
+    expect(DiagnosticBuckets.alien_label(:medium)).to eq("Med")
+    expect(DiagnosticBuckets.alien_label(:high)).to eq("High")
+    expect(DiagnosticBuckets.alien_label(:unknown)).to eq("?")
+  end
+
+  it "reports status from pending registry entries and complete examples" do
+    examples = {
+      UNDEFINED_VAR: { bad: "x", good: "LET x: Int64 = 1" },
+      UNKNOWN_TYPE: { bad: "x" },
+      MISSING_FUNCTION: { good: "FN main() -> PASS END" },
+      ARGUMENT_TYPE_ERROR: { bad: nil, good: "FN main() -> PASS END" },
+      RETURN_MISMATCH: { bad: "RETURN true", good: nil },
+    }
+
+    expect(DiagnosticBuckets.status_of(:PRIMITIVE_PASSED_AS_MUTABLE, examples)).to eq(:pending)
+    expect(DiagnosticBuckets.status_of(:UNDEFINED_VAR, examples)).to eq(:annotated)
+    expect(DiagnosticBuckets.status_of(:UNKNOWN_TYPE, examples)).to eq(:todo)
+    expect(DiagnosticBuckets.status_of(:MISSING_FUNCTION, examples)).to eq(:todo)
+    expect(DiagnosticBuckets.status_of(:ARGUMENT_TYPE_ERROR, examples)).to eq(:todo)
+    expect(DiagnosticBuckets.status_of(:RETURN_MISMATCH, examples)).to eq(:todo)
+    expect(DiagnosticBuckets.status_of(:STRUCT_FIELD_UNRESOLVABLE, examples)).to eq(:todo)
+  end
+
+  it "returns covered codes as a set containing every bucket code" do
+    expected = DiagnosticBuckets::BUCKETS.flat_map { |bucket| bucket[:codes] }.to_set
+
+    expect(DiagnosticBuckets.covered_codes).to eq(expected)
+    expect(DiagnosticBuckets.covered_codes).to include(:UNDEFINED_VAR, :WITH_CAP_BINDING_LOST)
   end
 end

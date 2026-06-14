@@ -1,9 +1,9 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # MVCC L5 -- annotator validation for WITH SNAPSHOT.
 #
@@ -15,7 +15,7 @@ require_relative "../src/annotator"
 RSpec.describe "WITH SNAPSHOT annotator validation" do
   def run(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

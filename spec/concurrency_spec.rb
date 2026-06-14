@@ -3,13 +3,13 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -339,6 +339,26 @@ RSpec.describe SemanticAnnotator do
       it "rejects unsafe @parallel dispatch for an affine locked capture" do
         expect { ZigTranspiler.new.transpile(code) }
           .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
+      end
+    end
+
+    context "DO block with @parallel override on @shared:locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN touch(v: Int64) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0_i64 } @shared:locked;
+              DO {
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); },
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); }
+              }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "preserves shared ownership in MIR boundary facts" do
+        expect { ZigTranspiler.new.transpile(code) }.not_to raise_error
       end
     end
   end
@@ -1561,7 +1581,7 @@ RSpec.describe SemanticAnnotator do
 
       it "parse_type_annotation produces a tense Type for ~Float64" do
         tokens = Lexer.new("~Float64").tokenize
-        parser = Parser.new(tokens, "~Float64")
+        parser = ClearParser.new(tokens, "~Float64")
         t = parser.send(:parse_type_annotation)
         expect(t.tense?).to be true
         expect(t.tense_type).to eq(:Float64)
@@ -1773,17 +1793,17 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
-  # BG / ~T (Tense / Promise) — Phase 4: Parser + Transpiler
+  # BG / ~T (Tense / Promise) — Phase 4: ClearParser + Transpiler
   # ===================================================================
   describe "BG/NEXT — Phase 4: parser and transpiler" do
     def transpile_fn(clear_src)
       ZigTranspiler.new.transpile(clear_src)
     end
 
-    describe "Parser" do
+    describe "ClearParser" do
       it "parses BG { expr; } as a BgBlock node" do
         tokens = Lexer.new("BG { 42.0; }").tokenize
-        parser = Parser.new(tokens, "BG { 42.0; }")
+        parser = ClearParser.new(tokens, "BG { 42.0; }")
         node   = parser.send(:parse_bg_block)
         expect(node).to be_a(AST::BgBlock)
         expect(node.body.length).to eq(1)
@@ -1791,7 +1811,7 @@ RSpec.describe SemanticAnnotator do
 
       it "parses NEXT expr as a NextExpr node" do
         tokens = Lexer.new("NEXT p").tokenize
-        parser = Parser.new(tokens, "NEXT p")
+        parser = ClearParser.new(tokens, "NEXT p")
         node   = parser.send(:parse_next_expr)
         expect(node).to be_a(AST::NextExpr)
         expect(node.expr).to be_a(AST::Identifier)
@@ -1801,7 +1821,7 @@ RSpec.describe SemanticAnnotator do
       it "parses BG { expr; } as the RHS of a bind expression" do
         src    = "FN f() RETURNS !Void -> p: ~Float64 = BG { 1.0; }; RETURN; END"
         tokens = Lexer.new(src).tokenize
-        ast    = Parser.new(tokens, src).parse
+        ast    = ClearParser.new(tokens, src).parse
         fn_node = ast.statements.first
         bind    = fn_node.body.first
         expect(bind.value).to be_a(AST::BgBlock)
@@ -1810,7 +1830,7 @@ RSpec.describe SemanticAnnotator do
       it "parses NEXT as an expression in a bind" do
         src    = "FN f() RETURNS !Void -> p: ~Float64 = BG { 1.0; }; r: Float64 = NEXT p; RETURN; END"
         tokens = Lexer.new(src).tokenize
-        ast    = Parser.new(tokens, src).parse
+        ast    = ClearParser.new(tokens, src).parse
         fn_node = ast.statements.first
         next_bind = fn_node.body[1]
         expect(next_bind.value).to be_a(AST::NextExpr)

@@ -176,7 +176,7 @@ AST::FunctionDef(
 
 Nothing is MIR yet. The tree is still an annotated AST.
 
-### 1. Pipeline Rewrite (`src/backends/pipeline_rewriter.rb`)
+### 1. Pipeline Rewrite (`src/mir/rewriters/pipeline_rewriter.rb`)
 
 The pipeline rewriter fuses or rewrites pipeline expressions before MIR sees
 them. This example has no pipeline, so the tree does not change.
@@ -189,7 +189,7 @@ pass state: :pipeline_rewritten
 This stage matters because MIR lowering should see the final execution shape,
 not a high-level pipeline that still needs fusion decisions.
 
-### 2. String Concatenation Rewrite (`src/backends/string_concat_rewriter.rb`)
+### 2. String Concatenation Rewrite (`src/mir/rewriters/string_concat_rewriter.rb`)
 
 String concatenation is normalized before MIR. This example has no string
 concat in `demo`, so the `demo` tree does not change.
@@ -556,7 +556,7 @@ re-infer compiler intent from source syntax.
 pass state: :mir_checked
 ```
 
-### 12. MIR Emission (`mir_emitter.rb`)
+### 12. MIR Emission (`../backends/mir_emitter.rb`)
 
 The emitter is a renderer/printer. It maps MIR nodes to Zig text and does not
 perform ownership analysis, allocator selection, type inference, or schema
@@ -633,10 +633,10 @@ The MIR directory is split by responsibility:
 * [`fiber_ctx_builder.rb`](fiber_ctx_builder.rb): shared capture-context builder for BG, DO, stream, concurrent, and FSM-adjacent lowering.
 * [`test_lowering.rb`](test_lowering.rb): TEST/WHEN/STUB/BENCHMARK lowering support.
 * [`mir_checker.rb`](mir_checker.rb): ownership and lifecycle verification over MIR.
-* [`mir_emitter.rb`](mir_emitter.rb): MIR-to-Zig emission.
+* [`../backends/mir_emitter.rb`](../backends/mir_emitter.rb): MIR-to-Zig emission.
 * [`fsm_transform.rb`](fsm_transform.rb), [`fsm_transform/`](fsm_transform),
   [`fsm_lowering.rb`](fsm_lowering.rb), [`fsm_ops.rb`](fsm_ops.rb), and
-  [`fsm_wrapper_emitter.rb`](fsm_wrapper_emitter.rb): async/background FSM
+  [`../backends/fsm_wrapper_emitter.rb`](../backends/fsm_wrapper_emitter.rb): async/background FSM
   lowering and emission support, including structural `FsmOps` operation trees
   for std-lib FSM behavior.
 * [`thunk_transform.rb`](thunk_transform.rb) and

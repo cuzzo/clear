@@ -147,7 +147,7 @@ FN isLambda?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
+FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
     PARTIAL MATCH a START
         Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
@@ -214,7 +214,7 @@ FN readAtom(token: String) RETURNS Value ->
     RETURN Value{ Symbol: COPY token };
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
+FN prStr(v: Value, readably: Bool) RETURNS String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
@@ -310,7 +310,7 @@ FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
     RETURN getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -330,7 +330,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
     RETURN readAtom(tok);
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
@@ -361,7 +361,7 @@ END
 #      26=string-append 27=string-length 28=substring 29=string-ref
 #      30=number->string 31=string->number 32=string? 33=display
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
+FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     # Arithmetic
     # Modulo
     IF id == 37 THEN
@@ -658,7 +658,7 @@ END
 
 # Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     val = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
     PARTIAL MATCH val START
         Value.Number AS n ->
@@ -677,7 +677,7 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool EFFECTS REENTRANT ->
     existing = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
     PARTIAL MATCH existing START
         Value.Number AS n ->
@@ -801,7 +801,7 @@ END
 # Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
 # Returns the debug action: 0=continue, 1=step-into, 2=step-over, 3=step-out
 
-FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
+FN debugPause!(reason: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Int64 EFFECTS REENTRANT ->
     # Build call stack string
     stackStr = envGet!(envId, "__dbg_stack", pool);
     stackDisplay = getStr(stackStr);
@@ -866,7 +866,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
 END
 
 # resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
-FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
@@ -879,7 +879,7 @@ END
 
 # eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -904,7 +904,7 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -1807,7 +1807,7 @@ END
 
 # runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -2047,7 +2047,7 @@ END
 # compile! stores results in pool env at __bc_ops and __bc_consts keys.
 # Caller reads them from pool[envId] after the call.
 
-FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EFFECTS REENTRANT ->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
 
@@ -2180,7 +2180,7 @@ END
 # Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 # Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;

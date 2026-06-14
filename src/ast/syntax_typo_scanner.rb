@@ -21,6 +21,7 @@
 
 require "sorbet-runtime"
 
+require_relative "diagnostic_registry"
 require_relative "fixable_error"
 
 module SyntaxTypoScanner
@@ -120,10 +121,15 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: Integer, col: Integer, rule: T.untyped).returns(T.nilable(T::Array[FixableFinding])) }
+  sig { params(line: Integer, col: Integer, rule: T.untyped).void }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
-      description: "Replace `#{rule[:match]}` with `#{rule[:replace]}` — #{rule[:label]}.",
+      description: DiagnosticRegistry.fix_description(
+        :REPLACE_OPERATOR_TYPO,
+        match: rule[:match],
+        replace: rule[:replace],
+        label: rule[:label],
+      ),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: line, col: col, length: rule[:match].length),
@@ -132,9 +138,14 @@ module SyntaxTypoScanner
     )
 
     anchor = Struct.new(:line, :column).new(line, col)
+    message = T.must(DiagnosticRegistry.format(
+      :OPERATOR_TYPO_SUGGESTION,
+      match: rule[:match],
+      replace: rule[:replace],
+    ))
     finding = FixableFinding.new(
       level: :error,
-      message: "Unknown operator `#{rule[:match]}` — did you mean `#{rule[:replace]}`?",
+      message: message,
       token: anchor,
       category: :type,
       fixes: [fix]

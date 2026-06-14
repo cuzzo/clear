@@ -1,7 +1,7 @@
 require "spec_helper"
 
-require_relative "../src/annotator/phases/declaration_index"
-require_relative "../src/ast/lexer"
+require_relative "../src/annotator/phases/declaration_index" unless defined?(Annotator::Phases::DeclarationIndexer)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Annotator::Phases::DeclarationIndexer do
   def tok(value = "x")

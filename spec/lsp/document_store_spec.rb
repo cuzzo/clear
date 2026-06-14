@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/document_store"
+require_relative "../../src/lsp/document_store" unless defined?(LSP::DocumentStore)
 
 RSpec.describe LSP::DocumentStore do
   let(:store) { described_class.new }
@@ -7,7 +7,9 @@ RSpec.describe LSP::DocumentStore do
 
   describe "#open" do
     it "stores text + version" do
-      store.open(uri, "hello", 1)
+      doc = store.open(uri, "hello", 1)
+      expect(doc.uri).to eq(uri)
+      expect(store.get(uri)).to equal(doc)
       expect(store.text(uri)).to eq("hello")
       expect(store.version(uri)).to eq(1)
     end
@@ -16,7 +18,8 @@ RSpec.describe LSP::DocumentStore do
   describe "#update" do
     it "replaces text and bumps version" do
       store.open(uri, "v1", 1)
-      store.update(uri, "v2", 2)
+      doc = store.update(uri, "v2", 2)
+      expect(doc).to equal(store.get(uri))
       expect(store.text(uri)).to eq("v2")
       expect(store.version(uri)).to eq(2)
     end
@@ -46,6 +49,16 @@ RSpec.describe LSP::DocumentStore do
 
     it "is a no-op for an unknown uri" do
       expect { store.close("file:///nope.cht") }.not_to raise_error
+    end
+  end
+
+  describe "#text and #version" do
+    it "return nil for unknown uris" do
+      store.open(uri, "known text", 7)
+      expect(store.text(uri)).to eq("known text")
+      expect(store.version(uri)).to eq(7)
+      expect(store.text("file:///missing.cht")).to be_nil
+      expect(store.version("file:///missing.cht")).to be_nil
     end
   end
 

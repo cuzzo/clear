@@ -1,10 +1,10 @@
 require "rspec"
 require "stringio"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/ast/std_lib"
-require_relative "../src/backends/importer"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 
 RSpec.describe "pipeline legacy matrix" do
   EXPECTED_CONCURRENT_STRUCTURAL_HITS = {}.freeze

@@ -4,13 +4,14 @@
 # consume/materialize them uniformly.
 
 OWNED_SINK_DESTINATION_CELLS = []
+OSD_OWNED_VALUE_SHAPES = %i[string list_owned string_list_owned struct_owned union_owned nested_owned].freeze
 
 %i[local move copy call_result or_result branch_result].each do |source|
   %i[return_value struct_field list_append map_put takes_arg normal_arg].each do |sink|
-    %i[string struct_owned list_owned].each do |shape|
+    OSD_OWNED_VALUE_SHAPES.each do |shape|
       expected = :pass
       expected = :compile_error if sink == :normal_arg && source == :move
-      expected = :compile_error if sink == :list_append && shape == :list_owned
+      expected = :compile_error if sink == :list_append && %i[list_owned string_list_owned].include?(shape)
       OWNED_SINK_DESTINATION_CELLS << { source: source, sink: sink, shape: shape, expected: expected }
     end
   end
@@ -18,16 +19,26 @@ end
 
 %i[field_borrow index_borrow].each do |source|
   %i[return_value struct_field takes_arg normal_arg].each do |sink|
-    %i[string struct_owned].each do |shape|
+    %i[string struct_owned union_owned].each do |shape|
       expected = %i[field_borrow index_borrow].include?(source) && sink == :takes_arg ? :compile_error : :pass
       expected = :compile_error if source == :index_borrow && sink == :struct_field
+      expected = :compile_error if shape == :union_owned && sink == :return_value
       OWNED_SINK_DESTINATION_CELLS << { source: source, sink: sink, shape: shape, expected: expected }
     end
   end
 end
 
 def osd_prelude(shape)
-  shape == :struct_owned ? "STRUCT Box { label: String }\n" : ""
+  case shape
+  when :struct_owned
+    "STRUCT Box { label: String }\n"
+  when :union_owned
+    "UNION Val { Empty, Text: String, Items: String[]@list }\n"
+  when :nested_owned
+    "STRUCT Nest { items: String[]@list }\n"
+  else
+    ""
+  end
 end
 
 def osd_type(shape)
@@ -35,6 +46,9 @@ def osd_type(shape)
   when :string then "String"
   when :struct_owned then "Box"
   when :list_owned then "Int64[]@list"
+  when :string_list_owned then "String[]@list"
+  when :union_owned then "Val"
+  when :nested_owned then "Nest"
   end
 end
 
@@ -46,6 +60,12 @@ def osd_build_value(shape, name = "v")
     "#{name}: Box = Box{ label: COPY \"abc\" };"
   when :list_owned
     "MUTABLE #{name}: Int64[]@list = [];\n    #{name}.append(1_i64);\n    #{name}.append(2_i64);\n    #{name}.append(3_i64);"
+  when :string_list_owned
+    "MUTABLE #{name}: String[]@list = List[];\n    #{name}.append(COPY \"a\");\n    #{name}.append(COPY \"b\");\n    #{name}.append(COPY \"c\");"
+  when :union_owned
+    "#{name}: Val = Val{ Items: mkStringList() };"
+  when :nested_owned
+    "#{name}: Nest = Nest{ items: mkStringList() };"
   end
 end
 
@@ -54,6 +74,9 @@ def osd_return_expr(shape)
   when :string then 'COPY "abc"'
   when :struct_owned then 'Box{ label: COPY "abc" }'
   when :list_owned then "mkList()"
+  when :string_list_owned then "mkStringList()"
+  when :union_owned then "Val{ Items: mkStringList() }"
+  when :nested_owned then "Nest{ items: mkStringList() }"
   end
 end
 
@@ -74,11 +97,17 @@ def osd_source_setup(source, shape)
            when :string then 'MUTABLE v: String = COPY "seed";'
            when :struct_owned then 'MUTABLE v: Box = Box{ label: COPY "seed" };'
            when :list_owned then "MUTABLE v: Int64[]@list = [];\n    v.append(0_i64);"
+           when :string_list_owned then "MUTABLE v: String[]@list = List[];\n    v.append(COPY \"seed\");"
+           when :union_owned then "MUTABLE v: Val = Val{ Text: COPY \"seed\" };"
+           when :nested_owned then "MUTABLE v: Nest = Nest{ items: mkStringList() };"
            end
     assign = case shape
              when :string then 'v = COPY "abc";'
              when :struct_owned then 'v = Box{ label: COPY "abc" };'
              when :list_owned then "v = mkList();"
+             when :string_list_owned then "v = mkStringList();"
+             when :union_owned then "v = Val{ Items: mkStringList() };"
+             when :nested_owned then "v = Nest{ items: mkStringList() };"
              end
     ["#{init}\n    IF TRUE THEN #{assign} END", "v"]
   when :field_borrow
@@ -92,7 +121,9 @@ def osd_len(shape, name)
   case shape
   when :string then "#{name}.length()"
   when :struct_owned then "#{name}.label.length()"
-  when :list_owned then "#{name}.length()"
+  when :list_owned, :string_list_owned then "#{name}.length()"
+  when :union_owned then "observeVal(#{name})"
+  when :nested_owned then "#{name}.items.length()"
   end
 end
 
@@ -100,7 +131,7 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
   ty = osd_type(p[:shape])
   prelude = osd_prelude(p[:shape])
   setup, expr = osd_source_setup(p[:source], p[:shape])
-  list_helper = p[:shape] == :list_owned ? <<~CHT : ""
+  list_helper = %i[list_owned string_list_owned union_owned nested_owned].include?(p[:shape]) ? <<~CHT : ""
     FN mkList() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
         xs.append(1_i64);
@@ -108,9 +139,26 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
         xs.append(3_i64);
         RETURN xs;
     END
+
+    FN mkStringList() RETURNS String[]@list ->
+        MUTABLE xs: String[]@list = List[];
+        xs.append(COPY "a");
+        xs.append(COPY "b");
+        xs.append(COPY "c");
+        RETURN xs;
+    END
+  CHT
+  union_helper = p[:shape] == :union_owned ? <<~CHT : ""
+    FN observeVal(x: Val) RETURNS Int64 ->
+        PARTIAL MATCH x START
+            Val.Text AS s -> RETURN s.length();,
+            Val.Items AS items -> RETURN items.length();,
+            DEFAULT -> RETURN 0_i64;
+        END
+    END
   CHT
   helpers = <<~CHT
-    #{prelude}#{list_helper}
+    #{prelude}#{list_helper}#{union_helper}
     STRUCT SrcHolder { value: #{ty} }
 
     FN make() RETURNS !#{ty} ->

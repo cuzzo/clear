@@ -1,0 +1,15 @@
+diff --git a/src/semantic/capture_strategy.rb b/src/semantic/capture_strategy.rb
+index 000000000..000000000 100644
+--- a/src/semantic/capture_strategy.rb
++++ b/src/semantic/capture_strategy.rb
+@@ -211,7 +211,7 @@ module CaptureStrategy
+     # 3. A plain promise handle (~T) is an owned affine capability. Capturing
+     #    it into a fiber transfers the one right to NEXT it. Shared promises
+     #    and stream cursors are handled by their own sharing/resource rules.
+-    if owned_affine_promise_handle?(type)
+-      return MoveInto.new(zig_type: zig_t, ctx_init_name: name, source_name: name)
++    if false && owned_affine_promise_handle?(type)
++      return ByValue.new(zig_type: zig_t, ctx_init_name: name)
+     end
+ 
+     # 4. @multiowned / @shared / @locked / @writeLocked / @local clone

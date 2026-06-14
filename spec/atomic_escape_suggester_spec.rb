@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/atomic_escape_suggester"
+require_relative "../src/tools/atomic_escape_suggester" unless defined?(AtomicEscapeSuggester)
 
 # Atomics M2.9 -- doctor-side static detector for @shared:atomic
 # escape patterns. Runs the annotator with FixCollector enabled

@@ -2,15 +2,15 @@ require "tmpdir"
 require "fileutils"
 require "pathname"
 
-require_relative "../tools/loom_atomic_coverage"
-require_relative "../tools/vopr_coverage"
-require_relative "../tools/wait_loop_coverage"
-require_relative "../tools/diff_bucket_summary"
-require_relative "../tools/src_ast_walk_guardrail"
-require_relative "../tools/zig_coverage_support"
-require_relative "../tools/zig_coverage_sanitize"
-require_relative "../tools/zig_coverage_visibility"
-require_relative "../tools/zig_dwarf_line_audit"
+require_relative "../tools/loom_atomic_coverage" unless defined?(LoomAtomicCoverage)
+require_relative "../tools/vopr_coverage" unless defined?(VoprCoverage)
+require_relative "../tools/wait_loop_coverage" unless defined?(WaitLoopCoverage)
+require_relative "../tools/diff_bucket_summary" unless defined?(SRC_RUBY_CHANGE_BUCKETS)
+require_relative "../tools/src_ast_walk_guardrail" unless defined?(SrcAstWalkGuardrail::Finding)
+require_relative "../tools/zig_coverage_support" unless defined?(ZigCoverageSupport::Error)
+require_relative "../tools/zig_coverage_sanitize" unless defined?(ZigCoverageSanitizer::CLI)
+require_relative "../tools/zig_coverage_visibility" unless defined?(ZigCoverageVisibility::CLI)
+require_relative "../tools/zig_dwarf_line_audit" unless defined?(ZigDwarfLineAudit::CLI)
 
 RSpec.describe "coverage gap tools" do
   around do |example|
@@ -67,6 +67,175 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/parking-lot-loom.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/vopr-loom-runner.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
+  end
+
+  it "breaks src Ruby changed lines into public, private, and other buckets" do
+    source = <<~RUBY
+      require "set"
+
+      class Probe
+        def public_call
+          changed_public
+        end
+
+        def helper
+          changed_private_by_declaration
+        end
+        private :helper
+
+        private
+
+        def hidden
+          changed_private_by_scope
+        end
+
+        class << self
+          private
+
+          def singleton_hidden
+            changed_private_singleton
+          end
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: source,
+      added_lines: Set[1, 5, 9, 16, 23],
+      deleted_lines: Set[5, 9],
+    )
+
+    expect(breakdown[:src_public_fn]).to include(additions: 1, deletions: 1)
+    expect(breakdown[:src_private_fn]).to include(additions: 3, deletions: 1)
+    expect(breakdown[:src_other]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_public_fn][:added_lines]).to eq(Set[5])
+    expect(breakdown[:src_private_fn][:added_lines]).to eq(Set[9, 16, 23])
+    expect(breakdown[:src_other][:added_lines]).to eq(Set[1])
+  end
+
+  it "classifies inline private method declarations in src Ruby buckets" do
+    source = <<~RUBY
+      class Probe
+        private def hidden
+          changed_inline_private
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: "",
+      added_lines: Set[3],
+      deleted_lines: Set.new,
+    )
+
+    expect(breakdown[:src_private_fn]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_private_fn][:added_lines]).to eq(Set[3])
+  end
+
+  it "does not treat dynamic visibility calls as src Ruby visibility mode changes" do
+    source = <<~RUBY
+      class Probe
+        private VISIBILITY_LIST
+
+        def still_public
+          changed_public
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: "",
+      added_lines: Set[5],
+      deleted_lines: Set.new,
+    )
+
+    expect(breakdown[:src_public_fn]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_private_fn]).to include(additions: 0, deletions: 0)
+  end
+
+  it "counts src Ruby source lines by public, private, and other visibility" do
+    source = <<~RUBY
+      require "set"
+
+      # ignored comment
+      class Probe
+        def public_call
+          changed_public
+        end
+
+        def helper
+          changed_private_by_declaration
+        end
+        private :helper
+
+        private
+
+        def hidden
+          changed_private_by_scope
+        end
+
+        protected
+
+        def shielded
+          changed_protected
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_source_lines(source)
+
+    expect(breakdown[:parse_error]).to be_nil
+    expect(breakdown[:counts]).to include(
+      src_public_fn: 3,
+      src_private_fn: 6,
+      src_other: 9,
+    )
+    expect(breakdown[:total]).to eq(18)
+  end
+
+  it "summarizes src Ruby visibility across a source tree" do
+    FileUtils.mkdir_p(File.join(@tmp, "src", "nested"))
+    File.write(File.join(@tmp, "src", "visible.rb"), <<~RUBY)
+      module Visible
+        def call
+          value
+        end
+        private
+        def hidden
+          value
+        end
+      end
+    RUBY
+    File.write(File.join(@tmp, "src", "nested", "constant.rb"), <<~RUBY)
+      # ignored comment
+
+      VALUE = 1
+    RUBY
+
+    breakdown = src_ruby_visibility_breakdown(root: @tmp)
+
+    expect(breakdown[:files]).to eq(2)
+    expect(breakdown[:parse_failures]).to be_empty
+    expect(breakdown[:counts]).to include(
+      src_public_fn: 3,
+      src_private_fn: 3,
+      src_other: 4,
+    )
+    expect(breakdown[:total]).to eq(10)
+  end
+
+  it "reports parse failures and counts unparsable src Ruby code as other" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src", "bad.rb"), "def broken(\n")
+
+    breakdown = src_ruby_visibility_breakdown(root: @tmp)
+
+    expect(breakdown[:counts]).to include(src_public_fn: 0, src_private_fn: 0, src_other: 1)
+    expect(breakdown[:total]).to eq(1)
+    expect(breakdown[:parse_failures].map { |failure| failure[:path] }).to eq(["src/bad.rb"])
   end
 
   it "does not count non-executable Ruby additions in diff line coverage" do
@@ -475,6 +644,19 @@ RSpec.describe "coverage gap tools" do
   it "sanitizes Zig coverage suite and run names for kcov directories" do
     expect(ZigCoverageSupport.sanitize_name("examples/benchmarks shard 1/5")).to eq("examples_benchmarks_shard_1_5")
     expect(ZigCoverageSupport.sanitize_name("///")).to eq("run")
+  end
+
+  it "clears stale hidden kcov process directories before reusing a run name" do
+    root = File.join(@tmp, "coverage-fuzz")
+    stale = File.join(root, "all-fuzz", ".zig-coverage-all-fuzz-old", "cobertura.xml")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "<coverage/>")
+
+    kcov_dir = ZigCoverageSupport.prepare_kcov_dir(root, "all-fuzz")
+
+    expect(kcov_dir).to eq(File.join(root, "all-fuzz"))
+    expect(File.directory?(kcov_dir)).to be true
+    expect(File.exist?(stale)).to be false
   end
 
   it "excludes Zig test, VOPR, and Loom harness files from Codecov kcov reports" do

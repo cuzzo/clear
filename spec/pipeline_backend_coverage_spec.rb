@@ -1,14 +1,14 @@
 require "rspec"
 require "ostruct"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/source_error"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/ast/type"
-require_relative "../src/mir/lower/pipeline/pipeline_host"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_emitter"
-require_relative "../src/mir/mir_lowering"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/lower/pipeline/pipeline_host" unless defined?(PipelineHost)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
 
 PipelineMaterializerCoverageState = Struct.new(
   :current_label,
@@ -45,6 +45,9 @@ class PipelineConcurrentCoverageHost
         concurrent_visit_mir(expr)
       },
       callback_body_mir: ->(_body_stmts, placeholder, _capture_map, _capture_symbols, _rt_override) {
+        [MIR::Suppress.new(placeholder)]
+      },
+      callback_body_mir_with_shard: ->(_body_stmts, placeholder, _capture_map, _capture_symbols, _rt_override, _shard_context) {
         [MIR::Suppress.new(placeholder)]
       },
       pipeline_alloc_mark_fact: ->(_value, _name, _fallback_alloc, _type_info, _ast_node, _accept_owned_call, _include_cleanup) { nil },
@@ -631,14 +634,18 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     it "builds pipeline blocks with source cleanup, item setup, and result body" do
-      source_sig = FunctionSignature.new(params: [], return_type: Type.new(:"Int64[]", collection: :list), intrinsic: true)
-      source_sig.emit = IntrinsicEmit.new(allocates: true)
+      source_sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:"Int64[]", collection: :list),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(allocates: true)
+      )
       source_call = MIR::RegistryCall.new(
         entry: source_sig,
         args: [],
         reason: "test",
         ownership_contract: MIR::OwnershipContract.empty,
-        allocs: MIR.inline_alloc_metadata(alloc: :heap),
+        allocs: MIR::InlineAllocMetadata.new(alloc: :heap),
         target_var: "pipe_src_list",
       )
       harness = materializer_coverage_harness(source_mir: source_call)
@@ -691,9 +698,14 @@ RSpec.describe "pipeline backend coverage" do
       scoped = owning.append_owned_value_stmt("items", :heap, deep_copy)
       expect(scoped).to be_a(MIR::ScopeBlock)
       expect(scoped.body[0]).to be_a(MIR::AllocMark)
+      expect(scoped.body[0].scope).to eq(:heap)
       expect(scoped.body[2]).to be_a(MIR::ErrCleanup)
       expect(scoped.body[2].cleanup_entry[:zig_type]).to eq("Payload")
       expect(scoped.body.last).to be_a(MIR::MoveMark)
+
+      frame_copy = MIR::DeepCopy.new(MIR::Ident.new("value"), "Payload", nil, :full_value, :frame)
+      frame_scoped = owning.append_owned_value_stmt("items", :frame, frame_copy)
+      expect(frame_scoped.body[0].scope).to eq(:function)
     end
 
     it "normalizes zig type metadata for append cleanup entries" do
@@ -763,7 +775,7 @@ RSpec.describe "pipeline backend coverage" do
       shard.shard_context = AST::PipelineShardContext.new(
         auto_detected: true,
         key_expr: id("_"),
-        map_var: id("counts"),
+        map_var: id("counts", type: Type.new(:"HashMap<Int64>", shard_count: 3)),
       )
       concurrent_lowerer.lower(concurrent_smooth(range, shard), shard)
       expect(concurrent_host.calls.last).to eq(:shard)
@@ -1534,7 +1546,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(bridge.pipeline_index_insert_with_ownership(insert, MIR::Ident.new("v"), false, target_alloc: :heap)).to equal(insert)
 
       expect(bridge.with_runtime_binding_name("__rt2") { lowering.runtime_binding_name }).to eq("__rt2")
-      expect(bridge.with_fiber_capture_map({}, capture_symbols: nil, rt_override: "__rt3") { :ok }).to eq(:ok)
+      expect(bridge.with_fiber_capture_map({}, capture_symbols: {}, rt_override: "__rt3") { :ok }).to eq(:ok)
     end
 
     it "normalizes observable type names and rewrites body identifiers on token boundaries" do
@@ -1583,7 +1595,8 @@ RSpec.describe "pipeline backend coverage" do
       block = materializer.pipeline_block(id("source", type: Type.new(:"Int64[]"))) do |items, label|
         [MIR::BreakStmt.new(label, MIR::Ident.new(items))]
       end
-      expect(pipeline_host.instance_variable_get(:@current_pipe_label)).to eq("__pblk1")
+      label_state = pipeline_host.instance_variable_get(:@label_state)
+      expect(label_state.current_label).to eq("__pblk1")
       expect(block.body.first).to be_a(MIR::AllocMark)
       expect(block.body.last.value.name).to eq("pipe_items")
 
@@ -1762,7 +1775,7 @@ RSpec.describe "pipeline backend coverage" do
         bc_target: true,
         named_source: true,
       )
-      expect(shape.infinite_stream?).to be true
+      expect(shape.send(:infinite_stream?)).to be true
       expect(shape.bc_named_infinite_stream?).to be true
 
       source = id("users", type: Type.new(:"User[]"))

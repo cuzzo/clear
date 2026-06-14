@@ -32,15 +32,15 @@ require "ast/lexer"
 require "ast/parser"
 require "ast/ast"
 require "annotator"
-require "backends/compiler_frontend"
-require "backends/importer"
-require "backends/pipeline_rewriter"
-require "backends/string_concat_rewriter"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
+require "mir/rewriters/pipeline_rewriter"
+require "mir/rewriters/string_concat_rewriter"
 require "mir/hoist"
 require "mir/control_flow"
 require "mir/mir_lowering"
 require "mir/mir_checker"
-require "mir/mir_emitter"
+require "backends/mir_emitter"
 require "mir/pre_mir_type_check"
 require "semantic/pass_state"
 
@@ -664,7 +664,7 @@ module PassWorkProfilerTool
       token_count = T.must(tokens).length
 
       @profiler.measure("parser.parse", token_count: token_count) do
-        ast = Parser.new(T.must(tokens), @source).parse
+        ast = ClearParser.new(T.must(tokens), @source).parse
       end
       ast = T.must(ast)
       parsed_ast_nodes = PassWorkProfiler.count_ast_nodes(ast)

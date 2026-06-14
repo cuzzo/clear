@@ -1,7 +1,7 @@
 require "rspec"
 require "set"
 
-require_relative "../src/annotator/function_registry"
+require_relative "../src/annotator/function_registry" unless defined?(Annotator::FunctionRegistry)
 
 RSpec.describe Annotator::FunctionRegistry do
   def token(value)
@@ -37,6 +37,15 @@ RSpec.describe Annotator::FunctionRegistry do
     expect(seen).to eq(["main"])
   end
 
+  it "rejects duplicate function nodes" do
+    registry = described_class.new
+    registry.register!(function_def("main"))
+
+    expect {
+      registry.register!(function_def("main"))
+    }.to raise_error(RuntimeError, /duplicate function node 'main'/)
+  end
+
   it "tracks synthetic definitions as a clearable queue" do
     registry = described_class.new
     generated = function_def("generated")
@@ -60,8 +69,6 @@ RSpec.describe Annotator::FunctionRegistry do
     )
 
     expect(registry.record_body_summary!(summary)).to eq(summary)
-    expect(registry.body_summary_for("caller")).to eq(summary)
-    expect(registry.body_summary_for("missing")).to be_nil
     expect(registry.body_summaries).to eq("caller" => summary)
     expect(registry.call_graph).to eq("caller" => Set["callee"])
     expect(registry.propagating_callees).to eq("caller" => Set["fallible"])

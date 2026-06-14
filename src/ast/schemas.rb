@@ -127,12 +127,12 @@ module Schemas
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
     attr_reader :close_plan, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
-    sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
-    def initialize(close_plan:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
+    sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T::Array[Symbol], extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
+    def initialize(close_plan:, static_methods: {}, fields: {}, type_params: [], extern_module: nil, as_type: nil, visibility: :package, methods: {})
       @close_plan      = T.let(close_plan, Schemas::ResourceClosePlan)
       @static_methods  = T.let(static_methods, Schemas::ResourceSchema::StaticMethodsMap)
       @fields          = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
-      @type_params     = T.let(type_params, T.nilable(T::Array[Symbol]))
+      @type_params     = T.let(type_params.dup, T::Array[Symbol])
       @extern_module   = T.let(extern_module, T.nilable(String))
       @as_type         = T.let(as_type, T.nilable(String))
       @visibility      = T.let(visibility, Symbol)
@@ -150,6 +150,8 @@ module Schemas
     def enum? = false
     sig { returns(T::Boolean) }
     def struct? = false
+    sig { returns(T::Array[Symbol]) }
+    def type_params = @type_params
 
     sig { params(fields: FieldInputMap).returns(T::Hash[String, AST::StructField]) }
     def normalize_fields(fields)
@@ -212,13 +214,22 @@ module Schemas
     FieldInputMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
 
     attr_reader :fields
-    attr_accessor :deinit_entries
-    sig { params(fields: FieldInputMap, deinit_entries: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).void }
-    def initialize(fields:, deinit_entries: nil)
+    sig { params(fields: FieldInputMap, deinit_entries: T::Array[Schemas::InlineStructDeinitEntry]).void }
+    def initialize(fields:, deinit_entries: [])
       @fields = T.let(fields.transform_values { |field_type|
         Type.new(field_type)
       }, Schemas::InlineStructVariant::FieldMap)
-      @deinit_entries = T.let(deinit_entries, T.nilable(T::Array[Schemas::InlineStructDeinitEntry]))
+      @deinit_entries = T.let(deinit_entries, T::Array[Schemas::InlineStructDeinitEntry])
+    end
+
+    sig { returns(T::Array[Schemas::InlineStructDeinitEntry]) }
+    def deinit_entries
+      @deinit_entries
+    end
+
+    sig { params(entries: T::Array[Schemas::InlineStructDeinitEntry]).returns(T::Array[Schemas::InlineStructDeinitEntry]) }
+    def deinit_entries=(entries)
+      @deinit_entries = entries
     end
 
     sig { returns(T::Hash[String, Type]) }
@@ -250,8 +261,8 @@ module Schemas
     VariantInputMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantInput] }
 
     attr_reader :variants, :type_params, :visibility
-    sig { params(variants: VariantInputMap, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
-    def initialize(variants:, type_params: nil, visibility: :package)
+    sig { params(variants: VariantInputMap, type_params: T::Array[Symbol], visibility: Symbol).void }
+    def initialize(variants:, type_params: [], visibility: :package)
       @variants = T.let(
         variants.transform_values do |variant|
           if variant.nil? || variant.is_a?(Schemas::InlineStructVariant)
@@ -262,7 +273,7 @@ module Schemas
         end,
         Schemas::UnionSchema::VariantMap
       )
-      @type_params = type_params
+      @type_params = T.let(type_params.dup, T::Array[Symbol])
       @visibility = visibility
       freeze
     end
@@ -277,6 +288,8 @@ module Schemas
     def struct? = false
     sig { returns(T::Boolean) }
     def resource? = false
+    sig { returns(T::Array[Symbol]) }
+    def type_params = @type_params
   end
 
   # Struct/record schema. `fields` maps String field names to Type/Symbol
@@ -298,16 +311,19 @@ module Schemas
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
     attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
-    def initialize(fields: {}, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
+    sig { params(fields: FieldInputMap, type_params: T::Array[Symbol], methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    def initialize(fields: {}, type_params: [], methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
-      @type_params = type_params
+      @type_params = T.let(type_params.dup, T::Array[Symbol])
       @methods = methods
       @visibility = visibility
       @extern_module = extern_module
       @as_type = as_type
       freeze
     end
+
+    sig { returns(T::Array[Symbol]) }
+    def type_params = @type_params
 
     sig { returns(T::Hash[String, T.untyped]) }
     def field_defaults

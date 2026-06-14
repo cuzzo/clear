@@ -11,15 +11,14 @@ module Annotator
 
       sig { params(node: AST::FunctionDef, return_lifetime: T.nilable(String)).returns(FunctionSignature) }
       def self.function_signature(node, return_lifetime:)
-        signature = FunctionSignature.new(
+        FunctionSignature.new(
           params: node.params.map { |param| function_param(param) },
           return_type: node.annotation_return_type,
           return_lifetime: return_lifetime,
           visibility: node.visibility,
-          reentrant: node.reentrant == :reentrant
+          reentrant: node.declared_plain_reentrant?,
+          requires: node.requires
         )
-        signature.requires = node.requires
-        signature
       end
 
       sig { params(node: AST::ExternFnDecl).returns(FunctionSignature) }
@@ -32,7 +31,7 @@ module Annotator
           module_alias: node.from_module,
           extern_effects: extern_effects(node),
           fn_type_params: fn_type_params(node),
-          type_params: fn_type_params(node).any? ? fn_type_params(node) : nil,
+          type_params: fn_type_params(node),
           owner_type: node.owner_type,
           owner_type_params: owner_type_params(node)
         )
@@ -72,13 +71,13 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl).returns(T::Array[Symbol]) }
       def self.fn_type_params(node)
-        T.cast(node.fn_type_params || [], T::Array[Symbol])
+        node.fn_type_params
       end
       private_class_method :fn_type_params
 
       sig { params(node: AST::ExternFnDecl).returns(T::Array[Symbol]) }
       def self.owner_type_params(node)
-        T.cast(node.owner_type_params || [], T::Array[Symbol])
+        node.owner_type_params
       end
       private_class_method :owner_type_params
     end

@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 RSpec.describe Type, "provenance" do
   it "defaults to nil" do
@@ -9,7 +9,7 @@ RSpec.describe Type, "provenance" do
 
   it "can be marked as rodata" do
     t = Type.new(:String)
-    t.mark_rodata!
+    t.send(:mark_rodata!)
     expect(t.rodata?).to be true
     expect(t.heap?).to be false
     expect(t.frame?).to be false
@@ -31,7 +31,7 @@ RSpec.describe Type, "provenance" do
 
   it "provenance_alloc returns nil for rodata" do
     t = Type.new(:String)
-    t.mark_rodata!
+    t.send(:mark_rodata!)
     expect(t.provenance_alloc).to be_nil
   end
 

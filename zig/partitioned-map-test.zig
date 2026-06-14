@@ -1,6 +1,7 @@
 pub const CLEAR_FRAME_DEBUG = false;
 
 const std = @import("std");
+const build_options = @import("build_options");
 
 pub const partitioned_map_counters = struct {
     pub var get_created = std.atomic.Value(usize).init(0);
@@ -43,7 +44,7 @@ pub var partitioned_map_delay_get_ctx_destroy = false;
 pub var partitioned_map_delay_remove_ctx_destroy = false;
 pub var partitioned_map_delay_key_free = false;
 pub var partitioned_map_delay_completion_destroy = false;
-pub var partitioned_map_watchdog_timeout_ms: usize = 0;
+pub var partitioned_map_watchdog_timeout_ms: usize = if (build_options.tsan) 120_000 else 0;
 
 pub fn partitionedMapTestNextOpId(_: u8, _: usize) u64 {
     return partitioned_map_event_log.next_op_id.fetchAdd(1, .seq_cst);

@@ -1,17 +1,18 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Phase 2.1 — `@observable` flag on Type.
 # Verifies the parser recognizes `@observable` as a capability sigil and the
 # resulting Type carries `observable?` true. Semantic validation (where
 # `@observable` is legal) is enforced in later phases (2.2, 2.8).
-RSpec.describe "@observable type flag" do
+RSpec.describe Type, "@observable type flag" do
   def parse_type(src)
     tokens = Lexer.new(src).tokenize
-    parser = Parser.new(tokens, src)
+    parser = ClearParser.new(tokens, src)
     parser.send(:parse_type_annotation)
   end
 

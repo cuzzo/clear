@@ -81,7 +81,7 @@ STD_LIB = T.let({
   "remove" => {
     args: [:"Any[]", :Int64],
     return: :infer_element_type,
-    return_alloc: :heap,  # removed element is now owned by caller
+    return_alloc: :receiver_storage,  # removed element is now owned by caller
     zig: "{0}.orderedRemove(@intCast({1}))",
     bc: true,
     mutates_receiver: true,
@@ -93,7 +93,7 @@ STD_LIB = T.let({
   "pop" => {
     args: [:"Any[]"],
     return: :infer_optional_element_type,
-    return_alloc: :heap,  # popped element is now owned by caller
+    return_alloc: :receiver_storage,  # popped element is now owned by caller
     zig: "{0}.pop()",
     bc: true,
     mutates_receiver: true,

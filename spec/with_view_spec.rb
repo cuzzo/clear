@@ -1,18 +1,18 @@
 require "rspec"
 require "stringio"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Phase 2.3 — `WITH VIEW v AS s { ... }`:
 #   - parser recognizes the form (also `WITH MATERIALIZED VIEW`)
 #   - annotator rejects WITH VIEW on non-`@observable` sources
-#   - alias is bound as `?T` (NIL until first item)
+#   - alias is bound as the tense payload type returned by view/materialize
 #   - alias is non_escaping for VIEW (borrow), escapable for MATERIALIZED_VIEW
 RSpec.describe "WITH VIEW (Phase 2.3)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)
@@ -38,7 +38,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
             WITH VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             }
             RETURN GIVE running;
         END
@@ -55,7 +55,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64) RETURNS ~Float64 ->
             WITH MATERIALIZED VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             }
             RETURN GIVE running;
         END
@@ -71,7 +71,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
             WITH VIEW running AS s ->
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             END
             RETURN GIVE running;
         END
@@ -88,7 +88,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64) RETURNS ~Float64 ->
             WITH VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             }
             RETURN GIVE running;
         END
@@ -100,9 +100,27 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
             WITH VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             }
             RETURN GIVE running;
+        END
+      F
+      expect { annotate(src) }.not_to raise_error
+    end
+
+    it "keeps FIND view aliases optional" do
+      src = <<~F
+        FN main() RETURNS Void ->
+            gen: ~?Int64[] = BG STREAM {
+                YIELD 6_i64;
+            };
+            found: ~?Int64@observable = gen |> FIND _ == 6_i64;
+            WITH VIEW found AS s {
+                IF s != NIL THEN
+                    ASSERT s == 6_i64, "found";
+                END
+            }
+            _ = NEXT found;
         END
       F
       expect { annotate(src) }.not_to raise_error
@@ -127,7 +145,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
             WITH VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0.0, "started";
             }
             RETURN GIVE running;
         END
@@ -147,7 +165,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       src = <<~F
         FN viewer(running: ~Float64) RETURNS ~Float64 ->
             WITH MATERIALIZED VIEW running AS s {
-                ASSERT s != NIL, "ok";
+                ASSERT s >= 0.0, "ok";
             }
             RETURN GIVE running;
         END
@@ -186,7 +204,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       annotate(<<~CLEAR)
         FN viewer(xs: ~Float64) RETURNS ~Float64 ->
             WITH MATERIALIZED VIEW xs AS s {
-                ASSERT s != NIL, "ok";
+                ASSERT s >= 0.0, "ok";
             }
             RETURN GIVE xs;
         END
@@ -194,7 +212,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
     end
 
     it "tense-prefix fix targets the binding under WITH MATERIALIZED VIEW, not a same-typed prior decl on the same line" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       FixCollector.enable!
       begin
         src = <<~CLEAR
@@ -206,7 +224,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
           END
         CLEAR
         tokens = Lexer.new(src).tokenize
-        ast = Parser.new(tokens, src).parse
+        ast = ClearParser.new(tokens, src).parse
         SemanticAnnotator.new(source_code: src).annotate!(ast) rescue nil
         finding = FixCollector.drain.find { |f| f.message =~ /MATERIALIZED VIEW requires/ }
         expect(finding).not_to be_nil

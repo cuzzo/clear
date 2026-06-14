@@ -1,13 +1,13 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "PRE clauses on function signatures" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)
@@ -201,7 +201,7 @@ RSpec.describe "PRE clauses on function signatures" do
     end
 
     it "the PRE-typo error carries an :auto fix suggesting the closest parameter name" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       FixCollector.enable!
       begin
         begin
@@ -257,7 +257,7 @@ RSpec.describe "PRE clauses on function signatures" do
     end
 
     it "the PRE-without-RETURNS error carries an :auto fixable that inserts `RETURNS !Void`" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       FixCollector.enable!
       begin
         begin

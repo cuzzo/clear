@@ -29,6 +29,8 @@ module Annotator
         end
         nil
       end
-    end
+          private :setup_builtins
+
+end
   end
 end

@@ -37,10 +37,14 @@ class OwnershipGraph
       state_for_place(PlaceId.from_path(path))
     end
 
+    private
+
     sig { params(place: PlaceId).returns(T.nilable(Symbol)) }
     def state_for_place(place)
       states[place]
     end
+
+    public
 
     sig { params(path: String).returns(T.nilable(Integer)) }
     def move_line_for(path)
@@ -503,5 +507,8 @@ class OwnershipGraph
   def node_for(path)
     @nodes[place_id(path)] || @completed_nodes[place_id(path)]
   end
+
+  private :clear_completed_snapshot!, :prune_scope!, :remove_edge
+  private :owned_children
 
 end

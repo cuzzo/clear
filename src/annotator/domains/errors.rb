@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require_relative "../../compiler/entrypoint"
+
 module Annotator
   module Domains
     module Errors
@@ -84,7 +86,7 @@ module Annotator
 
         decl = decls.first
         has_main = program_node.statements.any? { |s|
-          s.is_a?(AST::FunctionDef) && s.name == "main"
+          s.is_a?(AST::FunctionDef) && s.name == Compiler::Entrypoint::NAME
         }
         unless has_main
           error!(decl, :SYNC_POLICY_NEEDS_MAIN_FILE)
@@ -92,6 +94,7 @@ module Annotator
 
         validate_sync_policy_body!(decl)
         program_node.sync_policy = decl.handlers
+        stamp_type!(decl, :Void)
       end
 
       # Per-handler-block validation: every selector must name a type the
@@ -187,9 +190,10 @@ module Annotator
           when :exit
             visit(T.must(clause.message))
           when :block
-            visit_stmts(T.must(clause.body))
+            visit_stmts(clause.body)
           end
         end
+        stamp_type!(node, :Void)
       end
 
       # Resolve a parsed CATCH clause into its runtime-dispatch form.
@@ -368,7 +372,8 @@ module Annotator
         # Handle optional return node for Void functions.
         fn_ctx = current_fn_ctx!
         expected = fn_ctx.return_type
-        if node.value.nil?
+        raw_value = node.value
+        if raw_value.nil?
           # If the function expects a value but we return nothing -> ERROR.
           # `!Void` (error union over Void) accepts a plain `RETURN;` because
           # the success arm is Void; the wrap is implicit at lowering time.
@@ -385,17 +390,18 @@ module Annotator
           return # Stop here, nothing else to analyze
         end
 
-        visit(node.value)
+        value = T.must(raw_value)
+        visit(value)
 
         # Inline BG return: `RETURN BG { ... }`, plus composite returns such
         # as `RETURN Holder{ bg: BG { ... } }`. There is no decl_node for
         # `stamp_bg_handle_lifetime!` to fire on, so run the same source walk
         # inline. If any contained BG captures a scope-bounded source, the
         # returned value cannot outlive those captures.
-        inline_bg_sources = collect_bg_sources_in_expr(node.value).uniq
+        inline_bg_sources = collect_bg_sources_in_expr(value).uniq
         if inline_bg_sources.any?
           error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-            type: node.value.full_type!(context: "inline BG return").to_s)
+            type: value.full_type!(context: "inline BG return").to_s)
         end
 
         # RETURN inside a WITH block is forbidden ONLY when the returned value
@@ -406,36 +412,34 @@ module Annotator
         # declare_capability_scope!; it's the same flag ensure_owned_value!
         # already uses to prevent storing WITH-scoped values in containers.
         if inside_with_block?
-          val = node.value
-          if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
+          if value.is_a?(AST::Identifier) && value.symbol&.non_escaping
             error!(node, :RETURN_FROM_WITH_SCOPED,
-              name: val.name)
-          elsif val.is_a?(AST::GetField) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
+              name: value.name)
+          elsif value.is_a?(AST::GetField) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
             error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
-          elsif val.is_a?(AST::GetIndex) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
+          elsif value.is_a?(AST::GetIndex) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
             error!(node, :RETURN_INDEX_FROM_WITH_SCOPED)
           end
         end
-        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
-        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
+        promote_to_expr_if!(node, value) if value.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, value) if value.is_a?(AST::MatchStatement)
 
-        verify_return(node.value)
+        verify_return(value)
         verify_tied_return!(node)
 
-        actual = node.value.resolved_type
-        actual_full = return_value_type(node.value)
-        expected = fn_ctx.return_type
+        actual = value.resolved_type
+        actual_full = return_value_type(value)
 
-        if node.value.is_a?(AST::Identifier)
-          vti = node.value.full_type!(context: "return identifier")
+        if value.is_a?(AST::Identifier)
+          vti = value.full_type!(context: "return identifier")
           if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) }
-            node.value.was_moved = true
+            value.was_moved = true
           end
           # Returning a future consumes the promise; otherwise scope finalization
           # reports it as unconsumed before return-lifetime checks can run.
           vt = vti.is_a?(Type) ? vti : (vti ? Type.new(vti) : nil)
           if vt&.future?
-            og_set_moved(node.value.name, at_token: node.value.token, action: :return)
+            og_set_moved(value.name, at_token: value.token, action: :return)
           end
         end
 
@@ -443,11 +447,11 @@ module Annotator
         # so the caller receives heap-allocated data.
 
         # Promote non-identifier literals to heap when the expected return type requires it.
-        unless node.value.is_a?(AST::Identifier)
+        unless value.is_a?(AST::Identifier)
           if expected.heap_return_storage? &&
-             node.value.respond_to?(:storage=) &&
-             node.value.full_type!(context: "return expression storage").requires_move?
-            node.value.storage = :heap
+             value.respond_to?(:storage=) &&
+             value.full_type!(context: "return expression storage").requires_move?
+            value.storage = :heap
           end
         end
 
@@ -475,7 +479,7 @@ module Annotator
           # (no 527 double-free). (`expected` is always a Type on master --
           # the FunctionSignature seam coerces nil -> Void.)
           value_is_fallible =
-            (node.value.respond_to?(:error_union_type) && node.value.error_union_type) ||
+            (value.respond_to?(:error_union_type) && value.error_union_type) ||
             actual_full.error_union?
           coerce_target =
             if !value_is_fallible && expected.plain_return_payload_type
@@ -483,16 +487,16 @@ module Annotator
             else
               expected
             end
-          node.value.coerced_type = coerce_target  # Don't coerce EXPLICIT returns
-          check_prefixed_int_range!(node.value, coerce_target)
+          value.coerced_type = coerce_target  # Don't coerce EXPLICIT returns
+          check_prefixed_int_range!(value, coerce_target)
         end
 
         stamp_type!(node, actual)
 
         fn_ctx.returns << AST::ReturnFact.new(
-          storage: T.cast(node.value.storage, T.nilable(Symbol)),
+          storage: T.cast(value.storage, T.nilable(Symbol)),
           type: T.cast(actual, Symbol),
-          metatype: T.cast(node.value.metatype, T.nilable(Symbol)),
+          metatype: T.cast(value.metatype, T.nilable(Symbol)),
         )
 
         @branch_terminated = true
@@ -515,6 +519,7 @@ module Annotator
 
         is_safe_autocast?(actual_type, expected_type)
       end
+      private :return_type_compatible?
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
       def same_return_capabilities?(expected_t, actual_t)
@@ -728,6 +733,16 @@ module Annotator
         current_fn_ctx&.mark_runtime_used!
         stamp_type!(node, :Void)
       end
-    end
+      private :baked_in_default_sync_policy
+  private :coerce_empty_collection_fallback!
+  private :emit_error_type_conflict!
+  private :resolve_catch_clause!
+  private :resolve_error_registration!
+  private :return_value_type
+  private :same_return_capabilities?
+  private :type_display
+  private :validate_sync_policy_body!
+
+end
   end
 end

@@ -74,7 +74,7 @@ module FunctionAnalysis
     const :expected_type, Type
     const :actual_type, Type
     const :actual, T.nilable(Symbol)
-    const :path, T.nilable(T::Array[Symbol])
+    const :path, T::Array[Symbol]
   end
 
   class EncounteredCallArgument < T::Struct
@@ -89,41 +89,31 @@ module FunctionAnalysis
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
     verify_captures!(node)
-    # Save and reset returns on the current FunctionContext (supports nested lambdas).
-    fn_ctx = current_fn_ctx
-    saved_returns = fn_ctx&.returns
-    fn_ctx.returns = [] if fn_ctx
 
-    with_new_scope do
-      og_push_scope
-      declare_and_verify_params(node)
-      declare_captures(node)
+    found_returns = collect_routine_returns do
+      with_routine_analysis_scope(node) do
+        declare_and_verify_params(node)
+        declare_captures(node)
 
-      # PRE clauses run at function entry — visit them with parameters in
-      # scope so each predicate type-checks and resolves identifiers
-      # against the parameter set. Visited before the body so the body's
-      # locals can't leak into the predicate's symbol scope.
-      visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
+        # PRE clauses run at function entry -- visit them with parameters in
+        # scope so each predicate type-checks and resolves identifiers
+        # against the parameter set. Visited before the body so the body's
+        # locals can't leak into the predicate's symbol scope.
+        visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
 
-      if body.is_a?(Array)
-        visit_stmts(body)
-      else
-        visit(body)
+        if body.is_a?(Array)
+          visit_stmts(body)
+        else
+          visit(body)
+        end
+
+        # DEBUG_POST clauses run AFTER the body is annotated (return type
+        # is known and synthetic `result` can be typed against it). Still
+        # inside the routine scope so parameters are visible.
+        visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
       end
-
-      # DEBUG_POST clauses run AFTER the body is annotated (return type
-      # is known and synthetic `result` can be typed against it). Still
-      # inside the routine scope so parameters are visible.
-      visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
-
-      finalize_scope(node)
-      og_pop_scope(archive: true)
     end
 
-    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
-    # Restore saved returns (for enclosing function/lambda).
-    restore_ctx = current_fn_ctx
-    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
@@ -143,6 +133,41 @@ module FunctionAnalysis
 
     return_type
   end
+
+  sig { params(node: RoutineNode, blk: T.proc.void).void }
+  def with_routine_analysis_scope(node, &blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    with_new_scope do
+      og_push_scope
+      begin
+        blk.call
+        finalize_scope(node)
+      ensure
+        og_pop_scope(archive: true)
+      end
+    end
+  end
+  private :with_routine_analysis_scope
+
+  sig { params(blk: T.proc.void).returns(T::Array[AST::ReturnFact]) }
+  def collect_routine_returns(&blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    # Save and reset returns on the current FunctionContext (supports nested lambdas).
+    fn_ctx = current_fn_ctx
+    saved_returns = fn_ctx&.returns
+    fn_ctx.returns = [] if fn_ctx
+
+    blk.call
+    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
+
+    # Restore saved returns (for enclosing function/lambda).
+    restore_ctx = current_fn_ctx
+    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
+    found_returns
+  end
+  private :collect_routine_returns
 
   sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
@@ -180,7 +205,7 @@ module FunctionAnalysis
     node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
     declared_return = node.annotation_return_type
     lifetime_paths = get_lifetime_paths(node)
-    fn_type_params = (node.type_params || []).map(&:to_sym)
+    fn_type_params = node.type_params.map(&:to_sym)
     fn_ctx = FunctionContext.new(
       name: node.name, return_type: node.annotation_return_type,
       lifetime: lifetime_paths, type_params: fn_type_params
@@ -206,10 +231,10 @@ module FunctionAnalysis
         )},
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
-        type_params: fn_type_params.any? ? fn_type_params : nil,
-        reentrant: node.reentrant == :reentrant
+        type_params: fn_type_params,
+        reentrant: node.declared_plain_reentrant?,
+        requires: node.requires
       )
-      signature.requires = node.requires
       current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
       register_function_node!(node)
@@ -231,12 +256,7 @@ module FunctionAnalysis
 
       if directly_recursive
         record_effect(EffectTracker::REENTRANT)
-        case node.reentrant
-        when :non_reentrant
-          unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
-            emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE)
-          end
-        when nil
+        unless node.reentrance_kind
           emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE)
         end
 
@@ -261,10 +281,10 @@ module FunctionAnalysis
       resolved_return_type = T.must(final_return_type)
       if (is_implicit_return || declared_return == :Any)
         node.return_type = resolved_return_type
-        signature.return_type = resolved_return_type
+        signature.replace_return_type!(resolved_return_type)
       end
 
-      signature.return_strategy = get_return_strategy(signature.return_type)
+      signature.replace_return_strategy!(get_return_strategy(signature.return_type))
       stamp_type!(node, signature)
       ctx = fn_ctx
       node.uses_frame = (ctx.frame_count > 0)
@@ -274,7 +294,7 @@ module FunctionAnalysis
       node.stack_vars_bytes = ctx.stack_vars_bytes
       raises_directly =
         has_fnptr ||
-        (node.reentrant == :non_reentrant) ||
+        node.reentrance_guard_required? ||
         function_has_pre_clauses?(node) ||
         raises_in_body == true
       record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
@@ -396,7 +416,7 @@ module FunctionAnalysis
       end
 
       type_params = signature.type_params
-      if type_params&.any?
+      if type_params.any?
         # For EXTERN FN with comptime params, the type bindings come directly from
         # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
         comptime_type_args ||= []
@@ -406,8 +426,8 @@ module FunctionAnalysis
         else
           subst = infer_generic_type_args!(node, signature, args, type_params)
         end
-        node.generic_type_args = type_params.map { |tp| T.must(subst)[tp] } if node.respond_to?(:generic_type_args=)
-        substituted = substitute_type_params(signature, T.must(subst))
+        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
+        substituted = substitute_type_params(signature, subst)
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         stamp_type!(node, substituted.return_type)
@@ -456,41 +476,6 @@ module FunctionAnalysis
     end
 
     nil
-  end
-
-  sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }
-  def normalize_intrinsic_signature(config)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return nil if config.arg_spec == :Varargs
-
-    params = config.arg_spec.each_with_index.map do |arg_def, i|
-      if arg_def.is_a?(Hash)
-        # Extended format: { type: :Int64, mutable: true, takes: false }
-        AST::Param.new(
-          name: arg_def[:name] || "arg#{i}",
-          type: arg_def[:type],
-          required: true,
-          mutable: arg_def[:mutable] || false,
-          takes: arg_def[:takes] || false
-        )
-      else
-        # Simple format: just a type symbol
-        AST::Param.new(
-          name: "arg#{i}",
-          type: arg_def,
-          required: true,
-          mutable: false,
-          takes: false
-        )
-      end
-    end
-
-    FunctionSignature.new(
-      params: params,
-      return_type: config.return_type,
-      intrinsic: true,
-      zig_pattern: config.intrinsic_pattern
-    )
   end
 
   # Single point: what allocator does the receiver/container of this call use?
@@ -713,19 +698,40 @@ module FunctionAnalysis
 
     actual_type = facts.arg_node.full_type!(context: "fn-typed argument")
     return true if facts.expected_type.accepts?(actual_type)
-    return false unless reentrant_fn_argument_rejected?(facts.expected_type, actual_type)
+    return true if reentrant_fn_argument_allowed_by_callee?(facts)
+    return false unless reentrant_fn_argument_rejected?(facts)
 
     error!(facts.arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM,
       name: argument_name(facts.arg_node, fallback: "Expression"), param: facts.param.name)
   end
 
-  sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }
-  def reentrant_fn_argument_rejected?(expected_type, actual_type)
-    return false unless actual_type.fn_type?
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def reentrant_fn_argument_allowed_by_callee?(facts)
+    T.bind(self, SemanticAnnotator)
+    return false unless facts.actual_type.fn_type?
 
-    actual_sig = actual_type.function_signature
-    expected_sig = expected_type.function_signature
-    !!(actual_sig&.reentrant && expected_sig && !expected_sig.reentrant)
+    actual_sig = facts.actual_type.function_signature
+    return false unless actual_sig&.reentrant
+
+    callee = function_node_for(facts.site.name)
+    return false unless callee&.declared_plain_reentrant?
+
+    callee.requires_clauses&.[](facts.param.name) != :non_reentrant
+  end
+
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def reentrant_fn_argument_rejected?(facts)
+    T.bind(self, SemanticAnnotator)
+    return false unless facts.actual_type.fn_type?
+
+    actual_sig = facts.actual_type.function_signature
+    return false unless actual_sig&.reentrant
+
+    callee = function_node_for(facts.site.name)
+    constraint = callee&.requires_clauses&.[](facts.param.name)
+    return true if constraint == :non_reentrant
+
+    callee&.declared_plain_reentrant? != true
   end
 
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
@@ -779,7 +785,7 @@ module FunctionAnalysis
   def verify_argument_aliases!(facts, encountered_args)
     T.bind(self, SemanticAnnotator)
     current_path = facts.path
-    return if current_path.nil?
+    return if current_path.empty?
 
     encountered_args.each_with_index do |prev, prev_index|
       next unless (param_mutable?(facts.param) || prev.mutable) && paths_overlap?(current_path, prev.path)
@@ -863,7 +869,7 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
+  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, SemanticAnnotator) rescue nil
     unique_args = atomic_args.compact
@@ -943,14 +949,15 @@ module FunctionAnalysis
 
   # Mixed atomic/non-atomic returned lifetimes are ambiguous because the
   # returned value's runtime layout depends on the caller's family choice.
-  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).void }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
     return if requires_map.empty?
 
     sources.each do |source|
-      path = T.must(get_path_to_root(source))
+      path = get_path_to_root(source)
+      next if path.empty?
       root_name = path.first.to_s
       families = requires_map[root_name]
       next unless families.is_a?(Set) && families.size > 1
@@ -962,11 +969,12 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: AST::FunctionDef, source_node: T.untyped).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: AST::FunctionDef, source_node: T.untyped).void }
   def verify_lifetime_source!(node, source_node)
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
-    root_param_name = T.must(path).first.to_s
+    return if path.empty?
+    root_param_name = T.must(path.first).to_s
     param = node.params.find { |p| p.name == root_param_name }
 
     if param.nil?
@@ -977,7 +985,7 @@ module FunctionAnalysis
     param_type = param.type
     current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
 
-    T.must(path).drop(1).each do |field_sym|
+    path.drop(1).each do |field_sym|
       field_name = field_sym.to_s
 
       # Stop if we hit an Array index wildcard (we can't verify types past a dynamic index easily yet)
@@ -1002,7 +1010,7 @@ module FunctionAnalysis
   sig { params(node: RoutineNode).void }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires : nil, T.nilable(T::Hash[String, T::Set[Symbol]]))
+    requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires || {} : {}, T::Hash[String, T::Set[Symbol]])
     node.params.each do |param|
       # Validate Defaults
       if param.default
@@ -1205,11 +1213,9 @@ module FunctionAnalysis
     lifetime_paths = current_fn_ctx!.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
-    is_wildcard = lifetime_paths == [:wildcard]
     schema_resolver = ->(t) { lookup_type_schema(t) }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
-    fn_type_params = current_fn_ctx&.type_params || []
-    is_type_param = fn_type_params.include?(type_info&.resolved)
+    is_type_param = current_function_type_param?(type_info&.resolved)
 
     unless has_lifetime || is_copyable || is_type_param
       emit_return_borrowed_no_copy_error!(node)
@@ -1218,6 +1224,7 @@ module FunctionAnalysis
     return true unless has_lifetime
     # Wildcard accepts any return-derivation path -- the diagnostic at
     # the declaration site already warned about it.
+    is_wildcard = lifetime_paths == [:wildcard]
     return true if is_wildcard
 
     # Lifetime path validation applies to direct field/index access only.
@@ -1225,7 +1232,7 @@ module FunctionAnalysis
     return true if node.is_a?(AST::Identifier)
 
     actual_path = get_path_to_root(node)
-    unless actual_path
+    if actual_path.empty?
       error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
       return
     end
@@ -1295,38 +1302,34 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(definitions: T::Array[FunctionSignature], args: T::Array[T.untyped]).returns(T.nilable(FunctionSignature)) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    matched = definitions.find do |config|
-      next true if config[:args] == :Varargs  # Varargs accepts anything
+    definitions.find do |config|
+      next true if config.intrinsic_varargs?
 
-      # Arity check
-      next false if args.size != config[:args].size
+      specs = config.intrinsic_arg_specs
+      next false if args.size != specs.size
 
-      # Type check each argument, including capability constraints.
-      # Hash args like { type: :String, sync: :raw } check both the base
-      # type and the capability. This allows the registry to dispatch to
-      # different Zig implementations based on the argument's capability.
       args.each_with_index.all? do |arg, i|
-        spec = config[:args][i]
-        if spec.is_a?(Hash)
-          expected = spec[:type]
-          next true if expected == :Any && !spec[:sync] && !spec[:ownership]
-          next false unless expected == :Any || is_safe_autocast?(arg.resolved_type, expected)
-          # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.full_type!(context: "intrinsic capability argument")
-          next false if spec[:sync] && arg_type&.sync != spec[:sync]
-          next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
-          true
-        else
-          next true if spec == :Any
-          next true if spec.is_a?(Symbol) && any_array_intrinsic_arg?(spec, arg)
-          is_safe_autocast?(arg.resolved_type, spec)
-        end
+        intrinsic_arg_matches?(T.must(specs[i]), arg)
       end
     end
-    matched && IntrinsicRegistry.fs(matched)
+  end
+
+  sig { params(spec: IntrinsicArgSpec, arg: T.untyped).returns(T::Boolean) }
+  def intrinsic_arg_matches?(spec, arg)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return true if spec.unconstrained_any?
+    return true if spec.type == :"Any[]" && any_array_intrinsic_arg?(spec.type, arg)
+    return false unless spec.type == :Any || is_safe_autocast?(arg.resolved_type, spec.type)
+    return true unless spec.capability_constrained?
+
+    arg_type = arg.full_type!(context: "intrinsic capability argument")
+    return false if spec.sync && arg_type&.sync != spec.sync
+    return false if spec.ownership && arg_type&.ownership != spec.ownership
+
+    true
   end
 
   sig { params(spec: Symbol, arg: Object).returns(T::Boolean) }
@@ -1344,12 +1347,49 @@ module FunctionAnalysis
       type.open_stream? || type.inf_stream?
   end
 
-  # Formats intrinsic args for error messages
-  sig { params(args: T::Array[T.untyped]).returns(String) }
-  def format_intrinsic_args(args)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return "(varargs)" if args == :Varargs
-    types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
-    "(#{types.join(', ')})"
-  end
+  private :verify_argument_type!,
+    :verify_argument_aliases!,
+    :verify_atomic_argument!,
+    :verify_function_signature!,
+    :verify_lifetime!,
+    :verify_takes_argument!,
+    :fn_type_argument_match?
+  private :analyze_routine
+  private :any_array_intrinsic_arg?
+  private :any_element_collection_param?
+  private :argument_name
+  private :atomic_cell_arg?
+  private :atomic_cell_to_atomic_param?
+  private :atomic_cell_to_bare_value_param?
+  private :basic_argument_match?
+  private :borrowed_takes_argument?
+  private :build_lambda_signature
+  private :call_argument_facts
+  private :call_arity_plan
+  private :call_signature_site
+  private :declare_and_verify_params
+  private :declare_captures
+  private :default_argument_for
+  private :explicit_primitive_atomic_param?
+  private :get_return_strategy
+  private :inject_default_arguments!
+  private :intrinsic_arg_matches?
+  private :param_mutable?
+  private :paths_overlap?
+  private :receiver_container_alloc
+  private :reentrant_fn_argument_allowed_by_callee?
+  private :reentrant_fn_argument_rejected?
+  private :return_is_borrow?
+  private :shared_argument_match?
+  private :verify_call_arity!
+  private :verify_captures!
+  private :verify_lifetime_source!
+  private :verify_link_argument!
+  private :verify_mutable_argument!
+  private :verify_no_mixed_atomic_returned_lifetime!
+  private :verify_owned_takes_argument!
+  private :verify_param_lifetime!
+  private :verify_returns
+  private :warn_multi_atomic_bare_value_call!
+
 end

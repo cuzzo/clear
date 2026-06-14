@@ -27,13 +27,12 @@ module LSP
     KIND_QUICKFIX = T.let("quickfix".freeze, String)
     KIND_REFACTOR = T.let("refactor".freeze, String)
 
-    module_function
 
     # Build the CodeAction array for `request_range` against the
     # document. Returns an empty array when there's nothing relevant
     # (no findings, no overlap, or no fixes).
     sig { params(document: T.untyped, request_range: T.untyped).returns(T::Array[T.untyped]) }
-    def for_range(document, request_range)
+    def self.for_range(document, request_range)
       return [] unless document
       result = document.cached_findings
       return [] unless result
@@ -47,7 +46,7 @@ module LSP
         next unless ranges_overlap?(diag[:range], request_range)
 
         finding.fixes.each do |fix|
-          out << build_action(fix, finding, diag, document, source)
+          out << build_action(fix, diag, document, source)
         end
       end
 
@@ -56,8 +55,8 @@ module LSP
 
     # ---- internals ----
 
-    sig { params(fix: T.untyped, _finding: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
-    def build_action(fix, _finding, diag, document, source)
+    sig { params(fix: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    def self.build_action(fix, diag, document, source)
       kind = fix.confidence == :auto ? KIND_QUICKFIX : KIND_REFACTOR
       edits = fix.edits.map { |e| build_text_edit(e, source) }
 
@@ -81,7 +80,7 @@ module LSP
     # Convert a Fix's Edit (line/col/length-based) into an LSP
     # TextEdit (range/newText).
     sig { params(edit: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
-    def build_text_edit(edit, source)
+    def self.build_text_edit(edit, source)
       {
         range:   Position.range_for_span(edit.span, source),
         newText: edit.replacement,
@@ -93,7 +92,7 @@ module LSP
     # end: {line, character}}`. Compare via `<=>` since Array#<
     # isn't defined.
     sig { params(a: T.untyped, b: T.untyped).returns(T::Boolean) }
-    def ranges_overlap?(a, b)
+    def self.ranges_overlap?(a, b)
       return false if (range_position(a, :end) <=> range_position(b, :start)) < 0
       return false if (range_position(b, :end) <=> range_position(a, :start)) < 0
       true
@@ -102,10 +101,15 @@ module LSP
     # Pack a range's start or end into a comparable [line, char]
     # tuple. Tolerates string-keyed positions from the LSP wire.
     sig { params(range: T.untyped, side: T.untyped).returns(T.untyped) }
-    def range_position(range, side)
+    def self.range_position(range, side)
       pos = range[side]
       pos ||= range[side.to_s]
       [pos[:line] || pos["line"], pos[:character] || pos["character"]]
     end
-  end
+  private_class_method :build_action
+  private_class_method :build_text_edit
+  private_class_method :range_position
+  private_class_method :ranges_overlap?
+
+end
 end

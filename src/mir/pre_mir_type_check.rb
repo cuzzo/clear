@@ -27,10 +27,9 @@ module PreMirTypeCheck
 
   LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze
 
-  module_function
 
   sig { params(program: AST::Program).returns(NilClass) }
-  def verify!(program)
+  def self.verify!(program)
     MIRPassState.require!(program, :hoisted, consumer: "PreMirTypeCheck")
     violations = []
     walk(program, violations, {})
@@ -68,7 +67,7 @@ module PreMirTypeCheck
   # Generic structural recursion: AST nodes are Structs (each_pair),
   # bodies are Arrays, some carry Hashes. Type / Token and scalars are
   # leaves. object_id memo guards shared-reference cycles.
-  def walk(node, violations, seen)
+  def self.walk(node, violations, seen)
     return if node.nil? || LEAVES.any? { |k| node.is_a?(k) }
     return if defined?(Type) && node.is_a?(Type)
     oid = node.object_id
@@ -92,4 +91,6 @@ module PreMirTypeCheck
       end
     end
   end
+  private_class_method :walk
+
 end

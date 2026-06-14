@@ -126,7 +126,7 @@ class Formatter
   sig { returns(T.nilable(AST::Program)) }
   def validate_parse!
     ts = ::Lexer.new(@source).tokenize
-    ::Parser.new(ts, @source).parse
+    ::ClearParser.new(ts, @source).parse
   rescue => e
     raise Error, "parse error: #{e.message}"
   end
@@ -155,7 +155,7 @@ class Formatter::FormatLexer
     @out  = T.let([], T::Array[T.untyped])
   end
 
-  sig { returns(T.nilable(Array)) }
+  sig { returns(Array) }
   def tokenize
     until @s.eos?
       sl, sc = @line, @col
@@ -653,7 +653,7 @@ class Formatter::Emitter
   # INDENT_OPEN/CLOSE phantoms to neutralize its OUTDENT_LEADING render
   # rule. Multi-line arms emit body on its own lines at +1 indent and
   # close the indent before the separator.
-  sig { params(out: Array, toks: Array, arm: Hash).returns(Array) }
+  sig { params(out: Array, toks: Array, arm: Hash).void }
   def emit_match_arm(out, toks, arm)
     s, e, body_end, arrow, sep, multi =
       arm[:start], arm[:end], arm[:body_end], arm[:arrow], arm[:sep], arm[:multi]
@@ -683,6 +683,7 @@ class Formatter::Emitter
     end
 
     insert_nl(out)
+    nil
   end
 
   sig { params(toks: Array, s: Integer, e: Integer).returns(Formatter::FormatLexer::Token) }
@@ -2465,7 +2466,7 @@ class Formatter::Emitter
 
   # Ensure the last token in `out` is exactly one :NL. If the last token
   # is already :NL, leave it. Otherwise append a fresh :NL.
-  sig { params(out: Array).returns(T.nilable(Array)) }
+  sig { params(out: Array).void }
   def insert_nl(out)
     return if out_ends_with_nl?(out)
     out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
@@ -3034,4 +3035,12 @@ class Formatter::Emitter
     end
     true  # start of line — treat as expression start
   end
+  private :bracket_close?
+  private :bracket_open?
+  private :nl_after_end
+  private :out_ends_with_nl?
+  private :root_depth?
+  private :top_level_keyword?
+  private :trim_trailing_body_nls
+
 end

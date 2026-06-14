@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.11 -- when a fn declares `REQUIRES c: VERSIONED | ATOMIC`
 # AND the body contains `WITH SNAPSHOT c AS MUTABLE x { ... }` without
@@ -16,7 +16,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

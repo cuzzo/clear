@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # F4 (Tranche 5): EFFECTS REENTRANT:MAX_DEPTH(N) on a function whose
 # name appears in a @call_graph cycle silently demotes the cycle to
@@ -21,14 +21,14 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
 
   def annotate_collecting(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast) rescue nil
     FixCollector.drain.select { |f| f.category == :reentrance }
   end
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -77,7 +77,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
 
   it "compiles a directly-self-recursive :MAX_DEPTH fn without firing any error" do
     # The pre-Tranche-5 annotator's `directly_recursive + :non_reentrant`
-    # branch fired a stale `Use @reentrant` message for MAX_DEPTH; that
+    # branch fired a stale `Use EFFECTS REENTRANT` message for MAX_DEPTH; that
     # branch now skips reentrant_max_depth so the runtime counter path
     # is the actual source of truth.
     expect {

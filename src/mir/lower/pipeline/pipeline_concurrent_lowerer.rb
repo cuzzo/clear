@@ -10,7 +10,8 @@ require_relative "../../mir"
 require_relative "../../cleanup_entry"
 require_relative "../../fiber_ctx_builder"
 
-PipelineConcurrentResult = T.type_alias { T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock) }
+PipelineConcurrentResult = T.type_alias { T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock, MIR::ShardConcurrentEach) }
+PipelineShardDirectContext = T.type_alias { T.nilable(T::Hash[Symbol, String]) }
 
 class PipelineConcurrentBcExpression < T::Struct
   const :policy, Symbol
@@ -183,6 +184,7 @@ class PipelineConcurrentLowerer < T::Struct
   const :lower_head_with_placeholder, T.proc.params(node: AST::Node, placeholder: String).returns(PipelineConcurrentHeadResult)
   const :callback_expr_mir, T.proc.params(expr: AST::Node, placeholder: String, capture_map: T::Hash[String, String], capture_symbols: T::Hash[String, SymbolEntry], rt_override: String).returns(MIR::Node)
   const :callback_body_mir, T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String, capture_map: T::Hash[String, String], capture_symbols: T::Hash[String, SymbolEntry], rt_override: String).returns(T::Array[MIR::Emittable])
+  const :callback_body_mir_with_shard, T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String, capture_map: T::Hash[String, String], capture_symbols: T::Hash[String, SymbolEntry], rt_override: String, shard_context: PipelineShardDirectContext).returns(T::Array[MIR::Emittable])
   const :pipeline_alloc_mark_fact, T.proc.params(value: MIR::Node, name: String, fallback_alloc: Symbol, type_info: Type, ast_node: AST::Node, accept_owned_call: T::Boolean, include_cleanup: T::Boolean).returns(T.nilable(PipelineConcurrentAllocationFact))
   const :append_ownership_transfers, T.proc.params(body: T::Array[MIR::Emittable]).returns(T::Array[MIR::Emittable])
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
@@ -364,7 +366,7 @@ class PipelineConcurrentLowerer < T::Struct
 
   private
 
-  sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, smooth_node: AST::BinaryOp).returns(MIR::ForStmt) }
+  sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, smooth_node: AST::BinaryOp).returns(PipelineConcurrentResult) }
   def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = T.must(shard_context(conc_op))
     each_op = T.cast(conc_op.op, AST::EachOp)
@@ -375,7 +377,10 @@ class PipelineConcurrentLowerer < T::Struct
     key_var = "__sh#{id}_key"
 
     start_mir = self.visit_mir.call(T.cast(range_node.start, AST::Node))
-    end_mir = self.visit_mir.call(T.cast(range_node.finish, AST::Node))
+    finish_mir = self.visit_mir.call(T.cast(range_node.finish, AST::Node))
+    return lower_shard_concurrent_each_zig(ctx, each_op, conc_op, range_node, id, idx_var, key_var, start_mir, finish_mir) unless self.bc_target.call
+
+    end_mir = finish_mir
     end_expr = range_node.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
 
     head = self.lower_head_with_placeholder.call(ctx.key_expr, idx_var)
@@ -409,6 +414,82 @@ class PipelineConcurrentLowerer < T::Struct
       idx_var,
       self.append_ownership_transfers.call(inner),
       nil,
+    )
+  end
+
+  sig do
+    params(
+      ctx: AST::PipelineShardContext,
+      each_op: AST::EachOp,
+      conc_op: AST::ConcurrentOp,
+      range_node: AST::RangeLit,
+      id: Integer,
+      idx_var: String,
+      key_var: String,
+      start_mir: MIR::Node,
+      finish_mir: MIR::Node,
+    ).returns(MIR::ShardConcurrentEach)
+  end
+  def lower_shard_concurrent_each_zig(ctx, each_op, conc_op, range_node, id, idx_var, key_var, start_mir, finish_mir)
+    map_node = T.cast(ctx.map_var, AST::Identifier)
+    map_var_name = map_node.name.to_s
+    map_type = Type.from_node!(map_node, context: "SHARD target map")
+    shard_count = ctx.shard_count || map_type.shard_count
+    raise "SHARD target missing shard_count" unless shard_count
+
+    key_type = shard_key_type(map_type)
+    head = self.lower_head_with_placeholder.call(ctx.key_expr, idx_var)
+    key_setup = T.let(head.pending.dup, T::Array[MIR::Emittable])
+    key_cleanup = T.let([], T::Array[MIR::Emittable])
+    key_fact = self.pipeline_alloc_mark_fact.call(
+      head.value,
+      key_var,
+      :heap,
+      Type.from_node!(ctx.key_expr, context: "SHARD key binding"),
+      ctx.key_expr,
+      true,
+      true,
+    )
+    if key_fact
+      key_setup << key_fact.mark
+      key_cleanup << MIR::Cleanup.new(key_var, key_fact.cleanup_entry) if key_fact.cleanup_entry
+    end
+    producer_key_body = self.append_ownership_transfers.call([
+      *key_setup,
+      MIR::Let.new(key_var, head.value, false, key_type, nil),
+      *key_cleanup,
+    ])
+    caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
+    capture_map = shard_capture_map(map_var_name, caps)
+    body_mir = self.callback_body_mir_with_shard.call(
+      each_op.body,
+      key_var,
+      capture_map,
+      caps.capture_symbols,
+      "__rt",
+      shard_direct_context(map_var_name, key_var),
+    )
+
+    MIR::ShardConcurrentEach.new(
+      id: id,
+      map_expr: self.visit_mir.call(map_node),
+      map_var_name: map_var_name,
+      map_type: map_type,
+      key_type: key_type,
+      shard_count: shard_count,
+      start_expr: start_mir,
+      finish_expr: finish_mir,
+      inclusive: range_node.inclusive,
+      capacity_expr: stream_concurrent_capacity_mir(conc_op, MIR::Lit.new(shard_count.to_s)),
+      batch_size_expr: bounded_concurrent_batch_mir(conc_op),
+      task_config_variant: shard_task_config_variant(conc_op),
+      producer_key_body: producer_key_body,
+      capture_fields: shard_capture_fields(caps),
+      capture_inits: shard_capture_inits(caps),
+      capture_setup: shard_capture_setup(caps),
+      body: self.append_ownership_transfers.call(body_mir),
+      key_allocates_frame: ctx.key_allocates_frame,
+      body_allocates_frame: ctx.body_allocates_frame,
     )
   end
 
@@ -1113,6 +1194,62 @@ class PipelineConcurrentLowerer < T::Struct
   sig { params(conc_op: AST::ConcurrentOp).returns(T.nilable(AST::PipelineShardContext)) }
   def shard_context(conc_op)
     T.cast(conc_op.shard_context, T.nilable(AST::PipelineShardContext))
+  end
+
+  sig { params(map_type: Type).returns(Type) }
+  def shard_key_type(map_type)
+    return map_type.key_type if map_type.numeric_map?
+
+    Type.new(:String)
+  end
+
+  sig { params(map_var_name: String, caps: FiberCtxBuilder::Result).returns(T::Hash[String, String]) }
+  def shard_capture_map(map_var_name, caps)
+    caps.capture_map.merge(map_var_name => "ctx.__shard_map.*")
+  end
+
+  sig { params(map_var_name: String, key_var: String).returns(T::Hash[Symbol, String]) }
+  def shard_direct_context(map_var_name, key_var)
+    {
+      map: map_var_name,
+      idx: "ctx.shard",
+      key: key_var,
+      hash: "0",
+    }
+  end
+
+  sig { params(caps: FiberCtxBuilder::Result).returns(T::Array[MIR::ContextFieldDecl]) }
+  def shard_capture_fields(caps)
+    caps.specs.flat_map do |spec|
+      fields = T.let([
+        MIR::ContextFieldDecl.new(name: spec.name, type_zig: spec.field_type_zig),
+      ], T::Array[MIR::ContextFieldDecl])
+      if spec.needs_moved_guard?
+        fields << MIR::ContextFieldDecl.new(
+          name: "#{spec.name}_moved",
+          type_zig: "bool",
+          default_value: MIR::Lit.new("false"),
+        )
+      end
+      fields
+    end
+  end
+
+  sig { params(caps: FiberCtxBuilder::Result).returns(T::Array[MIR::StructInitField]) }
+  def shard_capture_inits(caps)
+    caps.specs.map { |spec| MIR::StructInitField.new(name: spec.name, value: spec.init_value_mir) }
+  end
+
+  sig { params(caps: FiberCtxBuilder::Result).returns(T::Array[MIR::Emittable]) }
+  def shard_capture_setup(caps)
+    caps.specs.flat_map(&:setup_mir)
+  end
+
+  sig { params(conc_op: AST::ConcurrentOp).returns(String) }
+  def shard_task_config_variant(conc_op)
+    size_node = concurrent_option(conc_op, "size")
+    size_name = size_node.is_a?(AST::Identifier) ? size_node.name.downcase.to_sym : nil
+    self.task_config_variant.call(size_name)
   end
 
   sig { params(conc_op: AST::ConcurrentOp, key: String).returns(T.nilable(AST::Node)) }

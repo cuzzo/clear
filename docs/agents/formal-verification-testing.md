@@ -172,7 +172,7 @@ The three concurrency-static checks are tested in isolation:
 - **P3.3**: hold-lock-across-yield (forbid holding a lock across `:yield`)
 - **P3.4**: naked nested-WITH (forbid unranked re-acquire)
 - **P3.5**: compile-time reentrant lock (forbid recursive lock acquire
-  on same binding without `@reentrant`)
+  on same binding without an explicit reentrance declaration)
 
 Their interaction under nested permission combinations
 (`EXCLUSIVE @writeLocked` inside `DO {}` inside `WITH EXCLUSIVE @locked`

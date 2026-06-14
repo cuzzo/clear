@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/mir/thunk_transform"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/mir/thunk_transform" unless defined?(ThunkTransform)
 
 # Thunk Phase 4c — RecursiveSplitter pattern detection. Detects the
 # simple-recurrence shape (factorial / fibonacci-individual-call):
@@ -16,7 +16,7 @@ require_relative "../src/mir/thunk_transform"
 RSpec.describe "ThunkTransform::RecursiveSplitter.split" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def fn(ast, name)
@@ -138,9 +138,9 @@ end
 # shape so users can plan.
 RSpec.describe "Phase 4c detection-aware error message" do
   def annotate(source)
-    require_relative "../src/backends/transpiler"
+    require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

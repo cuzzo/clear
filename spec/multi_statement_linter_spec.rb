@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/multi_statement_linter"
+require_relative "../src/tools/multi_statement_linter" unless defined?(MultiStatementLinter)
 
 # `MultiStatementLinter.lint!` warns when a single source line contains
 # more than one `;`-terminated statement. Surfaced via FixCollector

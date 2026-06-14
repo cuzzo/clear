@@ -1,15 +1,15 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # Tests that the annotator raises a compile error when a non-Copy variable
 # is used after being moved. This is the core borrow checker rule.
 
-RSpec.describe "Use-after-move detection" do
+RSpec.describe UseAfterMoveChecker do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

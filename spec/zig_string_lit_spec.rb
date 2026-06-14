@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/mir/mir_lowering"
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
 
 # Direct unit tests for MIRLowering#zig_string_lit. The method only
 # fires when a CLEAR PRE clause includes special characters in its

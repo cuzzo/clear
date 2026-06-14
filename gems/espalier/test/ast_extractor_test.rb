@@ -96,4 +96,29 @@ class AstExtractorTest < Minitest::Test
     assert_equal "self", log_call[:receiver]
     assert_equal :iterates, log_call[:type]
   end
+
+  def test_extracts_method_visibility_from_access_modifiers
+    r = parse_ruby(<<~RB)
+      class Worker
+        def run; helper; end
+
+        private
+        def helper; end
+
+        public :helper
+
+        protected
+        def guarded; end
+
+        private def inline_helper; end
+      end
+    RB
+
+    mod = r.first
+    vis = mod[:methods].to_h { |method| [method[:name], method[:visibility]] }
+    assert_equal :public, vis["run"]
+    assert_equal :public, vis["helper"]
+    assert_equal :protected, vis["guarded"]
+    assert_equal :private, vis["inline_helper"]
+  end
 end

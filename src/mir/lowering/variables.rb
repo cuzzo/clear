@@ -531,6 +531,7 @@ module MIRLoweringVariables
   def type_requires_alloc_cleanup?(ft, alloc)
     T.bind(self, MIRLowering) rescue nil
     return false if ft.primitive? || ft.void? || ft.any? || ft.id_handle?
+    return true if ft.needs_cleanup?(mir_schema_lookup)
     return true if ft.needs_explicit_cleanup?(alloc, mir_schema_lookup)
 
     MIR::Placement.explicit_heap?(alloc) && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
@@ -1016,7 +1017,7 @@ module MIRLoweringVariables
   def lower_map_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
     T.bind(self, MIRLowering) rescue nil
     shard = shard_context
-    dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: false)
+    dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op)
     sink_type = receiver_type.value_type
     val = with_sink_type(sink_type) do
       with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
@@ -1032,7 +1033,7 @@ module MIRLoweringVariables
     # Map put takes ownership of the stored value on success. If the value
     # expression produces owned children, expose that temporary to MIRChecker
     # with error-only cleanup: normal cleanup would double-free after the map owns it.
-    val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
+    val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct && rodata_ownership_ast?(node.value)
     val = hoist_alloc(val, node.value, err_cleanup: true)
 
     if !bc_target? && receiver_type.rc_map?
@@ -1085,8 +1086,7 @@ module MIRLoweringVariables
       receiver_type,
       target_node,
       node,
-      op,
-      include_val_alloc: owns_transferred_value
+      op
     )
 
     sink_type = receiver_type.value_type || value_type_for_transfer
@@ -1158,11 +1158,10 @@ module MIRLoweringVariables
       receiver_type: Type,
       target_node: T.untyped,
       assignment: AST::Assignment,
-      op: FunctionSignature,
-      include_val_alloc: T::Boolean
+      op: FunctionSignature
     ).returns(IndexedAssignmentDispatch)
   end
-  def indexed_assignment_dispatch(kind, receiver_type, target_node, assignment, op, include_val_alloc:)
+  def indexed_assignment_dispatch(kind, receiver_type, target_node, assignment, op)
     T.bind(self, MIRLowering) rescue nil
 
     target_var = indexed_assignment_target_var(target_node)
@@ -1175,7 +1174,7 @@ module MIRLoweringVariables
     else
       :zig
     end
-    resolved_allocs = indexed_assignment_allocs(op, target_node, assignment, include_val_alloc: include_val_alloc)
+    resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
     receiver_alloc = T.unsafe(self).send(:placement_for_node, target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
@@ -1197,22 +1196,28 @@ module MIRLoweringVariables
     params(
       op: FunctionSignature,
       target_node: AST::Node,
-      assignment: AST::Assignment,
-      include_val_alloc: T::Boolean
+      assignment: AST::Assignment
     ).returns(MIR::InlineAllocMetadata)
   end
-  def indexed_assignment_allocs(op, target_node, assignment, include_val_alloc:)
+  def indexed_assignment_allocs(op, target_node, assignment)
     T.bind(self, MIRLowering) rescue nil
 
-    resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
-    [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-      registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
-      next unless registry_alloc || (include_val_alloc && alloc_key == :val_alloc)
-      alloc_sym = registry_alloc || :heap
-      next if alloc_key == :val_alloc && registry_alloc.nil? && include_val_alloc
-      resolved_allocs[alloc_key] = resolve_alloc_sym(alloc_sym, target_node, assignment)
-    end
-    MIR::InlineAllocMetadata.new(resolved_allocs)
+    MIR::InlineAllocMetadata.new(
+      alloc: indexed_assignment_resolved_alloc(op, :alloc, target_node, assignment),
+      key_alloc: indexed_assignment_resolved_alloc(op, :key_alloc, target_node, assignment),
+      val_alloc: indexed_assignment_resolved_alloc(op, :val_alloc, target_node, assignment),
+      shard_alloc: indexed_assignment_resolved_alloc(op, :shard_alloc, target_node, assignment),
+    )
+  end
+
+  sig { params(op: FunctionSignature, alloc_key: Symbol, target_node: AST::Node, assignment: AST::Assignment).returns(T.nilable(Symbol)) }
+  def indexed_assignment_resolved_alloc(op, alloc_key, target_node, assignment)
+    T.bind(self, MIRLowering) rescue nil
+
+    registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
+    return nil unless registry_alloc
+
+    resolve_alloc_sym(registry_alloc, target_node, assignment)
   end
 
   sig { params(op: FunctionSignature, alloc_key: Symbol).returns(T.nilable(Symbol)) }
@@ -1340,5 +1345,58 @@ module MIRLoweringVariables
   # Control flow
   # ================================================================
 
+
+  private :allocating_init_var_decl_plan
+  private :assignment_target_plan
+  private :assignment_value
+  private :auto_lock_assignment_facts
+  private :auto_lock_assignment_value
+  private :binding_metadata_var_decl_plan
+  private :binding_placement_fact
+  private :classified_cleanup_var_decl_plan
+  private :cleanup_entry_for_ast_binding
+  private :compose_capability_wrap
+  private :ensure_cleanup_binding_owns_string_init
+  private :field_access_moves_owner?
+  private :field_assignment_requires_cleanup?
+  private :field_assignment_root_identifier
+  private :field_owner_move_marks
+  private :indexed_assignment_allocs
+  private :indexed_assignment_registry_alloc
+  private :indexed_assignment_resolved_alloc
+  private :indexed_assignment_target_var
+  private :list_collection_copy?
+  private :lower_atomic_assignment
+  private :lower_auto_lock_assignment
+  private :lower_direct_indexed_set
+  private :lower_field_assignment_with_cleanup
+  private :lower_indexed_assignment
+  private :lower_map_indexed_assignment
+  private :lower_template_indexed_assignment
+  private :lower_var_decl
+  private :lower_var_decl_init
+  private :mark_field_assignment_cleanup!
+  private :mark_guarded_cleanup_name!
+  private :moved_guard_cleanup_entry
+  private :mutated_owned_var_decl?
+  private :mutated_owned_var_decl_plan
+  private :optional_nil_initializer?
+  private :owned_binding_source_alloc
+  private :owned_return_call_init?
+  private :owned_return_call_var_decl_plan
+  private :owned_return_transfer_binding?
+  private :source_already_has_declared_capability?
+  private :special_assignment_result
+  private :stamp_var_decl_init_target!
+  private :transfer_only_var_decl?
+  private :transfer_only_var_decl_plan
+  private :type_requires_alloc_cleanup?
+  private :var_decl_alloc_mark
+  private :var_decl_facts
+  private :var_decl_materialization_plan
+  private :var_decl_safe_name
+  private :var_decl_source_borrowed?
+  private :var_decl_source_transfer_required?
+  private :var_decl_suppression
 
 end

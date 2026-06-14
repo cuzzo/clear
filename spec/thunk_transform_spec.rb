@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/mir/thunk_transform"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/transpiler"
+require_relative "../src/mir/thunk_transform" unless defined?(ThunkTransform)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "ThunkTransform module wiring" do
   describe ZigType do
@@ -56,25 +56,25 @@ RSpec.describe "ThunkTransform module wiring" do
 
     it "passes for plain integer return types" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Int64))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:Int64))
       }.not_to raise_error
     end
 
     it "passes for void return type" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Void))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:Void))
       }.not_to raise_error
     end
 
     it "raises a directed error message when the return type is fallible" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/THUNK trampoline.*'deep'.*fallible/)
     end
 
     it "names the helpers a future maintainer must extend" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/build_trampoline.*build_mutual_trampoline.*errdefer/m)
     end
   end
@@ -262,7 +262,7 @@ RSpec.describe "ThunkTransform emit coverage" do
   end
 
   it "binds thunk frame params structurally before emitting Zig" do
-    context = ThunkTransform::Emit.current_frame_context(fn("sample", params: [param("n"), param("name")]))
+    context = ThunkTransform::Emit.send(:current_frame_context, fn("sample", params: [param("n"), param("name")]))
     mir = MIR::BinOp.new(
       "+",
       MIR::Ident.new("n"),
@@ -273,13 +273,13 @@ RSpec.describe "ThunkTransform emit coverage" do
       )
     )
 
-    rebound = ThunkTransform::Emit.bind_frame_refs(mir, context)
+    rebound = ThunkTransform::Emit.send(:bind_frame_refs, mir, context)
 
     expect(FakeThunkLowering.new.emit_expr(rebound)).to eq("current.n + obj.n + name_extra")
   end
 
   it "binds nested thunk call, method, index, and wrapper expressions structurally" do
-    context = ThunkTransform::Emit.mutual_frame_context(fn("sample", params: [param("n"), param("items")]))
+    context = ThunkTransform::Emit.send(:mutual_frame_context, fn("sample", params: [param("n"), param("items")]))
     call = MIR::Call.new(
       "next",
       [
@@ -296,7 +296,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       MIR::CallableContract.no_ownership(1)
     )
 
-    rebound = ThunkTransform::Emit.bind_frame_refs(
+    rebound = ThunkTransform::Emit.send(:bind_frame_refs,
       MIR::TryCatch.new(MIR::TryExpr.new(call), MIR::Deref.new(MIR::Ident.new("items")), nil),
       context
     )
@@ -304,7 +304,7 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(FakeThunkLowering.new.emit_expr(rebound)).
       to eq("try next(f.items[f.n].value(&f.n.?)) catch f.items.*")
 
-    casted = ThunkTransform::Emit.bind_frame_refs(
+    casted = ThunkTransform::Emit.send(:bind_frame_refs,
       MIR::Cast.new(MIR::UnaryOp.new("-", MIR::Ident.new("n")), "i64", :as),
       context
     )
@@ -365,7 +365,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
+      ThunkTransform::Emit.send(:build_mutual_arm, cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/cycle member 'odd' not found/)
 
     target = fn("odd", params: [param("n")])
@@ -374,7 +374,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
+      ThunkTransform::Emit.send(:build_mutual_arm, cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/target arg\/param count mismatch/)
   end
 
@@ -386,22 +386,22 @@ RSpec.describe "ThunkTransform recursive splitter helpers" do
   it "walks arrays while looking for mutual-recursion calls" do
     call = AST::FuncCall.new(tok, "even", [])
 
-    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
-    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x")], ["even"])).to be(false)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x")], ["even"])).to be(false)
   end
 
   it "walks arrays while looking for self-recursion calls" do
     call = AST::FuncCall.new(tok, "fact", [])
 
-    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x"), call], "fact")).to be(true)
-    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x")], "fact")).to be(false)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_self_call?, [AST::Identifier.new(tok, "x"), call], "fact")).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_self_call?, [AST::Identifier.new(tok, "x")], "fact")).to be(false)
   end
 end
 
 RSpec.describe "EFFECTS REENTRANT:THUNK validation" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast
@@ -454,7 +454,7 @@ end
 RSpec.describe "Phase 4b: tail-recursive :THUNK routing" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast
@@ -476,7 +476,7 @@ RSpec.describe "Phase 4b: tail-recursive :THUNK routing" do
     f = fn(ast, "sum")
     expect(f.reentrance_kind).to eq(:reentrant_thunk)
     expect(f.tail_call).to be(true)
-    expect(f.reentrant).to eq(:reentrant)
+    expect(f.recursive_reentrance_declared?).to be(true)
   end
 
   it "leaves tail_call false for a non-tail :THUNK function (handled by Phase 4d codegen)" do

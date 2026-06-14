@@ -41,6 +41,11 @@ group :development do
   # type the existing ~2100 methods.
   gem 'rubocop', require: false
   gem 'rubocop-sorbet', require: false
+
+  # Mutation testing: catches tests that execute code without asserting on
+  # the observable behavior. CI passes `--usage opensource`.
+  gem 'mutant', require: false
+  gem 'mutant-rspec', require: false
 end
 
 gem "stackprof", "~> 0.2.28"

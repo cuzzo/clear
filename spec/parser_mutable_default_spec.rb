@@ -1,10 +1,10 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
 
-RSpec.describe "Parser mutable fixed-array defaults" do
+RSpec.describe "ClearParser mutable fixed-array defaults" do
   def parse_main_body(source)
-    ast = Parser.new(Lexer.new(source).tokenize, source).parse
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
     ast.statements.find { |node| node.is_a?(AST::FunctionDef) && node.name == "main" }.body
   end
 

@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require 'set'
+require_relative "../../compiler/entrypoint"
 require_relative "../../semantic/capability_plan"
 require_relative "../../semantic/semantic_ids"
 
@@ -209,7 +210,7 @@ module EffectTracker
 
   # Record a call site's context so transitive propagation can promote the
   # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
-  sig { params(callee_name: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+  sig { params(callee_name: String).void }
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_ctx = current_fn_ctx
@@ -221,7 +222,7 @@ module EffectTracker
     existing = effect_call_site_context_for(caller_name, callee_name)
     existing[:loop] = existing[:loop] || in_loop
     existing[:cond] = existing[:cond] || in_cond
-    existing
+    nil
   end
 
   # Record the per-arg family Sets at this call site.
@@ -229,7 +230,7 @@ module EffectTracker
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
   # families are concrete, or keeps them MAYBE when polymorphism propagates.
-  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).returns(T.nilable(T::Array[T::Array[T::Set[Symbol]]])) }
+  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).void }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_ctx = current_fn_ctx
@@ -370,11 +371,11 @@ module EffectTracker
 
   # Merge callee's effects into caller, applying context-sensitive
   # SUSPENDS promotion based on the call site's loop/cond bits.
-  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: T.nilable(T::Hash[Symbol, T::Boolean])).returns(T::Set[Symbol]) }
+  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: CallContext).returns(T::Set[Symbol]) }
   def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
     T.bind(self, SemanticAnnotator) rescue {}
-    in_loop = site_ctx && site_ctx[:loop]
-    in_cond = site_ctx && site_ctx[:cond]
+    in_loop = site_ctx[:loop]
+    in_cond = site_ctx[:cond]
     callee_set.each do |eff|
       if SUSPENDS_FAMILY.include?(eff)
         has_loop = (eff == SUSPENDS_LOOP) || in_loop
@@ -400,31 +401,62 @@ module EffectTracker
   sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
+
     fn_nodes = function_node_map
-    needs_rt = {}
+    needs_rt = initial_needs_rt_map(fn_nodes)
+    seed_imported_needs_rt!(needs_rt)
+    propagate_needs_rt!(needs_rt)
+
+    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
+    # on finalized storage and cleanup facts. This annotator pass only
+    # computes local analysis used by can_fail/effects; it must not stamp the
+    # final calling convention bit.
+  end
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Hash[String, T::Boolean]) }
+  def initial_needs_rt_map(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    needs_rt = T.let({}, T::Hash[String, T::Boolean])
     fn_nodes.each do |name, fn_node|
-      fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
-      ret_type = fsig&.return_type
-      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      has_takes_heap = fn_node.params.any? { |p|
-        next unless p.takes
-        ti = p.type
-        is_pure_copy = ti.primitive? || ti.id_handle?
-        !is_pure_copy
-      }
-      has_catch = function_has_catch_clauses?(fn_node)
-      has_raise = function_raises_directly?(name)
-      # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
-      # recognized get a synthesized trampoline that allocates child
-      # frames via rt.heapAlloc(). Force needs_rt=true so callers
-      # pass rt when calling them.
-      thunk_uses_rt = !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil?
-      # Phase: recursion co-op yield. Non-TIGHT recursive fns get
-      # `rt.checkYield()` injected at entry by mir_lowering, so they
-      # need rt threaded.
-      yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = function_needs_runtime_directly?(name, fn_node)
     end
+    needs_rt
+  end
+  private :initial_needs_rt_map
+
+  sig { params(name: String, fn_node: AST::FunctionDef).returns(T::Boolean) }
+  def function_needs_runtime_directly?(name, fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
+    ret_type = fsig&.return_type
+    heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
+    has_takes_heap = fn_node.params.any? { |p|
+      next unless p.takes
+      ti = p.type
+      is_pure_copy = ti.primitive? || ti.id_handle?
+      !is_pure_copy
+    }
+    has_catch = function_has_catch_clauses?(fn_node)
+    has_raise = function_raises_directly?(name)
+    # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
+    # recognized get a synthesized trampoline that allocates child
+    # frames via rt.heapAlloc(). Force needs_rt=true so callers
+    # pass rt when calling them.
+    thunk_uses_rt = !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil?
+    # Phase: recursion co-op yield. Non-TIGHT recursive fns get
+    # `rt.checkYield()` injected at entry by mir_lowering, so they
+    # need rt threaded.
+    yield_uses_rt = recursion_yield_needed?(fn_node)
+    fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap ||
+      has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == Compiler::Entrypoint::NAME
+  end
+  private :function_needs_runtime_directly?
+
+  sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
+  def seed_imported_needs_rt!(needs_rt)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     # Seed imported (cross-module) functions: if a callee is not a local function
     # but is imported with needs_rt=true, include it so propagation works.
@@ -437,6 +469,12 @@ module EffectTracker
         needs_rt[c] = true if sig&.needs_rt
       end
     end
+  end
+  private :seed_imported_needs_rt!
+
+  sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
+  def propagate_needs_rt!(needs_rt)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     changed = T.let(true, T::Boolean)
     while changed
@@ -449,16 +487,12 @@ module EffectTracker
         end
       end
     end
-
-    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
-    # on finalized storage and cleanup facts. This annotator pass only
-    # computes local analysis used by can_fail/effects; it must not stamp the
-    # final calling convention bit.
   end
+  private :propagate_needs_rt!
 
   # Post-pass: compute can_fail for every function.
   # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
-  # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
+  # fn pointer call, guarded reentrance prologue) or any transitive callee can fail.
   # main always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
   # are excluded from propagation — they don't use CLEAR's error union convention.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
@@ -466,7 +500,7 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
-    # @nonReentrant / BG-spawn / declared `!T` / transitive ERROR
+    # guarded reentrance / BG-spawn / declared `!T` / transitive ERROR
     # callee). This is the axis that forces `RETURNS !T` (step 4). It
     # is kept strictly separate from the alloc FAULT axis below; the
     # transitive loop runs over THIS map (not the OR'd can_fail) so an
@@ -487,7 +521,7 @@ module EffectTracker
         rescue StandardError
           false
         end
-      error_fallible[name] = function_raises_directly?(name) || declared_fallible || name == "main"
+      error_fallible[name] = function_raises_directly?(name) || declared_fallible || name == Compiler::Entrypoint::NAME
     end
 
     # Seed imported (cross-module) functions. Read the callee's
@@ -626,7 +660,7 @@ module EffectTracker
   #   - constructor / destructor / methods auto-synthesized for unions:
   #     their signatures are stamped by the annotator; user code can't
   #     change them.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { void }
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -645,7 +679,7 @@ module EffectTracker
       # decision point; a future STRICT mode flips exactly this gate to
       # also require/surface the fault. (puck-clear-bugs.md #3/#12)
       next unless fn_node.error_fallible
-      next if name == "main"
+      next if name == Compiler::Entrypoint::NAME
 
       # A fn that absorbs its errors locally via CATCH (or a
       # DEFAULT catch-all) doesn't propagate, so the surface
@@ -678,12 +712,7 @@ module EffectTracker
 
       # Find at least one source of fallibility for the diagnostic.
       hint = fallibility_hint_for(name)
-      message = "Function '#{name}' can fail (#{hint}) but its return type " \
-                "doesn't declare it. Change `RETURNS #{ret_t.resolved}` to " \
-                "`RETURNS !#{ret_t.resolved}` so callers can see the error " \
-                "union and handle it (Zig-style discipline). Add a CATCH at " \
-                "the call site, propagate via `try`, or mark the call's result " \
-                "with `OR <action>`."
+      return_type = ret_t.resolved
 
       # Auto-fix: insert `!` immediately before the return-type token.
       # The token's column points at the start of the type identifier;
@@ -691,17 +720,19 @@ module EffectTracker
       tok = fn_node.respond_to?(:return_type_token) ? fn_node.return_type_token : nil
       if tok
         fixes = [Fix.new(
-          description: "Add `!` to the return type to declare the error union " \
-                       "(Zig-style fallible signature).",
+          description: fix_description(:ADD_ERROR_UNION_TO_RETURN),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
             replacement: '!',
           )],
         )]
-        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+        fixable!(fn_node, code: :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
+                 fn: name, hint: hint, return_type: return_type,
+                 category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, :PURITY_VIOLATION, message: message)
+        error!(fn_node, :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
+               fn: name, hint: hint, return_type: return_type)
       end
     end
   end
@@ -761,7 +792,7 @@ module EffectTracker
   #     translate, and a one-shot task is cheaper than an FSM state struct);
   #   - body does NOT have REENTRANT (recursion needs a stack);
   #   - body does NOT have EXTERN (opaque to the scheduler);
-  #   - function is not annotated @reentrant.
+  #   - function does not declare plain EFFECTS REENTRANT.
   #
   # BLOCKING (lock wait) is no longer disqualifying: ParkingMutex and
   # ParkingRwLock both support FSM waiters in the runtime.
@@ -774,7 +805,7 @@ module EffectTracker
       effs = fn_node.effects || Set.new
 
       reason = nil
-      if effs.include?(REENTRANT) || fn_node.reentrant == :reentrant
+      if effs.include?(REENTRANT) || fn_node.plain_reentrant?
         reason = :reentrant
       elsif effs.include?(EXTERN)
         reason = :extern
@@ -888,6 +919,7 @@ module EffectTracker
     T.unsafe(target).computed_stack_tier = (raw == :unbounded) ? :service : raw
     validate_fiber_stack!(validation_node, calls, user_size, can_smash)
   end
+  private :assign_async_stack_tier!
 
   # Returns a typed decision; reason is non-nil only for :stackful.
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(Annotator::Phases::BgSpawnDecision) }
@@ -906,7 +938,7 @@ module EffectTracker
       # unless the callee is explicitly EXTERN at the scope level.
       next unless fn
       effs = fn.effects || Set.new
-      if effs.include?(REENTRANT) || fn.reentrant == :reentrant
+      if effs.include?(REENTRANT) || fn.plain_reentrant?
         return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :reentrant)
       end
       return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :extern) if effs.include?(EXTERN)
@@ -954,6 +986,15 @@ module EffectTracker
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
+    assign_base_stack_tiers!(fn_nodes)
+    propagate_unbounded_stack_tiers!(fn_nodes)
+    nil
+  end
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  def assign_base_stack_tiers!(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
     #   :reentrant            unbounded -> :service (OS thread)
@@ -1026,6 +1067,12 @@ module EffectTracker
       fn_node.stack_tier = tier
       fn_node.stack_vars_bytes = stack_bytes
     end
+  end
+  private :assign_base_stack_tiers!
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  def propagate_unbounded_stack_tiers!(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     # Phase 2: propagate :unbounded through call graph.
     # Any function that transitively calls an :unbounded function is also :unbounded.
@@ -1043,6 +1090,7 @@ module EffectTracker
       end
     end
   end
+  private :propagate_unbounded_stack_tiers!
 
   # Phase 4g: detect mutual recursion in function_call_graph (the graph
   # already excludes self-loops -- see annotator.rb:530). Returns
@@ -1105,8 +1153,8 @@ module EffectTracker
   # --- TIGHT loop validation ---
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
-  # calls to @reentrant or EXTERN FN functions. Stops at FunctionDef boundaries.
-  sig { params(stmts: AstScanInput, loop_node: TightLoopNode).returns(T.nilable(T::Array[AST::Node])) }
+  # calls to plain EFFECTS REENTRANT or EXTERN FN functions. Stops at FunctionDef boundaries.
+  sig { params(stmts: AstScanInput, loop_node: TightLoopNode).void }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -1153,7 +1201,7 @@ module EffectTracker
   # Post-pass: detect indirect mutual recursion in the call graph.
   # DFS reachability: for each function F, walk F's callees transitively
   # and report an error if F is reachable from itself.
-  sig { returns(T.nilable(T::Hash[String, T::Set[String]])) }
+  sig { void }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -1161,7 +1209,7 @@ module EffectTracker
     function_call_graph.each_key do |fn_name|
       node = fn_nodes[fn_name]
       next if node.nil?
-      next if node.reentrant  # already annotated — no complaint needed
+      next if node.reentrance_kind
 
       visited = Set.new
       queue   = (function_call_graph[fn_name] || Set.new).to_a
@@ -1176,7 +1224,7 @@ module EffectTracker
           arrow = node.arrow_token
           if arrow
             fix = Fix.new(
-              description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+              description: fix_description(:ADD_EFFECTS_REENTRANT),
               confidence: :auto,
               edits: [Edit.new(
                 span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
@@ -1184,7 +1232,8 @@ module EffectTracker
               )]
             )
             fixable!(node,
-              message: T.must(DiagnosticRegistry.format(:REENTRANCY_MUTUAL_CYCLE, name: fn_name)),
+              code: :REENTRANCY_MUTUAL_CYCLE,
+              name: fn_name,
               category: :reentrance,
               level: :error,
               fixes: [fix])
@@ -1198,5 +1247,21 @@ module EffectTracker
       end
     end
   end
+
+  private :assign_bg_spawn_shape!
+  private :bg_spawn_form_for
+  private :effect_call_site_arg_families
+  private :effect_call_site_context
+  private :effect_direct_effects
+  private :effect_direct_effects_for
+  private :fallibility_hint_for
+  private :function_value_reference?
+  private :inherit_effects_from_callee
+  private :max_tier_for_calls
+  private :mutually_recursive_in_call_graph?
+  private :promote_suspends_for_current_context
+  private :reachable_in_call_graph?
+  private :resolve_maybe_effects
+  private :validate_tight_node!
 
 end

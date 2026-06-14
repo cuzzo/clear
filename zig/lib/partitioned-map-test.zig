@@ -88,7 +88,15 @@ const RunWatchdogCtx = struct {
     timeout_ms: usize,
 
     fn run(raw: *@This()) void {
-        std.Thread.sleep(raw.timeout_ms * std.time.ns_per_ms);
+        var elapsed_ms: usize = 0;
+        while (elapsed_ms < raw.timeout_ms) {
+            if (raw.status.done.load(.acquire)) return;
+
+            const remaining_ms = raw.timeout_ms - elapsed_ms;
+            const sleep_ms = @min(remaining_ms, 10);
+            std.Thread.sleep(sleep_ms * std.time.ns_per_ms);
+            elapsed_ms += sleep_ms;
+        }
         if (raw.status.done.load(.acquire)) return;
 
         const current_status = if (raw.sched.current_task) |task| task.status.load(.acquire) else null;
@@ -680,9 +688,7 @@ fn runTinyGetRemoveLoopWithEventLog(iters: usize) !void {
             resetPartitionedMapCounters();
             resetPartitionedMapEventLog();
             setPartitionedMapEventLogEnabled(true);
-            if (@hasDecl(root, "partitioned_map_watchdog_timeout_ms")) root.partitioned_map_watchdog_timeout_ms = 750;
             defer {
-                if (@hasDecl(root, "partitioned_map_watchdog_timeout_ms")) root.partitioned_map_watchdog_timeout_ms = 0;
                 setPartitionedMapEventLogEnabled(false);
                 resetPartitionedMapEventLog();
             }
@@ -720,6 +726,19 @@ fn runTinyGetRemoveLoopWithEventLog(iters: usize) !void {
     };
 
     var runner = MainFn{ .outer_rt = &rt, .iters = iters };
+    const previous_watchdog_timeout_ms = if (@hasDecl(root, "partitioned_map_watchdog_timeout_ms"))
+        root.partitioned_map_watchdog_timeout_ms
+    else
+        0;
+    if (@hasDecl(root, "partitioned_map_watchdog_timeout_ms")) {
+        root.partitioned_map_watchdog_timeout_ms = if (build_options.tsan) 30_000 else 5_000;
+    }
+    defer {
+        if (@hasDecl(root, "partitioned_map_watchdog_timeout_ms")) {
+            root.partitioned_map_watchdog_timeout_ms = previous_watchdog_timeout_ms;
+        }
+    }
+
     try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
 }
 

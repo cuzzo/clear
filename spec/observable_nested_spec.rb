@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # A22: pin the behavior of nested observable pipes. Today the type
 # system rejects every shape that would naturally express a "nested
@@ -15,7 +15,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "A22: nested observable pipes" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

@@ -1,7 +1,7 @@
 require "spec_helper"
 
-require_relative "../src/annotator/phases/signature_registry"
-require_relative "../src/ast/lexer"
+require_relative "../src/annotator/phases/signature_registry" unless defined?(Annotator::Phases::SignatureRegistry)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Annotator::Phases::SignatureRegistry do
   def tok(value = "x")
@@ -39,7 +39,7 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
       false
     )
     fn.requires = { "cell" => Set[:LOCKED] }
-    fn.reentrant = :reentrant
+    fn.effects_decl = :reentrant
 
     signature = described_class.function_signature(fn, return_lifetime: "value")
 
@@ -66,7 +66,7 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
       { alloc: :heap }
     )
     node.fn_type_params = [:T]
-    node.owner_type = "Parser"
+    node.owner_type = "ClearParser"
     node.owner_type_params = [:T]
 
     signature = described_class.extern_function_signature(node)
@@ -76,19 +76,19 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.extern_effects).to eq({ alloc: :heap })
     expect(signature.fn_type_params).to eq([:T])
     expect(signature.type_params).to eq([:T])
-    expect(signature.owner_type).to eq("Parser")
+    expect(signature.owner_type).to eq("ClearParser")
     expect(signature.owner_type_params).to eq([:T])
     expect(signature.params.first.mutable).to eq(false)
     expect(signature.params.first.comptime).to eq(true)
   end
 
-  it "keeps extern type params nil when no generic params are declared" do
+  it "keeps extern type params empty when no generic params are declared" do
     node = AST::ExternFnDecl.new(tok("puts"), "puts", [], Type.new(:Void), "c", nil)
 
     signature = described_class.extern_function_signature(node)
 
     expect(signature.fn_type_params).to eq([])
-    expect(signature.type_params).to be_nil
+    expect(signature.type_params).to eq([])
     expect(signature.extern_effects).to eq({})
     expect(signature.owner_type_params).to eq([])
   end
@@ -115,16 +115,30 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.requires).to eq({})
     expect(signature.extern_effects).to eq({})
 
-    signature.requires = { "x" => Set[:LOCKED] }
-    expect(signature.requires.fetch("x")).to include(:LOCKED)
-    signature.requires = nil
-    expect(signature.requires).to eq({})
+    with_requires = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params,
+      requires: { "x" => Set[:LOCKED] }
+    )
+    expect(with_requires.requires.fetch("x")).to include(:LOCKED)
+    without_requires = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params
+    )
+    expect(without_requires.requires).to eq({})
 
-    signature.effects = Set[:BLOCKING]
-    signature.heap_carry_return = true
-    signature.heap_carry_return_vars = Set["value"]
+    copy_source = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params,
+      effects: Set[:BLOCKING],
+      heap_carry_return: true,
+      heap_carry_return_vars: Set["value"]
+    )
 
-    copy = signature.dup
+    copy = copy_source.dup
     expect(copy.effects).to eq(Set[:BLOCKING])
     expect(copy.heap_carry_return).to eq(true)
     expect(copy.heap_carry_return_vars).to eq(Set["value"])

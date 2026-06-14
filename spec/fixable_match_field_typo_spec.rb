@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # A MATCH struct-pattern that names a field the schema doesn't declare
 # now offers a typo-suggestion fix. Covers two pattern shapes:
@@ -15,7 +15,7 @@ RSpec.describe "MATCH-pattern field typo auto-fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -122,7 +122,7 @@ RSpec.describe "MATCH-pattern field typo auto-fix" do
     it "raises plain CompilerError when no candidate is within Levenshtein threshold" do
       ann = SemanticAnnotator.new
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       FixCollector.disable!
       expect { ann.annotate!(ast) }.to raise_error(CompilerError, /does not exist on type|TYPO_SUGGESTION_REJECTED|somethingDifferent/i)
     end

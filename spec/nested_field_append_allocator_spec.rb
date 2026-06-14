@@ -1,14 +1,14 @@
-# A nested-field op's allocator must match its root container's
-# AllocMark; divergence is INLINE_ALLOC_MISMATCH or a UAF.
+# A nested-field op's allocator must match its root container's AllocMark;
+# divergence is INLINE_ALLOC_MISMATCH or a UAF.
 
 require "rspec"
 require "stringio"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_checker"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/importer"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/mir/mir_checker" unless defined?(MIRChecker::FsmStructureError)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 
 RSpec.describe "nested-@list-field append inherits root container allocator" do
   NESTED_FIELD_SRC = <<~CHT
@@ -89,9 +89,9 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       end
     end
     expect(alloc_marks["handles"]).not_to be_nil
-    expect(alloc_marks["handles"].alloc).to eq(:heap),
-      "root container placement must come from escape/storage, not loop rewinds"
-    expect(ops_targeting_handles.any? { |op| op.allocs&.key?(:alloc) }).to be(true)
+    expect(alloc_marks["handles"].scope).to eq(:function),
+      "root container placement must stay function-scoped, not loop rewound"
+    expect(ops_targeting_handles.any? { |op| op.allocs&.primary }).to be(true)
   end
 
   it "resolves every handles-targeting op to the same allocator as the root AllocMark (the contract)" do
@@ -103,9 +103,10 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     end
     root_alloc = alloc_marks["handles"].alloc
     ops.each do |op|
-      next unless op.allocs&.key?(:alloc)
-      expect(op.allocs[:alloc]).to eq(root_alloc),
-        "op alloc :#{op.allocs[:alloc]} disagrees with root 'handles' AllocMark :#{root_alloc} " \
+      op_alloc = op.allocs&.primary
+      next unless op_alloc
+      expect(op_alloc).to eq(root_alloc),
+        "op alloc :#{op_alloc} disagrees with root 'handles' AllocMark :#{root_alloc} " \
         "(resolver/checker root divergence -> INLINE_ALLOC_MISMATCH / UAF)"
     end
   end

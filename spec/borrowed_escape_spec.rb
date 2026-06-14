@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests that BORROWED/RESTRICT aliases (non_escaping bindings) cannot escape
 # their WITH block in any of the three previously unguarded ways:
@@ -7,10 +7,10 @@ require_relative "../src/backends/transpiler"
 #   Gap 2: WITH BORROWED on @shared/@locked/@multiowned types
 #   Gap 3: Field mutation assignment (s.field = ref)
 
-RSpec.describe "BORROWED escape lockdown" do
+RSpec.describe BorrowChecker do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     SemanticAnnotator.new.annotate!(ast)
   end

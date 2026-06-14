@@ -119,11 +119,11 @@ module FsmTransform
           post_acquire_idx: T.nilable(Integer),
           next_index: T.nilable(Integer),
           lock_index: T.nilable(Integer),
-          prior_lock_indices: T.nilable(T::Array[Integer]),
+          prior_lock_indices: T::Array[Integer],
         ).void
       end
-      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = nil)
-        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices || [])
+      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = [])
+        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices)
       end
 
       sig { returns(Symbol) }
@@ -148,10 +148,13 @@ module FsmTransform
     # A segment is a list of AST::Stmt nodes followed by a Tail.
     Segment = Struct.new(:index, :stmts, :tail)
 
-    module_function
+    class SplitResult < T::Struct
+      const :segments, T::Array[Segment]
+    end
+
 
     sig { params(tail: T.untyped).returns(T::Boolean) }
-    def suspend_tail?(tail)
+    def self.suspend_tail?(tail)
       tail.respond_to?(:suspend?) && tail.suspend?
     end
 
@@ -167,22 +170,22 @@ module FsmTransform
     #
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
-    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(T::Array[Segment])) }
-    def split(body, lowering)
+    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(SplitResult)) }
+    def self.split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
       # call at top level.
       T.bind(self, T.untyped) rescue nil
       body = rewrite_pipeline_io(body)
 
-      if (loop_segments = split_while_loop_next(body))
-        return loop_segments
+      if (loop_result = split_while_loop_next(body))
+        return loop_result
       end
 
       return nil if contains_unsupported_shape?(body)
 
-      segments = []
-      current_stmts = []
+      segments = T.let([], T::Array[Segment])
+      current_stmts = T.let([], T::Array[T.untyped])
 
       flush = lambda do |tail|
         segments << Segment.new(segments.length, current_stmts, tail)
@@ -199,7 +202,7 @@ module FsmTransform
       end
       flush.call(Done.new(nil))
 
-      segments
+      SplitResult.new(segments: segments)
     end
 
     # Stage 2 splitter: pre-stmts + WhileLoop containing one top-level
@@ -212,8 +215,8 @@ module FsmTransform
     #   2  loop_pre         -- NextSuspend / IoSuspend -> 3
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
-    sig { params(body: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-    def split_while_loop_next(body)
+    sig { params(body: T.untyped).returns(T.nilable(SplitResult)) }
+    def self.split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
 
@@ -270,25 +273,26 @@ module FsmTransform
       cond_node = loop_node.respond_to?(:condition) ? loop_node.condition : nil
       return nil if cond_node.nil?
 
-      [
+      segments = [
         Segment.new(0, pre,        Goto.new(1)),
         Segment.new(1, [],         CondBranch.new(cond_node, 2, 4)),
         Segment.new(2, loop_pre,   sus_tail),        # NextSuspend or IoSuspend
         Segment.new(3, loop_post,  LoopBack.new(1)),
         Segment.new(4, post,       Done.new(nil)),
       ]
+      SplitResult.new(segments: segments)
     end
 
     # Stage 1 punt: anything outside top-level linear stmts +
     # top-level suspends is not yet handled.
     sig { params(body: T.untyped).returns(T::Boolean) }
-    def contains_unsupported_shape?(body)
+    def self.contains_unsupported_shape?(body)
       T.bind(self, T.untyped) rescue nil
       body.any? { |stmt| stmt_unsupported?(stmt) }
     end
 
     sig { params(stmt: T.untyped).returns(T::Boolean) }
-    def stmt_unsupported?(stmt)
+    def self.stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
       when AST::WhileLoop, AST::WhileBindLoop
@@ -315,7 +319,7 @@ module FsmTransform
     # used to reject control-flow constructs that contain
     # suspends (Stage 1 punts those to the legacy emitters).
     sig { params(stmts: T.untyped).returns(T::Boolean) }
-    def contains_suspend_anywhere?(stmts)
+    def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
         case stmt
@@ -337,7 +341,7 @@ module FsmTransform
     # Identify the suspend tail (if any) that this top-level stmt
     # represents. Returns one of IoSuspend / NextSuspend / nil.
     sig { params(stmt: T.untyped).returns(T.untyped) }
-    def classify_suspend(stmt)
+    def self.classify_suspend(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
       when AST::FuncCall, AST::MethodCall, AST::NextExpr
@@ -354,7 +358,7 @@ module FsmTransform
     # BindExpr value, Assignment value -- decomplex degenerate-union /
     # Missing-Abstraction). result_var is the binding name (nil if none).
     sig { params(v: T.untyped, name: T.untyped).returns(T.untyped) }
-    def suspend_for(v, name)
+    def self.suspend_for(v, name)
       T.bind(self, T.untyped) rescue nil
       case v
       when AST::FuncCall, AST::MethodCall
@@ -368,14 +372,14 @@ module FsmTransform
     # :fsm_setup metadata -- the FSM template tells us how to set
     # up the suspend.
     sig { params(call_node: T.untyped).returns(T::Boolean) }
-    def io_suspending_call?(call_node)
+    def self.io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
       !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
     end
 
     sig { params(expr: T.untyped).returns(T::Boolean) }
-    def suspending_call?(expr)
+    def self.suspending_call?(expr)
       T.bind(self, T.untyped) rescue nil
       (AST.call?(expr)) &&
         io_suspending_call?(expr)
@@ -399,7 +403,7 @@ module FsmTransform
     #   - Multi-stage chains where the suspend isn't at the LHS-most
     #     position
     sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
-    def rewrite_pipeline_io(body)
+    def self.rewrite_pipeline_io(body)
       T.bind(self, T.untyped) rescue nil
       return body unless body.is_a?(Array)
       out = []
@@ -427,5 +431,13 @@ module FsmTransform
       end
       out
     end
-  end
+    private_class_method :contains_suspend_anywhere?
+    private_class_method :contains_unsupported_shape?
+    private_class_method :io_suspending_call?
+    private_class_method :rewrite_pipeline_io
+    private_class_method :split_while_loop_next
+    private_class_method :stmt_unsupported?
+    private_class_method :suspend_for
+
+end
 end

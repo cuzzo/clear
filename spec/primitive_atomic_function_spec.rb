@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "primitive non-shared atomics in functions" do
   def transpile(src)

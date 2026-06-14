@@ -42,7 +42,7 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS !Valu
     RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
 END
 
-FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
+FN eval!(TAKES ast: Value) RETURNS !Value EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.List AS listItems ->
@@ -58,7 +58,7 @@ FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS !Value @reentrant ->
+FN evalList!(TAKES items: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 

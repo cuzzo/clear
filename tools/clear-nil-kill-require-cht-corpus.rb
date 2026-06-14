@@ -8,6 +8,14 @@ ROOT = File.expand_path("..", __dir__)
 OUT = File.expand_path(File.join(ROOT, "tmp", "nil-kill", "require-corpus.cht"))
 SOURCE_DIRS = %w[examples benchmarks].freeze
 LIVE_DATA_EXCLUDES = %w[
+  benchmarks/concurrent/12_false_sharing/bench.cht
+  benchmarks/concurrent/13_rwlock_starvation/bench.cht
+  benchmarks/concurrent/14_nested_lock/bench.cht
+  benchmarks/concurrent/19_atomic_ptr/bench.cht
+  benchmarks/inter-clear/03_concurrent_mvcc_vs_rwlock/bench.cht
+  benchmarks/inter-clear/04_concurrent_mvcc_fat_struct/bench.cht
+  benchmarks/inter-clear/05_concurrent_mvcc_pure_read/bench.cht
+  benchmarks/inter-clear/06_concurrent_mvcc_writer_pressure/bench.cht
   examples/minivm/_bc_runner.cht
   examples/minivm/_scheme_runner.cht
   examples/minivm/bench_pool_ops.cht

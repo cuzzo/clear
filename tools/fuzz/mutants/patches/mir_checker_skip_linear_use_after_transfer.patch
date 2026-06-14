@@ -1,0 +1,15 @@
+diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+index 000000000..000000000 100644
+--- a/src/mir/mir_checker.rb
++++ b/src/mir/mir_checker.rb
+@@ -981,9 +981,7 @@ class MIRChecker
+     end
+     linear_expr_ident_names(expr).each do |name|
+       next if consuming_reads.include?(name)
+-      next unless state.released.include?(name) || state.maybe_released.include?(name)
+-      @errors << error(:OWNERSHIP_USE_AFTER_TRANSFER, name,
+-        "binding read after ownership was transferred")
++      next
+     end
+     check_nested_linear_expr_bodies!(expr, state)
+     nil

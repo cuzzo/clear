@@ -67,10 +67,14 @@ class MIRPassState
       "#{consumer} requires #{stage}; completed stages: #{completed_stages.join(", ")}"
   end
 
+  private
+
   sig { returns(T::Array[Symbol]) }
   def completed_stages
     ORDER.select { |stage| @completed.include?(stage) }
   end
+
+  public
 
   sig { returns(MIRPassState) }
   def copy
@@ -104,6 +108,8 @@ class MIRPassState
 
     raise MIRPassOrderError, "unknown MIR pass stage #{stage.inspect}"
   end
+
+  private
 
   sig { params(stage: Symbol).returns(StageSpec) }
   def stage_spec!(stage)

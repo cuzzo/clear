@@ -13,6 +13,7 @@ require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "../semantic/escape_analysis"
 require_relative "../semantic/bg_capture_classifier"
+require_relative "../compiler/entrypoint"
 require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
@@ -65,11 +66,11 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]), hoist_bindings: T.nilable(HoistBindings)).void }
-  def initialize(fn_nodes:, schema_lookup:, body_summaries: nil, hoist_bindings: nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
+  def initialize(fn_nodes:, schema_lookup:, body_summaries: {}, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
-    @body_summaries = T.let(body_summaries, T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]))
+    @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
     @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
@@ -99,7 +100,7 @@ class MIRPass
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Hoist has already lifted anonymous allocating expressions into bindings.
   # Escape analysis writes final binding storage; this pass inserts MIR markers.
-  sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(ast: AST::Program).void }
   def transform!(ast)
     pass_state = MIRPassState.for!(ast)
     pass_state.require!(:premir_type_checked, consumer: "MIRPass")
@@ -219,7 +220,7 @@ class MIRPass
 
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
   def finalized_runtime_input?(fn)
-      fn.name.to_s == "main" ||
+      fn.name.to_s == Compiler::Entrypoint::NAME ||
       fn.uses_rt == true ||
       function_error_context?(fn) ||
       fn.uses_alloc == true ||
@@ -385,7 +386,7 @@ class MIRPass
     end
   end
 
-  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
+  sig { params(fn: AST::FunctionDef).void }
   def transform_function!(fn)
     plan = ownership_preparation_plan(fn)
     return unless plan.cleanup_bindings?
@@ -482,7 +483,7 @@ class MIRPass
   end
 
   # Recurse into control flow branches to transform nested bodies.
-  sig { params(stmt: T.untyped, ctx: MIRPass::WalkCtx).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped, ctx: MIRPass::WalkCtx).void }
   def recurse_branches!(stmt, ctx)
     branch_ctx = if stmt.is_a?(AST::BgBlock) || stmt.is_a?(AST::BgStreamBlock)
       ctx.with(cleanup_facts: bg_inner_facts(stmt, ctx.cleanup_facts))
@@ -787,7 +788,7 @@ class MIRPass
 
 
   # Build moved_guard_info: { var_name => bool } for all bindings.
-  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(T.nilable(T::Hash[String, TrueClass])) }
+  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_moved_guard_info!(fn, facts)
     info = {}
     facts.bindings.each do |name, entry|
@@ -858,5 +859,7 @@ class MIRPass
     else []
     end
   end
+
+  private :live_cleanup_entry
 
 end

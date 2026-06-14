@@ -1,0 +1,12 @@
+diff --git a/src/semantic/concurrency_checks.rb b/src/semantic/concurrency_checks.rb
+--- a/src/semantic/concurrency_checks.rb
++++ b/src/semantic/concurrency_checks.rb
+@@ -48,7 +48,7 @@ module ConcurrencyChecks
+       summary = body_summaries.fetch(fn.name)
+       with_blocks = summary.with_blocks
+       with_scope_nodes = summary.with_scope_nodes
+-      check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
++      # MUTANT: skip hold-lock-across-yield validation.
+       check_naked_nested_with!(with_blocks, with_scope_nodes, error_handler, lock_ranks)
+       check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
+     end

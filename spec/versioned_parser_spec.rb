@@ -1,8 +1,8 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Phase L3 -- Capability sigil parsing for `@versioned`.
 #
@@ -14,12 +14,12 @@ require_relative "../src/ast/ast"
 RSpec.describe "@versioned parser" do
   def parse_type(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).send(:parse_type_annotation)
+    ClearParser.new(tokens, src).send(:parse_type_annotation)
   end
 
   def parse_full(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   describe "type-level `T@versioned`" do

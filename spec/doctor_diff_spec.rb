@@ -2,7 +2,7 @@ require "rspec"
 require "tmpdir"
 require "stringio"
 require "fileutils"
-require_relative "../src/tools/doctor"
+require_relative "../src/tools/doctor" unless defined?(Doctor)
 
 # Exercises the new --diff / --cumulative / --focus flags. Profiles
 # are synthesized as plain text files in a tmpdir; the binary at

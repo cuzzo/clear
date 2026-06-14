@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # F2 (Tranche 3): calling a recursive function (THUNK / TAIL_CALL /
 # plain REENTRANT / MAX_DEPTH) from inside a WITH lock body is a
@@ -18,7 +18,7 @@ require_relative "../src/annotator"
 RSpec.describe "Recursion-yield + WITH lock (P3.3 propagation)" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

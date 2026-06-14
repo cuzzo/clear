@@ -92,7 +92,7 @@ The `TODO.md` lists 8 compilation blockers - **all are already implemented**:
 | `@shared` construction | Done | `transpile-tests/35_shared.cht`, `capabilities_spec.rb` |
 | `RAISE` inside `WHILE` | Done | Error handling fully implemented |
 
-The additional features the interpreter uses (`@reentrant`, `@pool`, `Id<T>`, `HashMap<Value>` with `OR` fallback, `@list`, UNION with struct-like variants) are also all implemented and tested. **The interpreter should compile today.** The TODO.md is stale.
+The additional features the interpreter uses (`EFFECTS REENTRANT`, `@pool`, `Id<T>`, `HashMap<Value>` with `OR` fallback, `@list`, UNION with struct-like variants) are also all implemented and tested. **The interpreter should compile today.** The TODO.md is stale.
 
 ### Gap: What the Interpreter Still Needs
 

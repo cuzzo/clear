@@ -49,7 +49,6 @@ class SymbolEntry
     extend T::Sig
 
   @next_binding_id = T.let(0, Integer)
-  EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
   TypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
   LifetimeSourceInput = T.type_alias { T.any(SymbolEntry, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(Symbol, T::Array[LifetimeSourceInput], T::Hash[Symbol, T::Array[LifetimeSourceInput]])) }
@@ -137,6 +136,11 @@ class SymbolEntry
   flow_attr :poly_borrow_target
   flow_attr :init_contents_heap
 
+  class << self
+    undef_method :lifecycle_attr
+    undef_method :flow_attr
+  end
+
   sig { returns(T::Array[SymbolEntry]) }
   attr_reader :lifetime
 
@@ -216,10 +220,14 @@ class SymbolEntry
     !families.empty?
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def lock_sync?
     locked? || write_locked?
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def sync_or_shared_storage?
@@ -249,7 +257,7 @@ class SymbolEntry
   sig { params(live: T::Boolean).returns(T::Boolean) }
   def capture_move_required?(live)
     live && (ownership_kind == :resource || ownership_kind == :affine ||
-      (type.is_a?(Type) && type.needs_escape_promotion?))
+      type.needs_escape_promotion?)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
@@ -343,10 +351,14 @@ class SymbolEntry
     storage == :borrow
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def local_storage?
     self.class.local_storage_value?(storage)
   end
+
+  public
 
   sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
   def self.heap_storage_value?(storage)
@@ -399,14 +411,12 @@ class SymbolEntry
 
   sig { void }
   def mark_non_escaping!
-    @flow.non_escaping = true
     self.lifetime = [self]
   end
 
   sig { void }
   def clear_non_escaping!
     return unless non_escaping
-    @flow.non_escaping = false
     self.lifetime = []
   end
 
@@ -420,7 +430,7 @@ class SymbolEntry
     super
     @lifecycle = original.lifecycle
     @flow = original.instance_variable_get(:@flow).dup
-    @lifetime = original.lifetime.empty? ? EMPTY_LIFETIME : original.lifetime.dup
+    @lifetime = original.lifetime.dup
   end
 
   sig { returns(BindingFlowFacts) }
@@ -450,11 +460,10 @@ class SymbolEntry
     @lifetime
   end
 
-  # Build a tied lifetime from source SymbolEntries. Empty / nil input returns
-  # the unconstrained lifetime.
-  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T::Array[SymbolEntry]) }
+  # Build a tied lifetime from source SymbolEntries. Empty input returns the
+  # unconstrained lifetime.
+  sig { params(sources: T::Array[SymbolEntry]).returns(T::Array[SymbolEntry]) }
   def self.tied_lifetime(sources)
-    return [] if sources.nil? || sources.empty?
     sources.uniq
   end
 
@@ -464,9 +473,10 @@ class SymbolEntry
                  valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
     @reg = reg
+    normalized_type = type.nil? ? Type.new(:Untyped) : Type.new(type)
     @lifecycle = T.let(
       BindingLifecycleFacts.new(
-        type: Type.new(:Untyped),
+        type: normalized_type,
         storage: storage,
         sync: sync,
         layout: layout,
@@ -475,7 +485,6 @@ class SymbolEntry
       ),
       BindingLifecycleFacts
     )
-    self.type = type
     @mutable = T.let(mutable, T::Boolean)
     @rebindable = T.let(rebindable, T::Boolean)
     @size = T.let(size, Integer)
@@ -509,7 +518,6 @@ class SymbolEntry
 
   sig { params(value: LifetimeInput).returns(T::Array[SymbolEntry]) }
   def normalize_lifetime(value)
-    return [] if value.nil?
     return [self] if value == :current_scope
 
     sources = if value.is_a?(Hash)
@@ -517,7 +525,6 @@ class SymbolEntry
     else
       value
     end
-    return [] if sources.nil?
 
     Array(sources).map do |source|
       unless source.is_a?(SymbolEntry)

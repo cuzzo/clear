@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Phase 2 of the USE-AFTER-MOVE fix refinement: when the move was
 # `someFn(x)` with `someFn(TAKES v: T)` and the parameter `T` is
@@ -11,13 +11,13 @@ require_relative "../src/backends/transpiler"
 # declaration to a refcounted handle won't help — `someFn` still
 # demands a plain owned value and the use-after-move re-fires after
 # the upgrade. The fix-dropdown skips the upgrade fixes in that case.
-RSpec.describe "USE-AFTER-MOVE fix dropdown — TAKES-into-plain consumer filter" do
+RSpec.describe UseAfterMoveChecker do
   before { FixCollector.enable! }
   after  { FixCollector.disable! }
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end

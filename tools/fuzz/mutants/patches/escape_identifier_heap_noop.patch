@@ -1,0 +1,11 @@
+diff --git a/src/semantic/escape_analysis.rb b/src/semantic/escape_analysis.rb
+--- a/src/semantic/escape_analysis.rb
++++ b/src/semantic/escape_analysis.rb
+@@ -554,6 +554,7 @@
+ 
+   sig { params(expr: T.untyped).returns(T::Boolean) }
+   private_class_method def self.mark_expr_identifiers_heap!(expr)
++    return false # MUTANT: escape sinks no longer heap-place identifier sources.
+     changed = T.let(false, T::Boolean)
+     stack = T.let([expr], T::Array[T.untyped])
+     until stack.empty?

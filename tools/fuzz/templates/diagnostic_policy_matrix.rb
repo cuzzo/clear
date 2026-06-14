@@ -13,6 +13,8 @@ DIAGNOSTIC_POLICY_CELLS = [
   { shape: :plain_reentrant_inside_lock_reject, expected: :compile_error },
   { shape: :bad_reentrant_variant, expected: :compile_error },
   { shape: :bad_requires_family, expected: :compile_error },
+  { shape: :non_reentrant_callback_reject, expected: :compile_error },
+  { shape: :tight_loop_reentrant_reject, expected: :compile_error },
   { shape: :same_lock_nested_reject, expected: :compile_error },
   { shape: :same_type_nested_reject, expected: :compile_error },
   { shape: :deadlock_handler_unreachable, expected: :compile_error },
@@ -138,6 +140,41 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
       STRUCT Counter { value: Int64 }
       FN incr(MUTABLE c: Counter) RETURNS Void REQUIRES c: LOKKED -> RETURN; END
       FN main() RETURNS Void -> RETURN; END
+    CHT
+
+  when :non_reentrant_callback_reject
+    <<~CHT
+      FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
+        IF n <= 1_i64 -> RETURN n;
+        RETURN fib(n - 1_i64) + fib(n - 2_i64);
+      END
+
+      FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+        REQUIRES cb: NON_REENTRANT ->
+        RETURN cb(x);
+      END
+
+      FN main() RETURNS Void ->
+        _ = apply(fib, 4_i64) OR 0_i64;
+        RETURN;
+      END
+    CHT
+
+  when :tight_loop_reentrant_reject
+    <<~CHT
+      FN recur(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
+        IF n <= 0_i64 -> RETURN 0_i64;
+        RETURN recur(n - 1_i64);
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE i: Int64 = 0_i64;
+        TIGHT WHILE i < 2_i64 DO
+          _ = recur(2_i64);
+          i = i + 1_i64;
+        END
+        RETURN;
+      END
     CHT
 
   when :same_lock_nested_reject

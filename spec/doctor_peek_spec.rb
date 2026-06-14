@@ -2,7 +2,7 @@ require "rspec"
 require "tmpdir"
 require "stringio"
 require "fileutils"
-require_relative "../src/tools/doctor"
+require_relative "../src/tools/doctor" unless defined?(Doctor)
 
 # Exercises --peek (callers + callees of a function) and --ignore
 # (inverse of --focus). Profiles are synthesized; addr2line resolution
@@ -117,7 +117,7 @@ RSpec.describe Doctor do
       old_stderr = $stderr
       $stderr = StringIO.new
       expect {
-        described_class.run_peek("/nonexistent", /foo/)
+        described_class.send(:run_peek, "/nonexistent", /foo/)
       }.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
     ensure
       $stderr = old_stderr
@@ -188,7 +188,7 @@ RSpec.describe Doctor do
       # in tests, so resolve_addrs returns no entries — the absence of
       # `is_user_zig` mis-attribution is what matters in production. This
       # test pins the logic via a direct file_is_transpiled_zig? check.
-      require_relative "../src/tools/pprof_converter"
+      require_relative "../src/tools/pprof_converter" unless defined?(PprofConverter)
       expect(
         PprofConverter.send(:file_is_transpiled_zig?, "/tmp/runtime.zig:100", "/tmp/transpiled.zig")
       ).to be false

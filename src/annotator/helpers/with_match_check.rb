@@ -50,8 +50,8 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).void }
-  def self.check_function!(fn, with_blocks, error_handler, warn_handler: nil, policy_handlers: nil)
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T::Array[AST::ErrorClause]).void }
+  def self.check_function!(fn, with_blocks, error_handler, warn_handler: nil, policy_handlers: [])
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
     param_names = fn.params.map { |p| p.name.to_s }.to_set
 
@@ -73,7 +73,7 @@ module WithMatchCheck
       # error set and warn on errors that no handler covers (per-WITH
       # ON or program SYNC POLICY).
       warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
-                                         T.must(policy_handlers), T.must(warn_handler)) unless node.arms
+                                         policy_handlers, T.must(warn_handler)) unless node.arms
 
       if node.polymorphic
         fn.uses_rt = true if fn.respond_to?(:uses_rt=)
@@ -416,10 +416,10 @@ module WithMatchCheck
   # Names of errors handled by either the per-WITH `ON ...` clause
   # or the program-level SYNC POLICY. Type selectors contribute their
   # literal name, kind selectors expand via AST.types_for_kind.
-  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[AST::ErrorClause])).returns(T::Set[Symbol]) }
+  sig { params(node: AST::WithBlock, policy_handlers: T::Array[AST::ErrorClause]).returns(T::Set[Symbol]) }
   def self.handled_error_set(node, policy_handlers)
     handled = Set.new
-    [node.lock_error_clause, *(policy_handlers || [])].compact.each do |clause|
+    [node.lock_error_clause, *policy_handlers].compact.each do |clause|
       clause.selectors.each do |sel|
         case sel.form
         when :type

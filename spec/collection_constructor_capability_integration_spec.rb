@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "collection constructor capability integration" do
   it "transpiles constructor :sharded and :soa modifiers through collection annotations" do

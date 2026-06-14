@@ -39,16 +39,15 @@ require_relative "migration_suggester_helpers"
 module AtomicPtrMigrationSuggester
   extend T::Sig
 
-  module_function
   extend MigrationSuggesterHelpers
 
-  def analyze(source)
+  def self.analyze(source)
     run_analyze(source)
   end
 
   # Eligibility: STRUCT under :locked / :write_locked / :versioned sync. The
   # doctor gates :versioned candidates further with mvcc-profile signals.
-  def candidate_decl_info(node, _annotator)
+  def self.candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
 
@@ -83,7 +82,7 @@ module AtomicPtrMigrationSuggester
   # @locked accept EXCLUSIVE (write); @writeLocked also accepts an
   # inferred read-only WITH; @versioned accepts SNAPSHOT (read +
   # MUTABLE). Other capabilities DISQUALIFY.
-  def classify_with_block!(with_node, candidates)
+  def self.classify_with_block!(with_node, candidates)
     (with_node.capabilities || []).each do |cap|
       vn = cap[:var_node]
       next unless vn.is_a?(AST::Identifier)
@@ -114,14 +113,14 @@ module AtomicPtrMigrationSuggester
   # Each statement in the WITH body must be:
   #   - Read-only (alias appears only as target.field), OR
   #   - Whole-struct replace: `alias = StructName{...}`
-  def with_body_eligible?(with_node, alias_name, struct_name)
+  def self.with_body_eligible?(with_node, alias_name, struct_name)
     body = with_node.body
     return false unless body.is_a?(Array) && !body.empty?
     body.all? { |stmt| stmt_eligible?(stmt, alias_name, struct_name) }
   end
 
   sig { params(stmt: T.any(AST::Assignment, AST::BindExpr, AST::FuncCall), alias_name: String, struct_name: Symbol).returns(T::Boolean) }
-  def stmt_eligible?(stmt, alias_name, struct_name)
+  def self.stmt_eligible?(stmt, alias_name, struct_name)
     case stmt
     when AST::Assignment
       target = stmt.name
@@ -154,15 +153,21 @@ module AtomicPtrMigrationSuggester
   end
 
   sig { params(target: T.any(AST::GetField, AST::Identifier, String), alias_name: String).returns(T::Boolean) }
-  def alias_root?(target, alias_name)
+  def self.alias_root?(target, alias_name)
     target == alias_name ||
       (target.is_a?(AST::Identifier) && target.name == alias_name)
   end
 
   sig { params(target: T.any(AST::GetField, AST::Identifier, String), rhs: AST::Node, alias_name: String, struct_name: String).returns(T::Boolean) }
-  def whole_struct_replace?(target, rhs, alias_name, struct_name)
+  def self.whole_struct_replace?(target, rhs, alias_name, struct_name)
     alias_root?(target, alias_name) &&
       rhs.is_a?(AST::StructLit) &&
       rhs.name.to_s == struct_name.to_s
   end
+
+  private_class_method :stmt_eligible?
+  private_class_method :alias_root?
+  private_class_method :whole_struct_replace?
+  private_class_method :with_body_eligible?
+
 end

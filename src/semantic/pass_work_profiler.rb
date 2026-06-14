@@ -179,15 +179,88 @@ module PassWorkProfiler
     prop :child_seconds, Float, default: 0.0
   end
 
-  class Profiler
+  class RecordStore
     extend T::Sig
 
     sig { void }
     def initialize
       @records = T.let({}, T::Hash[String, StageRecord])
-      @stack = T.let([], T::Array[String])
-      @work_stack = T.let([], T::Array[WorkFrame])
       @next_sequence = T.let(0, Integer)
+    end
+
+    sig { params(label: String).returns(StageRecord) }
+    def fetch(label)
+      existing = @records[label]
+      return existing if existing
+
+      record = StageRecord.new(label: label, sequence: @next_sequence)
+      @next_sequence += 1
+      @records[label] = record
+      record
+    end
+
+    sig { returns(T::Array[StageRecord]) }
+    def records
+      @records.values.sort_by(&:sequence)
+    end
+  end
+
+  class StageStack
+    extend T::Sig
+
+    sig { void }
+    def initialize
+      @labels = T.let([], T::Array[String])
+    end
+
+    sig { params(label: String).void }
+    def push(label)
+      @labels << label
+    end
+
+    sig { void }
+    def pop
+      @labels.pop
+    end
+
+    sig { returns(String) }
+    def current_label
+      @labels.last || "(outside)"
+    end
+  end
+
+  class WorkFrameStack
+    extend T::Sig
+
+    sig { void }
+    def initialize
+      @frames = T.let([], T::Array[WorkFrame])
+    end
+
+    sig { params(frame: WorkFrame).void }
+    def push(frame)
+      @frames << frame
+    end
+
+    sig { returns(T.nilable(WorkFrame)) }
+    def pop
+      @frames.pop
+    end
+
+    sig { returns(T.nilable(WorkFrame)) }
+    def current
+      @frames.last
+    end
+  end
+
+  class Profiler
+    extend T::Sig
+
+    sig { void }
+    def initialize
+      @record_store = T.let(RecordStore.new, RecordStore)
+      @stage_stack = T.let(StageStack.new, StageStack)
+      @work_stack = T.let(WorkFrameStack.new, WorkFrameStack)
     end
 
     sig do
@@ -208,14 +281,14 @@ module PassWorkProfiler
       record.input_ast_nodes += PassWorkProfiler.count_ast_nodes(ast_root) if ast_root
       record.input_mir_nodes += PassWorkProfiler.count_mir_nodes(mir_root) if mir_root
 
-      @stack << label
+      @stage_stack.push(label)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f
       block.call
     ensure
       if record && started
         elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - started
         record.seconds += elapsed
-        @stack.pop
+        @stage_stack.pop
       end
     end
 
@@ -236,7 +309,7 @@ module PassWorkProfiler
         stage_label: current_label,
         started_at: Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f
       )
-      @work_stack << frame
+      @work_stack.push(frame)
       block.call
     ensure
       if frame
@@ -244,7 +317,7 @@ module PassWorkProfiler
         exclusive_seconds = elapsed - frame.child_seconds
         exclusive_seconds = 0.0 if exclusive_seconds.negative?
         @work_stack.pop
-        parent = @work_stack.last
+        parent = @work_stack.current
         parent.child_seconds += elapsed if parent
         record_for(frame.stage_label).add_work(kind, units, elapsed, exclusive_seconds)
       end
@@ -252,7 +325,7 @@ module PassWorkProfiler
 
     sig { returns(T::Array[StageRecord]) }
     def records
-      @records.values.sort_by(&:sequence)
+      @record_store.records
     end
 
     sig { returns(T::Array[WorkSummary]) }
@@ -421,18 +494,12 @@ module PassWorkProfiler
 
     sig { returns(String) }
     def current_label
-      @stack.last || "(outside)"
+      @stage_stack.current_label
     end
 
     sig { params(label: String).returns(StageRecord) }
     def record_for(label)
-      existing = @records[label]
-      return existing if existing
-
-      record = StageRecord.new(label: label, sequence: @next_sequence)
-      @next_sequence += 1
-      @records[label] = record
-      record
+      @record_store.fetch(label)
     end
   end
 

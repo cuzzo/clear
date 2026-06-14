@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Unit-level coverage for emit_int_overflow_error!'s widen-annotation
 # fix path. The CLI-level integration is exercised in clear_fix_spec
@@ -14,7 +14,7 @@ RSpec.describe "INT_LITERAL_OVERFLOW widen-annotation fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end

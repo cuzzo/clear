@@ -10,15 +10,8 @@ module Annotator
       def visit_VarDecl(node)
         T.bind(self, SemanticAnnotator)
 
-        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
-          node.value.storage = :stack
-        end
-        visit(node.value)
-        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
-        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
-        finalize_decl_node!(node, node.mutable)
-        stamp_init_contents_heap!(node)
-        stamp_bg_handle_lifetime!(node)
+        visit_declaration_value!(node)
+        finalize_var_declaration!(node)
       end
 
       # Shared declaration body used by visit_VarDecl and the declaration path of
@@ -82,11 +75,13 @@ module Annotator
       def finalize_decl_node!(node, mutable_flag)
         T.bind(self, SemanticAnnotator)
 
+        value = T.must(node.value)
         verify_unrestricted!(node)
         handle_assign_move(node)
         handle_assign_borrow(node)
 
-        validate_type_annotation!(node, node.type) if node.type
+        declared_type = node.type
+        validate_type_annotation!(node, declared_type) if declared_type
         validate_stream_type!(node)
 
         promote_pipe_to_observable_dest!(node)
@@ -103,62 +98,19 @@ module Annotator
         # check is correct because promote_pipe_to_observable_dest! sets
         # `observable_dest` only when the RHS is a SMOOTH-pipe over a
         # tense source; any other shape leaves it false.
-        if node.type&.future? && node.type.observable?
-          pipe = node.value
-          ok = pipe.is_a?(AST::BinaryOp) && pipe.smooth? && pipe.observable_dest
-          unless ok
-            msg = "`~T@observable` bindings must be initialized by a pipeline-terminal fold " \
-                  "over a tense stream (e.g. `running: ~Int64@observable = stream |> SUM _`). " \
-                  "The producer fiber, atomic accumulator, and WaitGroup wiring all live in " \
-                  "the fold's codegen path -- a bare declaration or a non-fold initializer has " \
-                  "no producer, so NEXT/COLLECT would deadlock and cleanup would touch an " \
-                  "uninitialized wrapper."
+        return unless validate_observable_binding_initializer!(node)
 
-            # Offer a fixable that drops `@observable` from the type
-            # annotation. When the parser captured a token for the
-            # `@observable` capability, we can target it precisely. If the
-            # capability was chained (`~Int64@locked:observable` → token's
-            # value is `:observable` rather than `@observable`), we span
-            # the colon-prefix; otherwise the token is `@observable`. This
-            # lands as :interactive (not :auto) because the user almost
-            # always wanted a fold-pipe initializer instead — dropping
-            # @observable changes the type semantics. We only offer the
-            # drop fix; the "add a fold-pipe initializer" alternative is
-            # too context-specific to template.
-            fixes = []
-            obs_tok = node.type.observable_token if node.type.respond_to?(:observable_token)
-            if obs_tok
-              # Token value is `@observable` (first cap) or `:observable`
-              # (chained after another cap). Match length to the actual
-              # token text so the edit deletes exactly the right span.
-              tok_text = obs_tok.value.to_s
-              fixes << Fix.new(
-                description: "Drop `#{tok_text}` from the binding's type annotation. The remaining type behaves as a regular binding (no producer fiber, no WITH VIEW); use this if you didn't actually want streaming-aggregate semantics.",
-                confidence: :interactive,
-                edits: [Edit.new(
-                  span: Span.new(file: nil, line: obs_tok.line, col: obs_tok.column, length: tok_text.length),
-                  replacement: "",
-                )],
-              )
-            end
-
-            return error!(node, :VARDECL_TYPE_MISMATCH_FIXABLE, message: msg) if fixes.empty?
-            fixable!(node, message: msg, category: :type, level: :error,
-                     fixes: fixes, raise_in_collector: false)
-          end
-        end
-
-        final_type, error = node.value.coerce!(node.type)
-        error!(node, :TYPE_COERCION_FAILED, message: error) if error
+        final_type, error = value.coerce!(node.type)
+        error!(node, :TYPE_COERCION_FAILED, detail: error) if error
 
         # Empty collection literals annotated as Auto need a permissive
         # container type in scope so method dispatch works during the body walk;
         # the declaration annotation remains Auto for the later constraint pass.
         if AST.empty_auto_collection_literal_decl?(node)
-          final_type = node.value.type_object
+          final_type = value.type_object
         end
 
-        check_prefixed_int_range!(node.value, node.value.coerced_type || final_type)
+        check_prefixed_int_range!(value, value.coerced_type || final_type)
         propagate_declared_type_to_value!(node, final_type)
 
         storage = finalize_decl_storage!(node, final_type)
@@ -176,7 +128,7 @@ module Annotator
         node_type = node.full_type!(context: "var declaration")
         node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)
 
-        Capabilities.validate!(node, node_type) { |n, msg| error!(n, :CAPABILITY_INVALID, message: msg) }
+        Capabilities.validate!(node, node_type) { |n, msg| error!(n, :CAPABILITY_INVALID, detail: msg) }
 
         node_sync = node_type.sync
         node_layout = node_type.layout
@@ -203,11 +155,11 @@ module Annotator
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)
         sym = T.must(node.symbol)
-        sym.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
+        sym.async_result_shape = value.async_result_shape if value.is_a?(AST::BgBlock)
         # (The late-provenance fold now happens BEFORE declare, above, so the
         # symbol is born with the correct storage -- no post-declare write.)
         # Propagate @link_source from the value type to the scope entry.
-        val_ti = node.value&.full_type!(context: "declaration link source value")
+        val_ti = value.full_type!(context: "declaration link source value")
         if val_ti&.link?
           link_src = val_ti.link_source
           sym.link_source = link_src if link_src
@@ -229,11 +181,11 @@ module Annotator
         # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
         # cannot be reached from another thread, so suggest the shared form.
         if node_type.versioned? && node_type.ownership == :affine
-          cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
+          cap_tok = value.is_a?(AST::CapabilityWrap) ? value.token : nil
           fixes = []
           if cap_tok && cap_tok.value.to_s == "@versioned"
             fixes << Fix.new(
-              description: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",
+              description: fix_description(:UPGRADE_VERSIONED_TO_SHARED),
               confidence: :auto,
               edits: [Edit.new(
                 span: Span.new(file: nil, line: cap_tok.line, col: cap_tok.column, length: "@versioned".length),
@@ -241,29 +193,68 @@ module Annotator
               )],
             )
           end
-          msg = "Bare `@versioned` on '#{node.name}' is unusual: a single-owner " \
-                "MVCC cell isn't reachable from another thread, so the lock-free " \
-                "commit path has no concurrent benefit. Use `@shared:versioned` " \
-                "for cross-thread sharing, or remove `@versioned` if the cell is " \
-                "truly local."
           if fixes.any?
-            fixable!(node, message: msg, category: :lint, level: :warning, fixes: fixes)
+            fixable!(node, code: :BARE_VERSIONED_UNSHARED, name: node.name,
+                     category: :lint, level: :warning, fixes: fixes)
           else
-            note!(node, msg)
+            note!(node, diagnostic_message(:BARE_VERSIONED_UNSHARED, name: node.name))
           end
         end
         classify_ownership!(sym)
-        og_declare(node.name, node, node.full_type!(context: "var declaration"))
+        og_declare(node.name, node, node_type)
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
-        ti = node.full_type!(context: "var declaration ownership")
-        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) }
+        if !node_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_fn_ctx&.record_heap_use!
         end
         accumulate_stack_bytes(storage, node)
-        track_union_alias(node.name, node.value)
+        track_union_alias(node.name, value)
         record_capability_binding(node.name, node, final_type, storage)
         nil
+      end
+
+      sig { params(node: DeclarationNode).returns(T::Boolean) }
+      def validate_observable_binding_initializer!(node)
+        T.bind(self, SemanticAnnotator)
+
+        return true unless node.type&.future? && node.type.observable?
+
+        pipe = node.value
+        ok = pipe.is_a?(AST::BinaryOp) && pipe.smooth? && pipe.observable_dest
+        return true if ok
+
+        fixes = observable_binding_drop_fixes(node)
+        if fixes.empty?
+          error!(node, :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE)
+          return false
+        end
+
+        fixable!(node, code: :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE, category: :type, level: :error,
+                 fixes: fixes, raise_in_collector: false)
+        true
+      end
+
+      sig { params(node: DeclarationNode).returns(T::Array[Fix]) }
+      def observable_binding_drop_fixes(node)
+        T.bind(self, SemanticAnnotator)
+
+        fixes = T.let([], T::Array[Fix])
+        obs_tok = node.type.observable_token if node.type.respond_to?(:observable_token)
+        return fixes unless obs_tok
+
+        # Token value is `@observable` (first cap) or `:observable`
+        # (chained after another cap). Match length to the actual token text
+        # so the edit deletes exactly the right span.
+        tok_text = obs_tok.value.to_s
+        fixes << Fix.new(
+          description: fix_description(:DROP_OBSERVABLE_CAPABILITY, token: tok_text),
+          confidence: :interactive,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: obs_tok.line, col: obs_tok.column, length: tok_text.length),
+            replacement: "",
+          )],
+        )
+        fixes
       end
 
       # Keywordless `x = val` or `x: Type = val`.
@@ -275,67 +266,132 @@ module Annotator
       def visit_BindExpr(node)
         T.bind(self, SemanticAnnotator)
 
-        # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
-        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
-          node.value.storage = :stack
-        end
-        visit(node.value)
+        visit_declaration_value!(node)
 
         scope = current_scope
         # `_` is a discard sink: every `_ = expr;` is an independent
         # declaration, never a reassignment.
-        if !scope.entry?(node.name) || node.name == "_"
-          # Declaration path
-          promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
-          promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
-          node.mode = :decl
-          finalize_decl_node!(node, false)
-          if node.value.instance_variable_get(:@has_borrowed_fields)
-            sym = T.must(node.symbol)
-            sym.mark_non_escaping!
-            sym.mark_borrowed_alias!
-          end
-          stamp_init_contents_heap!(node)
-          stamp_bg_handle_lifetime!(node)
-
+        if bind_declares_new_symbol?(node, scope)
+          finalize_bind_declaration!(node)
         elsif scope.is_immutable?(node.name)
-          emit_immutable_assignment_error!(node, scope)
-
+          reject_immutable_bind_assignment!(node, scope)
         else
-          # Assignment path
-          node.mode = :assign
+          finalize_bind_assignment!(node, scope)
+        end
+      end
 
-          verify_unrestricted!(node)
-          node.symbol = scope.entry_for_write(node.name)
-          validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
-          stamp_type!(node, scope.resolve_type(node.name))
+      sig { params(node: DeclarationNode).void }
+      def visit_declaration_value!(node)
+        T.bind(self, SemanticAnnotator)
 
-          handle_assign_move(node)
-          handle_assign_borrow(node)
+        # Fixed-array list literals must be storage-stamped before visiting so
+        # downstream list analysis sees the intended stack placement.
+        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
+          node.value.storage = :stack
+        end
+        visit(node.value)
+      end
 
-          mark_var_mutated(node.name)
-          og_set_live(node.name)
+      sig { params(node: AST::VarDecl).void }
+      def finalize_var_declaration!(node)
+        T.bind(self, SemanticAnnotator)
 
-          # Atomic compound assignments must become fetch ops; load+add+store
-          # would lose atomicity.
-          target_sync = scope.resolve_entry(node.name)&.sync
-          if target_sync == :atomic
-            op = case node.compound_op
-                 when nil  then :store
-                 when :ADD then :fetchAdd
-                 when :SUB then :fetchSub
-                 when :MUL, :DIV
-                   op_str = node.compound_op == :MUL ? "*=" : "/="
-                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND,
-                     op: op_str)
-                   nil
-                 else
-                   error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
-                   nil
-                 end
-            node.auto_atomic_op = op if op
-            record_effect(EffectTracker::CONTENTION)
-          end
+        promote_declaration_value!(node)
+        finalize_decl_node!(node, node.mutable)
+        stamp_init_contents_heap!(node)
+        stamp_bg_handle_lifetime!(node)
+      end
+
+      sig { params(node: DeclarationNode).void }
+      def promote_declaration_value!(node)
+        T.bind(self, SemanticAnnotator)
+
+        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).returns(T::Boolean) }
+      def bind_declares_new_symbol?(node, scope)
+        !scope.entry?(node.name) || node.name == "_"
+      end
+
+      sig { params(node: AST::BindExpr).void }
+      def finalize_bind_declaration!(node)
+        T.bind(self, SemanticAnnotator)
+
+        promote_declaration_value!(node)
+        node.mode = :decl
+        finalize_decl_node!(node, false)
+        mark_borrowed_field_bind_alias!(node)
+        stamp_init_contents_heap!(node)
+        stamp_bg_handle_lifetime!(node)
+      end
+
+      sig { params(node: AST::BindExpr).void }
+      def mark_borrowed_field_bind_alias!(node)
+        return unless node.value.instance_variable_get(:@has_borrowed_fields)
+
+        sym = T.must(node.symbol)
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).void }
+      def reject_immutable_bind_assignment!(node, scope)
+        T.bind(self, SemanticAnnotator)
+
+        node.symbol = scope.resolve_entry(node.name)
+        stamp_type!(node, scope.resolve_type(node.name))
+        emit_immutable_assignment_error!(node, scope)
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).void }
+      def finalize_bind_assignment!(node, scope)
+        T.bind(self, SemanticAnnotator)
+
+        node.mode = :assign
+        verify_unrestricted!(node)
+        node.symbol = scope.entry_for_write(node.name)
+        target_type = scope.resolve_type(node.name)
+        validate_assignment_type(node, target_type, node.value.resolved_type)
+        stamp_type!(node, target_type)
+
+        handle_assign_move(node)
+        handle_assign_borrow(node)
+
+        mark_var_mutated(node.name)
+        og_set_live(node.name)
+        stamp_atomic_bind_assignment!(node, scope.resolve_entry(node.name)&.sync)
+      end
+
+      sig { params(node: AST::BindExpr, target_sync: T.nilable(Symbol)).void }
+      def stamp_atomic_bind_assignment!(node, target_sync)
+        T.bind(self, SemanticAnnotator)
+
+        return unless target_sync == :atomic
+
+        op = atomic_bind_operation(node)
+        node.auto_atomic_op = op if op
+        record_effect(EffectTracker::CONTENTION)
+      end
+
+      sig { params(node: AST::BindExpr).returns(T.nilable(Symbol)) }
+      def atomic_bind_operation(node)
+        T.bind(self, SemanticAnnotator)
+
+        # Atomic compound assignments must become fetch ops; load+add+store
+        # would lose atomicity.
+        case node.compound_op
+        when nil  then :store
+        when :ADD then :fetchAdd
+        when :SUB then :fetchSub
+        when :MUL, :DIV
+          op_str = node.compound_op == :MUL ? "*=" : "/="
+          error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND, op: op_str)
+          nil
+        else
+          error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
+          nil
         end
       end
 
@@ -439,7 +495,7 @@ module Annotator
       # Track alias relationships for union values extracted from another union/collection.
       # Aliased variables share backing data with the source - skip cleanup to avoid double-free.
 
-      sig { params(var_name: String, value_node: AST::Node).returns(T.nilable(T::Array[OwnershipGraph::Edge])) }
+      sig { params(var_name: String, value_node: AST::Node).void }
       def track_union_alias(var_name, value_node)
         T.bind(self, SemanticAnnotator)
 
@@ -468,7 +524,6 @@ module Annotator
         if arg_type == ret_type_obj.resolved || first_arg.full_type!(context: "union alias source").map?
           ownership_graph.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
         end
-        nil
       end
 
       sig { params(storage: Symbol, node: DeclarationNode).returns(T.nilable(Integer)) }
@@ -607,7 +662,8 @@ module Annotator
           fix = build_declare_mutable_fix(var_name, scope)
           if fix
             fixable!(node,
-              message: T.must(DiagnosticRegistry.format(:ASSIGN_VAR_IMMUTABLE, name: var_name)),
+              code: :ASSIGN_VAR_IMMUTABLE,
+              name: var_name,
               category: :ownership,
               level: :error,
               fixes: [fix])
@@ -728,6 +784,29 @@ module Annotator
       # ==========================================
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
-    end
+      private :finalize_decl_node!
+      private :accumulate_stack_bytes
+      private :atomic_bind_operation
+      private :bind_declares_new_symbol?
+      private :classify_ownership!
+      private :finalize_bind_assignment!
+      private :finalize_bind_declaration!
+      private :finalize_var_declaration!
+      private :mark_borrowed_field_bind_alias!
+      private :mark_var_mutated
+      private :observable_binding_drop_fixes
+      private :promote_declaration_value!
+      private :promote_pipe_to_observable_dest!
+      private :reject_immutable_bind_assignment!
+      private :stamp_atomic_bind_assignment!
+      private :track_union_alias
+      private :validate_assignment_type
+      private :validate_observable_binding_initializer!
+      private :visit_declaration_value!
+      private :visit_assignment_field
+      private :visit_assignment_index
+      private :visit_assignment_variable
+
+end
   end
 end

@@ -69,7 +69,7 @@ module MiniCollect
     instr_lib_path = File.join(dir, lib_rel.to_s)
     {
       status: status, out: out, err: err, dir: dir,
-      methods: glob.call("methods"), structs: glob.call("structs"),
+      methods: glob.call("methods"), method_edges: glob.call("method-edges"), structs: glob.call("structs"),
       ivars: glob.call("ivars"), collections: glob.call("collections"),
       tlets: glob.call("tlets"), coverage: glob.call("coverage"),
       instr_lib: (File.file?(instr_lib_path) ? File.read(instr_lib_path) : ""),

@@ -17,7 +17,9 @@ require_relative "../ast/ast"
 class StackVerifier
     extend T::Sig
 
-  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+  FnNodes = T.type_alias { T::Hash[String, T.untyped] }
+  CallGraphData = T.type_alias { Hash }
+  MainTierResult = T.type_alias { Hash }
 
   # Fiber stack tier budgets (total allocation minus 4 KB frame arena).
   TIER_BUDGET = {
@@ -94,15 +96,15 @@ class StackVerifier
   end
 
   # Full analysis: extract frame sizes, compare against tiers.
-  sig { params(fn_nodes: T.nilable(Hash), source_file: T.nilable(String)).returns(Hash) }
-  def analyze(fn_nodes: nil, source_file: nil)
+  sig { params(fn_nodes: FnNodes, source_file: T.nilable(String)).returns(Hash) }
+  def analyze(fn_nodes: {}, source_file: nil)
     frames = extract_frame_sizes
     report = { functions: [], warnings: [], source_file: source_file }
 
     frames.each do |f|
       entry = { name: f[:name], stack_bytes: f[:stack_bytes] }
 
-      fn = fn_nodes&.[](f[:name])
+      fn = fn_nodes[f[:name]]
       if fn
         entry[:tier] = fn.stack_tier
         entry[:estimated_bytes] = fn.stack_vars_bytes
@@ -155,7 +157,7 @@ class StackVerifier
     report
   end
 
-  sig { params(report: Hash, io: StringIO).returns(T.nilable(Array)) }
+  sig { params(report: Hash, io: StringIO).void }
   def print_report(report, io: $stderr)
     return if report[:functions].empty?
 
@@ -189,7 +191,7 @@ class StackVerifier
     report[:warnings]&.any? { |w| w[:level] == :error }
   end
 
-  # Verify that @reentrant:tailCall functions were actually TCO'd in the binary.
+  # Verify that EFFECTS REENTRANT:TAIL_CALL functions were actually TCO'd in the binary.
   # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
   # Returns array of { name:, tco_verified: bool, has_self_call: bool }
   sig { params(fn_nodes: Hash).returns(Array) }
@@ -246,7 +248,7 @@ class StackVerifier
   # Parse ALL functions from objdump: frame sizes and call edges.
   # Returns { frame_sizes: { addr => bytes }, call_graph: { addr => [addr, ...] },
   #           fn_names: { addr => name }, bg_entries: [addr, ...] }
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(CallGraphData)) }
   def extract_full_call_graph
     output = objdump_output
     return nil if output.empty?
@@ -334,8 +336,8 @@ class StackVerifier
   #                                  :reentrant, so this path only
   #                                  matters as a sanity check)
   # Functions that trampoline off the fiber stack are treated as leaf nodes.
-  sig { params(entry_addr: String, graph_data: Hash, fn_nodes: T.nilable(FnNodes)).returns(Integer) }
-  def deepest_path_cost(entry_addr, graph_data, fn_nodes: nil)
+  sig { params(entry_addr: String, graph_data: Hash, fn_nodes: FnNodes).returns(Integer) }
+  def deepest_path_cost(entry_addr, graph_data, fn_nodes: {})
     frame_sizes = graph_data[:frame_sizes]
     call_graph  = graph_data[:call_graph]
     fn_names    = graph_data[:fn_names]
@@ -347,7 +349,7 @@ class StackVerifier
       if in_stack.include?(addr)
         # Cycle -> consult the CLEAR FunctionDef for a precise bound.
         clear_name = fn_names[addr] && zig_to_clear_name(fn_names[addr])
-        fn = fn_nodes&.[](clear_name)
+        fn = fn_nodes[clear_name]
         if fn && fn.respond_to?(:reentrance_kind) && fn.reentrance_kind == :reentrant_max_depth && fn.max_depth_n
           return (frame_sizes[addr] || 0) * fn.max_depth_n
         end
@@ -384,8 +386,8 @@ class StackVerifier
 
   # Compute optimal tier for the main fiber (clearMain entry point).
   # Returns { entry_name:, path_cost:, optimal_tier: } or nil if clearMain not found.
-  sig { params(fn_nodes: T.nilable(FnNodes)).returns(T.nilable(Hash)) }
-  def compute_main_optimal_tier(fn_nodes: nil)
+  sig { params(fn_nodes: FnNodes).returns(T.nilable(MainTierResult)) }
+  def compute_main_optimal_tier(fn_nodes: {})
     graph_data = extract_full_call_graph
     return nil unless graph_data
 
@@ -398,8 +400,8 @@ class StackVerifier
 
   # Compute optimal tiers for all BG entry functions in the binary.
   # Returns array of { bg_index:, entry_name:, path_cost:, optimal_tier:, current_tier: }
-  sig { params(fn_nodes: T.nilable(FnNodes)).returns(Array) }
-  def compute_optimal_tiers(fn_nodes: nil)
+  sig { params(fn_nodes: FnNodes).returns(Array) }
+  def compute_optimal_tiers(fn_nodes: {})
     graph_data = extract_full_call_graph
     return [] unless graph_data
 
@@ -441,7 +443,7 @@ class StackVerifier
   end
 
   # Print optimal tier report.
-  sig { params(results: Array, io: StringIO).returns(T.nilable(Array)) }
+  sig { params(results: Array, io: StringIO).void }
   def print_tier_report(results, io: $stderr)
     return if results.empty?
 
@@ -452,6 +454,8 @@ class StackVerifier
       io.puts "    BG##{r[:bg_index]}: #{r[:path_cost]} bytes -> #{tier_str}"
     end
   end
+
+  private :extract_frame_sizes
 
   private
 
@@ -475,4 +479,7 @@ class StackVerifier
     name = name.sub(/Env$/, '')
     name
   end
+  private :extract_full_call_graph
+  private :objdump_output
+
 end

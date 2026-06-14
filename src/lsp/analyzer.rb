@@ -1,5 +1,6 @@
 # typed: strict
-require_relative "../backends/transpiler"  # loads Lexer, Parser, SemanticAnnotator, FixCollector
+require_relative "analysis_result"
+require_relative "../backends/transpiler"  # loads Lexer, ClearParser, SemanticAnnotator, FixCollector
 
 module LSP
   # Runs the canonical CLEAR compiler frontend on a source string and
@@ -22,26 +23,18 @@ module LSP
     SyntheticToken = Struct.new(:line, :column, :value, keyword_init: true)
 
     # Result of one analysis pass.
-    Result = Struct.new(:findings, :fatal_error, keyword_init: true) do
-      extend T::Sig
-      sig { returns(T::Boolean) }
-      def fatal?; !fatal_error.nil?; end
-    end
-
-    module_function
-
     # Run the lexer, parser, and annotator on `source`. Returns a
     # Result with the FixCollector findings and an optional
     # `fatal_error` (a synthetic FixableFinding) if the parser or
     # annotator raised.
-    sig { params(source: String).returns(Result) }
-    def run(source)
+    sig { params(source: String).returns(LSP::AnalysisResult) }
+    def self.run(source)
       FixCollector.enable!
       findings = []
       fatal = nil
       begin
         tokens    = Lexer.new(source).tokenize
-        ast       = Parser.new(tokens, source).parse
+        ast       = ClearParser.new(tokens, source).parse
         annotator = SemanticAnnotator.new
         annotator.source_code = source
         annotator.annotate!(T.must(ast))
@@ -61,7 +54,7 @@ module LSP
         findings = FixCollector.drain
         FixCollector.disable!
       end
-      Result.new(findings: findings, fatal_error: fatal)
+      LSP::AnalysisResult.new(findings: findings, fatal_error: fatal)
     end
 
     # Internals --------------------------------------------------
@@ -73,21 +66,22 @@ module LSP
       extend T::Sig
       sig { returns(T::Boolean) }
       def fatal?
-        @level = T.let(@level, T.untyped)
-        @level == :error
+        level == :error
       end
     end
 
-    sig { params(err: T.untyped).returns(SyntheticFinding) }
-    def synthetic_finding_from(err)
+    sig { params(err: SourceError).returns(SyntheticFinding) }
+    def self.synthetic_finding_from(err)
       tok = err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
       SyntheticFinding.new(
         level: :error,
-        message: err.original_message || err.message,
+        message: err.original_message,
         token: tok,
         category: err.is_a?(ParserError) ? :syntax : :type,
         fixes: [],
       )
     end
-  end
+  private_class_method :synthetic_finding_from
+
+end
 end

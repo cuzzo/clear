@@ -54,7 +54,8 @@ The variant binds at the colon: `REENTRANT:TAIL_CALL` and `REENTRANT:THUNK` are 
 
 Old (capability on the type):
 ```
-FN map(items: Int64[], f: FN(Int64) -> Int64@nonReentrant) RETURNS Int64[] -> ...
+FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS Int64[]
+  REQUIRES f: NON_REENTRANT -> ...
 ```
 
 New (constraint on the binding):
@@ -105,7 +106,7 @@ For the last case the user must either change the callback's declaration to `:TA
 
 ### Default lowering for plain REENTRANT
 
-A function with `EFFECTS REENTRANT` and no variant defaults to the `@service` stack tier (2 MB OS thread). Calls into it from a fiber are ABI-compatible — the call goes through `spawnService` if the caller isn't already on a service stack. This is the same machinery that exists today for `@reentrant`; the change is the declaration syntax, not the runtime.
+A function with `EFFECTS REENTRANT` and no variant defaults to the `@service` stack tier (2 MB OS thread). Calls into it from a fiber are ABI-compatible — the call goes through `spawnService` if the caller isn't already on a service stack.
 
 A user who wants a plain REENTRANT function to run on a regular fiber (with stack-smash protection rather than 2 MB pre-allocation) writes:
 
@@ -256,34 +257,22 @@ A `:THUNK` or `:TAIL_CALL` function with computed `REENTRANT_PLAIN` from a calle
 
 ## `clear fix` migrations
 
-Three new categories.
+Legacy function annotations are no longer parsed, so `clear fix` does not
+offer `@reentrant` syntax migrations. The fixer operates on supported syntax
+that has already parsed.
 
-1. **`@reentrant` annotation -> `EFFECTS REENTRANT`**
-   ```
-   - @reentrant FN walk(node: *Node) RETURNS Void ->
-   + FN walk(node: *Node) RETURNS Void
-   +   EFFECTS REENTRANT ->
-   ```
-   Fully mechanical. Detect via the AST node's existing `reentrant: :reentrant` field; rewrite the surface form.
-
-2. **`@reentrant:tailCall` -> `EFFECTS REENTRANT:TAIL_CALL`** — same shape.
-
-3. **Unconstrained FN-typed parameter -> add `REQUIRES f: NON_REENTRANT`**
+1. **Unconstrained FN-typed parameter -> add `REQUIRES f: NON_REENTRANT`**
    ```
    - FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS Int64[] ->
    + FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS Int64[]
    +   REQUIRES f: NON_REENTRANT ->
    ```
-   The legacy form `FN(...)@nonReentrant` doesn't exist in the parser
-   (only `FN(...)@reentrant` does -- opt-in for reentrant callbacks).
    Today's implicit default for FN-typed parameters is non-reentrant;
    Phase 1.5 makes that default explicit. The fix is auto-confidence
-   (defaults to NON_REENTRANT) and skips parameters that already carry
-   `@reentrant` on the type or where the enclosing function declares
-   `EFFECTS REENTRANT` (propagation case). Phase 2 escalates the same
-   detection from info to warning to error.
+   (defaults to NON_REENTRANT) and skips parameters where the enclosing
+   function declares `EFFECTS REENTRANT` (propagation case).
 
-4. **Unconstrained fn parameter** — interactive fix offers two options:
+2. **Unconstrained fn parameter** — interactive fix offers two options:
    ```
    error: 'callIt' takes 'f: FN(Int64) -> Int64' but does not constrain reentrance.
      suggested fixes:
@@ -292,7 +281,7 @@ Three new categories.
    ```
    `clear fix` defaults to (1) in non-interactive mode; (2) is selected when the function body itself is REENTRANT.
 
-5. **Plain REENTRANT callee called from a non-service context** — fix offers two options:
+3. **Plain REENTRANT callee called from a non-service context** — fix offers two options:
    ```
    error: 'consume' is reentrant; this call needs a service stack or @thunk.
      suggested fixes:
@@ -322,8 +311,8 @@ Each phase is a green commit; nothing breaks behavior until phase 4.
 **Phase 1 — surface syntax + fix migrations** (no behavior change)
 - Parser accepts `EFFECTS REENTRANT[:TAIL_CALL|:THUNK]` and `REQUIRES x: NON_REENTRANT`.
 - Annotator stores them as `fn_node.effects_decl` and `fn_node.requires_clauses[<name>]`.
-- `clear fix` migrations 1-3 (mechanical) land.
-- The old `@reentrant` annotation continues to work, lowered to `EFFECTS REENTRANT` internally.
+- `clear fix` migrations for supported parsed syntax land.
+- The old `@reentrant` annotation is rejected.
 - All existing tests pass; 0 new functional behavior.
 
 **Phase 2 — error coverage** (warnings -> errors after a soft-deprecation window)

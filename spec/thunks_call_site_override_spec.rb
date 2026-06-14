@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Thunk Phase 4.1 / 4.2 -- call-site override syntax (parser-only).
 #
@@ -14,7 +14,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4.1/4.2 -- call-site override (parser-only)" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)

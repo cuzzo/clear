@@ -1,5 +1,5 @@
 require 'rspec'
-require_relative '../src/tools/completions'
+require_relative '../src/tools/completions' unless defined?(Completions)
 
 RSpec.describe Completions do
   describe '.script_for' do
@@ -28,7 +28,7 @@ RSpec.describe Completions do
   end
 
   describe 'bash script semantics' do
-    let(:script) { described_class.bash }
+    let(:script) { described_class.send(:bash) }
 
     it 'enumerates every subcommand for first-position completion' do
       Completions::SUBCOMMANDS.each_key do |sub|
@@ -52,7 +52,7 @@ RSpec.describe Completions do
   end
 
   describe 'zsh script semantics' do
-    let(:script) { described_class.zsh }
+    let(:script) { described_class.send(:zsh) }
 
     it 'tags every subcommand with its description for `_describe`' do
       Completions::SUBCOMMANDS.each do |sub, desc|
@@ -71,7 +71,7 @@ RSpec.describe Completions do
   end
 
   describe 'fish script semantics' do
-    let(:script) { described_class.fish }
+    let(:script) { described_class.send(:fish) }
 
     it 'declares one `complete` per subcommand' do
       Completions::SUBCOMMANDS.each_key do |sub|
@@ -89,7 +89,7 @@ RSpec.describe Completions do
       # No subcommand description currently contains a quote, but if
       # someone adds one the script must still parse cleanly.
       stub_const('Completions::SUBCOMMANDS', { 'foo' => "it's a thing" })
-      script = described_class.fish
+      script = described_class.send(:fish)
       expect(script).to include("-d 'it\\'s a thing'")
     end
   end

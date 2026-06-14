@@ -24,8 +24,9 @@ module Annotator
           acquire_capability!(node, cap, capability_expansion)
         end
         node.capability_plan = capability_expansion
-        expanded_capabilities = CapabilityPlan.require_for(node).all
-        lock_capabilities = CapabilityPlan.require_for(node).locks
+        capability_plan = CapabilityPlan.require_for(node)
+        expanded_capabilities = capability_plan.all
+        lock_capabilities = capability_plan.locks
         validate_with_match_source_shape!(node, capability_expansion)
 
         check_nested_lock_reacquire!(node, lock_capabilities)
@@ -63,14 +64,14 @@ module Annotator
             end
             validate_with_guard_no_body_mutation!(node)
             fallible_sources = retryable_with_fallible_sources(node)
-            if is_snapshot_txn_body && !T.must(fallible_sources).empty?
+            if is_snapshot_txn_body && !fallible_sources.empty?
               retryable_with_fallible_body_error!(
                 node,
                 "WITH SNAPSHOT ... AS MUTABLE",
                 fallible_sources
               )
             end
-            if retryable_with_universal_poly_candidate?(node) && !T.must(fallible_sources).empty?
+            if retryable_with_universal_poly_candidate?(node) && !fallible_sources.empty?
               retryable_with_fallible_body_error!(
                 node,
                 "WITH POLYMORPHIC",
@@ -214,6 +215,7 @@ module Annotator
           node.snapshot_mode == :transaction ||
           with_block_has_versioned_arm?(node)
       end
+      private :with_block_uses_runtime?
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_has_versioned_arm?(node)
@@ -226,14 +228,8 @@ module Annotator
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
         T.bind(self, SemanticAnnotator)
 
-        capability_plan = CapabilityPlan.require_for(node)
-        return unless node.polymorphic && capability_plan.all.length == 1
-
-        bound_fact = capability_plan.first_transition
-        bound_var = bound_fact.var_node
-        bound_name = bound_fact.var_name
-        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
-        return unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+        bound_name = unrequired_polymorphic_runtime_bound_name(node)
+        return unless bound_name
 
         fn_node = function_node_for(fn_ctx.name)
         return unless fn_node && !with_requires_binding?(fn_node, bound_name)
@@ -241,6 +237,23 @@ module Annotator
         fn_ctx.uses_rt = true
         fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
       end
+      private :mark_unrequired_polymorphic_with_runtime!
+
+      sig { params(node: AST::WithBlock).returns(T.nilable(String)) }
+      def unrequired_polymorphic_runtime_bound_name(node)
+        T.bind(self, SemanticAnnotator)
+
+        capability_plan = CapabilityPlan.require_for(node)
+        return nil unless node.polymorphic && capability_plan.all.length == 1
+
+        bound_fact = capability_plan.first_transition
+        bound_var = bound_fact.var_node
+        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+        return nil unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+
+        bound_fact.var_name
+      end
+      private :unrequired_polymorphic_runtime_bound_name
 
       sig { params(fn_node: AST::FunctionDef, bound_name: T.nilable(String)).returns(T::Boolean) }
       def with_requires_binding?(fn_node, bound_name)
@@ -322,12 +335,12 @@ module Annotator
         is_param && !has_req
       end
 
-      sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T::Array[String])).void }
+      sig { params(node: AST::WithBlock, with_name: String, sources: T::Array[String]).void }
       def retryable_with_fallible_body_error!(node, with_name, sources)
         T.bind(self, SemanticAnnotator)
 
-        detail = T.must(sources).first(3).join(", ")
-        detail += ", ..." if T.must(sources).length > 3
+        detail = sources.first(3).join(", ")
+        detail += ", ..." if sources.length > 3
         error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
       end
 
@@ -394,7 +407,7 @@ module Annotator
         when :return
           visit(T.must(clause.value))
         when :block
-          visit_stmts(T.must(clause.body))
+          visit_stmts(clause.body)
         end
       end
 
@@ -540,7 +553,7 @@ module Annotator
             when :exit
               visit(T.must(clause.message))
             when :block
-              visit_stmts(T.must(clause.body))
+              visit_stmts(clause.body)
             end
           end
         end
@@ -553,7 +566,7 @@ module Annotator
       #   3. Retry selectors resolve to Transient types only.
       #   4. The matched set intersects the block's possible error set.
 
-      sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).void }
       def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
         T.bind(self, SemanticAnnotator)
 
@@ -913,6 +926,23 @@ module Annotator
 
         type_info.ownership_bearing?(->(name) { lookup_type_schema(name) })
       end
-    end
+
+      private :mark_with_runtime_requirements!,
+        :validate_no_multi_object_atomic!,
+        :validate_lock_error_clause!
+      private :async_next_result_requires_heap?
+  private :cap_admits_atomic?
+  private :field_name_for_msg
+  private :resolve_error_selectors!
+  private :retryable_with_call_fallible?
+  private :retryable_with_fallible_body_error!
+  private :retryable_with_fallible_sources
+  private :retryable_with_universal_poly_candidate?
+  private :validate_snapshot_match_arms!
+  private :validate_with_match_source_shape!
+  private :with_block_has_versioned_arm?
+  private :with_requires_binding?
+
+end
   end
 end

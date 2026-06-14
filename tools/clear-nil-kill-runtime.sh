@@ -59,9 +59,12 @@ par_ruby() { # par_ruby <label> <find-args...> -- <ruby args...>
 
 # 1-3. Specs (prspec = parallel_rspec; WORKERS env scales workers to
 #       all cores instead of the gem's default of 4).
-run unit-specs        bundle exec prspec spec/
-run integration-specs bundle exec prspec spec/ --tag integration
-run nil-kill-specs    bundle exec prspec gems/nil-kill/spec/
+run unit-specs bundle exec prspec spec/
+# Source tracing slows MiniVM subprocesses enough that the normal 10s
+# golden timeout can trip even when the VM is healthy. Keep the override
+# scoped to nil-kill collection so ordinary integration specs stay strict.
+run integration-specs env MINIVM_GOLDEN_TIMEOUT_SECONDS="${NIL_KILL_MINIVM_GOLDEN_TIMEOUT_SECONDS:-120}" bundle exec prspec spec/ --tag integration
+run nil-kill-specs bundle exec prspec gems/nil-kill/spec/
 
 # 4. Transpile-tests corpus. gen.rb --single is the same Ruby pipeline
 #    (CompilerFrontend + MIRLowering + MIRChecker + MIREmitter) the
@@ -106,7 +109,7 @@ has_clear_main() {
 build_one() {
   should_skip_build_file "$1" && return 0
   has_clear_main "$1" || return 0
-  local timeout_seconds="${NIL_KILL_BUILD_TIMEOUT:-120}"
+  local timeout_seconds="${NIL_KILL_BUILD_TIMEOUT:-300}"
   if command -v timeout >/dev/null 2>&1; then
     timeout "${timeout_seconds}s" ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1
   else

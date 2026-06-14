@@ -38,11 +38,11 @@ $LOAD_PATH.unshift(File.join(src_root, "mir"))
 $LOAD_PATH.unshift(File.join(src_root, "backends"))
 $LOAD_PATH.unshift(File.join(src_root, "annotator-helpers"))
 
-require "backends/compiler_frontend"
-require "backends/importer"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
 require "mir_lowering"
 require "mir_checker"
-require "mir_emitter"
+require "backends/mir_emitter"
 
 source_path = File.expand_path(ARGV.fetch(0) do
   warn "missing source path"

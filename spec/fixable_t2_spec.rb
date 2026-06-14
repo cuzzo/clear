@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tier 2 fixable findings. Five additional error sites that previously
 # raised a plain CompilerError now emit a FixableFinding.
@@ -13,7 +13,7 @@ RSpec.describe "Tier 2 fixable findings" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -165,7 +165,7 @@ RSpec.describe "Tier 2 fixable findings" do
     it "AMBIGUOUS_RETURN — falls back to plain error! when arrow_token is missing" do
       tokens = Lexer.new("FN classify(n: Int64) ->\n  IF n > 0 THEN RETURN n; ELSE RETURN \"x\"; END\nEND\nFN main() RETURNS Void -> END").tokenize
       src = "FN classify(n: Int64) ->\n  IF n > 0 THEN RETURN n; ELSE RETURN \"x\"; END\nEND\nFN main() RETURNS Void -> END"
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       # Strip arrow_token from the synthesized fn so the helper falls
       # through to plain error!.
       classify = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "classify" }

@@ -19,7 +19,7 @@ require "sorbet-runtime"
 #                                 Zig flags them as unused).
 #
 # All methods rely on MIRLowering typed state (runtime name,
-# @active_stubs, function_state.current_bindings, function_state.decl_zig_name_map, etc.) and
+# test_state.active_stubs, function_state.current_bindings, function_state.decl_zig_name_map, etc.) and
 # call into shared lowering helpers (lower, lower_body, emit_expr).
 # This module is purely organizational — zero behavior change from
 # the inline definitions it replaces.
@@ -32,27 +32,27 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     ctx = TestBlockCtx.new(node, self)
     tests = []
-    ctx.emit_all_hooks(node.before_all, "__before_all", "", tests)
+    ctx.emit_all_hooks(node.before_all || [], "__before_all", "", tests)
 
     (node.whens || []).each do |when_block|
       lower_when_block(when_block, ctx, tests)
     end
 
-    ctx.emit_all_hooks(node.after_all, "__after_all", "", tests)
+    ctx.emit_all_hooks(node.after_all || [], "__after_all", "", tests)
     tests
   end
 
   # Emits all MIR::TestDef entries for a single WHEN block (its
   # BEFORE ALL hooks, then each TEST THAT, then benchmarks, then
-  # AFTER ALL hooks). Mutates @active_stubs around the body so
+  # AFTER ALL hooks). Mutates test_state.active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
   sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
   def lower_when_block(when_block, ctx, tests)
     T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
 
-    prev_stubs = (@active_stubs || {}).dup
-    @active_stubs = prev_stubs.dup
+    prev_stubs = test_state.active_stubs.dup
+    test_state.active_stubs = prev_stubs.dup
     begin
       stubs, non_stub_setup = when_block.setup.partition { |s| s.is_a?(AST::StubDecl) }
       when_setup_mir = lower_body(non_stub_setup)
@@ -73,11 +73,11 @@ module TestLowering
       # below, gated on whether each TEST THAT actually references the
       # name — that's the lazy bit (RSpec semantics: tests that don't
       # reference a LET never pay its construction cost).
-      let_ast_map = build_let_ast_map(when_block.lets, base: build_let_ast_map(ctx.test_block.lets))
+      let_ast_map = build_let_ast_map(when_block.lets || [], base: build_let_ast_map(ctx.test_block.lets || []))
 
-      ctx.emit_all_hooks(when_block.before_all, "__before_all", "#{when_desc}: ", tests)
+      ctx.emit_all_hooks(when_block.before_all || [], "__before_all", "#{when_desc}: ", tests)
 
-      tag_suffix = format_tag_suffix(when_block.tags)
+      tag_suffix = format_tag_suffix(when_block.tags || [])
       env = TestThatEnv.new(
         ctx: ctx,
         when_block: when_block,
@@ -94,13 +94,13 @@ module TestLowering
 
       (when_block.benchmarks || []).each do |b|
         name = "#{ctx.test_name}: #{when_desc}: benchmark#{tag_suffix}"
-        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + when_setup_mir + [lower(b)]
+        body = [ctx.fresh_preamble] + stub_mir + ctx.setup_mir + when_setup_mir + [lower(b)]
         tests << MIR::TestDef.new(name, body)
       end
 
-      ctx.emit_all_hooks(when_block.after_all, "__after_all", "#{when_desc}: ", tests)
+      ctx.emit_all_hooks(when_block.after_all || [], "__after_all", "#{when_desc}: ", tests)
     ensure
-      @active_stubs = prev_stubs
+      test_state.active_stubs = prev_stubs
     end
   end
 
@@ -190,7 +190,7 @@ module TestLowering
       @test_block = T.let(test_block, AST::TestBlock)
       @test_name  = T.let(test_block.name, String)
       @lowering   = lowering
-      @setup_mir  = T.let(lowering.lower_body(test_block.setup), T.nilable(T::Array[T.untyped]))
+      @setup_mir  = T.let(lowering.lower_body(test_block.setup), T::Array[T.untyped])
       @test_before_each_mir = T.let(
         (test_block.before_each || []).map { |b| lowering.lower_body(b) },
         T::Array[T.untyped],
@@ -214,9 +214,9 @@ module TestLowering
     # WHEN-level. Each ALL hook gets its own runtime (no shared
     # state with TEST THATs in v1 — file-scope-var promotion is a
     # deferred follow-up).
-    sig { params(bodies: T.nilable(T::Array[T::Array[T.untyped]]), name_kind: String, desc_prefix: String, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
+    sig { params(bodies: T::Array[T::Array[T.untyped]], name_kind: String, desc_prefix: String, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
-      (bodies || []).each_with_index do |body, idx|
+      bodies.each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
         tests << MIR::TestDef.new(name, [fresh_preamble] + @lowering.lower_body(body))
       end
@@ -238,10 +238,10 @@ module TestLowering
   # translates to `zig test --test-filter "#slow"` which uses Zig's
   # built-in substring filter — no custom test runner required.
   # Returns an empty string when there are no tags.
-  sig { params(tags: T.nilable(T::Array[String])).returns(String) }
+  sig { params(tags: T::Array[String]).returns(String) }
   def format_tag_suffix(tags)
     T.bind(self, MIRLowering) rescue []
-    return "" unless tags && !tags.empty?
+    return "" if tags.empty?
     " " + tags.map { |t| "##{t}" }.join(" ")
   end
 
@@ -251,11 +251,11 @@ module TestLowering
   # insertion order preserves declaration order for the surviving
   # entries: outer LETs occupy their original indices unless replaced
   # by an inner LET, which then takes the outer's slot.
-  sig { params(lets: T.nilable(T::Array[T.untyped]), base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
+  sig { params(lets: T::Array[T.untyped], base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
   def build_let_ast_map(lets, base: {})
     T.bind(self, MIRLowering) rescue []
     out = base.dup
-    (lets || []).each { |let_node| out[let_node.name] = let_node }
+    lets.each { |let_node| out[let_node.name] = let_node }
     out
   end
 
@@ -324,16 +324,15 @@ module TestLowering
   sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
-    stub_info = (@active_stubs || {})[fn_name]
+    stub_info = test_state.active_stubs[fn_name]
     return nil unless stub_info
 
     call_inputs = [receiver, *args].compact
     suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
     suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
 
-    @stub_label_counter ||= T.let(0, T.nilable(Integer))
-    @stub_label_counter += 1
-    counter = @stub_label_counter
+    counter = test_state.stub_label_counter + 1
+    test_state.stub_label_counter = counter
 
     case stub_info[:kind]
     when :returns
@@ -394,16 +393,14 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name
     stub_var = "__stub_#{fn_name}"
-    @active_stubs ||= T.let({}, T.nilable(T::Hash[T.untyped, T.untyped]))
-
     case node.kind
     when :returns
       val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :returns, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :returns, var: stub_var }
       MIR::Let.new(stub_var, val, false, nil, nil)
     when :captures
       cap_name = node.value
-      @active_stubs[fn_name] = { kind: :captures, var: cap_name }
+      test_state.active_stubs[fn_name] = { kind: :captures, var: cap_name }
       MIR::Let.new(cap_name, MIR::Lit.new("0"), true, Type.new("i64"), "_ = &#{cap_name};")
     when :sequence
       values = node.value
@@ -412,7 +409,7 @@ module TestLowering
       else
         [lower(values)]
       end
-      @active_stubs[fn_name] = { kind: :sequence, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :sequence, var: stub_var }
       [
         MIR::Let.new(
           "#{stub_var}_seq",
@@ -427,7 +424,7 @@ module TestLowering
       ]
     when :with
       val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :with, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :with, var: stub_var }
       MIR::Let.new(stub_var, val, false, nil, nil)
     else
       raise "MIRLowering: unhandled StubDecl kind: #{node.kind} for #{fn_name}"
@@ -451,4 +448,14 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("profile placeholder")
   end
+
+  private :lower_when_block
+  private :build_let_ast_map
+  private :collect_identifier_refs
+  private :compute_used_let_names
+  private :format_tag_suffix
+  private :lower_test_that
+  private :stub_local_idents
+  private :with_test_that_bindings
+
 end

@@ -45,9 +45,8 @@ class PipelineHost
     @pipeline_context = T.let(PipelineContextState.empty, PipelineContextState)
     @mir_mode = T.let(false, T::Boolean)
     @each_idx_counter = T.let(0, Integer)
-    @pipe_label_counter = T.let(0, Integer)
+    @label_state = T.let(PipelineLabelState.new, PipelineLabelState)
     @pipe_temp_counter = T.let(0, Integer)
-    @current_pipe_label = T.let(nil, T.nilable(String))
     @do_rt_name = T.let(nil, T.nilable(String))
     @materializer = T.let(PipelineMaterializer.new(host: build_materializer_host), PipelineMaterializer)
     @range_lowerer = T.let(PipelineRangeLowerer.new(host: build_range_lowerer_host), PipelineRangeLowerer)
@@ -109,7 +108,7 @@ class PipelineHost
       pipeline_result_alloc: -> { pipeline_result_alloc },
       source_shape: ->(source_node) { pipeline_source_shape(source_node) },
       next_label: -> { next_pipe_label },
-      set_current_label: ->(label) { @current_pipe_label = label },
+      set_current_label: ->(label) { set_current_pipe_label(label) },
       append_owned_value_stmt: ->(receiver, alloc, value_expr) {
         append_owned_value_stmt(receiver, alloc, value_expr)
       },
@@ -128,7 +127,7 @@ class PipelineHost
     PipelineBindingChainLowerer.new(
       bc_target: -> { bc_target? },
       next_label: -> { next_pipe_label },
-      set_current_label: ->(label) { @current_pipe_label = label },
+      set_current_label: ->(label) { set_current_pipe_label(label) },
       pipe_binding_zig_name: ->(clear_name) { pipe_binding_zig_name(clear_name) },
       visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
@@ -244,7 +243,7 @@ class PipelineHost
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
       },
       next_label: -> { next_pipe_label },
-      set_current_label: ->(label) { @current_pipe_label = label },
+      set_current_label: ->(label) { set_current_pipe_label(label) },
       transpile_type: ->(type_info) { transpile_type(type_info) },
       pipeline_alloc: ->(smooth_node) { pipeline_alloc(smooth_node) },
     )
@@ -306,6 +305,15 @@ class PipelineHost
         with_pipeline_context(placeholder: placeholder) {
           with_fiber_capture_map(capture_map, capture_symbols: capture_symbols, rt_override: rt_override) {
             visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
+          }
+        }
+      },
+      callback_body_mir_with_shard: ->(body_stmts, placeholder, capture_map, capture_symbols, rt_override, shard_context) {
+        with_pipeline_context(placeholder: placeholder) {
+          with_fiber_capture_map(capture_map, capture_symbols: capture_symbols, rt_override: rt_override) {
+            @lowering_bridge.with_shard_context(shard_context) {
+              visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
+            }
           }
         }
       },
@@ -402,7 +410,7 @@ class PipelineHost
       bc_target: -> { bc_target? },
       schema_lookup: -> { @lowering_bridge.mir_schema_lookup },
       next_label: -> { next_pipe_label },
-      set_current_label: ->(label) { @current_pipe_label = label },
+      set_current_label: ->(label) { set_current_pipe_label(label) },
       next_item_temp_name: -> {
         @pipe_temp_counter += 1
         "__pipe_item_#{@pipe_temp_counter}"
@@ -448,8 +456,12 @@ class PipelineHost
 
   sig { returns(String) }
   def next_pipe_label
-    @pipe_label_counter += 1
-    "__pblk#{@pipe_label_counter}"
+    @label_state.next_label
+  end
+
+  sig { params(label: String).void }
+  def set_current_pipe_label(label)
+    @label_state.current_label = label
   end
 
   sig { params(zig_t: String).returns(MIR::TypeSentinel) }
@@ -501,13 +513,13 @@ class PipelineHost
     type_parameters(:U)
       .params(
         new_entries: T::Hash[String, String],
-        capture_symbols: T.nilable(T::Hash[String, SymbolEntry]),
+        capture_symbols: T::Hash[String, SymbolEntry],
         rt_override: String,
         blk: T.proc.returns(T.type_parameter(:U)),
       )
       .returns(T.type_parameter(:U))
   end
-  def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
+  def with_fiber_capture_map(new_entries, capture_symbols: {}, rt_override: "__rt", &blk)
     @lowering_bridge.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 
@@ -648,6 +660,8 @@ class PipelineHost
     end
   end
 
+  private :lower_execution_plan
+
   private
 
   ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)
@@ -710,7 +724,7 @@ class PipelineHost
     list_node = site.list
     label = next_pipe_label
     source_mir = visit_mir(list_node)
-    @current_pipe_label = label
+    set_current_pipe_label(label)
 
     expr_mir = T.let(nil, T.nilable(MIR::Emittable))
     fields = T.let([], T::Array[String])
@@ -1162,5 +1176,12 @@ class PipelineHost
   def lower_concurrent(site, conc_op)
     @concurrent_lowerer.lower(site.options, conc_op)
   end
+
+
+
+  private :lower_dispatch_plan
+
+
+  private :visit_mir
 
 end

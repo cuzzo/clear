@@ -1,11 +1,11 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe "Test Framework DSL" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   describe "TEST block parsing" do
@@ -401,14 +401,14 @@ RSpec.describe "Test Framework DSL" do
   describe "strict test mode" do
     def analyze_strict(source)
       tokens = Lexer.new(source).tokenize
-      ast = Parser.new(tokens, source).parse
+      ast = ClearParser.new(tokens, source).parse
       annotator = SemanticAnnotator.new(strict_test: true)
       annotator.annotate!(ast)
     end
 
     def analyze_normal(source)
       tokens = Lexer.new(source).tokenize
-      ast = Parser.new(tokens, source).parse
+      ast = ClearParser.new(tokens, source).parse
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
     end

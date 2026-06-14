@@ -45,20 +45,7 @@ module Annotator
         branch_results = T.let([], T::Array[BranchAnalysisResult])
 
         branches.each do |branch_logic|
-          # Restore graph to pre-branch state before analyzing each branch
-          ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
-          prev_terminated = @branch_terminated
-          @branch_terminated = false
-          with_new_scope(current_scope) do
-            og_push_scope
-            branch_results << BranchAnalysisResult.new(
-              drops: branch_logic.call,
-              snapshot: ownership_graph.fork_lightweight,
-              terminated: @branch_terminated,
-            )
-            og_pop_scope
-          end
-          @branch_terminated = prev_terminated
+          branch_results << analyze_control_flow_branch(branch_logic, og_snapshot)
         end
 
         if merge_to_parent
@@ -90,6 +77,36 @@ module Annotator
 
         branch_results.map(&:drops)
       end
+
+      sig { params(branch_logic: T.proc.returns(BasicObject), og_snapshot: BranchSnapshot).returns(BranchAnalysisResult) }
+      def analyze_control_flow_branch(branch_logic, og_snapshot)
+        T.bind(self, SemanticAnnotator)
+
+        # Restore graph to pre-branch state before analyzing each branch.
+        ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
+        prev_terminated = @branch_terminated
+        @branch_terminated = false
+
+        begin
+          with_new_scope(current_scope) do
+            pushed_og_scope = T.let(false, T::Boolean)
+            begin
+              og_push_scope
+              pushed_og_scope = true
+              BranchAnalysisResult.new(
+                drops: branch_logic.call,
+                snapshot: ownership_graph.fork_lightweight,
+                terminated: @branch_terminated,
+              )
+            ensure
+              og_pop_scope if pushed_og_scope
+            end
+          end
+        ensure
+          @branch_terminated = prev_terminated
+        end
+      end
+      private :analyze_control_flow_branch
 
       sig { params(node: AST::BlockExpr).returns(T.nilable(Scope)) }
       def visit_BlockExpr(node)
@@ -251,7 +268,7 @@ module Annotator
         # A destructuring pattern's type IS the subject it destructures
         # (the MATCH expr) — not a guess.
         stamp_type!(pat, match_node.expr.full_type!(context: "match destructure subject"))
-        nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
+        nil
       end
 
       sig { params(pattern: AST::Node).returns(T.nilable(String)) }
@@ -314,14 +331,14 @@ module Annotator
         type_params = schema.type_params
         subst = {}
         if node.type_args&.any?
-          if type_params.nil? || type_params.empty?
+          if type_params.empty?
             error!(node, :GENERIC_NOT_GENERIC, type: node.name)
           end
           if node.type_args.length != type_params.length
             error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
           end
           type_params.zip(node.type_args).each { |param, arg| subst[param] = arg.to_sym }
-        elsif type_params&.any?
+        elsif type_params.any?
           params_hint = type_params.map(&:to_s).join(', ')
           error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
         end
@@ -365,11 +382,15 @@ module Annotator
         return {} unless expr_t.generic_instance?
 
         union_schema = T.cast(schema, Schemas::UnionSchema)
-        type_params = union_schema.type_params || []
+        type_params = union_schema.type_params
         return {} if type_params.empty?
 
         subst = T.let({}, T::Hash[Symbol, Symbol])
-        type_params.zip(expr_t.generic_args).each { |p, a| subst[p] = a.resolved }
+        type_params.zip(expr_t.generic_args).each do |p, a|
+          next unless a
+
+          subst[p] = a.resolved
+        end
         subst
       end
 
@@ -680,7 +701,7 @@ module Annotator
 
         # Store case result types so use sites can promote to expression mode.
         node.case_result_types = node.cases.map { |c| expr_result_type(c.body) }
-        node.default_result_type = expr_result_type(node.default_case)
+        node.default_result_type = expr_result_type(node.default_case || [])
 
         stamp_type!(node, :Void)
       end
@@ -801,7 +822,7 @@ module Annotator
         ], merge_to_parent: false)
 
         # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
-        # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
+        # if/while/match blocks) for direct calls to plain EFFECTS REENTRANT or EXTERN FN functions.
         # Does NOT recurse into bodies of called CLEAR functions — those are separate
         # compilation units and their internal behaviour is their own concern.
         if node.tight
@@ -914,7 +935,7 @@ module Annotator
 
       # Deep validation for TIGHT loops.
       # Walks the full AST subtree (nested ifs, whiles, match blocks) looking for
-      # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef
+      # any call to a plain EFFECTS REENTRANT or EXTERN FN function. Stops at FunctionDef
       # boundaries — nested lambdas/closures are separate compilation units.
 
       sig { params(node: AST::BreakNode).returns(T.nilable(Symbol)) }
@@ -936,6 +957,38 @@ module Annotator
         end
         stamp_type!(node, :Void)
       end
-    end
+
+      private :analyze_control_flow_branches,
+        :analyze_match_case!,
+        :analyze_value_match_case!,
+        :check_match_exhaustiveness!,
+        :declare_match_destructure_fields!,
+        :declare_union_payload_binding!,
+        :declare_match_destructure_bindings!,
+        :declare_match_payload_binding!,
+        :emit_missing_match_variants!,
+        :reject_duplicate_match_patterns!,
+        :validate_match_pattern_types!,
+        :visit_match_patterns!
+      private :analyze_when_match_case!
+  private :annotate_struct_pattern!
+  private :borrow_match_payload_binding!
+  private :captured_move_consumed_by_loop?
+  private :consume_match_subject_if_takes!
+  private :emit_unknown_destructure_field!
+  private :loop_value_copyable?
+  private :match_branch_logic
+  private :match_enum_schema
+  private :match_pattern_type_matches_subject?
+  private :match_payload_binding_type
+  private :match_payload_struct_schema
+  private :match_subject_plan
+  private :match_union_schema
+  private :match_union_substitution
+  private :normalized_match_payload
+  private :validate_moved_values_not_reused_by_loop!
+  private :verify_match_multi_arm_payloads!
+
+end
   end
 end

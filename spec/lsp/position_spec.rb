@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/position"
+require_relative "../../src/lsp/position" unless defined?(LSP::Position)
 
 RSpec.describe LSP::Position do
   Token = Struct.new(:line, :column, :value, keyword_init: true)
@@ -30,6 +30,14 @@ RSpec.describe LSP::Position do
       )
     end
 
+    it "uses nil source by default" do
+      tok = Token.new(line: 1, column: 2, value: "x")
+      expect(LSP::Position.range_for(tok, 1)).to eq(
+        start: { line: 0, character: 1 },
+        end:   { line: 0, character: 2 },
+      )
+    end
+
     it "treats UTF-8 multi-byte chars as 1 UTF-16 code unit when below U+FFFF" do
       # `é` is 2 bytes (0xC3 0xA9) but 1 UTF-16 code unit.
       # Line text: "  é foo"; the `f` of `foo` is at byte column 5
@@ -50,6 +58,33 @@ RSpec.describe LSP::Position do
       expect(r[:start][:character]).to eq(3)
       expect(r[:end][:character]).to eq(6)
     end
+
+    it "rounds byte offsets inside a UTF-8 character to the next UTF-16 boundary" do
+      tok = Token.new(line: 1, column: 2, value: "")
+      r = LSP::Position.range_for(tok, 0, "éx\n")
+      expect(r).to eq(
+        start: { line: 0, character: 1 },
+        end:   { line: 0, character: 1 },
+      )
+    end
+
+    it "counts U+10000 as the first supplementary-plane codepoint" do
+      tok = Token.new(line: 1, column: 5, value: "x")
+      r = LSP::Position.range_for(tok, 1, "\u{10000}x\n")
+      expect(r).to eq(
+        start: { line: 0, character: 2 },
+        end:   { line: 0, character: 3 },
+      )
+    end
+
+    it "counts U+FFFF as one UTF-16 code unit" do
+      tok = Token.new(line: 1, column: 4, value: "x")
+      r = LSP::Position.range_for(tok, 1, "\u{FFFF}x\n")
+      expect(r).to eq(
+        start: { line: 0, character: 1 },
+        end:   { line: 0, character: 2 },
+      )
+    end
   end
 
   describe ".range_for_span" do
@@ -69,15 +104,33 @@ RSpec.describe LSP::Position do
       )
     end
 
+    it "uses source text for UTF-16 columns in a single-line Span" do
+      span = span_class.new(file: nil, line: 1, col: 4, length: 3)
+      expect(LSP::Position.range_for_span(span, "é foo\n")).to eq(
+        start: { line: 0, character: 2 },
+        end:   { line: 0, character: 5 },
+      )
+    end
+
+    it "uses nil source by default" do
+      span = span_class.new(file: nil, line: 1, col: 2, length: 3)
+      expect(LSP::Position.range_for_span(span)).to eq(
+        start: { line: 0, character: 1 },
+        end:   { line: 0, character: 4 },
+      )
+    end
+
     it "handles a multi-line Span via end_line override" do
       multi_span = Object.new
       def multi_span.line; 2; end
       def multi_span.end_line; 4; end
-      def multi_span.col; 1; end
-      def multi_span.end_col; 5; end
-      r = LSP::Position.range_for_span(multi_span, "a\nb\nc\nd\n")
-      expect(r[:start][:line]).to eq(1)
-      expect(r[:end][:line]).to eq(3)
+      def multi_span.col; 4; end
+      def multi_span.end_col; 6; end
+      r = LSP::Position.range_for_span(multi_span, "a\n é start\nmiddle\n🎉 end\n")
+      expect(r).to eq(
+        start: { line: 1, character: 2 },
+        end:   { line: 3, character: 3 },
+      )
     end
   end
 
@@ -88,6 +141,12 @@ RSpec.describe LSP::Position do
 
     it "returns true for a position inside the range" do
       expect(LSP::Position.position_in_range?({ line: 2, character: 6 }, range)).to be true
+    end
+
+    it "does not apply start or end columns to middle lines" do
+      multi_line = { start: { line: 2, character: 4 }, end: { line: 4, character: 10 } }
+      expect(LSP::Position.position_in_range?({ line: 3, character: 0 }, multi_line)).to be true
+      expect(LSP::Position.position_in_range?({ line: 3, character: 99 }, multi_line)).to be true
     end
 
     it "returns false above the range's start line" do
@@ -115,10 +174,12 @@ RSpec.describe LSP::Position do
 
   describe ".line_at" do
     it "returns the requested line without its trailing newline" do
+      expect(LSP::Position.line_at("a\nbb\nccc\n", 0)).to eq("a")
       expect(LSP::Position.line_at("a\nbb\nccc\n", 1)).to eq("bb")
     end
 
     it "returns nil when out of bounds" do
+      expect(LSP::Position.line_at("a\n", 1)).to be_nil
       expect(LSP::Position.line_at("a\n", 5)).to be_nil
       expect(LSP::Position.line_at("a\n", -1)).to be_nil
     end

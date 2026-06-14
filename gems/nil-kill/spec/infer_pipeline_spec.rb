@@ -65,4 +65,52 @@ RSpec.describe "nil-kill infer pipeline" do
       expect(File.read(NilKill::REPORT_PATH)).to include("PipelineExample#call")
     end
   end
+
+  it "loads and merges runtime method-edge evidence" do
+    Dir.mktmpdir("nil-kill-pipeline-edges", NilKill::ROOT) do |dir|
+      source = File.join(dir, "edges.rb")
+      File.write(source, <<~RUBY)
+        class RuntimeEdgePipeline
+          def caller
+            callee
+          end
+
+          def callee
+            "ok"
+          end
+        end
+      RUBY
+
+      runtime_dir = NilKill::RUNTIME_DIR
+      FileUtils.rm_rf(runtime_dir)
+      FileUtils.mkdir_p(runtime_dir)
+      File.write(File.join(runtime_dir, "method-edges-a.jsonl"), JSON.generate(
+        "caller" => {"class" => "RuntimeEdgePipeline", "method" => "caller", "kind" => "instance", "path" => source, "line" => 2},
+        "callee" => {"class" => "RuntimeEdgePipeline", "method" => "callee", "kind" => "instance", "path" => source, "line" => 6},
+        "calls" => 2,
+        "ok_calls" => 2,
+        "raised_calls" => 0
+      ) + "\n")
+      File.write(File.join(runtime_dir, "method-edges-b.jsonl"), JSON.generate(
+        "caller" => {"class" => "RuntimeEdgePipeline", "method" => "caller", "kind" => "instance", "path" => source, "line" => 2},
+        "callee" => {"class" => "RuntimeEdgePipeline", "method" => "callee", "kind" => "instance", "path" => source, "line" => 6},
+        "calls" => 3,
+        "ok_calls" => 1,
+        "raised_calls" => 2
+      ) + "\n")
+
+      isolated_env("NIL_KILL_TARGETS" => dir) do
+        expect { NilKill::Infer.new(["--no-sorbet"]).run }.to output(/Nil Kill Report/).to_stdout
+      end
+
+      evidence = JSON.parse(File.read(NilKill::EVIDENCE_PATH))
+      expect(evidence.dig("facts", "runtime_call_edges")).to contain_exactly(a_hash_including(
+        "caller" => a_hash_including("class" => "RuntimeEdgePipeline", "method" => "caller"),
+        "callee" => a_hash_including("class" => "RuntimeEdgePipeline", "method" => "callee"),
+        "calls" => 5,
+        "ok_calls" => 3,
+        "raised_calls" => 2
+      ))
+    end
+  end
 end

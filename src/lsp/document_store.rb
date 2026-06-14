@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "analysis_result"
 
 module LSP
   # In-memory store of open documents. The LSP advertises full-sync
@@ -23,8 +24,8 @@ module LSP
       # Cached findings + the version they reflect. Hover and
       # codeAction read these without re-analysing. Set by the Server
       # after each `analyze_and_publish` pass.
-      sig { returns(T.nilable(T.any(LSP::Analyzer::Result, String))) }
-      def cached_findings;          @cached_findings = T.let(@cached_findings, T.nilable(T.any(LSP::Analyzer::Result, String))); end
+      sig { returns(T.nilable(T.any(LSP::AnalysisResult, String))) }
+      def cached_findings;          @cached_findings = T.let(@cached_findings, T.nilable(T.any(LSP::AnalysisResult, String))); end
       sig { params(value: T.untyped).void }
       def cached_findings=(value);  @cached_findings = value; end
       sig { returns(T.nilable(Integer)) }

@@ -9,10 +9,10 @@ Goal: make `tools/fuzz` an A-level, future-proof ownership-safety regression sui
  - [x] Add an initial `tools/fuzz/coverage.rb` report that loads the real templates, checks README/template drift, and reports uncovered registry dimensions.
  - [ ] Wire the ownership-surface registry into MIR safety tooling so MIR and fuzz share the same source of truth.
  - [ ] Replace template-local hardcoded dimensions (`ALLOC_KINDS`, `SYNCS`, ownership lists, escape-pattern lists) with registry-derived dimensions wherever the template is meant to cover a whole ownership surface.
- - [ ] Promote `tools/fuzz/coverage.rb` to a CI gate once the first intentionally uncovered P0 surfaces are either covered or marked unsupported/in-dev with reasons.
+ - [x] Promote `tools/fuzz/coverage.rb` to a CI-ready gate once the first intentionally uncovered P0 surfaces are either covered or marked unsupported/in-dev with reasons. It now exits nonzero for stale README counts, missing template metadata, high-risk non-exhaustive matrices, and uncovered P0 sink/value-shape cross-products.
  - [ ] Add a CI gate for registry drift: adding a new capability/collection/escape method/MIR ownership-effect node/collection method registry entry/boundary form requires registry metadata, and the fuzz coverage report must stay green.
  - [ ] Make negative cells diagnostic-specific. `expected: :compile_error` should include an expected diagnostic code/category/message fragment or MIR invariant id, so a parser/codegen failure cannot masquerade as the intended safety rejection.
- - [ ] Fix stale fuzz documentation/reporting: README matrix counts must be generated from the registry/template loader, and documented templates must exist.
+ - [x] Fix stale fuzz documentation/reporting: README matrix counts are checked against the generator, and documented templates must exist.
 
 ## Phase 2 - Expand UAF / Cleanup Matrices Across All Owned Shapes
 
@@ -30,15 +30,15 @@ Goal: make `tools/fuzz` an A-level, future-proof ownership-safety regression sui
  - [x] Add first mutant, `allow_with_alias_return`, which disables RETURN rejection for WITH-scoped aliases.
  - [x] Validate first mutant signal: `access_gate` baseline was 50 run / 46 ok / 4 MIR errors / 0 unexpected-pass; mutated run was 50 run / 43 ok / 4 MIR errors / 3 unexpected-pass. Result: killed with useful signal despite existing baseline noise.
  - [x] Harden mutant runner for manual release: target-file dirty guard, `--allow-dirty`, `--dry-run`, progress output, persisted baseline/mutated logs, defensive reverse-patch check, configurable kill predicates, and README docs marking the harness manual-only.
- - [ ] Add mutant tests for each major invariant: skip promotion, skip cleanup, allow alias escape, forget BG lifetime stamping, omit collection cleanup, treat non-copy collections as copyable, drop allocator identity on error paths, and bypass MIR for a collection mutation.
- - [ ] Add per-template scope metadata: real code vs modeled behavior, exhaustive matrix vs sampled cells, active vs `:in_dev`, exact invariants asserted, known exclusions, and what class of bug a failure proves.
- - [ ] Add a generated coverage report that maps each template to registry dimensions and highlights uncovered capability/type/escape cross-products by severity.
- - [ ] Keep template matrices bounded with pairwise/orthogonal-array generation for huge cross-products, but require full expansion for high-risk P0 surfaces: cleanup-bearing type escaping frame, alias escape sinks, lifetime-bound BG handle escape, and boundary admission.
+ - [x] Add mutant tests for each current major compiler invariant: skip promotion, skip cleanup, allow alias escape, forget BG lifetime stamping, drop allocator identity on error paths, bypass MIR ownership finalization, move-guard emission, call contracts, inline allocator mismatch, aggregate child allocator mismatch, union payload binding, and FSM suspension. Current gate: 21/21 killed.
+ - [x] Add per-template scope metadata: real code vs modeled behavior, exhaustive matrix vs sampled cells, active vs `:in_dev`, exact invariants asserted, known exclusions, and what class of bug a failure proves.
+ - [x] Add a generated coverage report that maps each template to registry dimensions and highlights uncovered capability/type/escape cross-products by severity.
+ - [x] Keep template matrices bounded with pairwise/orthogonal-array generation for huge cross-products, but require full expansion for high-risk P0 surfaces: cleanup-bearing type escaping frame, alias escape sinks, lifetime-bound BG handle escape, and boundary admission.
 
 ## Acceptance Criteria
 
  - [ ] A developer cannot add a new capability, collection/container type, escape sink/source, MIR ownership effect, or execution boundary without updating the ownership-surface registry.
- - [ ] `tools/fuzz/coverage.rb` proves every registered high-risk surface is covered by the relevant templates or explicitly marked unsupported/in-dev with a reason.
+ - [x] `tools/fuzz/coverage.rb` proves every registered high-risk surface is covered by the relevant templates or explicitly marked unsupported/in-dev with a reason.
  - [ ] Negative fuzz cells fail only for the intended diagnostic/invariant, not any compile failure.
- - [ ] At least one mutant per major invariant is caught by the fuzz suite.
- - [ ] Fuzz README/reporting is generated enough that matrix counts and template lists cannot go stale.
+ - [x] At least one mutant per current major compiler invariant is caught by the fuzz suite.
+ - [x] Fuzz README/reporting is generated enough that matrix counts and template lists cannot go stale.

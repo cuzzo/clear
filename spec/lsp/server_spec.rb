@@ -1,6 +1,6 @@
 require "rspec"
 require "stringio"
-require_relative "../../src/lsp/server"
+require_relative "../../src/lsp/server" unless defined?(LSP::Server)
 
 # Lifecycle tests for LSP::Server. Drives the server with canned
 # stdin frames and asserts on the responses written to stdout.

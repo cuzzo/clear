@@ -1,16 +1,15 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/fixable_error"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
 
 # Thunk Phase 4f.2 -- EFFECTS REENTRANT:NOT_LOGICAL.
 #
 # `:NOT_LOGICAL` declares that the function asserts (at runtime)
 # the recursion is logically impossible. The compiler can't prove
-# it. We compile in the existing `safety.StackGuard` prologue from
-# the legacy `@nonReentrant` path; it raises
+# it. We compile in the existing `safety.StackGuard` prologue; it raises
 # `error.UnexpectedRecursion` (System) if the function re-enters.
 # Because the guard CAN raise, the function MUST declare an
 # error-union return type (`!T`).
@@ -18,7 +17,7 @@ require_relative "../src/ast/fixable_error"
 RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)
@@ -103,7 +102,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
       }.to raise_error(/error-union return type.*!Void/m)
     end
 
-    it "stamps reentrance_kind = :reentrant_not_logical and reentrant = :non_reentrant" do
+    it "stamps reentrance_kind = :reentrant_not_logical and requires a guard" do
       ast = annotate(<<~CLEAR)
         FN f(n: Int64) RETURNS !Int64
           EFFECTS REENTRANT:NOT_LOGICAL ->
@@ -113,7 +112,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "f" }
       expect(fn.reentrance_kind).to eq(:reentrant_not_logical)
-      expect(fn.reentrant).to eq(:non_reentrant)
+      expect(fn.reentrance_guard_required?).to be(true)
     end
   end
 
@@ -139,7 +138,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
     def collect_findings(source)
       FixCollector.enable!
       tokens = Lexer.new(source).tokenize
-      ast = Parser.new(tokens, source).parse
+      ast = ClearParser.new(tokens, source).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       FixCollector.drain
     end

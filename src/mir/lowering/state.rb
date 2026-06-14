@@ -3,11 +3,11 @@ require "sorbet-runtime"
 require "set"
 
 require_relative "../mir"
-require_relative "../mir_emitter"
+require_relative "../../backends/mir_emitter"
 require_relative "../lower/pipeline/pipeline_host"
 require_relative "../../ast/ast"
 require_relative "../../ast/symbol_entry"
-require_relative "../../backends/importer"
+require_relative "../../compiler/module_importer"
 require_relative "../lowering/counters"
 require_relative "../lowering/schema_registry"
 require_relative "../lowering/functions"
@@ -64,7 +64,8 @@ class MIRLoweringProgramState < T::Struct
   extend T::Sig
 
   FnSigMap = T.type_alias { T::Hash[T.any(String, Symbol), FunctionSignature] }
-  ShardContext = T.type_alias { T.nilable(T::Hash[Symbol, String]) }
+  ShardContextMap = T.type_alias { T::Hash[Symbol, String] }
+  ShardContext = T.type_alias { T.nilable(ShardContextMap) }
   FnNodeMap = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   prop :fn_sigs, FnSigMap, factory: -> { {} }
@@ -89,13 +90,13 @@ class MIRLoweringCaptureState < T::Struct
   CaptureSymbols = T.type_alias { T::Hash[String, SymbolEntry] }
 
   prop :current_bg_pointer_captures, T.nilable(T::Set[String]), default: nil
-  prop :current_fiber_capture_symbols, T.nilable(CaptureSymbols), default: nil
+  prop :current_fiber_capture_symbols, CaptureSymbols, factory: -> { {} }
   prop :do_capture_map, T.nilable(CaptureMap), default: nil
   prop :current_stream_is_inf, T.nilable(T::Boolean), default: nil
   prop :current_stream_local, T.nilable(String), default: nil
   prop :current_fsm_inherited_alloc_names, T::Set[String], factory: -> { Set.new }
   prop :current_fsm_inherited_guarded_names, T::Set[String], factory: -> { Set.new }
-  prop :current_fsm_owned_result_guards, T.nilable(T::Hash[String, String]), default: nil
+  prop :current_fsm_owned_result_guards, T::Hash[String, String], factory: -> { {} }
   prop :last_fsm_result_transfer_facts, T::Array[MIR::FsmResultTransferFact], default: []
 end
 
@@ -117,6 +118,15 @@ class MIRLoweringOwnershipState < T::Struct
   prop :finalized_node_ids, T::Set[MIR::LoweredNodeId], factory: -> { Set.new }
 end
 
+class MIRLoweringTestState < T::Struct
+  extend T::Sig
+
+  ActiveStubs = T.type_alias { T::Hash[T.untyped, T.untyped] }
+
+  prop :active_stubs, ActiveStubs, factory: -> { {} }
+  prop :stub_label_counter, Integer, default: 0
+end
+
 class MIRLoweringState < T::Struct
   extend T::Sig
 
@@ -129,4 +139,5 @@ class MIRLoweringState < T::Struct
   const :capture, MIRLoweringCaptureState
   const :capabilities, MIRLoweringCapabilityState
   const :ownership, MIRLoweringOwnershipState
+  const :test, MIRLoweringTestState
 end

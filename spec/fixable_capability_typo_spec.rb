@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Capability sigil / modifier / WITH-keyword typos. All three sites
 # now route through emit_typo_suggestion! with the appropriate
@@ -14,7 +14,7 @@ RSpec.describe "Capability typo auto-fixes" do
 
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   describe "UNKNOWN_CAPABILITY_SIGIL — `@shared:lokced` typo" do

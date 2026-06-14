@@ -13,7 +13,7 @@ require_relative "hover"
 module LSP
   # CLEAR Language Server. The lifecycle pieces (initialize, shutdown,
   # exit) handle protocol setup; the textDocument/* handlers run the
-  # canonical Lexer→Parser→SemanticAnnotator pipeline against open
+  # canonical Lexer→ClearParser→SemanticAnnotator pipeline against open
   # documents and publish diagnostics back to the client.
   class Server
       extend T::Sig
@@ -73,9 +73,9 @@ module LSP
     # debounce window deterministically.
     sig { returns(T::Array[T.untyped]) }
     def flush_pending!
-      threads = T.let(nil, T.nilable(T::Array[Thread]))
+      threads = T.let([], T::Array[Thread])
       @timer_mutex.synchronize { threads = @timers.values.dup }
-      T.must(threads).each(&:join)
+      threads.each(&:join)
     end
 
     private
@@ -250,7 +250,7 @@ module LSP
     # an active diagnostic, render the registry entry + spec example
     # as markdown. Returns nil to dismiss the hover popup when there's
     # nothing relevant.
-    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(Hover::HoverResponse)) }
     def handle_hover(params)
       uri = params["textDocument"]["uri"]
       pos = params["position"]

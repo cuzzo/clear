@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Tests that Type#needs_promotion? and Type#needs_cleanup? mirror
 # the Zig comptime needsPromotion and needsCleanup functions exactly.
@@ -11,7 +11,7 @@ require_relative "../src/ast/type"
 # Struct fields typed as T[] are slices in Zig; ArrayList variables are promoted
 # separately by mark_escaping_collections!.
 
-RSpec.describe "Type promotion/cleanup analysis" do
+RSpec.describe Type, "promotion/cleanup analysis" do
   let(:schemas) do
     {
       Point: Schemas::StructSchema.new(fields: { "x" => :Float64, "y" => :Float64 }),

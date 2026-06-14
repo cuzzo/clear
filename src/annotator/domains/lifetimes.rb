@@ -142,20 +142,28 @@ module Annotator
           current_fn_ctx&.record_heap_use!
         end
 
+        deep_copy = collection_copy_deep_copy_required(node)
+        node.deep_copy = deep_copy unless deep_copy.nil?
+      end
+
+      sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
+      def collection_copy_deep_copy_required(node)
+        T.bind(self, SemanticAnnotator)
+
         # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
         # For list/array types, check if element type is a non-Copy union.
         vti = Type.from_node!(node.value, context: "array/list deep-copy")
-        if vti.direct_indexable_collection?
-          elem = vti.element_type
-          if elem
-            schema = lookup_type_schema(elem.resolved)
-            if Schemas.union?(schema)
-              has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-              node.deep_copy = has_heap
-            end
-          end
-        end
+        return nil unless vti.direct_indexable_collection?
+
+        elem = vti.element_type
+        return nil unless elem
+
+        schema = lookup_type_schema(elem.resolved)
+        return nil unless Schemas.union?(schema)
+
+        (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
+      private :collection_copy_deep_copy_required
 
       sig { params(node: AST::Copy).returns(T.nilable(T::Boolean)) }
       def visit_Copy(node)
@@ -356,7 +364,7 @@ module Annotator
 
         reject_borrowed_index_assignment_move!(node)
         path = get_path_to_root(node.value)
-        return if path.nil?
+        return if path.empty?
         value_type = Type.new(node.value.resolved_type)
         return unless value_type.requires_move?
 
@@ -438,7 +446,7 @@ module Annotator
         return unless actual_arg
 
         path = get_path_to_root(actual_arg)
-        return if path.nil?
+        return if path.empty?
 
         root_var = path.first.to_s
         borrowed_scope = lookup_scope_for(root_var)
@@ -466,11 +474,10 @@ module Annotator
             end
             # Named param lifetime -- find by index in args list
             args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-            arg_types = matched_def.arg_spec
-            if arg_types.is_a?(Array)
-              idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
-              return args[idx] if idx && args[idx]
+            idx = matched_def.intrinsic_arg_specs.index do |arg_spec|
+              arg_spec.name && lifetimes.include?(arg_spec.name)
             end
+            return args[idx] if idx && args[idx]
             return nil
           end
         end
@@ -508,14 +515,14 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         path = get_path_to_root(node.name)
-        return if path.nil?
+        return if path.empty?
         root_name = path.first.to_s
         unless ownership_graph.can_write?(root_name)
           error!(node, :ASSIGN_WHILE_BORROWED, name: root_name)
         end
       end
 
-      sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[String, SymbolEntry])) }
+      sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).void }
       def finalize_scope(node, branch: nil)
         T.bind(self, SemanticAnnotator)
 
@@ -642,7 +649,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.any(AST::Node, String, Symbol)).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: T.any(AST::Node, String, Symbol)).returns(T::Array[Symbol]) }
       def get_path_to_root(node)
         T.bind(self, SemanticAnnotator)
 
@@ -652,7 +659,7 @@ module Annotator
           path.unshift(curr.is_a?(AST::GetField) ? curr.field.to_sym : :*)
           curr = curr.target
         end
-        return nil unless curr.is_a?(AST::Identifier)
+        return [] unless curr.is_a?(AST::Identifier)
         path.unshift(curr.name.to_sym)
         path
       end
@@ -688,10 +695,11 @@ module Annotator
           # have an equivalent @shared:locked repair.
           fix = build_atomic_escape_migration_fix(source, source_name)
           if fix
-            fixable!(assign_node, message: msg, category: :escape,
+            fixable!(assign_node, code: :ATOMIC_ESCAPE_ASSIGN, detail: msg,
+                     category: :escape,
                      level: :error, fixes: [fix], raise_in_collector: true)
           else
-            error!(assign_node, :ATOMIC_ESCAPE_ASSIGN, message: msg)
+            error!(assign_node, :ATOMIC_ESCAPE_ASSIGN, detail: msg)
           end
         end
       end
@@ -720,7 +728,7 @@ module Annotator
 
         declared_names = declared.flat_map do |n|
           path = get_path_to_root(n)
-          path ? [path.first.to_s] : []
+          path.empty? ? [] : [T.must(path.first).to_s]
         end
 
         source_names = sources.map do |s|
@@ -756,10 +764,11 @@ module Annotator
         end
 
         if atomic_fix
-          fixable!(return_node, message: msg, category: :escape,
+          fixable!(return_node, code: :ATOMIC_ESCAPE_RETURN, detail: msg,
+                   category: :escape,
                    level: :error, fixes: [atomic_fix], raise_in_collector: true)
         else
-          error!(return_node, :ATOMIC_ESCAPE_RETURN, message: msg)
+          error!(return_node, :ATOMIC_ESCAPE_RETURN, detail: msg)
         end
       end
 
@@ -781,30 +790,6 @@ module Annotator
           next unless fn.respond_to?(:params)
           fn.params.each do |p|
             return p.name.to_s if p.symbol.equal?(sym)
-          end
-        end
-        nil
-      end
-
-      # Return an error string when storing val_node at dest_depth would let it
-      # outlive one of its tied-lifetime sources.
-      sig { params(val_node: AST::Node, dest_depth: Integer).returns(T.nilable(String)) }
-      def lifetime_violation_for_store(val_node, dest_depth)
-        T.bind(self, SemanticAnnotator)
-
-        sources = lifetime_sources_for_value(val_node)
-        return nil if sources.empty?
-        # `:current_scope` lifetime is detected via lifetime_sources
-        # returning [self], which means source.scope_depth = sym's own
-        # depth. The same depth comparison applies uniformly.
-        # CLEAR scopes are LIFO-stacked: shallower depth = scope lives
-        # LONGER. Destination outlives source iff dest_depth < source.depth.
-        sources.each do |source|
-          next if source.scope_depth.nil?
-          if dest_depth < T.must(source.scope_depth)
-            return "Lifetime Error: cannot store value with lifetime tied to " \
-                   "scope depth #{source.scope_depth} into a destination at " \
-                   "depth #{dest_depth} (the destination outlives the source)."
           end
         end
         nil
@@ -1055,7 +1040,10 @@ module Annotator
         return [] if rl.nil?
         return [:wildcard] if rl == :wildcard
         sources = rl.is_a?(Array) ? rl : [rl]
-        sources.map { |s| get_path_to_root(s)&.join(".") }.compact
+        sources.filter_map do |source|
+          path = get_path_to_root(source)
+          path.join(".") unless path.empty?
+        end
       end
 
       # Backward-compat shim: legacy single-binding callers got a single
@@ -1174,7 +1162,7 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "move candidate")
-        return if current_fn_ctx&.type_params&.include?(vt.resolved)
+        return if current_function_type_param?(vt.resolved)
         return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
         existing = ownership_graph.nodes[node.name]
         if existing&.specific_move_action?
@@ -1200,7 +1188,7 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "TAKES ownership candidate")
-        return if current_fn_ctx&.type_params&.include?(vt.resolved)
+        return if current_function_type_param?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 
         existing = ownership_graph.nodes[node.name]
@@ -1230,7 +1218,7 @@ module Annotator
         return if vti&.primitive?
         return if vti&.generic_instance?
         # Skip generic type parameters - can't determine borrowability at annotation time.
-        return if current_fn_ctx&.type_params&.include?(vti&.resolved)
+        return if current_function_type_param?(vti&.resolved)
         has_pointer = vti&.heap_ptr?
         return if !has_pointer && !vti&.struct?
         error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)
@@ -1251,6 +1239,26 @@ module Annotator
           :affine
         end
       end
-    end
+
+      private :bg_capture_independent?,
+        :collect_bg_sources_walk,
+        :handle_assignment_path_move!,
+        :reject_borrowed_index_assignment_move!
+      private :bg_lifetime_sources
+  private :bg_sources_for_block
+  private :classify_og_kind
+  private :collect_bg_sources_in_expr
+  private :declare_assignment_graph_path!
+  private :dest_scope_depth_for_target
+  private :get_lifetime_paths
+  private :get_path_to_root
+  private :handle_assignment_identifier_move!
+  private :init_value_contents_heap?
+  private :reject_scoped_assignment_move!
+  private :resolve_borrow_source
+  private :share_consumes_source?
+  private :value_copy_capture?
+
+end
   end
 end

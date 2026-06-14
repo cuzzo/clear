@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/formatter"
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
 
 # End-to-end: METHOD-flagged FNs have their prefix call sites
 # rewritten to UFCS form when running through `Formatter.format`.

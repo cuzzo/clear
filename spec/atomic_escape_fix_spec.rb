@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
 
 # Atomics M2.8 -- the M2.6 lifetime errors that fire on `@shared:atomic`
 # sources are now fixable findings. Under `FixCollector`, they record
@@ -17,7 +17,7 @@ require_relative "../src/ast/fixable_error"
 RSpec.describe "Atomic-escape fixable finding (M2.8)" do
   def collect_findings(src)
     tokens = Lexer.new(src).tokenize
-    ast    = Parser.new(tokens, src).parse
+    ast    = ClearParser.new(tokens, src).parse
     ann    = SemanticAnnotator.new
     ann.source_code = src
     FixCollector.enable!
@@ -132,7 +132,7 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast    = Parser.new(tokens, src).parse
+      ast    = ClearParser.new(tokens, src).parse
       ann    = SemanticAnnotator.new
       ann.source_code = src
       FixCollector.enable!

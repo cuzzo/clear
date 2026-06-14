@@ -1,0 +1,12 @@
+diff --git a/src/backends/mir_emitter.rb b/src/backends/mir_emitter.rb
+index 000000000..000000000 100644
+--- a/src/backends/mir_emitter.rb
++++ b/src/backends/mir_emitter.rb
+@@ -1876,6 +1876,6 @@ class MIREmitter
+       body = emit_body(arm.body)
+       payload = arm.payload
+-      capture = payload ? " |#{payload}|" : ""
++      capture = ""
+       ".#{arm.variant} =>#{capture} {\n#{body}\n}"
+     end
+     if node.default_body

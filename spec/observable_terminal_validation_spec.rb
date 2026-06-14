@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # T13 + T14: late-tranche test coverage from task #202.
 #
@@ -17,7 +17,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "T13/T14: observable terminal validation + nesting" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

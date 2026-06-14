@@ -2187,20 +2187,38 @@ pub const CheatLib = struct {
     // loops -- the kernel handles the wait internally.
     // -----------------------------------------------------------------------
 
-    // Write `data` to a socket via io_uring IORING_OP_SEND.
-    // Loops on short sends (resubmits remainder), yielding between each.
+    // Write `data` to a non-blocking socket.
+    //
+    // Fast path: try direct write first. Hot loopback workloads often have
+    // send-buffer capacity already available, and paying an io_uring
+    // submission + fiber yield for every ready write is far more expensive
+    // than the syscall itself.
+    //
+    // Slow path: if the fd would block, submit IORING_OP_SEND and yield.
+    // Loops on short sends until every byte is written.
     // Returns the total bytes sent (== data.len on success).
     pub noinline fn socketWrite(fd: i32, data: []const u8) !usize {
-        const sched = fp.active_scheduler;
-        const task = sched.getCurrent();
         var sent: usize = 0;
         while (sent < data.len) {
-            var waiter = fp.Scheduler.IoWaiter{ .task = task };
-            try sched.submitSend(&waiter, fd, data[sent..]);
-            task.base.yield();
-            if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
-            if (waiter.result == 0) return sent;
-            sent += @intCast(waiter.result);
+            const rc = std.c.write(fd, data.ptr + sent, data.len - sent);
+            const n: usize = switch (std.posix.errno(rc)) {
+                .SUCCESS => @intCast(rc),
+                .INTR => continue,
+                .AGAIN => blk: {
+                    if (!fp.scheduler_running) return error.WouldBlock;
+
+                    const sched = fp.active_scheduler;
+                    const task = sched.getCurrent();
+                    var waiter = fp.Scheduler.IoWaiter{ .task = task };
+                    try sched.submitSend(&waiter, fd, data[sent..]);
+                    task.base.yield();
+                    if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
+                    break :blk @intCast(waiter.result);
+                },
+                else => return error.Unexpected,
+            };
+            if (n == 0) return sent;
+            sent += n;
         }
         return sent;
     }
@@ -3392,19 +3410,8 @@ pub const CheatLib = struct {
             return try T.init(alloc, inner);
         }
 
-        if (info == .@"struct" and @hasDecl(T, "dupe")) {
+        if (comptime hasAllocatorDupe(T)) {
             return try value.dupe(alloc);
-        }
-
-        if (info == .@"struct" and !@hasDecl(T, "deinit")) {
-            var result = value;
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                if (comptime needsCleanup(FT)) {
-                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
-                }
-            }
-            return result;
         }
 
         // ArrayList: allocate a fresh buffer of the same length and deep-copy
@@ -3569,7 +3576,26 @@ pub const CheatLib = struct {
             return result;
         }
 
+        if (info == .@"struct" and !@hasDecl(T, "deinit")) {
+            var result = value;
+            inline for (info.@"struct".fields) |field| {
+                const FT = field.type;
+                if (comptime needsCleanup(FT)) {
+                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
+                }
+            }
+            return result;
+        }
+
         return value;
+    }
+
+    fn hasAllocatorDupe(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct" or !@hasDecl(T, "dupe")) return false;
+
+        const dupe_info = @typeInfo(@TypeOf(T.dupe));
+        return dupe_info == .@"fn" and dupe_info.@"fn".params.len == 2;
     }
 
     /// The owned type a COPY-captured binding becomes in the fiber.
@@ -3649,101 +3675,18 @@ pub const CheatLib = struct {
     pub fn dupeUnionValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
         const info = @typeInfo(T);
         if (info != .@"union" or info.@"union".tag_type == null) return value;
+
         var result = value;
         inline for (info.@"union".fields) |field| {
             if (std.meta.activeTag(value) == @field(std.meta.Tag(T), field.name)) {
                 const FT = field.type;
-                const ft_info = @typeInfo(FT);
-                if (FT == []const u8) {
-                    const src = @field(value, field.name);
-                    @field(result, field.name) = if (src.len > 0) try alloc.dupe(u8, src) else src;
-                    return result;
-                } else if (ft_info == .pointer and ft_info.pointer.size == .slice and FT != []u8) {
-                    const src = @field(value, field.name);
-                    if (src.len > 0) {
-                        const ElemT = ft_info.pointer.child;
-                        const buf = try alloc.alloc(ElemT, src.len);
-                        for (src, 0..) |elem, i| {
-                            buf[i] = try dupeUnionValue(ElemT, elem, alloc);
-                        }
-                        @field(result, field.name) = buf;
-                    }
-                    return result;
-                } else if (ft_info == .pointer and ft_info.pointer.size == .one and
-                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
-                {
-                    // Single pointer (*T): allocate new pointee and deep-copy.
-                    // Handles @indirect fields in union variants.
-                    const src_ptr = @field(value, field.name);
-                    const ChildT = ft_info.pointer.child;
-                    const new_ptr = try alloc.create(ChildT);
-                    // Use dupeStructSlices for struct pointees (deep-copies string/slice fields).
-                    // Use dupeUnionValue for union pointees.
-                    if (@typeInfo(ChildT) == .@"struct")
-                        new_ptr.* = try dupeStructSlices(ChildT, src_ptr.*, alloc)
-                    else
-                        new_ptr.* = try dupeUnionValue(ChildT, src_ptr.*, alloc);
-                    @field(result, field.name) = new_ptr;
-                    return result;
-                } else if (ft_info == .@"struct") {
-                    if (comptime isArrayList(FT)) {
-                        // Deep copy ArrayList: allocate independent backing slice and dupe each element.
-                        const ElemT = arrayListElemType(FT).?;
-                        const src = @field(value, field.name);
-                        if (src.items.len > 0) {
-                            const new_buf = try alloc.alloc(ElemT, src.items.len);
-                            for (src.items, 0..) |elem, ii| {
-                                new_buf[ii] = try dupeUnionValue(ElemT, elem, alloc);
-                            }
-                            @field(result, field.name) = FT{ .items = new_buf, .capacity = new_buf.len };
-                        }
-                        return result;
-                    } else if (comptime (!isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
-                        !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put"))))
-                    {
-                        @field(result, field.name) = try dupeStructSlices(FT, @field(value, field.name), alloc);
-                        return result;
-                    }
+                if (comptime needsCleanup(FT)) {
+                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
                 }
-                return value;
+                return result;
             }
         }
         return value;
-    }
-
-    /// Deep-copy slice and pointer fields inside a struct.
-    fn dupeStructSlices(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
-        const info = @typeInfo(T);
-        if (info != .@"struct") return value;
-        var result = value;
-        inline for (info.@"struct".fields) |field| {
-            const FT = field.type;
-            const ft_info = @typeInfo(FT);
-            if (ft_info == .pointer and ft_info.pointer.size == .slice) {
-                const src = @field(value, field.name);
-                if (src.len > 0) {
-                    const ElemT = ft_info.pointer.child;
-                    if (FT == []const u8 or FT == []u8) {
-                        @field(result, field.name) = try alloc.dupe(u8, src);
-                    } else {
-                        const buf = try alloc.alloc(ElemT, src.len);
-                        for (src, 0..) |elem, i| {
-                            buf[i] = try dupeUnionValue(ElemT, elem, alloc);
-                        }
-                        @field(result, field.name) = buf;
-                    }
-                }
-            } else if (ft_info == .pointer and ft_info.pointer.size == .one) {
-                const child_ptr = @field(value, field.name);
-                const ChildT = ft_info.pointer.child;
-                const new_ptr = try alloc.create(ChildT);
-                new_ptr.* = try dupeUnionValue(ChildT, child_ptr.*, alloc);
-                @field(result, field.name) = new_ptr;
-            } else if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-                @field(result, field.name) = try dupeUnionValue(FT, @field(value, field.name), alloc);
-            }
-        }
-        return result;
     }
 
     fn isArrayList(comptime T: type) bool {

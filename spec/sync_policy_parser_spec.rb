@@ -1,8 +1,8 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # True-Sync-Polymorphism step 1 (parser): verifies the new
 #   - top-level `SYNC POLICY START ... END` block
@@ -16,7 +16,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "True-Sync-Polymorphism parser (step 1)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def parse_first_stmt(src)

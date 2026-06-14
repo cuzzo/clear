@@ -1,6 +1,6 @@
-require_relative '../src/ast/lexer'
-require_relative '../src/ast/parser'
-require_relative '../src/annotator'
+require_relative '../src/ast/lexer' unless defined?(Lexer)
+require_relative '../src/ast/parser' unless defined?(ClearParser)
+require_relative '../src/annotator' unless defined?(SemanticAnnotator)
 
 # Extract ```clear code blocks from markdown files and verify they compile.
 # Blocks containing "# COMPILER ERROR" are expected to fail.
@@ -47,7 +47,7 @@ end
 
 def try_compile(code)
   tokens = Lexer.new(code).tokenize
-  ast = Parser.new(tokens, code).parse
+  ast = ClearParser.new(tokens, code).parse
   annotator = SemanticAnnotator.new
   annotator.annotate!(ast)
   true

@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/syntax_typo_scanner"
+require_relative "../src/ast/syntax_typo_scanner" unless defined?(SyntaxTypoScanner)
 
 # Unit-level coverage of SyntaxTypoScanner. The integration-tagged
 # clear_fix_spec exercises the same code via `./clear fix` subprocesses,

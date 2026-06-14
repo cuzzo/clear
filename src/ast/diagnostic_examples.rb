@@ -1,5 +1,6 @@
 # typed: strict
 require_relative "diagnostic_registry"
+require_relative "../semantic/ownership_graph"
 
 # DiagnosticExamples — pulls canonical bad/good CLEAR snippets from
 # spec files for `clear explain` to render.
@@ -39,7 +40,8 @@ require_relative "diagnostic_registry"
 # describe/it shape that the loader can extract verbatim.
 module DiagnosticExamples
   extend T::Sig
-  module_function
+
+  Example = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   class FixScan < T::Struct
     const :fix_lines, T::Array[String]
@@ -60,18 +62,18 @@ module DiagnosticExamples
   # Public entry point. Parses each spec file once, memoises results.
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
   sig { returns(T.untyped) }
-  def all
+  def self.all
     @all = T.let(@all, T.untyped)
     @all ||= load!
   end
 
-  sig { params(code: T.untyped).returns(T.nilable(OwnershipGraph::Node)) }
-  def lookup(code)
+  sig { params(code: T.untyped).returns(T.nilable(Example)) }
+  def self.lookup(code)
     all[code.to_sym]
   end
 
   sig { params(spec_files: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
-  def load!(spec_files = DEFAULT_SPEC_FILES)
+  def self.load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
       next unless File.exist?(path)
@@ -83,7 +85,7 @@ module DiagnosticExamples
   # ---- internals ----
 
   sig { params(path: T.untyped, out: T.untyped).returns(NilClass) }
-  def scan_file(path, out)
+  def self.scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)
     while i < lines.length
@@ -117,7 +119,7 @@ module DiagnosticExamples
   end
 
   sig { params(lines: T::Array[String], start_idx: Integer).returns(FixScan) }
-  def scan_fix_lines(lines, start_idx)
+  def self.scan_fix_lines(lines, start_idx)
     fix_lines = T.let([], T::Array[String])
     idx = start_idx
     while idx < lines.length
@@ -138,7 +140,7 @@ module DiagnosticExamples
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
   sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.untyped).returns(T.untyped) }
-  def find_block_end(lines, start_idx, indent)
+  def self.find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1
     while k < lines.length
@@ -162,7 +164,7 @@ module DiagnosticExamples
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
   sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.nilable(String)) }
-  def extract_first_heredoc_in_it(block_lines, expecting_raise:)
+  def self.extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/
       it_indent = $1.length
@@ -182,7 +184,7 @@ module DiagnosticExamples
   # legacy `<<~FLUX`) marker and ends at the next line whose only
   # non-whitespace is the matching marker name.
   sig { params(body: T.untyped).returns(T.nilable(String)) }
-  def extract_heredoc(body)
+  def self.extract_heredoc(body)
     return nil unless body =~ /<<~(CLEAR|FLUX)\b/
     marker = $~[1]
     after = $~.post_match
@@ -198,4 +200,11 @@ module DiagnosticExamples
     min_indent = nonempty.map { |l| l[/\A( *)/].length }.min
     raw_lines.map { |l| l.sub(/\A {0,#{min_indent}}/, "") }.join
   end
+
+  private_class_method :extract_first_heredoc_in_it
+  private_class_method :extract_heredoc
+  private_class_method :load!
+  private_class_method :scan_file
+  private_class_method :scan_fix_lines
+
 end

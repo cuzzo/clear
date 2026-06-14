@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_emitter"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Comparison test harness: verifies MIR pipeline produces equivalent Zig
 # to the old transpiler for simple programs. This validates MIRLowering
@@ -13,7 +13,7 @@ require_relative "../src/ast/ast"
 # "expected" Zig, then run the annotated AST through MIRLowering + MIREmitter
 # and compare the "user code" section per-statement.
 
-RSpec.describe "MIR pipeline comparison" do
+RSpec.describe MIREmitter do
   # Run full old pipeline, return the transpiled Zig.
   def old_transpile(src)
     ZigTranspiler.new.transpile(src)
@@ -460,7 +460,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include('@import("std")')
       expect(zig).to include('@import("runtime/runtime-header.zig")')
       expect(zig).to include("CheatHeader.CheatLib")
@@ -478,7 +478,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include("fn double(")
       expect(zig).to include("clearMain")
       expect(zig).to include("42")
@@ -493,7 +493,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include("Dir")
       expect(zig).to include("enum")
       expect(zig).to include("clearMain")
@@ -509,7 +509,7 @@ RSpec.describe "MIR pipeline comparison" do
         END
       CLEAR
       old_zig = ZigTranspiler.new.transpile(src)
-      new_zig = ZigTranspiler.new.transpile_mir(src)
+      new_zig = ZigTranspiler.new.send(:transpile_mir, src)
 
       # Both should have the same structural elements
       expect(new_zig).to include("Point")

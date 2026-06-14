@@ -13,11 +13,11 @@ $LOAD_PATH.unshift(File.join(src_root, "mir"))
 $LOAD_PATH.unshift(File.join(src_root, "backends"))
 $LOAD_PATH.unshift(File.join(src_root, "annotator-helpers"))
 
-require "backends/compiler_frontend"
-require "backends/importer"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
 require "mir_lowering"
 require "mir_checker"
-require "mir_emitter"
+require "backends/mir_emitter"
 
 options = {
   phase: "frontend",
@@ -247,13 +247,13 @@ timings = {}
 
 if phase == "annotate"
   tokens = Lexer.new(source).tokenize
-  ast = Parser.new(tokens, source).parse
+  ast = ClearParser.new(tokens, source).parse
   timings["annotate"] = Benchmark.realtime do
     SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source).annotate!(ast)
   end
 elsif phase == "mir_pass"
   tokens = Lexer.new(source).tokenize
-  ast = Parser.new(tokens, source).parse
+  ast = ClearParser.new(tokens, source).parse
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source)
   annotator.annotate!(ast)
   PipelineRewriter.new(annotator).rewrite!(ast)

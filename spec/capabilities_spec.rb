@@ -3,13 +3,13 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -647,7 +647,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @shared:locked type" do
       subject(:t) {
         tokens = Lexer.new("Counter @shared:locked").tokenize
-        Parser.new(tokens, "Counter @shared:locked").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @shared:locked").send(:parse_type_annotation)
       }
 
       it "sets ownership to :shared" do
@@ -662,7 +662,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @locked:multiowned type (reverse order)" do
       subject(:t) {
         tokens = Lexer.new("Counter @locked:multiowned").tokenize
-        Parser.new(tokens, "Counter @locked:multiowned").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @locked:multiowned").send(:parse_type_annotation)
       }
 
       it "sets ownership to :multiowned" do
@@ -677,7 +677,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @writeLocked:shared type" do
       subject(:t) {
         tokens = Lexer.new("Counter @writeLocked:shared").tokenize
-        Parser.new(tokens, "Counter @writeLocked:shared").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @writeLocked:shared").send(:parse_type_annotation)
       }
 
       it "sets ownership to :shared" do
@@ -957,7 +957,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     it "removes the @local on the lint-flagged binding when a prior @local is on the same line" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       src = counter_struct + <<~FLUX
         FN f() RETURNS !Void ->
             MUTABLE a = Counter{ value: 0 } @local; MUTABLE b = Counter{ value: 1 } @local;
@@ -967,7 +967,7 @@ RSpec.describe SemanticAnnotator do
         END
       FLUX
       tokens = Lexer.new(src).tokenize
-      ast    = Parser.new(tokens, src).parse
+      ast    = ClearParser.new(tokens, src).parse
       ann    = SemanticAnnotator.new
       ann.source_code = src
       FixCollector.enable!
@@ -986,16 +986,16 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
-  # REENTRANCY CAPABILITY — @reentrant / @nonReentrant
+  # REENTRANCE — EFFECTS REENTRANT / REQUIRES cb: NON_REENTRANT
   # ===========================================================================
-  describe "Reentrancy capability (@reentrant / @nonReentrant)" do
+  describe "Reentrance declarations" do
 
     def transpile(source)
       ZigTranspiler.new.transpile(source)
     end
 
     # -------------------------------------------------------------------------
-    # @reentrant: direct recursion allowed
+    # EFFECTS REENTRANT: direct recursion allowed
     # -------------------------------------------------------------------------
     describe "direct recursion" do
       it "raises an error when a directly-recursive function is not annotated" do
@@ -1008,9 +1008,9 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*EFFECTS REENTRANT/)
       end
 
-      it "accepts a directly-recursive function marked @reentrant" do
+      it "accepts a directly-recursive function marked EFFECTS REENTRANT" do
         code = <<~CLEAR
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
@@ -1018,19 +1018,19 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.not_to raise_error
       end
 
-      it "raises an error when a directly-recursive function is marked @nonReentrant" do
+      it "rejects removed @nonReentrant syntax" do
         code = <<~CLEAR
           FN fib(n: Int64) RETURNS Int64 @nonReentrant ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
         CLEAR
-        expect { run(code) }.to raise_error(CompilerError, /Replace `@nonReentrant` with `EFFECTS REENTRANT`/)
+        expect { run(code) }.to raise_error(ParserError)
       end
 
-      it "transpiles @reentrant function without a StackGuard prologue" do
+      it "transpiles EFFECTS REENTRANT function without a StackGuard prologue" do
         code = <<~CLEAR
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
@@ -1044,7 +1044,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # @nonReentrant: fn-pointer / lambda calls
+    # REQUIRES cb: NON_REENTRANT: fn-pointer / lambda calls
     # -------------------------------------------------------------------------
     describe "fn-pointer / lambda calls" do
       it "does not require annotation when calling a fn-type parameter" do
@@ -1058,30 +1058,32 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.not_to raise_error
       end
 
-      it "accepts a fn-pointer-calling function marked @nonReentrant" do
+      it "accepts a fn-pointer-calling function with a NON_REENTRANT callback constraint" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(x);
           END
         CLEAR
         expect { run(code) }.not_to raise_error
       end
 
-      it "accepts a fn-pointer-calling function marked @reentrant" do
+      it "accepts a fn-pointer-calling function marked EFFECTS REENTRANT" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @reentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
             RETURN cb(x);
           END
         CLEAR
         expect { run(code) }.not_to raise_error
       end
 
-      it "transpiles @nonReentrant with a StackGuard prologue" do
+      it "transpiles EFFECTS REENTRANT:NOT_LOGICAL with a StackGuard prologue" do
         code = <<~CLEAR
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT:NOT_LOGICAL ->
             RETURN cb(x);
           END
           FN main() RETURNS Void ->
@@ -1094,9 +1096,10 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include("_guard.pop()")
       end
 
-      it "transpiles @nonReentrant with safety import" do
+      it "transpiles EFFECTS REENTRANT:NOT_LOGICAL with safety import" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT:NOT_LOGICAL ->
             RETURN cb(x);
           END
           FN main() RETURNS Void ->
@@ -1106,7 +1109,7 @@ RSpec.describe SemanticAnnotator do
         expect(zig).to include('const safety = @import("runtime/../lib/safety.zig")')
       end
 
-      it "does not emit safety import when no @nonReentrant functions exist" do
+      it "does not emit safety import when no guarded reentrance functions exist" do
         code = <<~CLEAR
           FN main() RETURNS Void ->
           END
@@ -1137,13 +1140,13 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*mutually recursive/)
       end
 
-      it "accepts mutually recursive functions when both are marked @reentrant" do
+      it "accepts mutually recursive functions when both are marked EFFECTS REENTRANT" do
         code = <<~CLEAR
-          FN isEven(n: Int64) RETURNS Bool @reentrant ->
+          FN isEven(n: Int64) RETURNS Bool EFFECTS REENTRANT ->
             IF n == 0 THEN RETURN TRUE; END
             RETURN isOdd(n - 1);
           END
-          FN isOdd(n: Int64) RETURNS Bool @reentrant ->
+          FN isOdd(n: Int64) RETURNS Bool EFFECTS REENTRANT ->
             IF n == 0 THEN RETURN FALSE; END
             RETURN isEven(n - 1);
           END
@@ -1151,18 +1154,20 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.not_to raise_error
       end
 
-      it "accepts mutually recursive functions when both are marked @nonReentrant" do
+      it "rejects NOT_LOGICAL on mutually recursive functions" do
         code = <<~CLEAR
-          FN isEven(n: Int64) RETURNS !Bool @nonReentrant ->
+          FN isEven(n: Int64) RETURNS !Bool
+            EFFECTS REENTRANT:NOT_LOGICAL ->
             IF n == 0 THEN RETURN TRUE; END
             RETURN isOdd(n - 1);
           END
-          FN isOdd(n: Int64) RETURNS !Bool @nonReentrant ->
+          FN isOdd(n: Int64) RETURNS !Bool
+            EFFECTS REENTRANT:NOT_LOGICAL ->
             IF n == 0 THEN RETURN FALSE; END
             RETURN isEven(n - 1);
           END
         CLEAR
-        expect { run(code) }.not_to raise_error
+        expect { run(code) }.to raise_error(CompilerError, /NOT_LOGICAL/)
       end
 
       it "does not flag functions that share a callee but aren't in a cycle" do
@@ -1183,32 +1188,37 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: @reentrant / @nonReentrant attribute parsing
+    # ClearParser: EFFECTS REENTRANT parsing and legacy rejection
     # -------------------------------------------------------------------------
     describe "parser" do
-      it "parses @reentrant on FunctionDef without RETURNS" do
+      it "parses EFFECTS REENTRANT on FunctionDef without RETURNS" do
         code = <<~CLEAR
-          FN ping() @reentrant ->
+          FN ping() EFFECTS REENTRANT ->
             ping();
           END
         CLEAR
         tree = run(code)
         fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "ping" }
-        expect(fn.reentrant).to eq(:reentrant)
+        expect(fn.reentrance_kind).to eq(:reentrant)
       end
 
-      it "parses @nonReentrant on FunctionDef with RETURNS" do
+      it "rejects removed @reentrant and @nonReentrant function annotations" do
         code = <<~CLEAR
           FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
         CLEAR
-        tree = run(code)
-        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
-        expect(fn.reentrant).to eq(:non_reentrant)
+        expect { run(code) }.to raise_error(ParserError)
+
+        legacy_reentrant = <<~CLEAR
+          FN ping() RETURNS Void @reentrant ->
+            RETURN;
+          END
+        CLEAR
+        expect { run(legacy_reentrant) }.to raise_error(ParserError)
       end
 
-      it "leaves reentrant as nil for plain functions" do
+      it "leaves reentrance_kind as nil for plain functions" do
         code = <<~CLEAR
           FN add(a: Int64, b: Int64) RETURNS Int64 ->
             RETURN a + b;
@@ -1216,7 +1226,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         tree = run(code)
         fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "add" }
-        expect(fn.reentrant).to be_nil
+        expect(fn.reentrance_kind).to be_nil
       end
     end
 
@@ -1294,7 +1304,7 @@ RSpec.describe SemanticAnnotator do
   describe "WITH EXCLUSIVE error-clause parsing" do
     def parse_only(source)
       tokens = Lexer.new(source).tokenize
-      Parser.new(tokens, source).parse
+      ClearParser.new(tokens, source).parse
     end
 
     def with_block(ast)
@@ -2060,19 +2070,24 @@ RSpec.describe SemanticAnnotator do
   # spec: today no stdlib entry actually sets these fields, so silent regressions
   # in the plumbing are invisible. We monkey-patch writeFile (a can_fail stdlib
   # entry) for the duration of each example, reverting after.
-
   describe "stdlib error_kind / error_type stamping" do
     let(:entry) { STD_LIB["writeFile"] }
+
+    def clear_stdlib_signature_cache!
+      IntrinsicRegistry::SIGS_CACHE.delete(STD_LIB.object_id)
+    end
 
     around do |example|
       # Deep save + restore so the registry mutation doesn't leak across tests.
       saved = entry.dup
       entry[:error_kind] = :Transient
       entry[:error_type] = :LockTimeout
+      clear_stdlib_signature_cache!
       begin
         example.run
       ensure
         entry.replace(saved)
+        clear_stdlib_signature_cache!
       end
     end
 
@@ -2100,6 +2115,7 @@ RSpec.describe SemanticAnnotator do
     it "leaves error_kind / error_type nil when the entry has no metadata" do
       entry.delete(:error_kind)
       entry.delete(:error_type)
+      clear_stdlib_signature_cache!
       src = 'writeFile("p", "c") OR 0;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil

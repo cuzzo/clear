@@ -90,6 +90,9 @@ class PipelineLazyRangePrefix < T::Struct
       MIR::WhileStmt.new(next_call, body, T.must(capture_name), nil, nil, nil)
     end
   end
+  private :next_call
+  private :stage_body
+
 end
 
 class PipelineRangeFoldNames < T::Struct
@@ -1070,4 +1073,20 @@ class PipelineRangeLowerer
       (byte >= 48 && byte <= 57) ||
       byte == 95
   end
+  private :all_fold_plan
+  private :any_fold_plan
+  private :average_fold_plan
+  private :bc_loop_iter
+  private :count_fold_plan
+  private :find_fold_plan
+  private :max_fold_plan
+  private :min_fold_plan
+  private :min_max_fold_plan
+  private :observable_stream_item_alloc_marks
+  private :range_literal_element_type
+  private :scalar_fold_plan
+  private :sum_fold_plan
+  private :zig_identifier_boundary?
+  private :zig_identifier_byte?
+
 end

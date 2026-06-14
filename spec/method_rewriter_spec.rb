@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/method_rewriter"
+require_relative "../src/tools/method_rewriter" unless defined?(MethodRewriter)
 
 # Unit tests for MethodRewriter — the source-level preprocessor that
 # rewrites prefix calls of METHOD-flagged functions to UFCS form.
@@ -395,29 +395,29 @@ RSpec.describe MethodRewriter do
 
   describe "source span helpers" do
     it "skips spaces and tabs when locating the opening paren" do
-      expect(MethodRewriter.next_non_ws("foo \t(xs)", 3)).to eq(5)
+      expect(MethodRewriter.send(:next_non_ws, "foo \t(xs)", 3)).to eq(5)
     end
 
     it "matches parens while ignoring escaped quotes inside strings" do
       source = 'f("a\" )", y)'
-      expect(MethodRewriter.match_paren(source, 1)).to eq(source.length - 1)
+      expect(MethodRewriter.send(:match_paren, source, 1)).to eq(source.length - 1)
     end
 
     it "matches parens while ignoring parens inside triple-quoted strings" do
       source = 'f("""a)b""", y)'
-      expect(MethodRewriter.match_paren(source, 1)).to eq(source.length - 1)
+      expect(MethodRewriter.send(:match_paren, source, 1)).to eq(source.length - 1)
     end
 
     it "splits args while ignoring commas behind escaped quotes" do
       args = '"a\",b", second'
-      spans = MethodRewriter.split_args_by_comma(args)
+      spans = MethodRewriter.send(:split_args_by_comma, args)
 
       expect(spans.map { |s, e| args[s...e].strip }).to eq(['"a\",b"', "second"])
     end
 
     it "splits args while ignoring commas inside triple-quoted strings" do
       args = '"""a,b""", second'
-      spans = MethodRewriter.split_args_by_comma(args)
+      spans = MethodRewriter.send(:split_args_by_comma, args)
 
       expect(spans.map { |s, e| args[s...e].strip }).to eq(['"""a,b"""', "second"])
     end

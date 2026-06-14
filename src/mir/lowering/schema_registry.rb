@@ -78,15 +78,15 @@ class MIRLoweringSchemas
 
   sig do
     params(
-      struct_schemas: T.nilable(T::Hash[Symbol, Schemas::StructSchema]),
-      enum_schemas: T.nilable(T::Hash[Symbol, EnumVariants]),
-      union_schemas: T.nilable(T::Hash[Symbol, Schemas::UnionSchema]),
+      struct_schemas: T::Hash[Symbol, Schemas::StructSchema],
+      enum_schemas: T::Hash[Symbol, EnumVariants],
+      union_schemas: T::Hash[Symbol, Schemas::UnionSchema],
     ).void
   end
-  def merge!(struct_schemas:, enum_schemas:, union_schemas:)
-    @struct_schemas.merge!(struct_schemas) if struct_schemas
-    @enum_schemas.merge!(enum_schemas) if enum_schemas
-    @union_schemas.merge!(union_schemas) if union_schemas
+  def merge!(struct_schemas: {}, enum_schemas: {}, union_schemas: {})
+    @struct_schemas.merge!(struct_schemas)
+    @enum_schemas.merge!(enum_schemas)
+    @union_schemas.merge!(union_schemas)
   end
 
   private

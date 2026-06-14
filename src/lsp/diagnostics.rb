@@ -30,15 +30,16 @@ module LSP
     }.freeze, T::Hash[Symbol, Integer])
 
     SOURCE_NAME = T.let("clear".freeze, String)
+    TemplateRegexCache = T.type_alias { T::Hash[String, Regexp] }
+    TEMPLATE_REGEX_CACHE = T.let({}, TemplateRegexCache)
 
-    module_function
 
     # Convert a single FixableFinding (or synthetic equivalent) to an
     # LSP Diagnostic hash. `source_text` is optional — when provided,
     # we compute exact UTF-16 column offsets for tokens that span
     # multi-byte characters.
     sig { params(finding: T.untyped, source_text: T.untyped).returns(T.untyped) }
-    def from_finding(finding, source_text = nil)
+    def self.from_finding(finding, source_text = nil)
       tok    = finding.token
       length = token_length(tok, source_text)
       range  = Position.range_for(tok, length, source_text)
@@ -55,7 +56,7 @@ module LSP
     # Convert a list of findings + an optional fatal error into the
     # array of Diagnostics for a single document.
     sig { params(result: T.untyped, source_text: T.untyped).returns(T.untyped) }
-    def from_result(result, source_text = nil)
+    def self.from_result(result, source_text = nil)
       diags = result.findings.map { |f| from_finding(f, source_text) }
       diags << from_finding(result.fatal_error, source_text) if result.fatal?
       diags
@@ -70,7 +71,7 @@ module LSP
     # the source line at tok.column to recover the true byte span;
     # otherwise fall back to a quote-aware heuristic.
     sig { params(tok: T.untyped, source_text: T.untyped).returns(Integer) }
-    def token_length(tok, source_text = nil)
+    def self.token_length(tok, source_text = nil)
       val = tok.respond_to?(:value) ? tok.value : nil
       if source_text && tok.respond_to?(:line) && tok.respond_to?(:column)
         if tok.line && tok.column && (line = source_text.lines[tok.line - 1])
@@ -88,7 +89,7 @@ module LSP
     # token's textual span. Returns nil when the slice doesn't begin
     # with a recognizable literal — caller falls back.
     sig { params(rest: T.untyped).returns(T.nilable(Integer)) }
-    def literal_span_in(rest)
+    def self.literal_span_in(rest)
       return nil if rest.nil? || rest.empty?
       if rest.start_with?('"""')
         idx = rest.index('"""', 3)
@@ -109,7 +110,7 @@ module LSP
     end
 
     sig { params(val: T.untyped).returns(Integer) }
-    def fallback_token_length(val)
+    def self.fallback_token_length(val)
       case val
       when String
         len = val.bytesize
@@ -131,7 +132,7 @@ module LSP
     # mis-stamp; full-template matching disambiguates on the trailing
     # literal segments.
     sig { params(finding: T.untyped).returns(T.nilable(String)) }
-    def code_for(finding)
+    def self.code_for(finding)
       msg = finding.message.to_s
       return nil if msg.empty?
 
@@ -154,15 +155,21 @@ module LSP
     # `.` (e.g. "Undefined variable '%{name}'." -> message ends in
     # `'doesNotExist'`).
     sig { params(template: T.untyped).returns(Regexp) }
-    def template_regex(template)
-      @template_regex_cache = T.let(@template_regex_cache, T.nilable(T::Hash[String, Regexp]))
-      @template_regex_cache ||= {}
-      @template_regex_cache[template] ||= begin
+    def self.template_regex(template)
+      cache = TEMPLATE_REGEX_CACHE
+      cache[template] ||= begin
         parts = template.split(/(%\{[^}]+\})/)
         body = parts.map { |p| p.start_with?('%{') ? '.+?' : Regexp.escape(p) }.join
         body = body.sub(/(?:\\\.|\\!|\\\?|\s)+\z/, '')
         Regexp.new('\A' + body + '[.!?\s]*\z', Regexp::MULTILINE)
       end
     end
-  end
+
+    private_class_method :template_regex
+  private_class_method :code_for
+  private_class_method :fallback_token_length
+  private_class_method :literal_span_in
+  private_class_method :token_length
+
+end
 end

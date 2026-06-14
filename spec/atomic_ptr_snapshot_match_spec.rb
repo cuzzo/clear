@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.7 -- parser support for `WITH SNAPSHOT cell AS [MUTABLE]
 # alias MATCH ... END`. Polymorphic VERSIONED | ATOMIC fns dispatch
@@ -14,7 +14,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     ast.statements.first
   end
 

@@ -8,7 +8,7 @@ require_relative "../../../ast/type"
 require_relative "../../mir"
 
 PipelineTypeInput = T.type_alias { T.any(Type, Symbol, String) }
-PipelineLoweringResult = T.type_alias { T.nilable(T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock)) }
+PipelineLoweringResult = T.type_alias { T.nilable(T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock, MIR::ShardConcurrentEach)) }
 
 class PipelineSite < T::Struct
   const :list, AST::Node
@@ -30,10 +30,14 @@ class PipelineSourceShape < T::Struct
     elem_type
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def infinite_stream?
     type.inf_stream?
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def bc_infinite_stream?
@@ -49,4 +53,30 @@ end
 class PipelineNamedBinding < T::Struct
   const :name, String
   const :zig, String
+end
+
+class PipelineLabelState
+  extend T::Sig
+
+  sig { void }
+  def initialize
+    @counter = T.let(0, Integer)
+    @current_label = T.let(nil, T.nilable(String))
+  end
+
+  sig { returns(String) }
+  def next_label
+    @counter += 1
+    "__pblk#{@counter}"
+  end
+
+  sig { params(label: String).void }
+  def current_label=(label)
+    @current_label = label
+  end
+
+  sig { returns(T.nilable(String)) }
+  def current_label
+    @current_label
+  end
 end

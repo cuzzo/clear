@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/tools/predicate_rewriter"
-require_relative "../src/tools/formatter"
+require_relative "../src/tools/predicate_rewriter" unless defined?(PredicateRewriter::CompareSpan)
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
 
 # Unit tests for PredicateRewriter — the source-level preprocessor
 # that canonicalizes hand-written null-comparison and length-comparison
@@ -241,26 +241,26 @@ RSpec.describe PredicateRewriter do
 
     it "walks expressions across escaped quotes in strings" do
       source = '"a\"; not done"; tail'
-      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq('"a\"; not done"'.length)
+      expect(PredicateRewriter.send(:walk_to_expr_end, source, 0)).to eq('"a\"; not done"'.length)
     end
 
     it "walks expressions across triple-quoted strings" do
       source = '"""a; b) c"""; tail'
-      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq('"""a; b) c"""'.length)
+      expect(PredicateRewriter.send(:walk_to_expr_end, source, 0)).to eq('"""a; b) c"""'.length)
     end
 
     it "skips comments while walking expression ends" do
       source = "value # comment with ; and )\n"
-      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq("value".length)
+      expect(PredicateRewriter.send(:walk_to_expr_end, source, 0)).to eq("value".length)
     end
 
     it "stops at newlines and returns the last non-whitespace offset" do
       source = "value  \nnext"
-      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq("value".length)
+      expect(PredicateRewriter.send(:walk_to_expr_end, source, 0)).to eq("value".length)
     end
 
     it "returns the expression end when the source reaches EOF" do
-      expect(PredicateRewriter.walk_to_expr_end("value", 0)).to eq("value".length)
+      expect(PredicateRewriter.send(:walk_to_expr_end, "value", 0)).to eq("value".length)
     end
   end
 end

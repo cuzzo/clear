@@ -13,7 +13,7 @@ FN consume!(TAKES items: Val[]) RETURNS !Val ->
     RETURN COPY items[0];
 END
 
-FN eval!(TAKES ast: Val) RETURNS !Val @reentrant ->
+FN eval!(TAKES ast: Val) RETURNS !Val EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Val.List AS items ->
             RETURN consume!(GIVE items);,

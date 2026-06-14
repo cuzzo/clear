@@ -36,7 +36,7 @@ The bytecode VM (`examples/minivm/_bc_runner.cht`) stores environments in a pool
 
 ```clear
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>,
-         MUTABLE pool: Env[50000]@pool, ...) RETURNS Value @reentrant ->
+         MUTABLE pool: Env[50000]@pool, ...) RETURNS Value EFFECTS REENTRANT ->
     -- ... interpreter loop ...
     -- BG_SPAWN handler: run the fiber's bytecode in a separate fiber
     bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);    -- (Phase 1: synchronous)

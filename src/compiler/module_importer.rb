@@ -25,7 +25,7 @@ class ModuleImporter
 
   # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
   # and are auto-resolvable as `REQUIRE "pkg:<name>"` without an explicit
-  # --pkg flag. Computed from this file's location: src/backends/importer.rb
+  # --pkg flag. Computed from this file's location: src/compiler/module_importer.rb
   # → ../../stdlib relative to __FILE__.
   STDLIB_ROOT = T.let(File.expand_path('../../stdlib', __dir__), String)
 
@@ -106,13 +106,13 @@ class ModuleImporter
     # imported module's parse so `--gradual` from the top-level build
     # never propagates across module boundaries. Explicit `Auto` in
     # source still tokenizes; the post-parse check below catches it.
-    saved_gradual = Parser.gradual_mode
-    Parser.gradual_mode = false
+    saved_gradual = ClearParser.gradual_mode
+    ClearParser.gradual_mode = false
     begin
       tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(tokens, source).parse
+      ast    = ClearParser.new(tokens, source).parse
     ensure
-      Parser.gradual_mode = saved_gradual
+      ClearParser.gradual_mode = saved_gradual
     end
 
     reject_auto_in_public_signatures!(T.must(ast), abs_path)
@@ -133,7 +133,7 @@ class ModuleImporter
   # (gradual-typing.md §7). The importer rejects with a diagnostic
   # that points the user at running `clear fix --apply` on the
   # imported module before re-importing.
-  sig { params(ast: AST::Program, abs_path: String).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(ast: AST::Program, abs_path: String).void }
   def reject_auto_in_public_signatures!(ast, abs_path)
     rel_path = File.basename(abs_path)
     ast.statements.each do |stmt|
@@ -171,12 +171,12 @@ class ModuleImporter
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
-    require_relative "../mir/mir_emitter"
+    require_relative "../backends/mir_emitter"
     require_relative "../mir/hoist"
     require_relative "../semantic/pass_state"
     require_relative "../mir/pre_mir_type_check"
-    require_relative "pipeline_rewriter"
-    require_relative "string_concat_rewriter"
+    require_relative "../mir/rewriters/pipeline_rewriter"
+    require_relative "../mir/rewriters/string_concat_rewriter"
     require_relative "compiler_frontend"
 
     PipelineRewriter.new(annotator).rewrite!(ast)
@@ -232,8 +232,8 @@ class ModuleImporter
 
     result = lowering.lower_module(ast)
     emitter = MIREmitter.new
-    zig_body = T.must(result[:items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs = T.must(result[:type_items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    zig_body = result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs = result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     CompiledModule.new(
       ast,
@@ -249,7 +249,7 @@ class ModuleImporter
     )
   end
 
-  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator).void }
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
@@ -260,4 +260,8 @@ class ModuleImporter
     end
     nil
   end
+  private :auto_type?
+  private :reject_auto_in_public_signatures!
+  private :resolve_stdlib_package
+
 end

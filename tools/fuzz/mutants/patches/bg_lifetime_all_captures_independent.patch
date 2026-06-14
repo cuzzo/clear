@@ -1,0 +1,15 @@
+diff --git a/src/annotator/domains/lifetimes.rb b/src/annotator/domains/lifetimes.rb
+index 000000000..000000000 100644
+--- a/src/annotator/domains/lifetimes.rb
++++ b/src/annotator/domains/lifetimes.rb
+@@ -982,9 +982,7 @@ class SemanticAnnotator
+       def bg_lifetime_sources(analysis)
+         T.bind(self, SemanticAnnotator)
+ 
+-        analysis.capture_symbols.each_value.reject { |info|
+-          info && bg_capture_independent?(info)
+-        }.compact
++        []
+       end
+ 
+       # Default-deny inverse of the old explicit-include-list. A capture is

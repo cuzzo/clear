@@ -3,14 +3,14 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"  # loads compiler, annotator, lexer, parser, ast
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)  # loads compiler, annotator, lexer, parser, ast
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   # Helper to Lex -> Parse -> Annotate
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     @annotator = SemanticAnnotator.new
     @annotator.annotate!(ast)
     return ast
@@ -2749,7 +2749,7 @@ RSpec.describe SemanticAnnotator do
 
     def run_with_annotator(source)
       tokens = Lexer.new(source).tokenize
-      ast = Parser.new(tokens, source).parse
+      ast = ClearParser.new(tokens, source).parse
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
       [ast, annotator]
@@ -2848,7 +2848,7 @@ RSpec.describe SemanticAnnotator do
 
       compiler  = ModuleImporter.new(base_dir: dir)
       tokens    = Lexer.new(main_code).tokenize
-      ast       = Parser.new(tokens, main_code).parse
+      ast       = ClearParser.new(tokens, main_code).parse
       annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
       annotator.annotate!(ast)
       ast
@@ -2955,7 +2955,7 @@ RSpec.describe SemanticAnnotator do
         compiler  = ModuleImporter.new(base_dir: dir)
         main_code = 'REQUIRE "a.cht";'
         tokens    = Lexer.new(main_code).tokenize
-        ast       = Parser.new(tokens, main_code).parse
+        ast       = ClearParser.new(tokens, main_code).parse
         annotator = SemanticAnnotator.new(importer: compiler, source_dir: dir)
 
         expect { annotator.annotate!(ast) }.to raise_error(CircularDependencyError, /Circular dependency/)
@@ -3070,7 +3070,7 @@ RSpec.describe SemanticAnnotator do
   describe "EXTERN (FFI declarations)" do
     def annotate_extern(source)
       tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(tokens, source).parse
+      ast    = ClearParser.new(tokens, source).parse
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
       ast
@@ -3190,7 +3190,13 @@ RSpec.describe SemanticAnnotator do
           end
         end.new(:String)
 
-        match = annotator.send(:find_matching_intrinsic, [{ args: [{ type: :Int64 }] }], [arg])
+        definition = FunctionSignature.new(
+          params: [AST::Param.new(name: "arg0", type: :Int64)],
+          return_type: Type.new(:Void),
+          intrinsic: true,
+          arg_spec: [{ type: :Int64 }],
+        )
+        match = annotator.send(:find_matching_intrinsic, [definition], [arg])
         expect(match).to be_nil
       end
     end
@@ -3412,7 +3418,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         tokens = Lexer.new(code).tokenize
-        ast    = Parser.new(tokens, code).parse
+        ast    = ClearParser.new(tokens, code).parse
         annotator = SemanticAnnotator.new
         annotator.annotate!(ast)
         transpiler = ZigTranspiler.new
@@ -3961,7 +3967,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapKeys(i64, rt.heapAlloc(), m.inner)")
+        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m.inner)")
       end
 
       it "raises when keys receives arguments" do
@@ -4141,7 +4147,7 @@ RSpec.describe SemanticAnnotator do
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
         STRUCT BigS   { #{big_fields}   }
-        FN first_a(s: BigS) RETURNS Float64 @reentrant ->
+        FN first_a(s: BigS) RETURNS Float64 EFFECTS REENTRANT ->
           RETURN s.c1.a;
         END
       CLEAR

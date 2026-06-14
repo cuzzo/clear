@@ -3,6 +3,8 @@
 
 module NilKill
   class Infer
+    attr_reader :store
+
     def initialize(argv)
       @run_sorbet = !argv.include?("--no-sorbet")
       @store = Store.new
@@ -15,6 +17,7 @@ module NilKill
       build_actions
       sorbet_validate_high_actions! if @run_sorbet
       build_flow_graph
+      build_fallibility_pressure
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
@@ -48,6 +51,34 @@ module NilKill
           merge_shapes(rec["return_elem_shapes"], obs["return_elem_shapes"])
           merge_kv_shapes(rec["return_kv_shapes"], obs["return_kv_shapes"])
         end
+      end
+      runtime_edges = {}
+      Dir.glob(File.join(RUNTIME_DIR, "method-edges-*.jsonl")).each do |file|
+        File.foreach(file) do |line|
+          obs = JSON.parse(line)
+          caller = runtime_edge_endpoint(obs["caller"])
+          callee = runtime_edge_endpoint(obs["callee"])
+          next unless caller && callee
+          next unless NilKill.target_path?(caller["path"]) && NilKill.target_path?(callee["path"])
+
+          key = [caller, callee]
+          rec = (runtime_edges[key] ||= {
+            "caller" => caller,
+            "callee" => callee,
+            "calls" => 0,
+            "ok_calls" => 0,
+            "raised_calls" => 0,
+          })
+          rec["calls"] += obs["calls"].to_i
+          rec["ok_calls"] += obs["ok_calls"].to_i
+          rec["raised_calls"] += obs["raised_calls"].to_i
+        end
+      end
+      @store.facts["runtime_call_edges"] = runtime_edges.values.sort_by do |edge|
+        caller = edge.fetch("caller")
+        callee = edge.fetch("callee")
+        [caller["path"], caller["line"].to_i, caller["class"], caller["kind"], caller["method"],
+         callee["path"], callee["line"].to_i, callee["class"], callee["kind"], callee["method"]]
       end
       Dir.glob(File.join(RUNTIME_DIR, "tlets-*.jsonl")).each do |file|
         File.foreach(file) do |line|
@@ -99,6 +130,20 @@ module NilKill
           @store.facts["collection_runtime"] << obs
         end
       end
+    end
+
+    def runtime_edge_endpoint(endpoint)
+      return nil unless endpoint.is_a?(Hash)
+      path = endpoint["path"] || endpoint[:path]
+      return nil if path.to_s.empty?
+
+      {
+        "class" => (endpoint["class"] || endpoint[:class]).to_s,
+        "method" => (endpoint["method"] || endpoint[:method]).to_s,
+        "kind" => (endpoint["kind"] || endpoint[:kind]).to_s,
+        "path" => File.expand_path(path, ROOT),
+        "line" => (endpoint["line"] || endpoint[:line]).to_i,
+      }
     end
 
     def index_sources
@@ -470,6 +515,14 @@ module NilKill
 
     def build_flow_graph
       @store.facts["flow_graph"] = FlowGraph.from_evidence(@store.to_h).to_h
+    end
+
+    def build_fallibility_pressure
+      @store.facts["fallibility_pressure"] = FallibilityPressure.scan(
+        NilKill.target_files,
+        runtime_methods: @store.methods.values,
+        runtime_edges: @store.facts["runtime_call_edges"]
+      )
     end
 
     def propose_hash_record_cluster_actions

@@ -254,6 +254,8 @@ class Scope
     T.must(entry_for_write(name))
   end
 
+  private
+
   sig { params(entry: SymbolEntry).returns(SymbolEntry) }
   def clone_entry_for_scope(entry)
     new_entry = entry.dup
@@ -261,6 +263,8 @@ class Scope
     new_entry.scope = self
     new_entry
   end
+
+  public
 
   sig { returns(T::Hash[String, SymbolEntry]) }
   def local_entries
@@ -329,7 +333,7 @@ class Scope
     entry = resolve_entry(name)
     return Type.new(:Any) if entry.nil?
 
-    base_type = entry.type
+    base_type = Type.new(entry.type)
 
     value_sync = if entry.locked?
       :locked
@@ -354,11 +358,15 @@ class Scope
     entry ? entry.type : Type.new(:Any)
   end
 
+  private
+
   sig { params(name: String).returns(T::Boolean) }
   def is_mutable?(name)
     entry = resolve_entry(name)
     entry ? entry.mutable : true
   end
+
+  public
 
   sig { params(name: String).returns(T::Boolean) }
   def is_immutable?(name)
@@ -419,6 +427,8 @@ class Scope
       raise "Compile Error: Cannot use variable '#{name}'. Reason: #{entry.invalid_reason}"
     end
   end
+
+  private :local_entry?
 
 end
 
@@ -499,5 +509,8 @@ module ScopeHelper
   ensure
     scope_stack.pop
   end
+
+  private :current_scope
+  private :lookup_scope_for
 
 end

@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.10 -- reject bare mutation on @indirect:atomic.
 #
@@ -20,7 +20,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

@@ -1,6 +1,6 @@
 require "rspec"
 require "set"
-require_relative "../src/tools/atomic_ptr_migration_suggester"
+require_relative "../src/tools/atomic_ptr_migration_suggester" unless defined?(AtomicPtrMigrationSuggester)
 
 # AtomicPtr M3.15: static eligibility check for the @shared:writeLocked
 # / @shared:locked (struct) -> @indirect:atomic migration. Tested in
@@ -201,7 +201,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       ]
       with_node = AST::WithBlock.new(nil, [cap], body)
 
-      AtomicPtrMigrationSuggester.classify_with_block!(with_node, candidates_by_name)
+      AtomicPtrMigrationSuggester.send(:classify_with_block!, with_node, candidates_by_name)
 
       expect(candidates_by_name["c"]).to include(n_uses: 1, disqualified: false)
     end
@@ -215,7 +215,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         var_node: AST::Identifier.new(nil, "c"),
       )
 
-      AtomicPtrMigrationSuggester.classify_with_block!(
+      AtomicPtrMigrationSuggester.send(:classify_with_block!,
         AST::WithBlock.new(nil, [cap], []),
         candidates_by_name,
       )
@@ -233,7 +233,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         alias: "a",
       )
 
-      AtomicPtrMigrationSuggester.classify_with_block!(
+      AtomicPtrMigrationSuggester.send(:classify_with_block!,
         AST::WithBlock.new(nil, [cap], []),
         candidates_by_name,
       )
@@ -249,11 +249,11 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       other_target = AST::Assignment.new(nil, AST::GetField.new(nil, AST::Identifier.new(nil, "other"), "port"), AST::Literal.new(nil, :INT64, 81, :stack))
       call_stmt = AST::FuncCall.new(nil, "print", [AST::GetField.new(nil, alias_id, "port")])
 
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(field_write, "a", :Cfg)).to eq(false)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(matching_replace, "a", :Cfg)).to eq(true)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(mismatched_replace, "a", :Cfg)).to eq(false)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(other_target, "a", :Cfg)).to eq(true)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(call_stmt, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, field_write, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, matching_replace, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, mismatched_replace, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, other_target, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, call_stmt, "a", :Cfg)).to eq(true)
     end
   end
 end

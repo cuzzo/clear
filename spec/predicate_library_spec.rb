@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/tools/formatter"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
 
 # Predicate-library tranche of the test framework. Each predicate is a
 # stdlib FN tagged `is_method: true` so call sites read as English when

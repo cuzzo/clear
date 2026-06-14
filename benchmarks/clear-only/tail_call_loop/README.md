@@ -7,7 +7,7 @@ form has no closed form so LLVM has to actually run the loop.
 
 | File | Form | Expected lowering |
 |---|---|---|
-| `bench_tail_call.cht` | self-recursive with `EFFECTS REENTRANT:TAIL_CALL` | `@call(.always_tail, ...)` -> LLVM `musttail` -> self-`jmp` (TCO) |
+| `bench_tail_call.cht` | self-recursive with `EFFECTS REENTRANT:TIGHT:TAIL_CALL` | `@call(.always_tail, ...)` -> LLVM `musttail` -> self-`jmp` (TCO), no recursion yield probe |
 | `bench_loop.cht` | hand-written `WHILE` | direct loop |
 
 `N` is sampled from `timestampMs() MOD 1000 + 999_999_000` so
@@ -38,10 +38,10 @@ registers across iterations.
 
 ## What this validates (and what it doesn't)
 
-- **Validates**: `:TAIL_CALL` lowers to a self-jump loop -- the
+- **Validates**: `:TIGHT:TAIL_CALL` lowers to a self-jump loop -- the
   recursion runs at depth 1 on the fiber stack. A non-TCO'd
   variant would overflow long before reaching 1B.
-- **Validates**: `:TAIL_CALL` no longer forces `@service`
+- **Validates**: `:TIGHT:TAIL_CALL` no longer forces `@service`
   (Phase 4g). Both variants run on the default fiber tier.
 - **Doesn't validate**: bit-for-bit parity with the loop. The
   ~28% gap is a real cost; tight inner loops should still
@@ -55,6 +55,10 @@ registers across iterations.
   body. The optimized build does. Verify TCO on safety mode is
   out of scope -- by design, safety frames trade speed for the
   bounds/overflow checks.
+- Non-tight `:TAIL_CALL` intentionally emits `rt.checkYield()` on
+  recursive entry. That cost is measured by
+  `benchmarks/inter-clear/01_sequential_recursion_yield_overhead`;
+  this benchmark isolates TCO parity against a hand-written loop.
 - objdump of `bench_tail_call` should show `jmp` (no `call`)
   for the recursive site. The post-build stack verifier
   (`stack_verifier.rb#verify_tail_calls`) checks this.

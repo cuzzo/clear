@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tranche 7: equality assertions lower to Zig's std.testing helpers
 # so failures get structured diff output for free instead of a bare

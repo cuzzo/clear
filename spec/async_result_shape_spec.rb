@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "AsyncResultShape" do
   it "lowers BG returning a list as Promise<List<T>>, not list-of-promises" do

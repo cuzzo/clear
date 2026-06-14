@@ -1,9 +1,9 @@
 require "rspec"
 require "set"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/type"
-require_relative "../src/semantic/capture_strategy"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/semantic/capture_strategy" unless defined?(CaptureStrategy::CaptureSiteInfo)
 
 RSpec.describe CaptureStrategy do
   let(:empty_site) { CaptureStrategy::CaptureSiteInfo.empty }
@@ -15,9 +15,9 @@ RSpec.describe CaptureStrategy do
   end
 
   # ----------------------------------------------------------------
-  # ByValue — primitives and string ([]const u8)
+  # ByValue — primitives and rodata string slices
   # ----------------------------------------------------------------
-  describe "ByValue: primitives and strings" do
+  describe "ByValue: primitives and rodata strings" do
     %i[Int64 Float64 Bool Int8 Int16 Int32 UInt8 UInt16 UInt32 UInt64].each do |raw|
       it "classifies #{raw} as ByValue" do
         strat = classify(type: t(raw))
@@ -27,8 +27,8 @@ RSpec.describe CaptureStrategy do
       end
     end
 
-    it "classifies String as ByValue (CLEAR treats []const u8 as Copy)" do
-      strat = classify(type: t(:String))
+    it "classifies rodata String as ByValue" do
+      strat = classify(type: t(:String, location: :rodata))
       expect(strat).to be_a(CaptureStrategy::ByValue)
     end
   end
@@ -53,10 +53,64 @@ RSpec.describe CaptureStrategy do
   # FreshHeapCopy — owned aggregate captures get a fiber-owned duplicate
   # ----------------------------------------------------------------
   describe "FreshHeapCopy: owned aggregate captures" do
+    it "classifies managed String capture as FreshHeapCopy" do
+      strat = classify(type: t(:String))
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.alloc_sym).to eq(:heap)
+    end
+
     it "classifies @list local capture as FreshHeapCopy" do
       strat = classify(type: t(:"Int64[]", collection: :list))
       expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
       expect(strat.alloc_sym).to eq(:heap)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # MoveInto — resources and affine promise handles transfer ownership
+  # ----------------------------------------------------------------
+  describe "MoveInto: resources and affine promises" do
+    it "classifies resource captures as MoveInto even when the type is value-like" do
+      strat = CaptureStrategy.classify(
+        name: "fd",
+        type: t(:Int64),
+        site_info: empty_site,
+        is_resource: true,
+      )
+
+      expect(strat).to be_a(CaptureStrategy::MoveInto)
+      expect(strat.source_name).to eq("fd")
+      expect(strat.zig_type).to eq("i64")
+    end
+
+    it "classifies single affine promise handles as MoveInto" do
+      strat = classify(type: t(:"~Int64"))
+
+      expect(strat).to be_a(CaptureStrategy::MoveInto)
+      expect(strat.marker_plan).to contain_exactly(
+        have_attributes(source_name: "x")
+      )
+    end
+
+    it "does not treat streams as single affine promise handles" do
+      expect(CaptureStrategy.owned_affine_promise_handle?(t(:"~Int64[]"))).to eq(false)
+      expect(CaptureStrategy.owned_affine_promise_handle?(t(:"~Int64@shared"))).to eq(false)
+      expect(classify(type: t(:"~Int64[]"))).not_to be_a(CaptureStrategy::MoveInto)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # ByValue — pinned synchronized collections stay on the pinned path
+  # ----------------------------------------------------------------
+  describe "ByValue: pinned synchronized collections" do
+    it "classifies synchronized collection captures as ByValue for the pinned lowering path" do
+      strat = classify(name: "xs", type: t(:"Int64[]", collection: :list, sync: :locked))
+
+      expect(strat).to be_a(CaptureStrategy::ByValue)
+      expect(strat.ctx_init_name).to eq("xs")
+      expect(strat.zig_type).to eq("*CheatLib.Locked(std.ArrayListUnmanaged(i64))")
+      expect(CaptureStrategy.pinned_sync_collection?(t(:"Int64[]", collection: :list, sync: :locked))).to eq(true)
+      expect(CaptureStrategy.pinned_sync_collection?(t(:"Int64[]", collection: :list))).to eq(false)
     end
   end
 
@@ -89,6 +143,18 @@ RSpec.describe CaptureStrategy do
   # ----------------------------------------------------------------
   describe "MoveInto: explicit GIVE at capture site" do
     let(:site) { CaptureStrategy::CaptureSiteInfo.new(copied_names: Set.new, moved_names: Set["xs"]) }
+
+    it "classifies primitive values as MoveInto when GIVE is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:Int64),
+        site_info: site,
+      )
+
+      expect(strat).to be_a(CaptureStrategy::MoveInto)
+      expect(strat.zig_type).to eq("i64")
+      expect(strat.source_name).to eq("xs")
+    end
 
     it "classifies @list as MoveInto when GIVE is present" do
       strat = CaptureStrategy.classify(
@@ -126,6 +192,22 @@ RSpec.describe CaptureStrategy do
   describe "FreshHeapCopy: explicit COPY at capture site" do
     let(:site) { CaptureStrategy::CaptureSiteInfo.new(copied_names: Set["xs"], moved_names: Set.new) }
 
+    it "classifies primitive values as FreshHeapCopy when COPY is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:Int64),
+        site_info: site,
+      )
+
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.zig_type).to eq("i64")
+      expect(strat.ctx_init_name).to eq("xs")
+      expect(strat.marker_plan).to contain_exactly(
+        an_instance_of(CaptureStrategy::AllocMarkPlan).and(have_attributes(ctx_init_name: "xs", alloc_sym: :heap)),
+        an_instance_of(CaptureStrategy::CleanupPlan).and(have_attributes(ctx_init_name: "xs", alloc_sym: :heap))
+      )
+    end
+
     it "classifies @list as FreshHeapCopy when COPY is present" do
       strat = CaptureStrategy.classify(
         name: "xs",
@@ -160,6 +242,7 @@ RSpec.describe CaptureStrategy do
         t(:Float64),
         t(:Bool),
         t(:String),
+        t(:String, location: :rodata),
         t(:Counter, ownership: :multiowned),
         t(:Counter, ownership: :shared),
         t(:"Int64[]", collection: :list),
@@ -183,6 +266,7 @@ RSpec.describe CaptureStrategy do
       heap_backed = [
         t(:"Int64[]", collection: :list),
         t(:"Value[]", collection: :list),
+        t(:String),
         t(:"Env[100]", collection: :pool),
         t(:"HashMap<Int64>"),
         t(:"Int64[]"),  # slice — borrow of some owner
@@ -211,6 +295,30 @@ RSpec.describe CaptureStrategy do
       info = CaptureStrategy::CaptureSiteInfo.empty
       expect(info.copied?("x")).to be false
       expect(info.moved?("x")).to be false
+    end
+  end
+
+  describe "helper predicates" do
+    it "selects field Zig types for pointer-passed and ordinary values" do
+      expect(CaptureStrategy.field_zig_type(t(:Int64))).to eq("i64")
+      expect(CaptureStrategy.field_zig_type(t(:"Env[100]", collection: :pool))).to eq("*CheatLib.Pool(Env)")
+    end
+
+    it "classifies value-like and deep-copy capture shapes directly" do
+      expect(CaptureStrategy.value_like?(t(:Bool))).to eq(true)
+      expect(CaptureStrategy.value_like?(t(:String, location: :rodata))).to eq(true)
+      expect(CaptureStrategy.value_like?(t(:String))).to eq(false)
+      expect(CaptureStrategy.deep_copy_capture?(t(:String))).to eq(true)
+      expect(CaptureStrategy.deep_copy_capture?(t(:"HashMap<Int64>"))).to eq(false)
+      expect(CaptureStrategy.deep_copy_capture?(t(:"~Int64"))).to eq(false)
+    end
+
+    it "reports specific refusal reasons in priority order" do
+      expect(CaptureStrategy.refuse_reason_for(t(:"Env[100]", collection: :pool))).to eq(:pointer_passed_without_transfer)
+      expect(CaptureStrategy.refuse_reason_for(t(:"Int64[]", collection: :list))).to eq(:list_borrow_without_transfer)
+      expect(CaptureStrategy.refuse_reason_for(t(:"Int64[]"))).to eq(:array_borrow_without_transfer)
+      expect(CaptureStrategy.refuse_reason_for(t(:String, location: :heap))).to eq(:heap_backed_without_transfer)
+      expect(CaptureStrategy.refuse_reason_for(t(:Bool))).to eq(:unclassified_capture)
     end
   end
 end

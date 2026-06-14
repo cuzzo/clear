@@ -3,7 +3,6 @@ require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative '../semantic/capability_plan'
 require_relative 'fsm_ops'
-require_relative 'fsm_wrapper_emitter'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
 # so the helpers share the lowering's explicit function/capture state and
@@ -157,7 +156,7 @@ module FsmLowering
           last_expr = last_step.expr
           if last_expr.is_a?(AST::Identifier)
             guard_map = capture_state.current_fsm_owned_result_guards
-            guard_name = guard_map&.[](last_expr.name.to_s)
+            guard_name = guard_map[last_expr.name.to_s]
             if guard_name
               result_mir << MIR::Set.new(
                 MIR::FieldGet.new(ctx_ident, guard_name),
@@ -304,11 +303,11 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: AST::ThenStep).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(step: AST::ThenStep).returns(T::Array[MIR::Emittable]) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step.expr)
-    return nil if mir.nil?
+    return [] if mir.nil?
     pending = flush_pending
     # `lower_var_decl` may return an Array (e.g. [AllocMark, Let,
     # Cleanup]) for cleanup-needing bindings. After the FreshHeapCopy
@@ -319,7 +318,7 @@ module FsmLowering
     if mir.is_a?(Array)
       return pending + mir.compact
     end
-    return nil unless mir.is_a?(MIR::Emittable)
+    return [] unless mir.is_a?(MIR::Emittable)
 
     main = wrap_step_as_stmt(step, mir)
     return pending if main.nil?
@@ -367,27 +366,27 @@ module FsmLowering
         pointer_captures: T::Set[String],
         inherited_alloc_names: T::Set[String],
         inherited_guard_names: T::Set[String],
-        owned_result_guards: T.nilable(T::Hash[String, String]),
+        owned_result_guards: T::Hash[String, String],
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
   def with_fsm_segment_lowering_context(pointer_captures:, inherited_alloc_names:, inherited_guard_names:, owned_result_guards:, &blk)
     T.bind(self, MIRLowering)
-    prev_alloc_names = T.let(nil, T.nilable(T::Set[String]))
-    prev_guard_names = T.let(nil, T.nilable(T::Set[String]))
     prev_result_guards = capture_state.current_fsm_owned_result_guards
     prev_alloc_names = capture_state.current_fsm_inherited_alloc_names
     prev_guard_names = capture_state.current_fsm_inherited_guarded_names
 
-    capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names
-    capture_state.current_fsm_inherited_guarded_names = inherited_guard_names
-    capture_state.current_fsm_owned_result_guards = owned_result_guards
-    with_bg_fiber_body_context(pointer_captures, &blk)
-  ensure
-    capture_state.current_fsm_owned_result_guards = prev_result_guards
-    capture_state.current_fsm_inherited_guarded_names = T.must(prev_guard_names)
-    capture_state.current_fsm_inherited_alloc_names = T.must(prev_alloc_names)
+    begin
+      capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names
+      capture_state.current_fsm_inherited_guarded_names = inherited_guard_names
+      capture_state.current_fsm_owned_result_guards = owned_result_guards
+      with_bg_fiber_body_context(pointer_captures, &blk)
+    ensure
+      capture_state.current_fsm_owned_result_guards = prev_result_guards
+      capture_state.current_fsm_inherited_guarded_names = prev_guard_names
+      capture_state.current_fsm_inherited_alloc_names = prev_alloc_names
+    end
   end
 
   # Resolve ONE capability's lock-acquire metadata. Returns
@@ -508,7 +507,7 @@ module FsmLowering
         capture_state.current_bg_pointer_captures = pointer_captures
         function_state.pending_stmts = []
         with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-          lower_finalized_fsm_step_mir(clause.body || [], no_result: true)
+          lower_finalized_fsm_step_mir(clause.body, no_result: true)
         end
       ensure
         function_state.pending_stmts = prev_fiber_pending
@@ -569,4 +568,15 @@ module FsmLowering
       exit_kind: :done,
     )
   end
+
+  private :fsm_owned_transfer_identifier?,
+    :guard_fsm_result_cleanup!
+  private :coerce_fsm_result_value
+  private :fsm_ast_result_consumed_roots
+  private :lock_error_done_stmts
+  private :lock_error_set_error_stmt
+  private :lower_one_step_to_mir
+  private :lower_step_stmts
+  private :uniform_fsm_result_target_alloc
+
 end

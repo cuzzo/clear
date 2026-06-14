@@ -1,12 +1,103 @@
 require "rspec"
 require "byebug"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe ZigTranspiler do
   def transpile(src)
     ZigTranspiler.new.transpile(src)
+  end
+
+  def function_body(zig, name)
+    zig[/fn #{Regexp.escape(name)}\b.*?\n(.*?)^}/m, 1] || ""
+  end
+
+  describe "collection ownership regressions" do
+    it "cleans popped frame-list string captures with the receiver allocator" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE src: String[]@list = [];
+          src.append(COPY "a");
+          src.append(COPY "b");
+          IF src.pop() AS v THEN
+            ASSERT v.length() >= 0_i64, "captured string";
+          ELSE
+            ASSERT FALSE, "expected a popped value";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+    end
+
+    it "cleans popped frame-list struct captures with the receiver allocator" do
+      zig = transpile(<<~CLEAR)
+        STRUCT Item { name: String }
+
+        FN main() RETURNS Void ->
+          MUTABLE src: Item[]@list = [];
+          src.append(Item{ name: COPY "a" });
+          WHILE src.pop() AS v DO
+            ASSERT v.name.length() >= 0_i64, "captured struct";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+    end
+
+    it "lets heap return destinations override frame-default intrinsic return allocation" do
+      src = <<~CLEAR
+        UNION Val {
+          Nil,
+          Str: String,
+          Num: Float64
+        }
+
+        FN convert!(token: String) RETURNS !Val ->
+          IF token == "nil" THEN RETURN Val.Nil; END
+          IF charAt(token, 0) == "\\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
+          n = toNumber(token) OR (0.0 - 999999.0);
+          IF n != 0.0 - 999999.0 THEN RETURN Val{ Num: n }; END
+          RETURN Val{ Str: COPY token };
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "does not require ownership facts for primitive receiver-storage pop fallbacks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE stack: Int64[]@list = [];
+          stack.append(1_i64);
+          v = stack.pop() OR 0_i64;
+          ASSERT v == 1_i64, "primitive pop fallback";
+          RETURN;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "keeps owned receiver-storage pop fallbacks checker-clean" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE src: String[]@list = [];
+          src.append(COPY "a");
+          v = src.pop() OR COPY "fallback";
+          ASSERT v.length() > 0_i64, "owned pop fallback";
+          RETURN;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
   end
 
   describe "BG promise capture regressions" do
@@ -318,8 +409,6 @@ RSpec.describe ZigTranspiler do
   # SHARD pipeline producer loop frame marks
   # ===========================================================================
   describe "SHARD pipeline producer loop frame marks" do
-    # Phase 2 (LoopFrameAnalysis): SHARD key/body frame-alloc flags are computed
-    # in Pass 2. This test will pass when LoopFrameAnalysis sets them correctly.
     it "Phase 2: emits saveLoopMark in SHARD producer when key expression allocates from frame" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
@@ -355,11 +444,11 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("try counts.put(")
-      expect(zig).to include("defer if (!__sh1_key_moved) CheatLib.cleanup")
+      expect(zig).to include("CheatLib.BoundedChannel(__ShWork")
+      expect(zig).to include("putDirect(ctx.shard")
     end
 
-    it "lowers SHARD map reads structurally in the verifier-visible loop" do
+    it "lowers SHARD map reads structurally in the verifier-visible worker body" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
@@ -375,9 +464,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("(counts.get(__sh1_key) orelse @as(i64, 0))")
-      expect(zig).to include("for (0..100) |____sh1_i_usize|")
-      expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
+      expect(zig).to include("(ctx.__shard_map.*.getDirect(ctx.shard, __sh1_key) orelse @as(i64, 0))")
+      expect(zig).to include("var __sh1_i: i64 = 0")
+      expect(zig).to include("while ((__sh1_i < __sh1_end)")
     end
 
     it "structural SHARD put owns the value through explicit transfer markers" do
@@ -391,8 +480,24 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("try map.put(")
-      expect(zig).to include("__tmp_2_moved = true")
+      expect(zig).to include("try ctx.__shard_map.*.putDirect(ctx.shard")
+      expect(zig).to include(%(@as([]const u8, "value")))
+      expect(zig).not_to include(%(dupe(u8, @as([]const u8, "value"))))
+    end
+
+    it "keeps borrowed SHARD string map reads borrowed through OR fallback" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            MUTABLE map: HashMap<String>@sharded(4) = {};
+            (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
+                got = map[_] OR "";
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("ctx.__shard_map.*.getDirect(ctx.shard, __sh1_key) orelse")
+      expect(zig).not_to include("frameAlloc().dupe(u8")
     end
 
     it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
@@ -519,9 +624,9 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.to raise_error(/TIGHT loop cannot call EXTERN FN/)
     end
 
-    it "raises a compile error when TIGHT loop calls an @reentrant function directly" do
+    it "raises a compile error when TIGHT loop calls a plain EFFECTS REENTRANT function directly" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -534,12 +639,12 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
-    it "raises a compile error when @reentrant call is nested inside an IF inside TIGHT" do
+    it "raises a compile error when a plain EFFECTS REENTRANT call is nested inside an IF inside TIGHT" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -554,12 +659,12 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
-    it "raises when a TIGHT loop method-call argument calls an @reentrant function" do
+    it "raises when a TIGHT loop method-call argument calls a plain EFFECTS REENTRANT function" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -573,7 +678,7 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
     it "allows normal (non-reentrant, non-extern) CLEAR calls inside TIGHT" do
@@ -727,7 +832,7 @@ RSpec.describe ZigTranspiler do
   describe "HashMap param double-& fix" do
     it "does not double-wrap HashMap params with & in recursive calls" do
       src = <<~CLEAR
-        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS !Int64 @reentrant ->
+        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
             env[key] = depth;
             IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
             RETURN depth;
@@ -832,7 +937,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("restoreFrameMark")
     end
 
     it "emits saveFrameMark for frame-owned split results with borrowed string return" do
@@ -847,8 +953,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
-        expect(zig).not_to include("restoreFrameMark")
+      expect(function_body(zig, "f")).to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("restoreFrameMark")
       expect(zig).not_to include("preserveAndRewind")
       expect(zig).not_to include("__pr_body")
     end
@@ -866,7 +972,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
+      expect(function_body(zig, "check")).to include("saveFrameMark")
+      expect(function_body(zig, "check")).to include("restoreFrameMark")
     end
   end
 
@@ -1102,6 +1209,23 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
+    end
+
+    it "emits a dupe method for cleanup-bearing inline struct variant fields" do
+      src = <<~CLEAR
+        UNION Value { Nil, Error { errMsg: String, errKind: String } }
+        FN main() RETURNS Void ->
+            err = Value.Error{ errMsg: "x", errKind: "E" };
+            copied = COPY err;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+
+      expect(zig).to include("pub fn dupe(self: @This(), alloc: std.mem.Allocator) !@This()")
+      expect(zig).to include("try CheatLib.dupeValue(@TypeOf(self.errMsg), self.errMsg, alloc)")
+      expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__dupe_errMsg), alloc, &__dupe_errMsg)")
+      expect(zig).to include("result.errKind = __dupe_errKind")
     end
   end
 
@@ -1373,11 +1497,11 @@ RSpec.describe ZigTranspiler do
           Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
         }
 
-        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
+        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: Env[8]@pool) RETURNS String EFFECTS REENTRANT ->
           RETURN ast;
         END
 
-        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !String @reentrant ->
+        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !String EFFECTS REENTRANT ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoAst = COPY tco.tcoAst;
@@ -1452,7 +1576,7 @@ RSpec.describe ZigTranspiler do
   # BG string capture: do not free non-duped captures
   # ===========================================================================
   describe "BG string capture defer free" do
-    it "captures an already-owned heap string without promotion-era dup/free glue" do
+    it "captures an already-owned heap string as a fiber-owned duplicate" do
       src = <<~CLEAR
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN main() RETURNS Void ->
@@ -1464,9 +1588,33 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       user_code = zig.split("// 3. Main Entry").first
-      expect(user_code).to include(".msg = msg")
-      expect(user_code).not_to include("dupe(u8, msg)")
-      expect(user_code).not_to match(/free.*msg/)
+      expect(user_code).to include("CheatLib.dupeCaptured(@TypeOf(msg), msg")
+      expect(user_code).to include(".msg = __fc_")
+      expect(user_code).to include("msg_moved: bool = false,")
+      expect(user_code).to include("errdefer CheatLib.cleanup(@TypeOf(__fc_0_msg), __bg0_alloc, &__fc_0_msg);")
+      expect(user_code).to include(
+        "if (!__ctx_0.msg_moved) CheatLib.cleanup(@TypeOf(__ctx_0.msg), __ctx_0.alloc, &__ctx_0.msg);"
+      )
+    end
+
+    it "cleans duplicated FSM captures even when the source string starts as rodata" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            greeting: String = "world";
+            p: ~String = BG { greeting + "!"; };
+            result: String = NEXT p;
+            ASSERT result == "world!", "BG string capture";
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include("CheatLib.dupeCaptured(@TypeOf(greeting), greeting, __bg0_alloc)")
+      expect(user_code).to include("greeting_moved: bool = false,")
+      expect(user_code).to include("errdefer CheatLib.cleanup(@TypeOf(__fc_0_greeting), __bg0_alloc, &__fc_0_greeting);")
+      expect(user_code).to include(
+        "if (!__ctx_0.greeting_moved) CheatLib.cleanup(@TypeOf(__ctx_0.greeting), __ctx_0.alloc, &__ctx_0.greeting);"
+      )
     end
 
     it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do

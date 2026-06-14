@@ -26,9 +26,8 @@ module Completions
     'help'        => 'Show help',
   }.freeze
 
-  module_function
 
-  def script_for(shell)
+  def self.script_for(shell)
     case shell
     when 'bash' then bash
     when 'zsh'  then zsh
@@ -41,7 +40,7 @@ module Completions
   # Bash uses `complete -F` with a function. We hand-roll the
   # subcommand dispatch so file completion is filtered to `.cht`
   # for build-like commands and to `.profile/` for `doctor`.
-  def bash
+  def self.bash
     <<~BASH
       # bash completion for `clear`
       # Source from ~/.bashrc:  source <(clear completions bash)
@@ -89,7 +88,7 @@ module Completions
 
   # Zsh's completion system is richer: `_describe` shows subcommand
   # descriptions inline, `_files -g GLOB` filters by glob.
-  def zsh
+  def self.zsh
     desc_lines = SUBCOMMANDS.map { |k, v| "    '#{k}:#{v}'" }.join("\n")
     <<~ZSH
       #compdef clear
@@ -124,7 +123,7 @@ module Completions
   end
 
   # Fish completions are declarative: one `complete` call per arm.
-  def fish
+  def self.fish
     sub_complete = SUBCOMMANDS.map do |k, v|
       desc = v.gsub("'", "\\\\'")
       "complete -c clear -n '__fish_use_subcommand' -a #{k} -d '#{desc}'"
@@ -150,4 +149,8 @@ module Completions
         -a 'bash zsh fish'
     FISH
   end
+  private_class_method :bash
+  private_class_method :fish
+  private_class_method :zsh
+
 end

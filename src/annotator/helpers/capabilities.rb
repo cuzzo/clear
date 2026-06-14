@@ -170,11 +170,12 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@locked",
-              description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)."
+              description_code: :WITH_ADD_LOCKED
             ),
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@writeLocked",
-              description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)."
+              description_code: :WITH_ADD_WRITE_LOCKED,
+              description_params: { reader: "can coexist via WITH READ" }
             ),
           ],
           confidence: :interactive,
@@ -209,8 +210,7 @@ module CapabilityHelper
           emit_view_not_observable_finding!(node, fact, t)
         else
           name = fact.target_label
-          error!(node, :CAPABILITY_VIOLATION_FIXABLE,
-            message: "WITH VIEW requires an `@observable` source, but '#{name}' has type #{t.resolved}.")
+          error!(node, :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: t.resolved)
         end
       end
 
@@ -244,11 +244,11 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@versioned",
-              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)."
+              description_code: :WITH_ADD_VERSIONED
             ),
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@indirect:atomic",
-              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)."
+              description_code: :WITH_ADD_INDIRECT_ATOMIC
             ),
           ],
           confidence: :interactive,
@@ -262,7 +262,8 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@multiowned",
-              description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)."
+              description_code: :WITH_ADD_MULTIOWNED,
+              description_params: { suffix: " via WITH" }
             ),
           ],
           confidence: :auto,
@@ -276,7 +277,8 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@shared",
-              description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)."
+              description_code: :WITH_ADD_SHARED,
+              description_params: { suffix: "to clone across fibers" }
             ),
           ],
           confidence: :auto,
@@ -297,7 +299,7 @@ module CapabilityHelper
             [
               FixableHelper::CapabilityFixCandidate.new(
                 sigil: "@shared:atomic",
-                description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)."
+                description_code: :WITH_ADD_SHARED_ATOMIC
               ),
             ],
             confidence: :auto,
@@ -335,7 +337,7 @@ module CapabilityHelper
     fixes = []
     if view_tok
       fixes << Fix.new(
-        description: "Replace `VIEW` with `MATERIALIZED VIEW` (owned O(N) snapshot, works on any `~T` aggregate).",
+        description: fix_description(:WITH_VIEW_TO_MATERIALIZED),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: view_tok.line, col: view_tok.column, length: 'VIEW'.length),
@@ -344,8 +346,9 @@ module CapabilityHelper
       )
     end
 
-    return error!(node, :CAPABILITY_VIOLATION_FIXABLE, message: msg) if fixes.empty?
-    fixable!(node, message: msg, category: :capability, level: :error,
+    return error!(node, :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: var_type.resolved) if fixes.empty?
+    fixable!(node, code: :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: var_type.resolved,
+             category: :capability, level: :error,
              fixes: fixes, raise_in_collector: false)
   end
 
@@ -456,18 +459,44 @@ module CapabilityHelper
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
+    call_declared_impurity_reason(call) ||
+      matched_stdlib_impurity_reason(call) ||
+      semantic_function_impurity_reason(callee)
+  end
+
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
+  def call_declared_impurity_reason(call)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     return "is an extern call" if call.extern_call
     extern_effects = call.extern_effects
     return "has extern effects" if extern_effects && !extern_effects.empty?
     return "can fail" if call.can_fail
-    if call.matched_stdlib_def
-      md = T.must(call.matched_stdlib_def)
-      return "allocates" if md.emits_allocating?
-      return "can fail" if md.can_fail
-      return "suspends" if md.intrinsic_suspends?
-      return "mutates its receiver" if md.mutates_receiver?
-      return nil
-    end
+
+    nil
+  end
+  private :call_declared_impurity_reason
+
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
+  def matched_stdlib_impurity_reason(call)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    return nil unless call.matched_stdlib_def
+
+    md = T.must(call.matched_stdlib_def)
+    return "allocates" if md.emits_allocating?
+    return "can fail" if md.can_fail
+    return "suspends" if md.intrinsic_suspends?
+    return "mutates its receiver" if md.mutates_receiver?
+
+    nil
+  end
+  private :matched_stdlib_impurity_reason
+
+  sig { params(callee: String).returns(T.nilable(String)) }
+  def semantic_function_impurity_reason(callee)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     fn_nodes = function_node_map
     fn = fn_nodes[callee]
     return nil unless fn
@@ -476,6 +505,7 @@ module CapabilityHelper
     return nil if effects.empty?
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
+  private :semantic_function_impurity_reason
 
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
@@ -545,27 +575,23 @@ module CapabilityHelper
     return if pre_clauses.empty?
 
     unless fn_node.explicit_return_type
-      message = "Function '#{fn_node.name}' has PRE clauses but no explicit return type. " \
-                "PRE clauses can fail at runtime, so the function must declare an error-union " \
-                "return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) " \
-                "to the signature."
-
       arrow_tok = fn_node.arrow_token
       if arrow_tok
         # Auto-fix: insert `RETURNS !Void ` immediately before the
         # `->` arrow. The body is implicit-Void (no RETURNS clause
         # was given), so !Void is the correct error-union widening.
         fixes = [Fix.new(
-          description: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
+          description: fix_description(:INSERT_RETURNS_FALLIBLE_VOID),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: arrow_tok.line, col: arrow_tok.column, length: 0),
             replacement: 'RETURNS !Void ',
           )],
         )]
-        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+        fixable!(fn_node, code: :PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN,
+                 fn: fn_node.name, category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, :PURITY_VIOLATION, message: message)
+        error!(fn_node, :PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN, fn: fn_node.name)
       end
     end
 
@@ -943,13 +969,17 @@ module CapabilityHelper
   sig { params(fact: WithCapabilityFact).void }
   def declare_view_capability!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    inner = Type.new(fact.resolved_type).tense_type
-    bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
+    bind_type = view_capability_alias_type(fact)
     alias_name = fact.alias_name
-    current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
+    current_scope.declare(alias_name, nil, bind_type, false, false, nil, :stack)
     record_capture_local!(alias_name)
     declare_view_borrow_constraints!(alias_name) if fact.capability == :VIEW
-    og_declare(alias_name, nil, bind_type_sym)
+    og_declare(alias_name, nil, bind_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).returns(Type) }
+  def view_capability_alias_type(fact)
+    Type.new(fact.resolved_type).tense_type
   end
 
   sig { params(alias_name: String).void }
@@ -1227,6 +1257,34 @@ module CapabilityHelper
     end
     nil
   end
+
+  private :declare_borrowed_capability!,
+    :declare_capability_projection!,
+    :declare_restrict_capability!,
+    :declare_restrict_alias!,
+    :declare_snapshot_capability!,
+    :declare_unwrapped_capability_alias!,
+    :declare_view_capability!,
+    :record_capture_local!,
+    :record_capture_info!,
+    :validate_capability_transition!,
+    :with_capability_fact
+  private :add_capture_name_when
+  private :alias_mutated?
+  private :borrowed_source_qualifier
+  private :cap_var_layout
+  private :declare_capability_binding_or_error!
+  private :declare_view_borrow_constraints!
+  private :emit_borrowed_rejection!
+  private :emit_view_not_observable_finding!
+  private :new_capture_analysis
+  private :non_escaping_fiber_capture?
+  private :predicate_impurity_reason
+  private :record_capture_move!
+  private :set_capture_close_plan_when
+  private :unwrapped_capability_alias_type
+  private :view_capability_alias_type
+
 end
 
 # ============================================================================
@@ -1317,7 +1375,7 @@ module CapabilityAudit
   sig { params(var_name: String).void }
   def audit_mark_mutated(var_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
     record&.mark_mutated!
@@ -1326,7 +1384,7 @@ module CapabilityAudit
   sig { params(var_name: String, parallel: T::Boolean).void }
   def audit_mark_captured(var_name, parallel:)
     T.bind(self, SemanticAnnotator) rescue nil
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
     record&.mark_captured!(parallel: parallel)
@@ -1368,5 +1426,4 @@ module CapabilityAudit
     "#{fn_name}:#{var_name}"
   end
   private :capability_audit_key
-
 end

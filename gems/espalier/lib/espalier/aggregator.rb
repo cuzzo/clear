@@ -9,20 +9,31 @@ module Espalier
     def initialize(
       decomplex_data: {},
       nil_kill_data: {},
-      risk_data: {}
+      risk_data: {},
+      ruby_topology: nil
     )
       @decomplex_data = decomplex_data
       @nil_kill_data = nil_kill_data
       @risk_data = risk_data
+      @ruby_topology = ruby_topology
     end
 
     # Aggregate extracted AST structure with auxiliary indicators
     def aggregate(modules)
-      modules.map do |mod|
+      topology = ruby_topology_for(modules)
+      manifest = modules.map do |mod|
+        internal_edges = internal_edges_for(mod, topology)
+        callers_by_method = internal_edges.each_with_object(Hash.new { |h, k| h[k] = [] }) do |edge, index|
+          index[edge[:callee]] << edge[:caller]
+        end
+        callees_by_method = internal_edges.each_with_object(Hash.new { |h, k| h[k] = [] }) do |edge, index|
+          index[edge[:caller]] << edge[:callee]
+        end
+
         aggregated_states = mod[:states].map do |state_var|
           # Merge state context if dynamic updates or properties exist
           type_str = mod[:ivar_types] ? mod[:ivar_types][state_var] : nil
-          
+
           props = collect_state_properties(mod[:name], state_var)
           if mod[:ivar_properties] && mod[:ivar_properties][state_var]
             props.concat(mod[:ivar_properties][state_var])
@@ -37,7 +48,7 @@ module Espalier
 
         aggregated_methods = mod[:methods].map do |m|
           key = "#{mod[:name]}##{m[:name]}"
-          
+
           # 1. Capture concrete type signature if nil-kill supplied custom RBI/data
           sig = @nil_kill_data[key] || m[:signature]
 
@@ -45,12 +56,12 @@ module Espalier
           always_calls = []
           conditionally_calls = []
 
-          m[:delegations].uniq.each do |del|
+          Array(m[:delegations]).uniq.each do |del|
             receiver = del[:receiver]
             if receiver.start_with?("@") && mod[:ivar_types] && (type_name = mod[:ivar_types][receiver])
               receiver = type_name
             end
-            
+
             target = receiver == "self" ? del[:message] : "#{receiver}.#{del[:message]}"
             if del[:type] == :conditional
               conditionally_calls << target
@@ -82,26 +93,88 @@ module Espalier
           {
             name: m[:name],
             signature: sig,
+            visibility: m[:visibility] || :public,
             EFFECTS: {
               reads: m[:effects][:reads].to_a.sort,
               writes: m[:effects][:writes].to_a.sort
             },
             DELEGATIONS: delegations.empty? ? nil : delegations,
+            CALL_GRAPH: call_graph_for(m[:name], callers_by_method, callees_by_method),
             quality_metrics: quality.empty? ? nil : quality
           }.compact
         end
 
-        {
+        mod_row = {
           module: mod[:name],
           file: mod[:file],
           type: mod[:type],
           state: aggregated_states.empty? ? nil : aggregated_states,
           functions: aggregated_methods
         }.compact
+        mod_row[:call_graph] = { internal_edges: internal_edges } unless internal_edges.empty?
+        mod_row
       end
+      PrivacyAnalyzer.annotate!(manifest)
     end
 
     private
+
+    def ruby_topology_for(modules)
+      return @ruby_topology if @ruby_topology
+
+      files = modules.filter_map { |mod| mod[:file] }.uniq.select { |file| File.file?(file) }
+      return nil if files.empty?
+
+      @ruby_topology = Decomplex::RubyTopology.scan(files)
+    rescue ArgumentError, SyntaxError
+      nil
+    end
+
+    def internal_edges_for(mod, topology)
+      if topology && !topology.methods_for_owner(mod[:name]).empty?
+        return topology_edges_for(mod, topology)
+      end
+
+      legacy_internal_edges_for(mod)
+    end
+
+    def topology_edges_for(mod, topology)
+      topology.edges_for_owner(mod[:name]).map do |edge|
+        {
+          caller: edge.caller_name,
+          callee: edge.callee_name,
+          type: edge.type
+        }
+      end.uniq.sort_by { |edge| [edge[:callee], edge[:caller], edge[:type].to_s] }
+    end
+
+    def legacy_internal_edges_for(mod)
+      method_names = mod[:methods].map { |m| m[:name].to_s }
+      mod[:methods].flat_map do |method|
+        caller = method[:name].to_s
+        Array(method[:delegations]).filter_map do |delegation|
+          callee = delegation[:message].to_s
+          next unless delegation[:receiver] == "self"
+          next unless method_names.include?(callee)
+          next if caller == callee
+
+          {
+            caller: caller,
+            callee: callee,
+            type: delegation[:type] || :always
+          }
+        end
+      end.uniq.sort_by { |edge| [edge[:callee], edge[:caller], edge[:type].to_s] }
+    end
+
+    def call_graph_for(method_name, callers_by_method, callees_by_method)
+      graph = {}
+      callers = callers_by_method[method_name.to_s].uniq.sort
+      callees = callees_by_method[method_name.to_s].uniq.sort
+      graph[:internal_callers] = callers unless callers.empty?
+      graph[:internal_calls] = callees unless callees.empty?
+      graph.empty? ? nil : graph
+    end
 
     def collect_state_properties(class_name, state_var)
       props = []

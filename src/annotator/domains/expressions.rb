@@ -11,7 +11,7 @@ module Annotator
       def infer_implicit_type_params(fn_node)
         T.bind(self, SemanticAnnotator)
 
-        explicit = (fn_node.type_params || []).map(&:to_s)
+        explicit = fn_node.type_params.map(&:to_s)
         return explicit unless explicit.empty?
         inferred = []
         ([fn_node.return_type] + fn_node.params.map { |p| p.type }).each do |type|
@@ -149,6 +149,7 @@ module Annotator
         # Standard binary operations - visit children first
         visit(node.left)
         visit(node.right)
+        validate_predicate_purity! if current_predicate_context
 
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
@@ -156,7 +157,7 @@ module Annotator
         result = Type.binary_op(node.op, left_type, right_type)
 
         if result.error
-          error!(node, :TYPE_ERROR_GENERIC, message: result.error)
+          error!(node, :TYPE_ERROR_GENERIC, detail: result.error)
         end
 
         stamp_type!(node, result.type)
@@ -334,11 +335,11 @@ module Annotator
       # Returns the Type of the last value-producing expression in a branch body,
       # or nil if the branch doesn't end with a usable expression.
       # Used to determine whether an IF/MATCH node can be promoted to expression mode.
-      sig { params(branch: T.nilable(T::Array[AST::Node])).returns(T.nilable(Type)) }
+      sig { params(branch: T::Array[AST::Node]).returns(T.nilable(Type)) }
       def expr_result_type(branch)
         T.bind(self, SemanticAnnotator)
 
-        return nil if branch.nil? || branch.empty?
+        return nil if branch.empty?
         last = branch.last
         # ELSE_IF chain: the last element is a nested IfStatement — use its result type
         if last.is_a?(AST::IfStatement)
@@ -449,6 +450,8 @@ module Annotator
         match_node.expr_mode = true
         stamp_type!(match_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
       end
-    end
+      private :collect_implicit_type_params
+
+end
   end
 end

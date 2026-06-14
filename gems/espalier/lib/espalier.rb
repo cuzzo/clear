@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 require_relative "espalier/ast_extractor"
+begin
+  require "decomplex/ruby_topology"
+rescue LoadError
+  require_relative "../../decomplex/lib/decomplex/ruby_topology"
+end
+require_relative "espalier/privacy_analyzer"
+require_relative "espalier/architecture_analyzer"
 require_relative "espalier/aggregator"
 require_relative "espalier/formatter"
 require_relative "espalier/reporter"

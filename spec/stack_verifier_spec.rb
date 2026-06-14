@@ -2,7 +2,7 @@ require "rspec"
 require "stringio"
 require "tmpdir"
 require "fileutils"
-require_relative "../src/tools/stack_verifier"
+require_relative "../src/tools/stack_verifier" unless defined?(StackVerifier)
 
 # Most expectations drive a real StackVerifier with canned objdump
 # output (no Zig build needed) -- this contributes coverage for
@@ -170,7 +170,7 @@ RSpec.describe StackVerifier do
   describe "#extract_frame_sizes" do
     it "parses sub $0xN,%rsp instructions into per-fn frame entries" do
       v = stub_verifier(BASIC_OBJDUMP)
-      frames = v.extract_frame_sizes
+      frames = v.send(:extract_frame_sizes)
 
       names = frames.map { |f| f[:name] }
       expect(names).to include("main", "compute", "clearMain.__BgCtx0.run")
@@ -183,7 +183,7 @@ RSpec.describe StackVerifier do
     end
 
     it "returns [] when objdump output is empty" do
-      expect(stub_verifier("").extract_frame_sizes).to eq([])
+      expect(stub_verifier("").send(:extract_frame_sizes)).to eq([])
     end
 
     it "ignores functions whose name doesn't start with the module prefix" do
@@ -192,7 +192,7 @@ RSpec.describe StackVerifier do
         0000000001162900 <some_other_module.foo>:
          1162900:\t48 81 ec aa 00 00 00 \tsub    $0xaa,%rsp
       EXTRA
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       expect(frames.map { |f| f[:name] }).not_to include("some_other_module.foo")
     end
 
@@ -222,7 +222,7 @@ RSpec.describe StackVerifier do
          12dd242:\t4c 29 d4             \tsub    %r10,%rsp
          12dd245:\t42 85 a4 14 00 f0 ff \ttest   %esp,-0x1000(%rsp,%r10,1)
       OBJ
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       huge = frames.find { |f| f[:name] == "runRegisterBytecode" }
       expect(huge).not_to be_nil
       expect(huge[:stack_bytes]).to eq(0x88010)
@@ -240,7 +240,7 @@ RSpec.describe StackVerifier do
         00000000012dd400 <#{PREFIX}.smallFn>:
          12dd400:\t48 81 ec 80 00 00 00 \tsub    $0x80,%rsp
       OBJ
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       expect(frames.length).to eq(2)
       big = frames.find { |f| f[:name] == "bigFn" }
       small = frames.find { |f| f[:name] == "smallFn" }
@@ -330,9 +330,9 @@ RSpec.describe StackVerifier do
       expect(err[:message]).to include("(test.cht:42)")
     end
 
-    it "treats fn_nodes as empty when nil (covers `&.` nil branch)" do
+    it "treats omitted fn_nodes as empty" do
       v = stub_verifier(BASIC_OBJDUMP)
-      report = v.analyze(fn_nodes: nil)
+      report = v.analyze
       report[:functions].each { |f| expect(f[:tier]).to eq(:unknown) }
     end
 
@@ -448,7 +448,7 @@ RSpec.describe StackVerifier do
   describe "#extract_full_call_graph" do
     it "builds frame_sizes, call_graph, fn_names from objdump" do
       v = stub_verifier(BASIC_OBJDUMP)
-      g = v.extract_full_call_graph
+      g = v.send(:extract_full_call_graph)
 
       expect(g[:fn_names].values).to include("#{PREFIX}.clearMain", "#{PREFIX}.compute")
 
@@ -463,13 +463,13 @@ RSpec.describe StackVerifier do
 
     it "identifies BG entries by __BgCtxN.run suffix" do
       v = stub_verifier(BASIC_OBJDUMP)
-      g = v.extract_full_call_graph
+      g = v.send(:extract_full_call_graph)
       expect(g[:bg_entries].length).to eq(1)
       expect(g[:fn_names][g[:bg_entries].first]).to include("__BgCtx0.run")
     end
 
     it "returns nil when objdump output is empty" do
-      expect(stub_verifier("").extract_full_call_graph).to be_nil
+      expect(stub_verifier("").send(:extract_full_call_graph)).to be_nil
     end
 
     # Regression: call-graph frame sizes must include huge-frame
@@ -491,7 +491,7 @@ RSpec.describe StackVerifier do
          12dd23c:\t41 ba 10 80 08 00    \tmov    $0x88010,%r10d
          12dd242:\t4c 29 d4             \tsub    %r10,%rsp
       OBJ
-      g = stub_verifier(output).extract_full_call_graph
+      g = stub_verifier(output).send(:extract_full_call_graph)
       runner_addr = g[:fn_addrs]["#{PREFIX}.runRegisterBytecode"]
       expect(g[:frame_sizes][runner_addr]).to eq(0x88010)
     end
@@ -772,7 +772,7 @@ RSpec.describe StackVerifier do
     it "extract_frame_sizes parses real objdump output (format check)" do
       skip "build failed" unless @real_bin
       v = StackVerifier.new(@real_bin, @real_prefix)
-      frames = v.extract_frame_sizes
+      frames = v.send(:extract_frame_sizes)
       expect(frames.map { |f| f[:name] }).to include("main")
       frames.each { |f| expect(f[:stack_bytes]).to be > 0 }
     end

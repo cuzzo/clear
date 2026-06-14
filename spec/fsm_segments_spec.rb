@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/std_lib"
-require_relative "../src/ast/type"
-require_relative "../src/mir/fsm_transform/segments"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/fsm_transform/segments" unless defined?(FsmTransform::Segments::SplitResult)
 
 RSpec.describe FsmTransform::Segments do
   let(:tok) { Lexer::Token.new(:IDENTIFIER, "x", 1, 1) }
@@ -11,9 +11,16 @@ RSpec.describe FsmTransform::Segments do
   let(:plain_def) { intrinsic_sig(suspends: false) }
 
   def intrinsic_sig(suspends:, fsm_setup: nil)
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    sig.emit = IntrinsicEmit.new(suspends: suspends, fsm_setup: fsm_setup)
-    sig
+    FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(
+        suspends: suspends,
+        fsm_setup: fsm_setup || [],
+        fsm_setup_present: !fsm_setup.nil?,
+      )
+    )
   end
 
   def typed(node, type = :Int64)
@@ -62,19 +69,19 @@ RSpec.describe FsmTransform::Segments do
     expect(described_class::LoopBack.new(1).kind).to eq(:loop_back)
     expect(described_class::Goto.new(1).kind).to eq(:goto)
     expect(described_class::CondBranch.new(lit, 1, 2).kind).to eq(:cond_branch)
-    expect(described_class.suspend_tail?(described_class::Done.new(nil))).to eq(false)
+    expect(described_class.send(:suspend_tail?, described_class::Done.new(nil))).to eq(false)
   end
 
   it "classifies top-level, binding, and assignment suspend statements" do
     bind = AST::BindExpr.new(tok, "future_value", nil, next_expr)
     assign = AST::Assignment.new(tok, "file_value", io_call)
 
-    expect(described_class.classify_suspend(next_expr)).to be_a(described_class::NextSuspend)
-    expect(described_class.classify_suspend(bind)).to be_a(described_class::NextSuspend)
-    expect(described_class.classify_suspend(assign)).to be_a(described_class::IoSuspend)
-    expect(described_class.classify_suspend(non_io_call)).to be_nil
-    expect(described_class.suspending_call?(io_call)).to eq(true)
-    expect(described_class.suspending_call?(non_io_call)).to eq(false)
+    expect(described_class.send(:classify_suspend, next_expr)).to be_a(described_class::NextSuspend)
+    expect(described_class.send(:classify_suspend, bind)).to be_a(described_class::NextSuspend)
+    expect(described_class.send(:classify_suspend, assign)).to be_a(described_class::IoSuspend)
+    expect(described_class.send(:classify_suspend, non_io_call)).to be_nil
+    expect(described_class.send(:suspending_call?, io_call)).to eq(true)
+    expect(described_class.send(:suspending_call?, non_io_call)).to eq(false)
   end
 
   it "splits linear bodies and rejects unsupported control-flow shapes" do
@@ -82,7 +89,7 @@ RSpec.describe FsmTransform::Segments do
     last = lit
     bind = AST::BindExpr.new(tok, "a", nil, next_expr("p1"))
     assign = AST::Assignment.new(tok, "b", io_call("sleep"))
-    segments = described_class.split([first, bind, assign, last], nil)
+    segments = described_class.split([first, bind, assign, last], nil).segments
 
     expect(segments.map(&:index)).to eq([0, 1, 2])
     expect(segments[0].stmts).to eq([first])
@@ -93,12 +100,12 @@ RSpec.describe FsmTransform::Segments do
 
     with_block = AST::WithBlock.new(tok, [], [lit])
     expect(described_class.split([with_block], nil)).to be_nil
-    expect(described_class.contains_unsupported_shape?([with_block])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [with_block])).to eq(true)
   end
 
   it "handles the legacy while-loop single-suspend shape" do
     loop = AST::WhileLoop.new(tok, lit, [lit, next_expr, lit], nil)
-    segments = described_class.split_while_loop_next([lit, loop, lit])
+    segments = described_class.send(:split_while_loop_next, [lit, loop, lit]).segments
 
     expect(segments.length).to eq(5)
     expect(segments[0].tail).to be_a(described_class::Goto)
@@ -108,7 +115,7 @@ RSpec.describe FsmTransform::Segments do
     expect(segments[3].tail).to be_a(described_class::LoopBack)
     expect(segments[4].tail).to be_a(described_class::Done)
 
-    expect(described_class.split([lit, loop, lit], nil).map(&:tail).map(&:kind)).
+    expect(described_class.split([lit, loop, lit], nil).segments.map(&:tail).map(&:kind)).
       to eq(%i[goto cond_branch next loop_back done])
   end
 
@@ -118,10 +125,10 @@ RSpec.describe FsmTransform::Segments do
     nested = AST::WhileLoop.new(tok, lit, [nested_if], nil)
     pre_suspend = AST::WhileLoop.new(tok, lit, [lit], nil)
 
-    expect(described_class.split_while_loop_next("not a body")).to be_nil
-    expect(described_class.split_while_loop_next([multiple])).to be_nil
-    expect(described_class.split_while_loop_next([nested])).to be_nil
-    expect(described_class.split_while_loop_next([next_expr, pre_suspend])).to be_nil
+    expect(described_class.send(:split_while_loop_next, "not a body")).to be_nil
+    expect(described_class.send(:split_while_loop_next, [multiple])).to be_nil
+    expect(described_class.send(:split_while_loop_next, [nested])).to be_nil
+    expect(described_class.send(:split_while_loop_next, [next_expr, pre_suspend])).to be_nil
   end
 
   it "detects suspends inside unsupported control-flow containers" do
@@ -135,28 +142,28 @@ RSpec.describe FsmTransform::Segments do
     catch_block = AST::CatchBlock.new(tok, [], without_next)
     with_block = AST::WithBlock.new(tok, [], without_next)
 
-    expect(described_class.contains_unsupported_shape?([while_loop])).to eq(true)
-    expect(described_class.contains_unsupported_shape?([for_range])).to eq(true)
-    expect(described_class.contains_unsupported_shape?([for_each])).to eq(true)
-    expect(described_class.contains_unsupported_shape?([while_bind])).to eq(true)
-    expect(described_class.contains_unsupported_shape?([nested_if])).to eq(true)
-    expect(described_class.contains_unsupported_shape?([catch_block])).to eq(true)
-    expect(described_class.contains_suspend_anywhere?([while_loop])).to eq(true)
-    expect(described_class.contains_suspend_anywhere?([with_block])).to eq(true)
-    expect(described_class.contains_suspend_anywhere?([catch_block])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [while_loop])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [for_range])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [for_each])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [while_bind])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [nested_if])).to eq(true)
+    expect(described_class.send(:contains_unsupported_shape?, [catch_block])).to eq(true)
+    expect(described_class.send(:contains_suspend_anywhere?, [while_loop])).to eq(true)
+    expect(described_class.send(:contains_suspend_anywhere?, [with_block])).to eq(true)
+    expect(described_class.send(:contains_suspend_anywhere?, [catch_block])).to eq(true)
   end
 
   it "rewrites top-level suspending pipeline heads into bind plus residual pipeline" do
     right = typed(AST::FuncCall.new(tok, "trim", []), :String)
     pipeline = typed(AST::BinaryOp.new(tok, io_call, :SMOOTH, right), :String)
 
-    rewritten = described_class.rewrite_pipeline_io([pipeline, lit])
+    rewritten = described_class.send(:rewrite_pipeline_io, [pipeline, lit])
 
     expect(rewritten.length).to eq(3)
     expect(rewritten[0]).to be_a(AST::BindExpr)
     expect(rewritten[0].name).to eq("__pipe_v_0")
     expect(rewritten[1]).to be_a(AST::BinaryOp)
     expect(rewritten[1].left).to be_a(AST::Identifier)
-    expect(described_class.rewrite_pipeline_io(pipeline)).to be(pipeline)
+    expect(described_class.send(:rewrite_pipeline_io, pipeline)).to be(pipeline)
   end
 end

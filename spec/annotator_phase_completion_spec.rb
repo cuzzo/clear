@@ -1,7 +1,7 @@
 require "spec_helper"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/semantic/pass_state"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/semantic/pass_state" unless defined?(MIRPassState::StageSpec)
 
 RSpec.describe "annotator completion phases" do
   def tok(value = "program")
@@ -9,11 +9,11 @@ RSpec.describe "annotator completion phases" do
   end
 
   def parse(source)
-    Parser.new(Lexer.new(source).tokenize, source).parse
+    ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
   it "initializes builtin environment during annotator construction" do
-    scope = SemanticAnnotator.new.current_scope
+    scope = SemanticAnnotator.new.send(:current_scope)
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
     expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)
@@ -28,7 +28,7 @@ RSpec.describe "annotator completion phases" do
     SemanticAnnotator.new.annotate!(program)
 
     expect(program.full_type!.resolved).to eq(:Void)
-    expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
+    expect(MIRPassState.for!(program).send(:completed_stages)).to eq([:annotated])
   end
 
   it "runs body analysis and program finalization for executable statements" do
@@ -43,7 +43,7 @@ RSpec.describe "annotator completion phases" do
     SemanticAnnotator.new.annotate!(program)
 
     expect(program.full_type!.resolved).to eq(:Int64)
-    expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
+    expect(MIRPassState.for!(program).send(:completed_stages)).to eq([:annotated])
   end
 
   it "publishes a frozen semantic index after annotation completes" do
@@ -81,7 +81,7 @@ RSpec.describe "annotator completion phases" do
     CLEAR
 
     annotator.annotate!(program)
-    summary = T.must(annotator.function_body_summary_for("main"))
+    summary = T.must(annotator.function_body_summaries["main"])
 
     expect(summary.definition_id.value).to be > 0
     expect(summary.body_id.value).to be > 0
@@ -91,6 +91,25 @@ RSpec.describe "annotator completion phases" do
     expect(summary.call_site_facts.map(&:callee_name)).to include("callee")
     expect(summary.call_site_facts.map(&:fn_var_call)).to eq([false])
     expect(summary.call_site_facts.map(&:propagates_failure)).to eq([true])
+  end
+
+  it "resets compilation state between reused annotator runs" do
+    annotator = SemanticAnnotator.new
+    first = parse(<<~CLEAR)
+      FN stale() RETURNS Int64 ->
+        RETURN 1;
+      END
+    CLEAR
+    second = parse(<<~CLEAR)
+      stale();
+    CLEAR
+
+    annotator.annotate!(first)
+
+    expect {
+      annotator.annotate!(second)
+    }.to raise_error(CompilerError, /undefined|unknown/i)
+    expect(annotator.semantic_function_nodes).not_to have_key("stale")
   end
 
   it "appends synthesized functions during body analysis" do
@@ -171,6 +190,43 @@ RSpec.describe "annotator completion phases" do
     expect {
       annotator.mark_annotation_complete!(program)
     }.to raise_error(RuntimeError, /unresolved type info/)
+  end
+
+  it "rejects annotation completion if a child node remains unstamped" do
+    child = AST::Identifier.new(tok("x"), "x")
+    program = AST::Program.new(tok, [child])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.to raise_error(RuntimeError, /unresolved AST type facts/)
+  end
+
+  it "rejects annotation completion if a child node remains Auto" do
+    child = AST::Identifier.new(tok("x"), "x")
+    child.full_type = Type.new(:Auto, auto: true)
+    program = AST::Program.new(tok, [child])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.to raise_error(RuntimeError, /Identifier .* Auto/)
+  end
+
+  it "ignores lifetime metadata nodes at the annotation boundary" do
+    lifetime = AST::Identifier.new(tok("n"), "n")
+    fn = AST::FunctionDef.new(tok("identity"), "identity", [], [], Type.new(:Int64), [lifetime], [], [], nil, :pub, [], false)
+    fn.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+    program = AST::Program.new(tok, [fn])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+    annotator.semantic_function_nodes["identity"] = fn
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.not_to raise_error
   end
 
   it "rejects annotation completion if a function lacks a signature" do

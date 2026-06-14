@@ -1,8 +1,8 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "../ast/ast"
-require_relative "../ast/type"
+require_relative "../../ast/ast"
+require_relative "../../ast/type"
 
 # String Concat Rewriter — flattens chained string + into StringConcat nodes.
 #
@@ -28,14 +28,12 @@ class StringConcatRewriter
     return node unless node
     rewrite_children!(node)
 
-    if string_concat?(node)
-      parts = collect_parts(node)
-      if parts.length > 2
-        concat = AST::StringConcat.new(node.token, parts)
-        AST.stamp_synthetic_type!(concat, node.full_type!, context: "synthetic AST type")
-        concat.storage = node.storage if node.respond_to?(:storage)
-        return concat
-      end
+    parts = collect_parts(node)
+    if parts.length > 2
+      concat = AST::StringConcat.new(node.token, parts)
+      AST.stamp_synthetic_type!(concat, node.full_type!, context: "synthetic AST type")
+      concat.storage = node.storage
+      return concat
     end
 
     node
@@ -45,14 +43,14 @@ class StringConcatRewriter
   def rewrite_children!(node)
     case node
     when AST::FunctionDef
-      node.body.map!.with_index { |s, _| rewrite_in_node!(s) }
+      node.body.map! { |s| rewrite_in_node!(s) }
     when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
-      node.value = rewrite_in_node!(node.value) if node.value
+      node.value = rewrite_in_node!(node.value)
     when AST::IfStatement
       node.then_branch&.map! { |s| rewrite_in_node!(s) }
       node.else_branch&.map! { |s| rewrite_in_node!(s) }
     when AST::MatchStatement
-      node.cases.each { |c| c.body&.map! { |s| rewrite_in_node!(s) } }
+      node.cases.each { |c| c.body.map! { |s| rewrite_in_node!(s) } }
       node.default_case.map! { |s| rewrite_in_node!(s) } if node.default_case
     when AST::WhileLoop
       b = node.do_branch
@@ -60,8 +58,8 @@ class StringConcatRewriter
     when AST::ForRange, AST::ForEach
       node.body.map! { |s| rewrite_in_node!(s) }
     when AST::BinaryOp
-      node.left = rewrite_in_node!(node.left) if node.left
-      node.right = rewrite_in_node!(node.right) if node.right
+      node.left = rewrite_in_node!(node.left)
+      node.right = rewrite_in_node!(node.right)
     when AST::FuncCall, AST::MethodCall
       node.args.map! { |a| rewrite_in_node!(a) }
     when AST::StructLit

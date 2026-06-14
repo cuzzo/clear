@@ -1,12 +1,12 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/ast/lexer'
-require_relative '../src/ast/parser'
-require_relative '../src/ast/type'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_lowering'
-require_relative '../src/mir/fsm_transform/segments'
-require_relative '../src/mir/fsm_transform/recursive_splitter'
+require_relative '../src/ast/lexer' unless defined?(Lexer)
+require_relative '../src/ast/parser' unless defined?(ClearParser)
+require_relative '../src/ast/type' unless defined?(Type)
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_lowering' unless defined?(FsmLowering::FsmLockErrorArmSplit)
+require_relative '../src/mir/fsm_transform/segments' unless defined?(FsmTransform::Segments::SplitResult)
+require_relative '../src/mir/fsm_transform/recursive_splitter' unless defined?(FsmTransform::RecursiveSplitter::UnsupportedShape)
 
 # Tests for FsmTransform::RecursiveSplitter -- the unified
 # AST-walker that produces flat segment graphs for any nested
@@ -122,6 +122,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       expect(segs.first.tail).to be_a(FsmTransform::Segments::Goto)
       done_idx = segs.find_index { |s| s.tail.is_a?(FsmTransform::Segments::Done) }
       expect(segs.first.tail.target_index).to eq(done_idx)
+      expect(segs.fetch(T.must(done_idx)).stmts).to eq([])
     end
   end
 
@@ -135,12 +136,12 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
     it "rejects catch blocks and unhandled pivot statements" do
       catch_block = AST::CatchBlock.new(nil, [], nil)
-      expect(FsmTransform::RecursiveSplitter.contains_unsupported?([catch_block]))
+      expect(FsmTransform::RecursiveSplitter.send(:contains_unsupported?, [catch_block]))
         .to eq(true)
 
       builder = FsmTransform::RecursiveSplitter::Builder.new
       expect {
-        FsmTransform::RecursiveSplitter.emit_pivot(AST::PassStmt.new(nil), 0, builder, lowering, {})
+        FsmTransform::RecursiveSplitter.send(:emit_pivot, AST::PassStmt.new(nil), 0, builder, lowering, {})
       }.to raise_error(FsmTransform::RecursiveSplitter::UnsupportedShape, /Unhandled pivot kind/)
     end
 
@@ -163,15 +164,23 @@ RSpec.describe FsmTransform::RecursiveSplitter do
         [for_each("v", unknown_coll, [next_expr])], lowering)).to be_nil
     end
 
+    it "rejects lock-suspending WITH without split context" do
+      cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
+      with_node = AST::WithBlock.new(nil, [cap], [])
+      attach_capability_plan!(with_node)
+
+      expect(FsmTransform::RecursiveSplitter.split([with_node], lowering)).to be_nil
+    end
+
     it "remaps loop-back tails and passes through unknown tails" do
-      remapped = FsmTransform::RecursiveSplitter.remap_tail(
+      remapped = FsmTransform::RecursiveSplitter.send(:remap_tail,
         FsmTransform::Segments::LoopBack.new(4),
         { 4 => 1 },
       )
       passthrough = Object.new
 
       expect(remapped.target_index).to eq(1)
-      expect(FsmTransform::RecursiveSplitter.remap_tail(passthrough, {}))
+      expect(FsmTransform::RecursiveSplitter.send(:remap_tail, passthrough, {}))
         .to equal(passthrough)
     end
   end
@@ -324,6 +333,39 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # Both LockSuspend AND a NextSuspend (in the CS body) appear.
       expect(segs.any? { |s| s.tail.is_a?(FsmTransform::Segments::LockSuspend) }).to be true
       expect(segs.any? { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }).to be true
+    end
+
+    it "remaps alias overrides to the renumbered critical-section segment" do
+      cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"), alias: "guard")
+      next_expr = AST::NextExpr.new(nil, ident("p"))
+      with_node = AST::WithBlock.new(nil, [cap], [next_expr])
+      attach_capability_plan!(with_node)
+
+      segment_list = FsmTransform::RecursiveSplitter.split(
+        [with_node], lowering, ctx: default_ctx)
+      segs = segments_for(segment_list)
+      next_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
+
+      expect(next_seg).not_to be_nil
+      expect(segment_list.alias_overrides_for(next_seg.index))
+        .to eq("guard" => "(__ctx_0.lock.data)")
+    end
+
+    it "remaps alias overrides when a pre-statement moves the critical-section segment" do
+      cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"), alias: "guard")
+      next_expr = AST::NextExpr.new(nil, ident("p"))
+      with_node = AST::WithBlock.new(nil, [cap], [next_expr])
+      attach_capability_plan!(with_node)
+
+      segment_list = FsmTransform::RecursiveSplitter.split(
+        [lit(1), with_node], lowering, ctx: default_ctx)
+      segs = segments_for(segment_list)
+      next_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
+
+      expect(next_seg).not_to be_nil
+      expect(next_seg.index).not_to eq(3)
+      expect(segment_list.alias_overrides_for(next_seg.index))
+        .to eq("guard" => "(__ctx_0.lock.data)")
     end
   end
 end

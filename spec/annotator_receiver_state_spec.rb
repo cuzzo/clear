@@ -1,6 +1,6 @@
 require "spec_helper"
 
-require_relative "../src/annotator/annotator"
+require_relative "../src/annotator/annotator" unless defined?(SemanticAnnotator::ReceiverState)
 
 RSpec.describe "annotator receiver state boundaries" do
   def tok(type = :VAR_ID, value = "x")
@@ -46,7 +46,7 @@ RSpec.describe "annotator receiver state boundaries" do
       ann.send(:with_loop_context) do
         ann.with_conditional_context do
           ann.send(:with_smooth_context) do
-            expect(ann.current_fn_ctx).to eq(ctx)
+            expect(ann.send(:current_fn_ctx)).to eq(ctx)
             expect(ann.current_loop_depth).to eq(1)
             expect(ann.current_conditional_depth).to eq(1)
             expect(ann.smooth_depth).to eq(1)
@@ -60,7 +60,7 @@ RSpec.describe "annotator receiver state boundaries" do
     expect(ctx.conditional_depth).to eq(0)
     expect(ann.smooth_depth).to eq(0)
     expect(ann.send(:pop_function_context!)).to eq(ctx)
-    expect(ann.current_fn_ctx).to be_nil
+    expect(ann.send(:current_fn_ctx)).to be_nil
 
     ann.with_conditional_context do
       expect(ann.current_conditional_depth).to eq(1)
@@ -78,14 +78,14 @@ RSpec.describe "annotator receiver state boundaries" do
 
     expect do
       ann.send(:with_held_locks, with_node, [fact]) do
-        expect(ann.current_held_locks.keys).to eq(["cell"])
-        expect(ann.current_held_lock_types.map(&:type)).to eq([:Counter])
+        expect(ann.send(:current_held_locks).keys).to eq(["cell"])
+        expect(ann.send(:current_held_lock_types).map(&:type)).to eq([:Counter])
         raise "force unwind"
       end
     end.to raise_error("force unwind")
 
-    expect(ann.current_held_locks).to be_empty
-    expect(ann.current_held_lock_types).to be_empty
+    expect(ann.send(:current_held_locks)).to be_empty
+    expect(ann.send(:current_held_lock_types)).to be_empty
   end
 
   it "scopes predicate context while preserving recorded predicate call sites" do
@@ -120,7 +120,7 @@ RSpec.describe "annotator receiver state boundaries" do
 
   it "restores auto-locked assignment context when RHS analysis raises" do
     ann = SemanticAnnotator.new(source_code: "")
-    ann.current_scope.declare("cell", nil, Type.new(:Counter), true, false, nil, :heap, Set.new, [], sync: :locked)
+    ann.send(:current_scope).declare("cell", nil, Type.new(:Counter), true, false, nil, :heap, Set.new, [], sync: :locked)
     locked_target = AST::GetField.new(tok(:DOT, "."), AST::Identifier.new(tok(:VAR_ID, "cell"), "cell"), "value")
     value = AST::Literal.new(tok(:INT64, "1"), :INT64, 1, :stack)
     assignment = AST::Assignment.new(tok(:EQUAL, "="), locked_target, value)

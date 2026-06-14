@@ -245,6 +245,8 @@ module CapabilityPlan
       refreshed_target = target.with_source_entry(source_entry)
       CapabilityPlan.transition_from(request, refreshed_target, borrowed_qualifier)
     end
+
+    private :deferred_lock_param?, :exclusive_sync?, :lock_capability?, :parameter_target?
   end
 
   WithCapabilityFacts = T.type_alias { T::Array[CapabilityTransition] }
@@ -261,7 +263,7 @@ module CapabilityPlan
 
     sig { returns(WithCapabilityFacts) }
     def locks
-      all.select(&:lock_capability?)
+      all.select { |fact| LOCK_CAPABILITIES.include?(fact.capability) }
     end
 
     sig { returns(WithCapabilityFacts) }

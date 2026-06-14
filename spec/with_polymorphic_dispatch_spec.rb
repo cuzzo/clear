@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator/helpers/with_match_check"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator/helpers/with_match_check" unless defined?(WithMatchCheck)
 
 # True-Sync-Polymorphism step 4 (#326): annotator validation for the
 # polymorphic-iff rule and the SNAPSHOTTED REQUIRES family.
@@ -23,7 +23,7 @@ require_relative "../src/annotator/helpers/with_match_check"
 RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -175,7 +175,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
           RETURN;
         END
       CLEAR
-      ast = Parser.new(tokens, "").parse
+      ast = ClearParser.new(tokens, "").parse
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
       expect(fn.requires["c"]).to eq(Set[:SNAPSHOTTED])
     end

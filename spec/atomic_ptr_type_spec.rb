@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # AtomicPtr M3.1 -- Type axis for `@indirect:atomic` (atomic pointer to
 # a refcounted struct payload).
@@ -12,11 +12,11 @@ require_relative "../src/ast/type"
 # CAS-able machine word; AtomicPtr(T) is atomic pointer swap on a
 # refcounted heap-allocated T.
 #
-# Parser sigil work (M3.2) wires `@indirect:atomic` from source through
+# ClearParser sigil work (M3.2) wires `@indirect:atomic` from source through
 # CapabilityWrap. Annotator combo validation (M3.4) rejects @local /
 # @multiowned with @indirect:atomic, and rejects @indirect:atomic on
 # primitives (use @shared:atomic instead). Runtime AtomicPtr(T) is M3.3.
-RSpec.describe "Type @indirect:atomic axis (AtomicPtr M3.1)" do
+RSpec.describe Type, "@indirect:atomic axis (AtomicPtr M3.1)" do
   describe "predicates" do
     it "indirect? is true when layout == :indirect" do
       t = Type.new(:Counter, sync: :atomic, layout: :indirect)

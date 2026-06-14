@@ -34,6 +34,7 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :transfer_without_alloc, error_code: :TRANSFER_WITHOUT_ALLOC },
   { case_name: :cleanup_without_alloc, error_code: :CLEANUP_WITHOUT_ALLOC },
   { case_name: :alloc_without_cleanup, error_code: :ALLOC_WITHOUT_CLEANUP },
+  { case_name: :cleanup_required_without_finalizer, error_code: :CLEANUP_REQUIRED_WITHOUT_FINALIZER },
   { case_name: :errcleanup_without_transfer, error_code: :ERRCLEANUP_WITHOUT_TRANSFER },
   { case_name: :alloc_cleanup_mismatch, error_code: :ALLOC_CLEANUP_MISMATCH },
   { case_name: :invalid_allocmark_allocator, error_code: :INVALID_ALLOCATOR_MARK },
@@ -49,6 +50,7 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :unhoisted_return_concat, error_code: :UNHOISTED_ALLOC },
   { case_name: :unhoisted_exprstmt_deepcopy, error_code: :UNHOISTED_ALLOC },
   { case_name: :unhoisted_call_arg_makelist, error_code: :UNHOISTED_ALLOC },
+  { case_name: :registry_ownership_surface_without_fact, error_code: :OWNERSHIP_FACT_REQUIRED },
 ].map { |cell| cell.merge(expected: :compile_error) }.freeze
 
 def mir_checker_negative_case(case_name)
@@ -168,7 +170,7 @@ def mir_checker_negative_case(case_name)
         :frame,
         "items",
         ownership_contract: contract,
-        allocs: MIR.inline_alloc_metadata(alloc: :frame, val_alloc: :frame),
+        allocs: MIR::InlineAllocMetadata.new(alloc: :frame, val_alloc: :frame),
       )
       [
         alloc_mark("child", :heap),
@@ -224,7 +226,7 @@ def mir_checker_negative_case(case_name)
   when :inline_alloc_mismatch_value
     <<~RUBY
       iz = registry_call(nil, "map")
-      iz.allocs = MIR.inline_alloc_metadata(key_alloc: :heap, val_alloc: :frame)
+      iz.allocs = MIR::InlineAllocMetadata.new(key_alloc: :heap, val_alloc: :frame)
       [
         alloc_mark("map", :heap),
         MIR::ExprStmt.new(iz, false),
@@ -275,6 +277,13 @@ def mir_checker_negative_case(case_name)
     <<~RUBY
       [
         alloc_mark("x", :heap),
+      ]
+    RUBY
+  when :cleanup_required_without_finalizer
+    <<~RUBY
+      [
+        alloc_mark("parts", :frame, Type.new(:"String[]", collection: :list, location: :frame)),
+        MIR::Let.new("parts", MIR::ContainerInit.new("std.ArrayListUnmanaged([]const u8)", :array_list_empty, :frame, nil), true, nil, nil),
       ]
     RUBY
   when :errcleanup_without_transfer
@@ -381,6 +390,18 @@ def mir_checker_negative_case(case_name)
         MIR::ExprStmt.new(MIR::Call.new("use", [MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap)], false, false, MIR::CallableContract.no_ownership(1)), false),
       ]
     RUBY
+  when :registry_ownership_surface_without_fact
+    <<~RUBY
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("child", Type.new(:String), "fuzz"),
+      ])
+      call = registry_call(nil, "items", ownership_contract: contract)
+      [
+        alloc_mark("child", :heap),
+        MIR::TransferMark.new("child", :owned_sink, :heap),
+        MIR::ExprStmt.new(call, false),
+      ]
+    RUBY
   end
 end
 
@@ -407,14 +428,18 @@ def mir_checker_negative_source(case_name, error_code)
     end
 
     def registry_call(alloc, target, ownership_contract: MIR::OwnershipContract.empty, allocs: nil)
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(mutates_receiver: true),
+      )
       MIR::RegistryCall.new(
         entry: sig,
         args: [],
         reason: "inline_contract",
         ownership_contract: ownership_contract,
-        allocs: allocs || (alloc ? MIR.inline_alloc_metadata(alloc: alloc) : MIR.inline_alloc_metadata),
+        allocs: allocs || (alloc ? MIR::InlineAllocMetadata.new(alloc: alloc) : MIR::InlineAllocMetadata.new),
         target_var: target,
       )
     end

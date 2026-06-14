@@ -75,8 +75,7 @@ module ZigCoverageSupport
     compile_output, compile_status = Open3.capture2e(env, *compile_args, chdir: build_dir)
     return [compile_output, compile_status] unless compile_status.success?
 
-    kcov_dir = File.join(root, run_name)
-    FileUtils.mkdir_p(kcov_dir)
+    kcov_dir = prepare_kcov_dir(root, run_name)
     kcov_args = [
       "kcov",
       "--clean",
@@ -91,6 +90,13 @@ module ZigCoverageSupport
     [compile_output + run_output, run_status]
   ensure
     FileUtils.rm_f(bin_path) if bin_path && ENV["ZIG_COVERAGE_KEEP_BIN"] != "1"
+  end
+
+  def self.prepare_kcov_dir(root, run_name)
+    kcov_dir = File.join(root, run_name)
+    FileUtils.rm_rf(kcov_dir)
+    FileUtils.mkdir_p(kcov_dir)
+    kcov_dir
   end
 
   def self.merge!(suite)

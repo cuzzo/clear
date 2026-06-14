@@ -7,6 +7,14 @@ jobs="${NIL_KILL_JOBS:-${NK_JOBS:-$(nproc 2>/dev/null || echo 1)}}"
 
 should_skip_live_data_file() {
   case "$1" in
+    benchmarks/concurrent/12_false_sharing/bench.cht|\
+    benchmarks/concurrent/13_rwlock_starvation/bench.cht|\
+    benchmarks/concurrent/14_nested_lock/bench.cht|\
+    benchmarks/concurrent/19_atomic_ptr/bench.cht|\
+    benchmarks/inter-clear/03_concurrent_mvcc_vs_rwlock/bench.cht|\
+    benchmarks/inter-clear/04_concurrent_mvcc_fat_struct/bench.cht|\
+    benchmarks/inter-clear/05_concurrent_mvcc_pure_read/bench.cht|\
+    benchmarks/inter-clear/06_concurrent_mvcc_writer_pressure/bench.cht|\
     examples/minivm/_bc_runner.cht|\
     examples/minivm/_scheme_runner.cht|\
     examples/minivm/bench_pool_ops.cht|\
@@ -34,7 +42,9 @@ run_transpiler() {
 
 run_transpiler_with_timeout() {
   local file="$1"
-  local timeout_seconds="${NIL_KILL_REQUIRE_CHT_TIMEOUT:-120}"
+  # Source instrumentation can make large require shards take minutes even
+  # when the same file transpiles quickly without nil-kill collect wrapping.
+  local timeout_seconds="${NIL_KILL_REQUIRE_CHT_TIMEOUT:-300}"
 
   if command -v timeout >/dev/null 2>&1; then
     timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/lib/nil_kill/runtime_trace.rb" ruby src/backends/transpiler.rb "$1"' _ "$file"
@@ -79,9 +89,11 @@ RUBY
   find "$shard_dir" -maxdepth 1 -type f -name 'require-corpus-shard-*.cht' -print0 \
     | sort -z \
     | xargs -0 -P "$jobs" -I{} bash -c '
-        if ! run_transpiler_with_timeout "$1" >/dev/null; then
-          echo "nil-kill corpus shard failed: $1" >&2
-          exit 1
+        run_transpiler_with_timeout "$1" >/dev/null
+        status=$?
+        if [ "$status" -ne 0 ]; then
+          echo "nil-kill corpus shard failed: $1 (status=$status)" >&2
+          exit "$status"
         fi
       ' _ {} || failures=$?
 

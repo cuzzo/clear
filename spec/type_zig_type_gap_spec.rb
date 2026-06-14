@@ -1,11 +1,11 @@
 require "rspec"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/source_error"
-require_relative "../src/ast/type"
-require_relative "../src/annotator/helpers/function_signature"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
-RSpec.describe "Type#zig_type gap coverage" do
+RSpec.describe Type, "zig_type gap coverage" do
   it "renders generic and stream-style surface names without string re-parsing" do
     expect(Type.surface_name(Type.generic_instance_of(:Box, [Type.new(:Int64)]))).to eq("Box<Int64>")
     expect(Type.array_capacity_suffix(:STREAM_OPEN)).to eq("[?]")
@@ -160,7 +160,7 @@ RSpec.describe "Type#zig_type gap coverage" do
     expect(plain.sync_surface_name).to be_nil
     expect(plain.sync_family_name).to be_nil
     expect(observable.observable_terminal).to eq(:sum)
-    expect(observable.observable_wrapper_zig(Type.new(:Int64))).to eq("ObservableSum(i64)")
+    expect(observable.send(:observable_wrapper_zig, Type.new(:Int64))).to eq("ObservableSum(i64)")
   end
 
   it "renders every observable terminal wrapper through typed terminal metadata" do
@@ -177,11 +177,11 @@ RSpec.describe "Type#zig_type gap coverage" do
     wrappers.each do |terminal, expected|
       observable = Type.new(:"~Int64", observable: true, observable_terminal: terminal)
       tense_type = terminal == :find ? Type.new(:"?Int64") : Type.new(:Int64)
-      expect(observable.observable_wrapper_zig(tense_type)).to eq(expected)
+      expect(observable.send(:observable_wrapper_zig, tense_type)).to eq(expected)
     end
 
     distinct = Type.new(:"~Int64[4]", observable: true, observable_terminal: :distinct)
-    expect(distinct.observable_wrapper_zig(Type.new(:"Int64[4]", collection: :set))).to eq("ObservableStreamSetBounded(i64, 4)")
+    expect(distinct.send(:observable_wrapper_zig, Type.new(:"Int64[4]", collection: :set))).to eq("ObservableStreamSetBounded(i64, 4)")
   end
 
   it "exposes placement location aliases and dynamic field-array intent through composition" do
@@ -246,7 +246,7 @@ RSpec.describe "Type#zig_type gap coverage" do
     type = Type.new(:"~Int64", observable: true)
 
     expect {
-      type.observable_wrapper_zig(Type.new(:Int64))
+      type.send(:observable_wrapper_zig, Type.new(:Int64))
     }.to raise_error(CompilerError, /without an observable_terminal stamp/)
   end
 end

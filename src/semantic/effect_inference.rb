@@ -14,14 +14,13 @@ require_relative "effect_set"
 # checks.
 module EffectInference
   extend T::Sig
-  module_function
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   # After the annotator's compute_effects! has stamped fn.effects, fold
   # those into a closed-lattice EffectSet on each FunctionDef.
   sig { params(fn_nodes: FnNodes).void }
-  def analyze!(fn_nodes)
+  def self.analyze!(fn_nodes)
     fn_nodes.each do |_name, fn|
       next unless fn
       fn.effect_set = build(fn)
@@ -32,7 +31,7 @@ module EffectInference
   # Project a single function's closed-lattice effects from the
   # annotator-stamped fields. Pure read; no walking.
   sig { params(fn: AST::FunctionDef).returns(EffectSet) }
-  def build(fn)
+  def self.build(fn)
     eff = Set.new
     raw = fn.respond_to?(:effects) ? fn.effects : nil
 

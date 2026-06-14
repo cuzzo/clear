@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tier 1 fixable findings — five error codes that previously raised a
 # plain CompilerError now emit a FixableFinding with a deterministic
@@ -16,7 +16,7 @@ RSpec.describe "Tier 1 fixable findings" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end
@@ -208,7 +208,7 @@ RSpec.describe "Tier 1 fixable findings" do
       # build_declare_mutable_fix returns nil and the helper raises.
       # Synthesize this by stubbing.
       tokens = Lexer.new("FN main() RETURNS Void -> x = 5; WITH RESTRICT x { _ = x; } END").tokenize
-      ast = Parser.new(tokens, "FN main() RETURNS Void -> x = 5; WITH RESTRICT x { _ = x; } END").parse
+      ast = ClearParser.new(tokens, "FN main() RETURNS Void -> x = 5; WITH RESTRICT x { _ = x; } END").parse
       ann = SemanticAnnotator.new
       allow(ann).to receive(:build_declare_mutable_fix).and_return(nil)
       FixCollector.disable!  # raise instead of collect

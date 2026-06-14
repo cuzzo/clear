@@ -23,7 +23,6 @@ module Annotator
         # Caller sync depends on annotated call-site args, so propagate it after
         # the body walk and before replaying deferred WITH validations.
         fn_nodes = whole_program_fn_nodes
-        root_scope = whole_program_root_scope
         body_summaries = function_body_summaries
 
         EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries)
@@ -45,9 +44,10 @@ module Annotator
         EffectInference.analyze!(fn_nodes)
 
         error_handler = lambda { |node, message|
-          error!(node, :EFFECT_INFERENCE_VIOLATION, message: message)
+          error!(node, :EFFECT_INFERENCE_VIOLATION, detail: message)
         }
         warning_handler = lambda { |node, message| note!(node, message) }
+        root_scope = whole_program_root_scope
         signature_lookup = lambda { |name| root_scope.resolve_entry(name)&.type }
         policy_handlers = whole_program_node&.sync_policy
 
@@ -88,7 +88,7 @@ module Annotator
         root_scope = whole_program_root_scope
         whole_program_fn_nodes.each do |name, fn|
           signature = FunctionSignature.unwrap(root_scope.resolve_entry(name)&.type)
-          signature.requires = fn.requires if signature
+          FunctionSignature.sync_from_function_def!(signature, fn) if signature
         end
       end
       private :restamp_requires_on_signatures!

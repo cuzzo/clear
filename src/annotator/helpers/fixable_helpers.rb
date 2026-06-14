@@ -20,16 +20,17 @@ require "sorbet-runtime"
 module FixableHelper
     extend T::Sig
 
-  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+  DiagnosticKwValue = T.type_alias { DiagnosticRegistry::DiagnosticKwValue }
 
   class CapabilityFixCandidate < T::Struct
     const :sigil, String
-    const :description, String
+    const :description_code, Symbol
+    const :description_params, T::Hash[Symbol, DiagnosticKwValue], default: {}
   end
 
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
-  sig { params(reg: T.nilable(AST::VarDecl), name: String).returns(T.nilable(T::Array[String])) }
+  sig { params(reg: T.nilable(AST::VarDecl), name: String).void }
   def emit_mutable_unused_finding!(reg, name)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless reg && reg.token
@@ -37,7 +38,7 @@ module FixableHelper
     fixes = []
     if tok.value == 'MUTABLE'
       fixes << Fix.new(
-        description: "Remove MUTABLE keyword (binding is never reassigned).",
+        description: fix_description(:REMOVE_MUTABLE_UNUSED),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: tok.line, col: tok.column, length: 'MUTABLE '.length),
@@ -53,7 +54,8 @@ module FixableHelper
     end
 
     fixable!(reg,
-      message: "MUTABLE '#{name}' is never reassigned — consider removing MUTABLE",
+      code: :MUTABLE_UNUSED,
+      name: name,
       category: :lint,
       level: :warning,
       fixes: fixes)
@@ -111,7 +113,7 @@ module FixableHelper
     fixes = []
     if best
       fixes << Fix.new(
-        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        description: fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, name: name, best: best, label: fix_label),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: token.line, col: token.column, length: name.to_s.length),
@@ -120,9 +122,10 @@ module FixableHelper
       )
     end
 
-    return error!(token, :REGISTRY_MISMATCH_REJECTED, message: message) if fixes.empty?
+    return error!(token, :REGISTRY_MISMATCH_REJECTED, detail: message) if fixes.empty?
 
-    fixable!(token, message: message, category: :registry, level: :error, fixes: fixes)
+    fixable!(token, code: :REGISTRY_MISMATCH_REJECTED, detail: message,
+             category: :registry, level: :error, fixes: fixes)
   end
 
   # Registry-shaped: an identifier typo against a known candidate set
@@ -150,7 +153,7 @@ module FixableHelper
     fixes = []
     if best
       fixes << Fix.new(
-        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        description: fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, name: name, best: best, label: fix_label),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: token.line, col: token.column, length: name.to_s.length),
@@ -159,9 +162,10 @@ module FixableHelper
       )
     end
 
-    return error!(token, :TYPO_SUGGESTION_REJECTED, message: message) if fixes.empty?
+    return error!(token, :TYPO_SUGGESTION_REJECTED, detail: message) if fixes.empty?
 
-    fixable!(token, message: message, category: category, level: :error,
+    fixable!(token, code: :TYPO_SUGGESTION_REJECTED, detail: message,
+             category: category, level: :error,
              fixes: fixes, raise_in_collector: cascade)
   end
 
@@ -218,7 +222,7 @@ module FixableHelper
     fixes = []
     if best
       fixes << Fix.new(
-        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        description: fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, name: name, best: best, label: fix_label),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: anchor.line, col: anchor.column, length: name.to_s.length),
@@ -227,9 +231,10 @@ module FixableHelper
       )
     end
 
-    return error!(anchor, :TYPO_SUGGESTION_REJECTED, message: message) if fixes.empty?
+    return error!(anchor, :TYPO_SUGGESTION_REJECTED, detail: message) if fixes.empty?
 
-    fixable!(anchor, message: message, category: :type, level: :error,
+    fixable!(anchor, code: :TYPO_SUGGESTION_REJECTED, detail: message,
+             category: :type, level: :error,
              fixes: fixes, raise_in_collector: cascade)
   end
 
@@ -257,7 +262,7 @@ module FixableHelper
     move_col = og_node.move_col
     unless move_line && move_col
       msg = "USE AFTER MOVE: You can't use `#{name}`."
-      return error!(use_node, :USE_OF_MOVED_VALUE, message: msg)
+      return error!(use_node, :USE_OF_MOVED_VALUE, detail: msg)
     end
 
     # Pick COPY vs CLONE for the consumer-site fix. CLEAR uses CLONE
@@ -273,13 +278,11 @@ module FixableHelper
     use_clone = is_shared || is_multi || is_split
 
     consumer_keyword = use_clone ? "CLONE" : "COPY"
-    consumer_descr = use_clone ?
-      "Wrap the consuming reference with CLONE at line #{og_node.move_line} (bumps the refcount; both bindings stay live)." :
-      "Wrap the consuming reference with COPY at line #{og_node.move_line} (the original survives for the later use)."
+    consumer_description_code = use_clone ? :WRAP_CONSUMER_WITH_CLONE : :WRAP_CONSUMER_WITH_COPY
 
     fixes = []
     fixes << Fix.new(
-      description: consumer_descr,
+      description: fix_description(consumer_description_code, line: og_node.move_line),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: move_line, col: move_col, length: name.length),
@@ -331,9 +334,11 @@ module FixableHelper
       if semi_idx
         insert_col = semi_idx + 1  # 1-based column at the `;`
         candidate_caps.each do |cap|
+          reason = cap == '@multiowned' ?
+            'single-scheduler Rc; automatic clone on move' :
+            'atomic Arc; safe across fibers'
           fixes << Fix.new(
-            description: "Change '#{name}' to `#{cap}` at its declaration " \
-                         "(#{cap == '@multiowned' ? 'single-scheduler Rc; automatic clone on move' : 'atomic Arc; safe across fibers'}).",
+            description: fix_description(:CHANGE_BINDING_CAPABILITY_FOR_MOVE, name: name, cap: cap, reason: reason),
             confidence: :interactive,
             edits: [Edit.new(
               span: Span.new(file: nil, line: dline, col: insert_col, length: 0),
@@ -353,7 +358,8 @@ module FixableHelper
     end
 
     fixable!(use_node,
-      message: msg,
+      code: :USE_OF_MOVED_VALUE,
+      detail: msg,
       category: :ownership,
       level: :error,
       fixes: fixes,
@@ -371,7 +377,7 @@ module FixableHelper
     consumer_clause = consumer ? "`#{consumer}` already TOOK it. " : ""
     msg = "USE AFTER MOVE: You can't use `#{name}` here — #{consumer_clause}" \
           "Values can only be TAKEN once; subsequent iterations have nothing left to GIVE."
-    error!(node, code, message: msg)
+    error!(node, code, detail: msg)
   end
 
   # Sub-path use after the path's owner was consumed elsewhere. Uses
@@ -388,7 +394,7 @@ module FixableHelper
     else
       "USE AFTER MOVE: You can't use `#{path_str}`. Its owner `#{root}` was already consumed elsewhere."
     end
-    error!(node, :USE_OF_MOVED_PATH, message: msg)
+    error!(node, :USE_OF_MOVED_PATH, detail: msg)
   end
 
   # Active form: subject is the consumer (e.g. "`process(GIVE msg)`
@@ -481,13 +487,11 @@ module FixableHelper
   def emit_int_overflow_error!(node, val, target_type, min, max)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
-    overflow_kw = { val: val, type: target_type, min: min, max: max }
-    msg = "Integer literal (#{val}) overflows #{target_type} (range #{min}..#{max})"
     tok = node.token
-    return error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw) unless tok && @source_code
+    return error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max) unless tok && @source_code
 
     best = smallest_fitting_int_type(val)
-    return error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw) unless best
+    return error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max) unless best
 
     line_text = @source_code.lines[tok.line - 1] || ''
 
@@ -498,7 +502,7 @@ module FixableHelper
       new_suffix = INT_SUFFIXES[best]
       if new_suffix && new_suffix != old_suffix
         suffix_col = tok.column + m[1].length + 1
-        return emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
+        return emit_overflow_suffix_fix!(node, target_type, min, max, tok, suffix_col, old_suffix, new_suffix, val)
       end
     end
 
@@ -517,7 +521,7 @@ module FixableHelper
       new_type = best.to_s
       if new_type != target_name
         fix = Fix.new(
-          description: "Widen annotation `#{target_name}` to `#{new_type}` (smallest type that fits #{val}).",
+          description: fix_description(:WIDEN_INT_ANNOTATION, old_type: target_name, new_type: new_type, value: val),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: tok.line, col: ann_col, length: target_name.length),
@@ -525,7 +529,11 @@ module FixableHelper
           )]
         )
         return fixable!(node,
-          message: msg,
+          code: :INT_LITERAL_OVERFLOW,
+          val: val,
+          type: target_type,
+          min: min,
+          max: max,
           category: :type,
           level: :error,
           fixes: [fix],
@@ -533,14 +541,14 @@ module FixableHelper
       end
     end
 
-    error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw)
+    error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max)
   end
 
-  sig { params(node: T.untyped, msg: String, tok: T.untyped, suffix_col: Integer, old_suffix: String, new_suffix: String, val: Integer).returns(T.untyped) }
-  def emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
+  sig { params(node: AST::Node, target_type: Symbol, min: Integer, max: Integer, tok: Lexer::Token, suffix_col: Integer, old_suffix: String, new_suffix: String, val: Integer).returns(NilClass) }
+  def emit_overflow_suffix_fix!(node, target_type, min, max, tok, suffix_col, old_suffix, new_suffix, val)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = Fix.new(
-      description: "Widen suffix `_#{old_suffix}` to `_#{new_suffix}` (smallest type that fits #{val}).",
+      description: fix_description(:WIDEN_INT_SUFFIX, old_suffix: old_suffix, new_suffix: new_suffix, value: val),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: tok.line, col: suffix_col, length: old_suffix.length),
@@ -548,7 +556,11 @@ module FixableHelper
       )]
     )
     fixable!(node,
-      message: msg,
+      code: :INT_LITERAL_OVERFLOW,
+      val: val,
+      type: target_type,
+      min: min,
+      max: max,
       category: :type,
       level: :error,
       fixes: [fix],
@@ -565,8 +577,6 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     name = info.var
     line = info.line
-    msg = "Variable '#{name}' is @local but never shared across fibers. " \
-          "You are paying for a heap allocation with no sharing benefit. Consider removing @local."
     fixes = []
 
     if @source_code && line
@@ -580,7 +590,7 @@ module FixableHelper
         start_col = idx + 1 - lead
         length    = 6 + lead + trail
         fixes << Fix.new(
-          description: "Remove `@local` capability from '#{name}' (never shared across fibers).",
+          description: fix_description(:REMOVE_LOCAL_CAPABILITY, name: name),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: line, col: start_col, length: length),
@@ -592,13 +602,14 @@ module FixableHelper
 
     if fixes.empty?
       loc = line ? " (line #{line})" : ""
-      $stderr.puts "\e[36m[Note]\e[0m #{msg}#{loc}"
+      $stderr.puts "\e[36m[Note]\e[0m #{diagnostic_message(:LOCAL_NEVER_SHARED, name: name)}#{loc}"
       return
     end
 
     anchor = anchor_at(T.must(line), info.column || 1)
     fixable!(anchor,
-      message: msg,
+      code: :LOCAL_NEVER_SHARED,
+      name: name,
       category: :lint,
       level: :info,
       fixes: fixes)
@@ -613,7 +624,8 @@ module FixableHelper
     fix = build_declare_mutable_fix(node.name, scope)
     return error!(node, :IMMUTABLE_ASSIGNMENT, name: node.name) unless fix
     fixable!(node,
-      message: "Variable '#{node.name}' is immutable",
+      code: :IMMUTABLE_ASSIGNMENT,
+      name: node.name,
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -629,7 +641,8 @@ module FixableHelper
     kw = { index: arg_idx, param: param_name, actual: arg_node.name }
     return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
     fixable!(arg_node,
-      message: T.must(DiagnosticRegistry.format(:IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw)),
+      code: :IMMUTABLE_ARG_PASSED_AS_MUTABLE,
+      **kw,
       category: :ownership,
       level: :error,
       fixes: [fix],
@@ -646,7 +659,8 @@ module FixableHelper
     fix = build_declare_mutable_fix(var_name, scope)
     return error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name) unless fix
     fixable!(assignment_node,
-      message: T.must(DiagnosticRegistry.format(:ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name)),
+      code: :ASSIGN_INDEX_IMMUTABLE_LIST,
+      name: var_name,
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -663,7 +677,8 @@ module FixableHelper
     kw = { name: var_name, field: field_name }
     return error!(assignment_node, :IMMUTABLE_FIELD_ASSIGNMENT, **kw) unless fix
     fixable!(assignment_node,
-      message: T.must(DiagnosticRegistry.format(:IMMUTABLE_FIELD_ASSIGNMENT, **kw)),
+      code: :IMMUTABLE_FIELD_ASSIGNMENT,
+      **kw,
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -676,7 +691,7 @@ module FixableHelper
   # zero-length insert.
   #
   # `code` selects the error code that fires when the fix isn't
-  # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
+  # locatable (REENTRANCE_DIRECT_RECURSIVE for explicit reentrance guards,
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case).
   sig { params(fn_node: AST::FunctionDef, code: Symbol).returns(NilClass) }
   def emit_reentrant_error!(fn_node, code)
@@ -685,7 +700,7 @@ module FixableHelper
     fix = nil
     if arrow
       fix = Fix.new(
-        description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+        description: fix_description(:ADD_EFFECTS_REENTRANT),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
@@ -695,7 +710,8 @@ module FixableHelper
     end
     return error!(fn_node, code, name: fn_node.name) unless fix
     fixable!(fn_node,
-      message: T.must(DiagnosticRegistry.format(code, name: fn_node.name)),
+      code: code,
+      name: fn_node.name,
       category: :reentrance,
       level: :error,
       fixes: [fix])
@@ -710,7 +726,8 @@ module FixableHelper
     fix = build_declare_mutable_fix(cap_name, owner_scope)
     return error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name)),
+      code: :CAPTURE_IMMUTABLE_AS_MUTABLE,
+      name: cap_name,
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -728,7 +745,7 @@ module FixableHelper
     fix = nil
     if arrow
       fix = Fix.new(
-        description: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
+        description: fix_description(:INSERT_RETURNS_ANY),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
@@ -738,7 +755,8 @@ module FixableHelper
     end
     return error!(fn_node, :AMBIGUOUS_RETURN, types: return_types) unless fix
     fixable!(fn_node,
-      message: T.must(DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: return_types)),
+      code: :AMBIGUOUS_RETURN,
+      types: return_types,
       category: :type,
       level: :error,
       fixes: [fix])
@@ -755,7 +773,7 @@ module FixableHelper
     fix = nil
     if tok
       fix = Fix.new(
-        description: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
+        description: fix_description(:REPLACE_MATCH_WITH_PARTIAL),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
@@ -764,11 +782,26 @@ module FixableHelper
       )
     end
     return error!(match_node, code, **kwargs) unless fix
-    fixable!(match_node,
-      message: T.must(DiagnosticRegistry.format(code, **kwargs)),
-      category: :type,
-      level: :error,
-      fixes: [fix])
+    case code
+    when :MATCH_NEEDS_ENUM_OR_UNION
+      fixable!(match_node,
+        code: code,
+        type: kwargs[:type],
+        category: :type,
+        level: :error,
+        fixes: [fix])
+    when :MATCH_NON_EXHAUSTIVE
+      fixable!(match_node,
+        code: code,
+        kind: kwargs[:kind],
+        name: kwargs[:name],
+        missing: kwargs[:missing],
+        category: :type,
+        level: :error,
+        fixes: [fix])
+    else
+      Kernel.raise ArgumentError, "unsupported MATCH partial fix diagnostic: #{code.inspect}"
+    end
   end
 
   # Lifetime: returning a borrowed value without COPY or a `RETURNS x:T`
@@ -782,7 +815,7 @@ module FixableHelper
     if node.token
       tok = node.token
       fix = Fix.new(
-        description: "Wrap the returned value with `COPY ` so it doesn't borrow from the parameter.",
+        description: fix_description(:WRAP_RETURN_WITH_COPY),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
@@ -793,7 +826,8 @@ module FixableHelper
     kw = { type: node.full_type!(context: "borrowed return diagnostic") }
     return error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw)),
+      code: :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
+      **kw,
       category: :lifetime,
       level: :error,
       fixes: [fix])
@@ -831,8 +865,11 @@ module FixableHelper
         rewritten = inner.gsub(/\b#{Regexp.escape(name.to_s)}\.(?=\w)/, "#{alias_name}.")
         new_line = "#{indent}WITH #{perm} #{name} AS #{alias_name} { #{rewritten} }"
         fixes << Fix.new(
-          description: "Wrap with `WITH #{perm} #{name} AS #{alias_name} { ... }` " \
-                       "to acquire the #{cap} unwrap; access the inner value through #{alias_name}.",
+          description: fix_description(:WRAP_CAPABILITY_ACCESS,
+            permission: perm,
+            name: name,
+            alias_name: alias_name,
+            capability: cap),
           confidence: :interactive,
           edits: [Edit.new(
             span: Span.new(file: nil, line: line_num, col: 1, length: body.length),
@@ -843,7 +880,8 @@ module FixableHelper
     end
     return error!(node, code, **kw) if fixes.empty?
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(code, **kw)),
+      code: code,
+      **kw,
       category: :capability,
       level: :error,
       fixes: fixes,
@@ -873,12 +911,12 @@ module FixableHelper
     end
     return error!(node, :WITH_GUARD_ALL_BINDINGS_NEED_AS) if edits.empty?
     fix = Fix.new(
-      description: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
+      description: fix_description(:ADD_WITH_GUARD_ALIASES),
       confidence: :auto,
       edits: edits
     )
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_GUARD_ALL_BINDINGS_NEED_AS)),
+      code: :WITH_GUARD_ALL_BINDINGS_NEED_AS,
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -923,13 +961,15 @@ module FixableHelper
     names_str = names.map { |n| "'#{n}'" }.join(', ')
     kw = { names: names_str, verb: verb }
     return error!(node, :WITH_GUARD_MUTABLE_MUTATED, **kw) if edits.empty?
+    target = names.size == 1 ? 'the alias' : 'each guarded alias'
     fix = Fix.new(
-      description: "Drop `MUTABLE` from #{names.size == 1 ? 'the alias' : 'each guarded alias'} so the GUARD predicate stays valid (the body only reads through the alias).",
+      description: fix_description(:DROP_WITH_GUARD_MUTABLE, target: target),
       confidence: :interactive,
       edits: edits
     )
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_GUARD_MUTABLE_MUTATED, **kw)),
+      code: :WITH_GUARD_MUTABLE_MUTATED,
+      **kw,
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -949,17 +989,18 @@ module FixableHelper
     syn = cap_var_sync(var_node)
     fix = if syn == :locked
       build_decl_cap_replace_fix(name, '@locked', '@writeLocked',
-        description: "Change `@locked` to `@writeLocked` on '#{name}' " \
-                     "so concurrent readers can take `WITH READ` alongside `WITH EXCLUSIVE` writers.",
+        description_code: :REPLACE_LOCKED_WITH_WRITE_LOCKED,
         confidence: :auto)
     else
       build_decl_cap_insert_fix(name, '@writeLocked',
-        description: "Add `@writeLocked` to '#{name}' (RwLock — readers via `WITH READ`; writers via `WITH EXCLUSIVE`).",
+        description_code: :WITH_ADD_WRITE_LOCKED,
+        description_params: { reader: "via `WITH READ`" },
         confidence: :auto)
     end
     return error!(node, :WITH_READ_NEEDS_WRITE_LOCK, name: name) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_READ_NEEDS_WRITE_LOCK, name: name)),
+      code: :WITH_READ_NEEDS_WRITE_LOCK,
+      name: name,
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -976,20 +1017,28 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     candidates = [
       { sigil: '@multiowned',
-        description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones)." },
+        description_code: :WITH_ADD_MULTIOWNED,
+        description_params: { suffix: "" } },
       { sigil: '@shared',
-        description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe across fibers)." },
+        description_code: :WITH_ADD_SHARED,
+        description_params: { suffix: "across fibers" } },
       { sigil: '@locked',
-        description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)." },
+        description_code: :WITH_ADD_LOCKED,
+        description_params: {} },
       { sigil: '@writeLocked',
-        description: "Add `@writeLocked` to '#{name}' (RwLock — readers via WITH READ; writers via WITH EXCLUSIVE)." },
+        description_code: :WITH_ADD_WRITE_LOCKED,
+        description_params: { reader: "via WITH READ" } },
     ]
     fixes = candidates.filter_map do |c|
-      build_decl_cap_insert_fix(name, c[:sigil], description: c[:description], confidence: :interactive)
+      build_decl_cap_insert_fix(name, c[:sigil],
+        description_code: c[:description_code],
+        description_params: c[:description_params],
+        confidence: :interactive)
     end
     return error!(node, :WITH_CANNOT_INFER_CAP, name: name) if fixes.empty?
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_CANNOT_INFER_CAP, name: name)),
+      code: :WITH_CANNOT_INFER_CAP,
+      name: name,
       category: :capability,
       level: :error,
       fixes: fixes,
@@ -1020,8 +1069,7 @@ module FixableHelper
         if ann_match && !line_text.include?('~')
           type_col = ann_match.begin(1) + 1  # 1-based
           fix = Fix.new(
-            description: "Prefix the declared type with `~` so '#{name}' becomes a tense (`~T`) source. " \
-                         "MATERIALIZED VIEW snapshots a tense aggregate at the WITH boundary.",
+            description: fix_description(:PREFIX_TENSE_TYPE, name: name),
             confidence: :interactive,
             edits: [Edit.new(
               span: Span.new(file: nil, line: dline, col: type_col, length: 0),
@@ -1034,7 +1082,8 @@ module FixableHelper
     kw = { name: name, got: got }
     return error!(node, :WITH_MATERIALIZED_NEEDS_TENSE, **kw) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_MATERIALIZED_NEEDS_TENSE, **kw)),
+      code: :WITH_MATERIALIZED_NEEDS_TENSE,
+      **kw,
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -1052,7 +1101,8 @@ module FixableHelper
     fix = build_declare_mutable_fix(name, scope)
     return error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: name) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:WITH_RESTRICT_NEEDS_MUTABLE, name: name)),
+      code: :WITH_RESTRICT_NEEDS_MUTABLE,
+      name: name,
       category: :capability,
       level: :error,
       fixes: [fix])
@@ -1071,7 +1121,7 @@ module FixableHelper
     if name_tok
       end_col = name_tok.column + name.length
       fix = Fix.new(
-        description: "Append `!` to '#{name}' (signals that it takes a MUTABLE parameter).",
+        description: fix_description(:APPEND_MUTABLE_PARAM_BANG, name: name),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: name_tok.line, col: end_col, length: 0),
@@ -1081,7 +1131,8 @@ module FixableHelper
     end
     return error!(fn_node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name) unless fix
     fixable!(fn_node,
-      message: T.must(DiagnosticRegistry.format(:STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name)),
+      code: :STYLE_MUTABLE_PARAM_NEEDS_BANG,
+      name: name,
       category: :lint,
       level: :error,
       fixes: [fix])
@@ -1097,7 +1148,7 @@ module FixableHelper
     tok = node.respond_to?(:can_smash_token) ? node.can_smash_token : nil
     if tok
       fix = Fix.new(
-        description: "Replace `@canSmash` with `@service` (OS-thread spawn — supported today).",
+        description: fix_description(:REPLACE_CAN_SMASH_WITH_SERVICE),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: tok.line, col: tok.column, length: tok.value.to_s.length),
@@ -1107,7 +1158,7 @@ module FixableHelper
     end
     return error!(node, :CAN_SMASH_NOT_SUPPORTED) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:CAN_SMASH_NOT_SUPPORTED)),
+      code: :CAN_SMASH_NOT_SUPPORTED,
       category: :reentrance,
       level: :error,
       fixes: [fix])
@@ -1127,7 +1178,8 @@ module FixableHelper
     fix = build_cast_wrap_fix(value, target_type)
     return error!(node, :TYPE_MISMATCH_ASSIGN, **kw) unless fix
     fixable!(node,
-      message: T.must(DiagnosticRegistry.format(:TYPE_MISMATCH_ASSIGN, **kw)),
+      code: :TYPE_MISMATCH_ASSIGN,
+      **kw,
       category: :type,
       level: :error,
       fixes: [fix])
@@ -1189,7 +1241,7 @@ module FixableHelper
                   end
     return nil unless text_length
     Fix.new(
-      description: "Wrap value with `CAST(... AS #{target_name})` (narrowing — verify it can't lose data).",
+      description: fix_description(:WRAP_VALUE_WITH_CAST, type: target_name),
       confidence: :interactive,
       edits: [
         Edit.new(span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
@@ -1207,8 +1259,16 @@ module FixableHelper
   #  - the binding has no scope-local decl (param / field / global)
   #  - the decl line has no `;` (multi-line value expression)
   #  - the sigil is already present (idempotency — would be a no-op)
-  sig { params(name: String, sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
-  def build_decl_cap_insert_fix(name, sigil, description: nil, confidence: :auto)
+  sig do
+    params(
+      name: String,
+      sigil: String,
+      description_code: Symbol,
+      description_params: T::Hash[Symbol, DiagnosticKwValue],
+      confidence: Symbol
+    ).returns(T.nilable(Fix))
+  end
+  def build_decl_cap_insert_fix(name, sigil, description_code: :ADD_DECL_CAPABILITY_GENERIC, description_params: {}, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.nilable(String))
     scope = lookup_scope_for(name)
@@ -1223,8 +1283,9 @@ module FixableHelper
     return nil unless semi_idx
     return nil if line_text.include?(sigil)
     insert_col = semi_idx + 1
+    fix_params = description_params.merge(sigil: sigil, name: name, line: dline)
     Fix.new(
-      description: description || "Add `#{sigil}` to '#{name}' at its declaration (line #{dline}).",
+      description: fix_description_from_hash(description_code, fix_params),
       confidence: confidence,
       edits: [Edit.new(
         span: Span.new(file: nil, line: dline, col: insert_col, length: 0),
@@ -1235,8 +1296,17 @@ module FixableHelper
 
   # Shared helper — replace an existing sigil on the declaration line.
   # Returns nil when the old sigil isn't found on the line.
-  sig { params(name: String, old_sigil: String, new_sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
-  def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description: nil, confidence: :auto)
+  sig do
+    params(
+      name: String,
+      old_sigil: String,
+      new_sigil: String,
+      description_code: Symbol,
+      description_params: T::Hash[Symbol, DiagnosticKwValue],
+      confidence: Symbol
+    ).returns(T.nilable(Fix))
+  end
+  def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description_code: :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {}, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.nilable(String))
     scope = lookup_scope_for(name)
@@ -1247,8 +1317,14 @@ module FixableHelper
     line_text = @source_code.lines[dline - 1] || ''
     idx = line_text.index(old_sigil)
     return nil unless idx
+    fix_params = description_params.merge(
+      old_sigil: old_sigil,
+      new_sigil: new_sigil,
+      name: name,
+      line: dline
+    )
     Fix.new(
-      description: description || "Change `#{old_sigil}` to `#{new_sigil}` on '#{name}' (line #{dline}).",
+      description: fix_description_from_hash(description_code, fix_params),
       confidence: confidence,
       edits: [Edit.new(
         span: Span.new(file: nil, line: dline, col: idx + 1, length: old_sigil.length),
@@ -1266,15 +1342,43 @@ module FixableHelper
   def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
     T.bind(self, SemanticAnnotator) rescue nil
     fixes = candidates.filter_map do |c|
-      build_decl_cap_insert_fix(name, c.sigil, description: c.description, confidence: confidence)
+      build_decl_cap_insert_fix(name, c.sigil,
+        description_code: c.description_code,
+        description_params: c.description_params,
+        confidence: confidence)
     end
     return error!(node, code, **kw) if fixes.empty?
-    fixable!(node,
-      message: T.must(DiagnosticRegistry.format(code, **kw)),
-      category: :capability,
-      level: :error,
-      fixes: fixes,
-      raise_in_collector: true)
+    case code
+    when :WITH_EXCLUSIVE_NEEDS_LOCK
+      fixable!(node,
+        code: code,
+        got: kw[:got],
+        category: :capability,
+        level: :error,
+        fixes: fixes,
+        raise_in_collector: true)
+    when :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC,
+         :WITH_ATOMIC_NEEDS_SHARED_ATOMIC
+      fixable!(node,
+        code: code,
+        name: kw[:name],
+        actual: kw[:actual],
+        category: :capability,
+        level: :error,
+        fixes: fixes,
+        raise_in_collector: true)
+    when :WITH_NEEDS_MULTIOWNED,
+         :WITH_NEEDS_SHARED
+      fixable!(node,
+        code: code,
+        name: kw[:name],
+        category: :capability,
+        level: :error,
+        fixes: fixes,
+        raise_in_collector: true)
+    else
+      Kernel.raise ArgumentError, "unsupported WITH capability mismatch diagnostic: #{code.inspect}"
+    end
   end
 
   # Shared helper — returns a Fix that inserts `MUTABLE ` at the
@@ -1300,7 +1404,7 @@ module FixableHelper
     return nil if tok.value == 'MUTABLE'
 
     Fix.new(
-      description: "Declare '#{name}' as MUTABLE at its binding site (line #{tok.line}).",
+      description: fix_description(:DECLARE_MUTABLE_BINDING, name: name, line: tok.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
@@ -1331,15 +1435,7 @@ module FixableHelper
     start_col = match.begin(0) + 1   # 1-based column
 
     Fix.new(
-      description: "Migrate '#{source_name}' from `@shared:atomic` to " \
-                   "`@shared:locked` so its lifetime can outlive the " \
-                   "declaring scope. NOTE: `@shared:locked` typically " \
-                   "needs a STRUCT wrap around the primitive (e.g. " \
-                   "`STRUCT Counter { v: Int64 }; c = Counter{v: 0} " \
-                   "@shared:locked`); read/write sites become " \
-                   "`WITH EXCLUSIVE c AS a { ... }`. Alternatively, " \
-                   "wait for v0.3 atomic struct fields, which lift " \
-                   "this escape restriction without the Arc cost.",
+      description: fix_description(:MIGRATE_ATOMIC_ESCAPE, name: source_name),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: line_num, col: start_col, length: match[0].length),
@@ -1423,10 +1519,12 @@ module FixableHelper
     auto_tok = auto_token_for(slot)
     return nil unless auto_tok
     type_str = type_sym.to_s
-    desc = +"(#{position}) Pin #{auto_slot_label(slot)} to `#{type_str}`."
-    desc << " #{note}" if note
     Fix.new(
-      description: desc,
+      description: fix_description(:PIN_AUTO_SLOT,
+        position: position,
+        label: auto_slot_label(slot),
+        type: type_str,
+        note: note ? " #{note}" : ""),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: auto_tok.line, col: auto_tok.column, length: 'Auto'.length),
@@ -1480,7 +1578,9 @@ module FixableHelper
     auto_tok = auto_token_for(slot)
     fixable!(
       auto_tok || slot.decl_node,
-      message: "Inferred type for #{label}: #{type_str}.",
+      code: :AUTO_INFERRED_TYPE,
+      label: label,
+      type: type_str,
       category: :type, level: :info,
       fixes: build_auto_replace_fixes(auto_tok, type_str),
     )
@@ -1503,7 +1603,9 @@ module FixableHelper
     auto_tok = auto_token_for(slot)
     fixable!(
       auto_tok || decl,
-      message: "Inferred type for `#{name}`: #{type_str}.",
+      code: :AUTO_INFERRED_BINDING_TYPE,
+      name: name,
+      type: type_str,
       category: :type, level: :info,
       fixes: build_auto_replace_fixes(auto_tok, type_str),
     )
@@ -1518,7 +1620,7 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     return [] unless auto_tok
     [Fix.new(
-      description: "Replace `Auto` with the inferred type `#{type_str}`.",
+      description: fix_description(:REPLACE_AUTO_WITH_INFERRED, type: type_str),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: auto_tok.line, col: auto_tok.column, length: 'Auto'.length),
@@ -1558,7 +1660,8 @@ module FixableHelper
     auto_tok = auto_token_for(slot)
     fixable!(
       auto_tok || slot.decl_node,
-      message: message, category: :type, level: :error, fixes: fixes,
+      code: :AUTO_AMBIGUOUS_TYPE,
+      detail: message, category: :type, level: :error, fixes: fixes,
     )
   end
 
@@ -1592,7 +1695,8 @@ module FixableHelper
     auto_tok = auto_token_for(slot)
     fixable!(
       auto_tok || slot.decl_node,
-      message: message, category: :type, level: :error, fixes: fixes,
+      code: :AUTO_UNRESOLVED_TYPE,
+      detail: message, category: :type, level: :error, fixes: fixes,
     )
   end
 
@@ -1714,4 +1818,31 @@ module FixableHelper
 
     msg
   end
+
+  private :build_decl_cap_insert_fix,
+    :build_decl_cap_replace_fix,
+    :literal_source_length
+  private :anchor_at
+  private :auto_rank_candidates
+  private :auto_slot_label
+  private :auto_type_source_form
+  private :auto_token_for
+  private :build_auto_ambiguity_message
+  private :build_auto_candidate_fix
+  private :build_auto_op_evidence_block
+  private :build_auto_replace_fixes
+  private :build_atomic_escape_migration_fix
+  private :build_cast_wrap_fix
+  private :build_declare_mutable_fix
+  private :closest_name
+  private :consumer_source_text
+  private :emit_overflow_suffix_fix!
+  private :levenshtein
+  private :ownership_active_phrase
+  private :ownership_passive_phrase
+  private :smallest_fitting_int_type
+  private :slot_id_for
+  private :variant_anchor_from_getfield
+  private :variant_anchor_from_unionlit
+
 end

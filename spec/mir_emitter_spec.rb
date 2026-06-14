@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/ast"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_emitter"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
 
 RSpec.describe MIREmitter do
   let(:e) { MIREmitter.new }
@@ -530,7 +530,7 @@ RSpec.describe MIREmitter do
       ],
     )
 
-    zig = e.emit_bg_stackful_plan(plan)
+    zig = e.emit(MIR::BgBlock.new(plan))
 
     expect(zig).to include("var pool = try Pool(User).initCapacity(__rt_bg0.heapAlloc(), 4);")
     expect(zig).to include("defer CheatLib.cleanup(@TypeOf(pool), __rt_bg0.heapAlloc(), &pool);")
@@ -707,6 +707,7 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
       node = MIR::Cleanup.new("nums", entry)
       zig = e.emit(node)
+      expect(zig).to start_with("defer ")
       expect(zig).to include("defer CheatLib.cleanup(@TypeOf(nums), rt.frameAlloc(), &nums);")
       expect(zig).not_to include("_moved")
     end
@@ -1095,9 +1096,24 @@ RSpec.describe MIREmitter do
 
   describe "edge coverage" do
     def intrinsic_sig(**emit_kwargs)
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(**emit_kwargs)
-      sig
+      FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(**emit_kwargs)
+      )
+    end
+
+    def return_action(value = MIR::Ident.new("error.Stop"))
+      MIR::FailureAction.new(
+        kind: MIR::FailureActionKind::Return,
+        error_type: :LockTimeout,
+        error_kind: :Transient,
+        default_message: "lock timeout",
+        line: "9",
+        rt_name: "rt",
+        return_value: value,
+      )
     end
 
     it "emits miscellaneous dispatch-only expression nodes" do
@@ -1156,7 +1172,7 @@ RSpec.describe MIREmitter do
         sig,
         Type.new(:String),
         Type.new(:Int64),
-        { alloc: :frame },
+        MIR::InlineAllocMetadata.new(alloc: :frame),
         :shard_direct_zig,
       )
 
@@ -1174,7 +1190,7 @@ RSpec.describe MIREmitter do
         sig,
         nil,
         nil,
-        nil,
+        MIR::InlineAllocMetadata.new,
         :shard_direct_zig,
       )
 
@@ -1360,6 +1376,351 @@ RSpec.describe MIREmitter do
       expect(e.emit(MIR::TypeSentinel.new(:min, "Custom"))).to eq("-std.math.floatMax(f64)")
       expect(e.send(:guarded_defer, "conn", "{\nconn.close();\n}", false))
         .to eq("defer {\nconn.close();\n}\n")
+    end
+
+    it "emits simple dispatcher-only statements and expressions through emit" do
+      cleanup = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
+
+      expect(e.emit(MIR::Panic.new("stop"))).to eq("@panic(\"stop\");")
+      expect(e.emit(MIR::TestPreamble.new(nil))).to include("const rt: *Runtime = &__rt_box")
+      expect(e.emit(MIR::DebugOnly.new([MIR::ExprStmt.new(MIR::Call.new("trace", [], false), false)])))
+        .to include("if (@import(\"builtin\").mode == .Debug)")
+      expect(e.emit(MIR::SoaFieldAccess.new(MIR::Ident.new("rows"), "age"))).to eq("rows.data.items(.age)")
+      expect(e.emit(MIR::Pipeline.new(nil, MIR::Call.new("pipeDone", [], false), nil, nil, nil, nil)))
+        .to eq("pipeDone()")
+      expect(e.emit(MIR::Comment.new("generated"))).to eq("// generated")
+      expect(e.emit(MIR::Suppress.new("unused"))).to eq("_ = &unused;")
+      expect(e.emit(MIR::PubConst.new("Answer", "42"))).to eq("pub const Answer = 42;")
+      expect(e.emit(MIR::ErrCleanup.new("name", cleanup)))
+        .to eq("errdefer CheatLib.cleanup(@TypeOf(name), rt.heapAlloc(), &name);\n")
+      expect(e.emit(MIR::FreeSlice.new(MIR::Ident.new("buf"), :frame))).to eq("rt.frameAlloc().free(buf)")
+      expect(e.emit(MIR::DestroyPtr.new(MIR::Ident.new("ptr"), :heap))).to eq("rt.heapAlloc().destroy(ptr)")
+      expect(e.emit(MIR::RcDowngrade.new(MIR::Ident.new("ref"), "User", "arcDowngrade")))
+        .to eq("CheatLib.arcDowngrade(User, ref)")
+      expect(e.emit(MIR::WeakUpgrade.new(MIR::Ident.new("weak"), "User", "weakArcUpgrade")))
+        .to eq("CheatLib.weakArcUpgrade(User, weak)")
+      expect(e.emit(MIR::VoidLiteral.new)).to eq("{}")
+      expect(e.emit(MIR::Comptime.new(MIR::Ident.new("T")))).to eq("comptime T")
+      expect(e.emit(MIR::ListItems.new(MIR::Ident.new("items")))).to eq("items.items")
+      expect(e.emit(MIR::ListLength.new(MIR::ListItems.new(MIR::Ident.new("items"))))).to eq("items.items.len")
+      expect(e.emit(MIR::IterRange.new(MIR::Lit.new("0"), MIR::Ident.new("n"), nil))).to eq("0..n")
+      expect(e.emit(MIR::Undef.new(nil))).to eq("undefined")
+      expect(e.emit(MIR::Undef.new("i64"))).to eq("@as(i64, undefined)")
+    end
+
+    it "emits direct dispatcher statement helpers through emit" do
+      cleanup = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
+      assert_node = MIR::AssertRaisesCheck.new(
+        MIR::Call.new("mayFail", [], false),
+        "rt",
+        :Transient,
+        :Timeout,
+      )
+      push = MIR::BatchWindowPush.new(
+        "window",
+        MIR::Ident.new("item"),
+        "__batch",
+        "i64",
+        "out",
+        MIR::Call.new("sum", [MIR::Ident.new("__batch")], false),
+        :frame,
+      )
+      flush = MIR::BatchWindowFlush.new(
+        "window",
+        "__batch",
+        "i64",
+        "out",
+        MIR::Call.new("sum", [MIR::Ident.new("__batch")], false),
+        :heap,
+      )
+      discard = MIR::DiscardOwned.new(MIR::Call.new("makeString", [], true), cleanup, "[]const u8")
+
+      assert_zig = e.emit(assert_node)
+      expect(assert_zig).to include("if (mayFail()) |_|")
+      expect(assert_zig).to include("ASSERT_RAISES: expected Transient error")
+      expect(assert_zig).to include("rt.__error.matchesKind(.Transient)")
+      expect(assert_zig).to include("rt.__error.matchesName(@intFromEnum(ErrorName.Timeout))")
+
+      expect(e.emit(push)).to include("if (try window.push(item)) |__batch_slice|")
+      expect(e.emit(push)).to include("try out.append(rt.frameAlloc(), __batch_val);")
+      expect(e.emit(flush)).to include("if (try window.flush()) |__batch_slice|")
+      expect(e.emit(flush)).to include("try out.append(rt.heapAlloc(), __batch_val);")
+      expect(e.emit(discard)).to include("var __discard_")
+      expect(e.emit(discard)).to include("try makeString()")
+      expect(e.emit(discard)).to include("defer CheatLib.cleanup(@TypeOf(__discard_")
+    end
+
+    it "emits direct dispatcher control-flow helpers through emit" do
+      variant = MIR::ThunkVariant.new(
+        name: "even",
+        param_fields: [MIR::ThunkFrameField.new(name: "n", type_info: Type.new(:Int64))],
+      )
+      arm = MIR::MutualThunkArm.new(
+        variant_name: "even",
+        base_cases: [MIR::ThunkBaseCase.new(cond: MIR::BinOp.new("==", MIR::FieldGet.new(MIR::Ident.new("f"), "n"), MIR::Lit.new("0")), value: MIR::Lit.new("true"))],
+        target_variant: "even",
+        target_arg_inits: [MIR::ThunkFrameInit.new(field_name: "n", value: MIR::BinOp.new("-", MIR::FieldGet.new(MIR::Ident.new("f"), "n"), MIR::Lit.new("1")))],
+      )
+      thunk = MIR::MutualThunkTrampoline.new(
+        fn_name: "even",
+        return_type: Type.new(:Bool),
+        variants: [variant],
+        initial_variant: "even",
+        initial_fields: [MIR::ThunkFrameInit.new(field_name: "n", value: MIR::Ident.new("n"))],
+        arms: [arm],
+        yield_policy: :check,
+      )
+      snapshot = MIR::SnapshotTransaction.new(
+        MIR::CapabilityUnwrap.new(MIR::Ident.new("cell")),
+        "rt",
+        :heap,
+        "view",
+        Type.new(:Counter),
+        [MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new("view"), "value"), MIR::Lit.new("1"))],
+        return_action,
+        nil,
+        nil,
+        false,
+      )
+
+      thunk_zig = e.emit(thunk)
+      expect(thunk_zig).to include("const Frame = union(enum)")
+      expect(thunk_zig).to include(".even => |f|")
+      expect(thunk_zig).to include("return true;")
+      expect(thunk_zig).to include("current = .{ .even = .{ .n = (f.n - 1) } };")
+
+      snapshot_zig = e.emit(snapshot)
+      expect(snapshot_zig).to include(".*.update(rt, rt.heapAlloc()")
+      expect(snapshot_zig).to include("fn run(view: *Counter) void")
+      expect(snapshot_zig).to include("view.value = 1;")
+      expect(snapshot_zig).to include("error.UpdateRetriesExhausted => { return error.Stop; }")
+    end
+
+    it "emits polymorphic and lock dispatcher helpers through emit" do
+      mutate = MIR::PolymorphicMutate.new(
+        MIR::Ident.new("cell"),
+        "rt",
+        "view",
+        Type.new(:Counter),
+        [MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new("view"), "value"), MIR::Lit.new("2"))],
+      )
+      flow = MIR::PolymorphicMutateFlow.new(
+        MIR::Ident.new("cell"),
+        "rt",
+        "view",
+        Type.new(:Counter),
+        Type.new(:Int64),
+        [MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("view"), "value"))],
+        MIR::Ident.new("ok"),
+        [MIR::PolymorphicFlowSignal.new(:skip_no_commit, nil)],
+      )
+      entry = MIR::SortedLockAcquireEntry.new(
+        index: 0,
+        alias_name: "guarded",
+        guard_var: "__guard",
+        held_var: "__held",
+        lock_expr: MIR::Ident.new("lock"),
+        address_expr: MIR::AddressOf.new(MIR::Ident.new("lock")),
+        method_name: "acquire",
+      )
+      sorted = MIR::SortedLockAcquire.new([entry], nil, [], [], nil, "__LINE__", "__locks", "rt", false)
+      fallible = MIR::FallibleLockBinding.new(
+        "__guard",
+        "guarded",
+        MIR::LockAcquire.new(MIR::Ident.new("lock"), :locked, true),
+        return_action,
+        nil,
+        [:LockTimeout],
+        [],
+        "__LINE__",
+        "__lock_acquire",
+        "rt",
+      )
+
+      mutate_zig = e.emit(mutate)
+      expect(mutate_zig).to include("try CheatLib.polymorphicMutate(cell, rt")
+      expect(mutate_zig).to include("fn run(view: *Counter) void")
+      expect(mutate_zig).to include("view.value = 2;")
+
+      flow_zig = e.emit(flow)
+      expect(flow_zig).to include("const __PolyFlow = struct")
+      expect(flow_zig).to include("try CheatLib.polymorphicMutateFlow(cell, rt")
+      expect(flow_zig).to include("if (!(ok))")
+      expect(flow_zig).to include(".ret_commit, .ret_no_commit => return __poly_flow.ret")
+
+      sorted_zig = e.emit(sorted)
+      expect(sorted_zig).to include("var __guard: @TypeOf(lock.acquire()) = undefined;")
+      expect(sorted_zig).to include("const __ptrs = [_]usize{ @intFromPtr(&lock) };")
+      expect(sorted_zig).to include("0 => __guard = lock.acquire(),")
+      expect(sorted_zig).to include("const guarded = __guard.get();")
+
+      fallible_zig = e.emit(fallible)
+      expect(fallible_zig).to include("var __guard = __lock_acquire: {")
+      expect(fallible_zig).to include("if (lock.acquireOrErr()) |__g|")
+      expect(fallible_zig).to include("error.LockTimeout => { return error.Stop; }")
+      expect(fallible_zig).to include("const guarded = __guard.get();")
+    end
+
+    it "emits callable expression dispatcher helpers through emit" do
+      registry = MIR::RegistryCall.new(
+        entry: intrinsic_sig(zig: "try registryCall({0}, {alloc})"),
+        args: [MIR::RegistryCallArg.new(expr: MIR::Ident.new("value"), coerce_type: :Int64)],
+        reason: "spec",
+        allocs: MIR::InlineAllocMetadata.new(alloc: :heap),
+      )
+      indexed = MIR::IndexedStore.new(
+        target: MIR::Ident.new("map"),
+        index: MIR::Ident.new("key"),
+        value: MIR::Ident.new("value"),
+        entry: intrinsic_sig(zig: "try {target}.put({index}, {value}, {alloc})"),
+        template_kind: :zig,
+        map_kind: :string_map,
+        allocs: MIR::InlineAllocMetadata.new(alloc: :frame),
+        key_type: Type.new(:String),
+        value_type: Type.new(:Int64),
+      )
+      lambda_fn = MIR::FnDef.new(
+        "__lambda",
+        [MIR::Param.new("x", "i64")],
+        "i64",
+        [MIR::ReturnStmt.new(MIR::Ident.new("x"))],
+        :private,
+        false,
+        nil,
+      )
+      extern = MIR::ExternTrampoline.new(
+        id: 7,
+        callee_name: "nativeCall",
+        runtime_args: [MIR::ExternTrampolineArg.new(expr: MIR::Ident.new("x"), field_type: Type.new(:Int64))],
+        return_type: Type.new(:Int64),
+        stdlib_def: FunctionSignature.borrowing_intrinsic,
+      )
+      observable = MIR::ObservableConsumerSpawn.new(
+        id: 4,
+        acc_name: "acc",
+        source_name: "gen",
+        acc_type: Type.new(:Int64),
+        runtime_name: "rt",
+        task_config_variant: "Medium",
+        stdlib_def: FunctionSignature.borrowing_intrinsic,
+        ownership_contract: MIR::OwnershipContract.empty,
+        body: [MIR::ExprStmt.new(MIR::Call.new("publish", [MIR::Ident.new("acc"), MIR::Ident.new("gen")], false), false)],
+      )
+      inline = MIR::InlineBc.new(:add, [MIR::Ident.new("left"), MIR::Ident.new("right")], intrinsic_sig(zig: "CheatLib.add({0}, {1})"))
+
+      expect(e.emit(registry)).to eq("try registryCall(@as(i64, value), rt.heapAlloc())")
+      expect(e.emit(indexed)).to eq("try map.put(key, value, rt.frameAlloc())")
+      expect(e.emit(MIR::LambdaExpr.new(lambda_fn, []))).to include("&(struct { fn __lambda(x: i64) i64")
+
+      extern_zig = e.emit(extern)
+      expect(extern_zig).to include("const __Ext7 = struct")
+      expect(extern_zig).to include("nativeCall(f.a0)")
+      expect(extern_zig).to include("rt.onRootStack")
+      expect(extern_zig).to include("break :blk_ext7 __ext7_frame.ret;")
+
+      observable_zig = e.emit(observable)
+      expect(observable_zig).to include("const __ObsConsumerCtx4 = struct")
+      expect(observable_zig).to include("defer ctx.acc.finish();")
+      expect(observable_zig).to include("publish(ctx.acc, ctx.gen);")
+      expect(observable_zig).to include("try CheatHeader.spawnObservableConsumerCtx")
+
+      expect(e.emit(inline)).to eq("CheatLib.add(left, right)")
+    end
+
+    it "emits sharded concurrent each through emit" do
+      node = MIR::ShardConcurrentEach.new(
+        id: 2,
+        map_expr: MIR::Ident.new("counts"),
+        map_var_name: "counts",
+        map_type: Type.new(:Any),
+        key_type: Type.new(:String),
+        shard_count: 2,
+        start_expr: MIR::Lit.new("0"),
+        finish_expr: MIR::Ident.new("limit"),
+        inclusive: false,
+        capacity_expr: MIR::Lit.new("8"),
+        batch_size_expr: MIR::Lit.new("2"),
+        task_config_variant: "Medium",
+        producer_key_body: [MIR::Let.new("__sh2_key", MIR::Ident.new("source_key"), false, nil, nil)],
+        body: [MIR::ExprStmt.new(MIR::Call.new("consume", [MIR::Ident.new("__sh2_key")], false), false)],
+        key_allocates_frame: true,
+        body_allocates_frame: true,
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("const __sh2_map = &counts;")
+      expect(zig).to include("var __sh2_chans: [2]CheatLib.BoundedChannel(__ShWork2)")
+      expect(zig).to include("try CheatHeader.spawnBest")
+      expect(zig).to include("const __sh2_key_mark = rt.saveLoopMark();")
+      expect(zig).to include("const __sh2_body_mark = __rt.saveLoopMark();")
+      expect(zig).to include("consume(__sh2_key);")
+    end
+
+    it "emits remaining direct expression wrappers through emit" do
+      expect(e.emit(MIR::CapabilityLockTarget.new(MIR::Ident.new("cell"), false, false))).to eq("cell")
+      expect(e.emit(MIR::CapabilityLockTarget.new(MIR::Ident.new("cell"), true, false))).to eq("cell.ctrl.data.*")
+      expect(e.emit(MIR::CapabilityLockAddress.new(MIR::Ident.new("cell"), false))).to eq("&cell")
+      expect(e.emit(MIR::CapabilityLockAddress.new(MIR::Ident.new("cell"), true))).to eq("cell.ctrl.data")
+      expect(e.emit(MIR::LockAcquire.new(MIR::Ident.new("lock"), :locked, false))).to eq("lock.acquire()")
+      expect(e.emit(MIR::LockAcquire.new(MIR::Ident.new("lock"), :write_locked, true))).to eq("lock.writeOrErr()")
+      expect(e.emit(MIR::TailCall.new("nextStep", [MIR::Ident.new("state"), MIR::Lit.new("1")])))
+        .to eq("@call(.always_tail, nextStep, .{state, 1})")
+      expect(e.emit(MIR::ConcatStr.new([MIR::Lit.new("\"a\""), MIR::Ident.new("b")], :frame, nil)))
+        .to eq("try std.mem.concat(rt.frameAlloc(), u8, &.{ \"a\", b })")
+      expect(e.emit(MIR::ListItems.new(MIR::TryExpr.new(MIR::Call.new("loadList", [], false)))))
+        .to eq("(try loadList()).items")
+      expect(e.emit(MIR::ListLength.new(MIR::TryExpr.new(MIR::Call.new("loadList", [], false)))))
+        .to eq("(try loadList()).len")
+      expect(e.emit(MIR::IfOptional.new(
+        MIR::Ident.new("maybe"),
+        "value",
+        MIR::Ident.new("value"),
+        MIR::Lit.new("0"),
+      ))).to eq("(if (maybe) |value| value else 0)")
+      owned_slice = e.emit(MIR::OwnedSlice.new(MIR::Ident.new("list"), :heap))
+      expect(owned_slice).to include("try __x.toOwnedSlice(rt.heapAlloc())")
+      expect(owned_slice).to include("break :blk_owned_slice_")
+    end
+
+    it "emits structural union matches through emit" do
+      node = MIR::UnionMatchStmt.new(
+        MIR::Ident.new("result"),
+        [
+          MIR::UnionMatchArm.new(
+            variant: "Ok",
+            payload: "value",
+            body: [MIR::ReturnStmt.new(MIR::Ident.new("value"))],
+          ),
+          MIR::UnionMatchArm.new(
+            variant: "Err",
+            payload: nil,
+            body: [MIR::ReturnStmt.new(MIR::Lit.new("0"))],
+          ),
+        ],
+        [MIR::Panic.new("unknown")],
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("switch (result)")
+      expect(zig).to include(".Ok => |value|")
+      expect(zig).to include("return value;")
+      expect(zig).to include(".Err =>")
+      expect(zig).to include("else =>")
+      expect(zig).to include("@panic(\"unknown\");")
+    end
+
+    it "keeps verification-only ownership facts non-emitting through emit" do
+      expect(e.emit(MIR::TransferMark.new("name", :return, :heap))).to be_nil
+      expect(e.emit(MIR::OwnedCreate.new("name", :heap, Type.new(:String), "source"))).to be_nil
+      expect(e.emit(MIR::OwnedDestroy.new("name", :heap, "source"))).to be_nil
+      expect(e.emit(MIR::OwnedTransfer.new("name", :return, "source"))).to be_nil
+      expect(e.emit(MIR::OwnedBorrow.new("name", "source"))).to be_nil
+      expect(e.emit(MIR::OwnedStore.new("name", "target", :heap, "source"))).to be_nil
+      expect(e.emit(MIR::OwnedReturn.new("name", "source"))).to be_nil
+    end
+
+    it "reports unknown structural nodes with their class" do
+      expect { e.emit(Object.new) }.to raise_error(/MIREmitter: unknown node type Object/)
     end
   end
 end

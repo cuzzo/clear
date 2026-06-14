@@ -1,4 +1,4 @@
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # doc_spec.rb — Verify all ```clear code blocks in docs/ transpile successfully.
 #

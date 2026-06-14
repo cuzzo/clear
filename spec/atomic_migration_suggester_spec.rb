@@ -1,6 +1,6 @@
 require "rspec"
 require "set"
-require_relative "../src/tools/atomic_migration_suggester"
+require_relative "../src/tools/atomic_migration_suggester" unless defined?(AtomicMigrationSuggester)
 
 # Atomics M1.9 / M1.10: static eligibility check for the
 # @shared:locked -> @shared:atomic migration. Tested in isolation;
@@ -191,7 +191,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
       bind = AST::BindExpr.new(nil, "bg", nil, bg)
       seen = []
 
-      AtomicMigrationSuggester.walk_recursive([bind]) { |node| seen << node }
+      AtomicMigrationSuggester.send(:walk_recursive, [bind]) { |node| seen << node }
 
       expect(seen).to include(nested)
     end
@@ -206,7 +206,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
       )
       with_node = AST::WithBlock.new(nil, [cap], [])
 
-      AtomicMigrationSuggester.classify_with_block!(with_node, candidates_by_name)
+      AtomicMigrationSuggester.send(:classify_with_block!, with_node, candidates_by_name)
 
       expect(candidates_by_name["c"][:disqualified]).to eq(true)
     end
@@ -217,8 +217,8 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
         "d" => { disqualified: false },
       }
 
-      AtomicMigrationSuggester.classify_uses!(AST::Identifier.new(nil, "c"), candidates_by_name)
-      AtomicMigrationSuggester.classify_uses!(
+      AtomicMigrationSuggester.send(:classify_uses!, AST::Identifier.new(nil, "c"), candidates_by_name)
+      AtomicMigrationSuggester.send(:classify_uses!,
         AST::FuncCall.new(nil, "sink", [AST::Identifier.new(nil, "d")]),
         candidates_by_name,
       )
@@ -232,10 +232,10 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
       alias_field = AST::GetField.new(nil, alias_id, "v")
       other_field = AST::GetField.new(nil, AST::Identifier.new(nil, "other"), "v")
 
-      expect(AtomicMigrationSuggester.references_alias?([alias_id], "a")).to eq(true)
-      expect(AtomicMigrationSuggester.rhs_uses_alias_only_for_field_get?([alias_field], "a", "v")).to eq(true)
-      expect(AtomicMigrationSuggester.rhs_uses_alias_only_for_field_get?(AST::Identifier.new(nil, "a"), "a", "v")).to eq(false)
-      expect(AtomicMigrationSuggester.rhs_uses_alias_only_for_field_get?(other_field, "a", "v")).to eq(true)
+      expect(AtomicMigrationSuggester.send(:references_alias?, [alias_id], "a")).to eq(true)
+      expect(AtomicMigrationSuggester.send(:rhs_uses_alias_only_for_field_get?, [alias_field], "a", "v")).to eq(true)
+      expect(AtomicMigrationSuggester.send(:rhs_uses_alias_only_for_field_get?, AST::Identifier.new(nil, "a"), "a", "v")).to eq(false)
+      expect(AtomicMigrationSuggester.send(:rhs_uses_alias_only_for_field_get?, other_field, "a", "v")).to eq(true)
     end
 
     it "handles BindExpr field assignment and read-only statement shapes" do
@@ -244,8 +244,8 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
       bind_assignment = AST::BindExpr.new(nil, target, nil, AST::Literal.new(nil, :INT64, 42, :stack))
       read_stmt = AST::FuncCall.new(nil, "print", [AST::GetField.new(nil, alias_id, "v")])
 
-      expect(AtomicMigrationSuggester.stmt_eligible?(bind_assignment, "a", "v")).to eq(true)
-      expect(AtomicMigrationSuggester.stmt_eligible?(read_stmt, "a", "v")).to eq(true)
+      expect(AtomicMigrationSuggester.send(:stmt_eligible?, bind_assignment, "a", "v")).to eq(true)
+      expect(AtomicMigrationSuggester.send(:stmt_eligible?, read_stmt, "a", "v")).to eq(true)
     end
   end
 end

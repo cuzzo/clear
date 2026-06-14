@@ -10,6 +10,8 @@ module PipeAnalysis
 
   requires_ancestor { SemanticAnnotator }
 
+  ConcurrentOptions = T.type_alias { T::Hash[String, AST::Node] }
+
   class PipeArityPlan < T::Struct
     extend T::Sig
 
@@ -92,7 +94,7 @@ module PipeAnalysis
     AST.pipeline_complex_op?(node) || node.is_a?(AST::RecoverOp) || node.is_a?(AST::CollectOp)
   end
 
-  sig { params(options: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  sig { params(options: ConcurrentOptions).returns(T::Boolean) }
   def concurrent_parallel_enabled?(options)
     value = options["parallel"]
     !!(value.is_a?(AST::Identifier) && %w[true TRUE].include?(value.name))
@@ -1168,26 +1170,12 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: T.untyped, names: T::Set[String]).void }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(node) do |n|
       names << n.name if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
     end
-    nil
-  end
-
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def pre_scan_node_for_sharded(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    found = T.let(false, T::Boolean)
-    each_shard_scan_node(node) do |n|
-      if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
-        found = true
-        break
-      end
-    end
-    found
   end
 
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
@@ -1281,16 +1269,6 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|
       access = sharded_get_index_access(node, context: "sharded pipeline target")
-      results << access if access
-    end
-  end
-
-  # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
-  def walk_for_sharded_getindex(nodes, results)
-    T.bind(self, SemanticAnnotator) rescue nil
-    each_shard_scan_node(nodes) do |node|
-      access = sharded_get_index_access(node, context: "pipeline target")
       results << access if access
     end
   end
@@ -1445,83 +1423,14 @@ module PipeAnalysis
   def analyze_concurrent_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     conc    = node.right   # the ConcurrentOp node
-    options = conc.options
-    lhs_type = node.left.full_type!(context: "pipeline left")
-
-    # Detect SHARD predecessor: (range) |> SHARD(key, map) |> CONCURRENT EACH { ... }
-    # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
-    shard_node = nil
-    if shard_concurrent_source?(node.left)
-      shard_node = node.left.right
-      target_info = shard_node.target_map.full_type!(context: "shard target map")
-      conc.shard_context = AST::PipelineShardContext.new(
-        map_var: shard_node.target_map,
-        shard_count: target_info&.shard_count,
-        key_expr: shard_node.key_expr
-      )
-    end
-
-    # Validate workers option if present
-    if (ps = options["workers"])
-      validate_positive_numeric_concurrent_option!("workers", ps)
-    end
-
-    # Validate capacity option if present
-    if (cap = options["capacity"])
-      unless queue_backed_concurrent_source?(node)
-        error!(cap, :CONCURRENT_CAPACITY_BAD_INPUT)
-      end
-      validate_positive_numeric_concurrent_option!("capacity", cap)
-    end
-
-    # Validate batch option if present
-    if (batch = options["batch"])
-      validate_positive_numeric_concurrent_option!("batch", batch)
-    end
-
-    # Validate parallel option is Bool if present
-    if (par_val = options["parallel"])
-      is_bool = (par_val.is_a?(AST::Literal) && par_val.type == :BOOLEAN) ||
-                (par_val.is_a?(AST::Identifier) && %w[true false TRUE FALSE].include?(par_val.name))
-      unless is_bool
-        error!(par_val, :CONCURRENT_PARALLEL_NEEDS_BOOL, got: par_val.class.name.split('::').last)
-      end
-    end
-
-    # Validate size option if present: must be one of MICRO STANDARD LARGE XL
-    if (sz = options["size"])
-      valid = sz.is_a?(AST::Identifier) && VALID_CONCURRENT_SIZES.include?(sz.name)
-      unless valid
-        got = sz.is_a?(AST::Identifier) ? sz.name : sz.class.name.split("::").last
-        error!(sz, :CONCURRENT_SIZE_BAD_VALUE, valid: VALID_CONCURRENT_SIZES.join(', '), got: got)
-      end
-    end
-
-    # CONCURRENT option values that are bare identifiers (size: MICRO,
-    # etc.) are compile-time keyword selectors consumed structurally
-    # via .name — never runtime values. Same compile-time-marker
-    # category as a type-name ident; stamp the codebase's :Type marker
-    # (not a guess: it is not an evaluatable value).
-    options.each_value do |v|
-      if v.is_a?(AST::Identifier)
-        # Keyword selector (MICRO/STANDARD/...): compile-time marker.
-        stamp_type!(v, Type.new(:Type))
-      else
-        # A real value option (workers: 2, parallel: TRUE) — annotate
-        # it normally so it gets its true type.
-        visit(v)
-      end
-    end
-
-    # Validate that only known option keys are used
-    options.each_key do |key|
-      unless VALID_CONCURRENT_OPTIONS.include?(key)
-        error!(conc, :CONCURRENT_UNKNOWN_OPTION, name: key, valid: VALID_CONCURRENT_OPTIONS.join(', '))
-      end
-    end
+    options = T.cast(conc.options, ConcurrentOptions)
+    validate_concurrent_options!(node, conc, options)
+    stamp_concurrent_option_values!(options)
 
     # Type analysis for concurrent ops is identical to synchronous versions.
     # Create a proxy BinaryOp(SMOOTH, left, inner_op) so we can reuse the existing analyze_* methods.
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    shard_node = prepare_concurrent_shard_context!(node, conc)
     proxy = AST::BinaryOp.new(node.token, node.left, :SMOOTH, conc.op)
 
     case conc.op
@@ -1613,6 +1522,114 @@ module PipeAnalysis
     inner = conc.op
     stamp_type!(inner, node.full_type!(context: "CONCURRENT inner op result"))
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
+  end
+
+  sig { params(node: AST::BinaryOp, conc: AST::ConcurrentOp, options: ConcurrentOptions).void }
+  def validate_concurrent_options!(node, conc, options)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    validate_concurrent_numeric_option!(options, "workers")
+    validate_concurrent_capacity_option!(node, options)
+    validate_concurrent_numeric_option!(options, "batch")
+    validate_concurrent_parallel_option!(options)
+    validate_concurrent_size_option!(options)
+    validate_known_concurrent_options!(conc, options)
+  end
+
+  sig { params(options: ConcurrentOptions, name: String).void }
+  def validate_concurrent_numeric_option!(options, name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    expr = options[name]
+    validate_positive_numeric_concurrent_option!(name, expr) if expr
+  end
+
+  sig { params(node: AST::BinaryOp, options: ConcurrentOptions).void }
+  def validate_concurrent_capacity_option!(node, options)
+    T.bind(self, SemanticAnnotator) rescue nil
+    cap = options["capacity"]
+    return unless cap
+
+    error!(cap, :CONCURRENT_CAPACITY_BAD_INPUT) unless queue_backed_concurrent_source?(node)
+    validate_positive_numeric_concurrent_option!("capacity", cap)
+  end
+
+  sig { params(options: ConcurrentOptions).void }
+  def validate_concurrent_parallel_option!(options)
+    T.bind(self, SemanticAnnotator) rescue nil
+    par_val = options["parallel"]
+    return unless par_val
+
+    return if concurrent_bool_option?(par_val)
+
+    error!(par_val, :CONCURRENT_PARALLEL_NEEDS_BOOL, got: concurrent_option_label(par_val))
+  end
+
+  sig { params(value: AST::Node).returns(T::Boolean) }
+  def concurrent_bool_option?(value)
+    T.bind(self, SemanticAnnotator) rescue nil
+    !!((value.is_a?(AST::Literal) && value.type == :BOOLEAN) ||
+      (value.is_a?(AST::Identifier) && %w[true false TRUE FALSE].include?(value.name)))
+  end
+
+  sig { params(options: ConcurrentOptions).void }
+  def validate_concurrent_size_option!(options)
+    T.bind(self, SemanticAnnotator) rescue nil
+    size = options["size"]
+    return unless size
+    return if size.is_a?(AST::Identifier) && VALID_CONCURRENT_SIZES.include?(size.name)
+
+    error!(size,
+      :CONCURRENT_SIZE_BAD_VALUE,
+      valid: VALID_CONCURRENT_SIZES.join(', '),
+      got: concurrent_option_label(size))
+  end
+
+  sig { params(value: AST::Node).returns(String) }
+  def concurrent_option_label(value)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return value.name if value.is_a?(AST::Identifier)
+
+    class_name = value.class.name
+    class_name ? class_name.split("::").last : value.class.to_s
+  end
+
+  sig { params(conc: AST::ConcurrentOp, options: ConcurrentOptions).void }
+  def validate_known_concurrent_options!(conc, options)
+    T.bind(self, SemanticAnnotator) rescue nil
+    options.each_key do |key|
+      error!(conc, :CONCURRENT_UNKNOWN_OPTION, name: key, valid: VALID_CONCURRENT_OPTIONS.join(', ')) unless VALID_CONCURRENT_OPTIONS.include?(key)
+    end
+  end
+
+  sig { params(options: ConcurrentOptions).void }
+  def stamp_concurrent_option_values!(options)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    # Bare identifiers are compile-time keyword selectors consumed
+    # structurally via .name; non-identifiers are runtime values.
+    options.each_value do |v|
+      if v.is_a?(AST::Identifier)
+        stamp_type!(v, Type.new(:Type))
+      else
+        visit(v)
+      end
+    end
+  end
+
+  sig { params(node: AST::BinaryOp, conc: AST::ConcurrentOp).returns(T.nilable(AST::ShardOp)) }
+  def prepare_concurrent_shard_context!(node, conc)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    return nil unless shard_concurrent_source?(node.left)
+
+    shard_node = node.left.right
+    target_info = shard_node.target_map.full_type!(context: "shard target map")
+    conc.shard_context = AST::PipelineShardContext.new(
+      map_var: shard_node.target_map,
+      shard_count: target_info&.shard_count,
+      key_expr: shard_node.key_expr
+    )
+    shard_node
   end
 
   sig { params(node: AST::Locatable, lhs_type: Type).returns(T::Boolean) }
@@ -1802,7 +1819,7 @@ module PipeAnalysis
   SOA_MIN_FIELDS = 4
   SOA_THRESHOLD  = 0.5  # warn when < 50% of fields accessed
 
-  sig { params(node: AST::BinaryOp, item_type: T.untyped).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::BinaryOp, item_type: T.untyped).void }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, SemanticAnnotator) rescue nil
     accessed = phase_receiver_state.pipeline_accessed_fields
@@ -1824,7 +1841,7 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).void }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
     receiver_state = phase_receiver_state

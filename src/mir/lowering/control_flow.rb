@@ -218,24 +218,23 @@ module MIRLoweringControlFlow
     [save, restore] + suffix
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), scope: Symbol).void }
+  sig { params(stmts: T::Array[T.untyped], scope: Symbol).void }
   def stamp_loop_frame_alloc_scopes!(stmts, scope)
-    return unless stmts.is_a?(Array)
     stmts.each do |s|
       case s
       when MIR::AllocMark
         s.scope = scope if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt, MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(s.else_body, scope)
+        stamp_loop_frame_alloc_scopes!(s.else_body, scope) if s.else_body
       when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope)
+        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope)
+        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
       when MIR::WithMatchDispatch
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
@@ -243,7 +242,7 @@ module MIRLoweringControlFlow
     nil
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), mark_per_iter: T.untyped).void }
+  sig { params(stmts: T::Array[T.untyped], mark_per_iter: T.untyped).void }
   def finalize_loop_frame_alloc_scopes!(stmts, mark_per_iter)
     stamp_loop_frame_alloc_scopes!(stmts, mark_per_iter == true ? :iteration : :function)
   end
@@ -582,7 +581,7 @@ module MIRLoweringControlFlow
   sig { params(match_case: AST::MatchCase, expr_label: T.nilable(String)).returns(MatchBody) }
   def hoisted_match_case_body(match_case, expr_label)
     body = lower_match_branch(match_case.body, expr_label)
-    T.cast(hoist_unhoisted_return_allocs(body, match_case.body), MatchBody)
+    hoist_unhoisted_return_allocs(body, match_case.body)
   end
 
   sig { params(cond: MIR::Emittable, body: MatchBody).returns(MIR::IfChainBranch) }
@@ -684,7 +683,7 @@ module MIRLoweringControlFlow
     return nil unless default_case && !default_case.empty?
 
     body = lower_match_branch(default_case, expr_label)
-    T.cast(hoist_unhoisted_return_allocs(body, default_case), MatchBody)
+    hoist_unhoisted_return_allocs(body, default_case)
   end
 
   sig { params(node: AST::MatchStatement).returns(T::Boolean) }
@@ -736,7 +735,7 @@ module MIRLoweringControlFlow
   def lower_union_match(node, facts)
     arms = node.cases.flat_map { |c| union_match_arm_plans(c, node, facts.expr_label) }
     default = union_match_default_body(node, facts, arms)
-    default = hoist_unhoisted_return_allocs(default, node.default_case) if default
+    default = hoist_unhoisted_return_allocs(default, node.default_case || []) if default
     MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
       MIR::UnionMatchArm.new(variant: arm.variant, payload: arm.payload_name, body: arm.body)
     }, default)
@@ -759,7 +758,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     variants = union_match_case_variants(c)
     body = lower_match_branch(c.body, expr_label)
-    body = T.cast(hoist_unhoisted_return_allocs(body, c.body), MatchBody)
+    body = hoist_unhoisted_return_allocs(body, c.body)
     return variants.map { |variant| UnionMatchArmPlan.new(variant: variant, body: body, payload_name: nil) } unless c.binding || c.destructure
 
     variants.map do |variant|
@@ -846,12 +845,11 @@ module MIRLoweringControlFlow
     lower(value)
   end
 
-  sig { params(body: T.nilable(T::Array[MIR::Emittable]), ast_stmts: T.nilable(T::Array[AST::Node])).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(body: T::Array[MIR::Emittable], ast_stmts: T::Array[AST::Node]).returns(T::Array[MIR::Emittable]) }
   def hoist_unhoisted_return_allocs(body, ast_stmts)
     T.bind(self, MIRLowering) rescue nil
-    return body unless body
     returns = T.let([], T::Array[AST::Node])
-    Array(ast_stmts).each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
+    ast_stmts.each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
     ret_i = T.let(0, Integer)
 
     body.flat_map do |stmt|
@@ -1163,11 +1161,10 @@ module MIRLoweringControlFlow
     !!(entry && entry.present? && !entry.needs_cleanup?)
   end
 
-  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T::Set[String]) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
   def collect_fn_returned_names(body)
     T.bind(self, MIRLowering) rescue nil
     names = T.let(Set.new, T::Set[String])
-    return names unless body
     AST.walk_body(body) do |node|
       collect_returned_binding_names(node.value, names) if node.is_a?(AST::ReturnNode)
     end
@@ -1263,5 +1260,61 @@ module MIRLoweringControlFlow
   # Lower a StructPattern into (conditions, binding_stmts).
   # conditions: Array of Zig boolean fragments ("subject.x == 10")
   # binding_stmts: Array of MIR nodes (const decls for :bind fields)
+
+  private :finalize_return_value,
+    :return_transfer_required?
+  private :aggregate_return_literal?
+  private :collect_returned_binding_names
+  private :conjoin_match_conditions
+  private :equality_match_condition
+  private :finalize_loop_frame_alloc_scopes!
+  private :for_each_loop_stmt
+  private :for_each_owned_collection_source?
+  private :for_each_owned_collection_source_alloc
+  private :for_each_plan
+  private :for_range_plan
+  private :heap_carry_recursive_param_value
+  private :heap_carry_return_value
+  private :hoist_unhoisted_return_allocs
+  private :hoisted_match_case_body
+  private :if_chain_match_case_branches
+  private :loop_body_exits?
+  private :lower_control_condition
+  private :lower_if_chain_match
+  private :lower_match_branch
+  private :lower_match_default_body
+  private :lower_switch_match
+  private :lower_union_match
+  private :match_lowering_facts
+  private :prepend_loop_mark
+  private :return_destination_type
+  private :return_lowering_plan
+  private :return_move_guard_required?
+  private :return_move_guard_required_names
+  private :return_payload_pointer_value
+  private :return_transfer_required_names
+  private :return_transfers_heap_binding?
+  private :return_value_already_payload_pointer?
+  private :return_value_destination_type
+  private :return_with_transfer_marks
+  private :returned_binding_names
+  private :returned_hoist_binding?
+  private :returned_owned_binding?
+  private :returned_takes_param?
+  private :stamp_loop_frame_alloc_scopes!
+  private :string_match_condition
+  private :switch_match_pattern
+  private :synthetic_return_ownership_plan
+  private :tail_call_return?
+  private :union_if_chain_match_case
+  private :union_if_chain_payload_bindings
+  private :union_match_arm_plans
+  private :union_match_default_body
+  private :union_match_payload_bindings
+  private :union_match_switchable?
+  private :union_match_variant_name
+  private :union_tag_condition
+  private :value_if_chain_match_case
+  private :with_if_bind_alias_maps
 
 end

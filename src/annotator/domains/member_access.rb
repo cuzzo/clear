@@ -67,19 +67,7 @@ module Annotator
 
         visit(node.target)
 
-        # Check if this path or any ancestor has been moved (graph handles both)
-        path = get_path_to_root(node)
-        if path
-          # Check root, then progressively longer sub-paths
-          check = T.let("", String)
-          path.each do |seg|
-            check = check.empty? ? seg.to_s : "#{check}.#{seg}"
-            if ownership_graph.moved?(check)
-              emit_use_of_moved_path_error!(node, path, ownership_graph[check])
-              break
-            end
-          end
-        end
+        emit_moved_field_path_error_if_needed!(node)
 
         type = node.target.resolved_type
 
@@ -89,30 +77,7 @@ module Annotator
           return
         end
 
-        # Capability-wrapped bindings hide the inner T behind a lock /
-        # atomic cell. Direct field access on the outer binding skips the
-        # unwrap and produces a Zig-level "no field named X" since the
-        # wrapper type doesn't have the field. Catch this early with a
-        # CLEAR-level diagnostic that names the right WITH form.
-        # Skip when this GetField is the LHS of an assignment — field
-        # writes are handled by visit_assignment_field's auto-lock path
-        # (`assignment_node.auto_lock`), which emits the correct
-        # lock-acquire-and-release inline.
-        if node.target.is_a?(AST::Identifier) && !node.is_assignment_lhs
-          sym = node.target.symbol
-          in_auto_lock = phase_receiver_state.auto_locked_assign_name == node.target.name
-          in_with_block = inside_with_block?
-          cap_error = [
-            [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
-            [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
-            [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
-          ].find { |candidate| candidate[0] }
-          if cap_error && !in_auto_lock && !in_with_block
-            emit_cap_field_needs_with!(node,
-              cap_error[1], perm: cap_error[2],
-              name: node.target.name, field: node.field, cap: cap_error[3])
-          end
-        end
+        emit_capability_field_access_error_if_needed!(node)
 
         raw_schema = lookup_type_schema(type)
         if Schemas.enum?(raw_schema)
@@ -158,9 +123,11 @@ module Annotator
         # Handles compound types like T[], ?T, !T via apply_type_subst.
         # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
         type_obj = Type.new(type)
-        if type_obj.generic_instance? && struct_schema.type_params
+        if type_obj.generic_instance? && struct_schema.type_params.any?
           subst = {}
           struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
+            next unless arg
+
             subst[param] = arg.resolved
           end
           field_type = apply_type_subst(field_type, subst)
@@ -189,6 +156,57 @@ module Annotator
         end
         stamp_type!(node, field_type)
       end
+
+      sig { params(node: AST::GetField).void }
+      def emit_moved_field_path_error_if_needed!(node)
+        T.bind(self, SemanticAnnotator)
+
+        path = get_path_to_root(node)
+        return if path.empty?
+
+        # Check root, then progressively longer sub-paths.
+        check = T.let("", String)
+        path.each do |seg|
+          check = check.empty? ? seg.to_s : "#{check}.#{seg}"
+          if ownership_graph.moved?(check)
+            emit_use_of_moved_path_error!(node, path, ownership_graph[check])
+            break
+          end
+        end
+      end
+      private :emit_moved_field_path_error_if_needed!
+
+      sig { params(node: AST::GetField).void }
+      def emit_capability_field_access_error_if_needed!(node)
+        T.bind(self, SemanticAnnotator)
+
+        # Capability-wrapped bindings hide the inner T behind a lock /
+        # atomic cell. Direct field access on the outer binding skips the
+        # unwrap and produces a Zig-level "no field named X" since the
+        # wrapper type doesn't have the field. Catch this early with a
+        # CLEAR-level diagnostic that names the right WITH form.
+        # Skip when this GetField is the LHS of an assignment -- field
+        # writes are handled by visit_assignment_field's auto-lock path
+        # (`assignment_node.auto_lock`), which emits the correct
+        # lock-acquire-and-release inline.
+        return unless node.target.is_a?(AST::Identifier)
+        return if node.is_assignment_lhs
+
+        sym = node.target.symbol
+        in_auto_lock = phase_receiver_state.auto_locked_assign_name == node.target.name
+        in_with_block = inside_with_block?
+        cap_error = [
+          [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
+          [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
+          [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
+        ].find { |candidate| candidate[0] }
+        if cap_error && !in_auto_lock && !in_with_block
+          emit_cap_field_needs_with!(node,
+            cap_error[1], perm: cap_error[2],
+            name: node.target.name, field: node.field, cap: cap_error[3])
+        end
+      end
+      private :emit_capability_field_access_error_if_needed!
 
       sig { params(node: AST::Slice).void }
       def visit_Slice(node)

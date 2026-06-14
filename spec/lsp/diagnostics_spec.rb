@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../../src/lsp/diagnostics"
-require_relative "../../src/lsp/analyzer"
+require_relative "../../src/lsp/diagnostics" unless defined?(LSP::Diagnostics)
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
 
 RSpec.describe LSP::Diagnostics do
   Token = Struct.new(:line, :column, :value, keyword_init: true)
@@ -152,14 +152,14 @@ RSpec.describe LSP::Diagnostics do
       f1 = StubFinding.new(level: :warning, message: "w", token: Token.new(line: 1, column: 1, value: "x"), category: :lint, fixes: [])
       f2 = StubFinding.new(level: :error,   message: "e", token: Token.new(line: 2, column: 1, value: "y"), category: :type, fixes: [])
       fatal = StubFinding.new(level: :error, message: "boom", token: Token.new(line: 3, column: 1, value: "z"), category: :syntax, fixes: [])
-      result = LSP::Analyzer::Result.new(findings: [f1, f2], fatal_error: fatal)
+      result = LSP::AnalysisResult.new(findings: [f1, f2], fatal_error: fatal)
       diags = LSP::Diagnostics.from_result(result)
       expect(diags.size).to eq(3)
       expect(diags.last[:message]).to eq("boom")
     end
 
     it "produces an empty array for a clean Result" do
-      result = LSP::Analyzer::Result.new(findings: [], fatal_error: nil)
+      result = LSP::AnalysisResult.new(findings: [], fatal_error: nil)
       expect(LSP::Diagnostics.from_result(result)).to eq([])
     end
   end

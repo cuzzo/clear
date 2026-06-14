@@ -16,16 +16,15 @@ require_relative 'pprof'
 module PprofConverter
   extend T::Sig
 
-  module_function
 
   # Run all available converters for a `.profile/` directory. Returns
   # a hash of {name => path} for files actually written. Missing input
   # files are silently skipped.
-  def convert_all(profile_dir)
-    return {} unless profile_dir && Dir.exist?(profile_dir)
+  def self.convert_all(profile_dir)
+    return {} unless profile_dir
 
-    binary = profile_dir.chomp('/').sub(/\.profile$/, '')
-    binary = nil unless File.exist?(binary.to_s)
+    binary = profile_dir.chomp('/').delete_suffix('.profile')
+    binary = nil unless File.exist?(binary)
 
     out = {}
     if (path = convert_alloc(profile_dir, binary))
@@ -40,7 +39,7 @@ module PprofConverter
     if (path = convert_channels(profile_dir, binary))
       out[:channels] = path
     end
-    if (path = convert_perf(profile_dir, binary))
+    if (path = convert_perf(profile_dir))
       out[:cpu] = path
     end
     out
@@ -53,7 +52,7 @@ module PprofConverter
   # views show the per-channel breakdown with stable identifiers.
   # Sample columns: pushes / pops / push_blocked / pop_blocked /
   # max_depth (capacity travels as a label).
-  def convert_channels(profile_dir, binary)
+  def self.convert_channels(profile_dir, binary)
     src = File.join(profile_dir, 'channels.txt')
     return nil unless File.exist?(src)
 
@@ -103,7 +102,7 @@ module PprofConverter
   #   alloc_space   (bytes)  = total bytes allocated at this site
   #   inuse_objects (count)  = currently-live objects (allocs - frees)
   #   inuse_space   (bytes)  = currently-live bytes  (bytes - free_bytes)
-  def convert_alloc(profile_dir, binary)
+  def self.convert_alloc(profile_dir, binary)
     src = File.join(profile_dir, 'alloc.txt')
     return nil unless File.exist?(src)
 
@@ -119,7 +118,6 @@ module PprofConverter
         bytes: f[2].to_i,
         frees: f[3].to_i,
         free_bytes: f[4].to_i,
-        live: f[5].to_i,
       }
     end
     return nil if sites.empty?
@@ -162,7 +160,7 @@ module PprofConverter
 
   # Pre-build one Location per unique address so multi-frame samples
   # can share frames. Returns { hex_addr => location_id }.
-  def build_location_index(pb, addrs, resolved, profile_dir)
+  def self.build_location_index(pb, addrs, resolved, profile_dir)
     addrs.each_with_object({}) do |addr, idx|
       r = resolved[addr] || {}
       func = r[:func] || addr
@@ -180,7 +178,7 @@ module PprofConverter
   # addr2line emits `path:line` for each address. Pull the trailing
   # line number; returns 0 if absent.
   sig { params(addr2line_file: String).returns(Integer) }
-  def extract_zig_line(addr2line_file)
+  def self.extract_zig_line(addr2line_file)
     return 0 unless addr2line_file
     addr2line_file =~ /:(\d+)\b/ ? Regexp.last_match(1).to_i : 0
   end
@@ -189,7 +187,7 @@ module PprofConverter
   # Mirrors Go's mutex profile shape (contention count + delay ns).
   # We add hold-time columns since the runtime tracks both, and the
   # split read/write columns so the pprof user can drill into either.
-  def convert_locks(profile_dir, binary)
+  def self.convert_locks(profile_dir, binary)
     src = File.join(profile_dir, 'locks.txt')
     return nil unless File.exist?(src)
 
@@ -202,10 +200,10 @@ module PprofConverter
       caller_trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
-        total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
-        total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
+        total_wait_ns: f[3].to_i,
+        total_hold_ns: f[5].to_i,
         read_acquires: f[7].to_i, read_contended: f[8].to_i,
-        read_total_wait_ns: f[9].to_i, read_max_wait_ns: f[10].to_i,
+        read_total_wait_ns: f[9].to_i,
         caller_trace: caller_trace,
       }
     end.reject { |l| l[:acquires].zero? && l[:read_acquires].zero? }
@@ -253,7 +251,7 @@ module PprofConverter
   # MVCC cells track read/commit/retry counts and per-cell struct size.
   # Reported columns let the pprof user spot COW-thrash (high commits
   # x large struct), retry storms, and read-heavy cells worth keeping.
-  def convert_mvcc(profile_dir, binary)
+  def self.convert_mvcc(profile_dir, binary)
     src = File.join(profile_dir, 'mvcc.txt')
     return nil unless File.exist?(src)
 
@@ -265,8 +263,6 @@ module PprofConverter
       {
         addr: f[0], struct_size: f[1].to_i, reads: f[2].to_i,
         commits: f[3].to_i, retries: f[4].to_i,
-        update_failures: f[5].to_i,
-        multi_commits: (f[6] || 0).to_i,
         caller_trace: caller_trace,
       }
     end.reject { |c| c[:reads].zero? && c[:commits].zero? }
@@ -308,7 +304,7 @@ module PprofConverter
   # `go install github.com/google/perf_data_converter/src/cmd/perf_to_profile`).
   # If the tool is not on PATH we leave perf.data in place and return
   # nil; the caller surfaces a one-line install hint.
-  def convert_perf(profile_dir, _binary)
+  def self.convert_perf(profile_dir)
     src = File.join(profile_dir, 'perf.data')
     return nil unless File.exist?(src)
     return nil unless system('which perf_to_profile > /dev/null 2>&1')
@@ -324,7 +320,7 @@ module PprofConverter
   # Read whitespace-separated columns from a profile text file,
   # skipping `#` comment lines and blank lines. Filters rows that are
   # shorter than `min_cols` (header lines, partial dumps).
-  def parse_columns(path, min_cols)
+  def self.parse_columns(path, min_cols)
     File.readlines(path).each_with_object([]) do |line, acc|
       next if line.start_with?('#') || line.strip.empty?
       f = line.strip.split
@@ -336,7 +332,7 @@ module PprofConverter
   # caller_trace field can carry commas without a column-count
   # ambiguity. Older single-tab-or-whitespace files still parse via
   # the fallback. Filters rows shorter than `min_cols`.
-  def parse_tabbed_columns(path, min_cols)
+  def self.parse_tabbed_columns(path, min_cols)
     File.readlines(path).each_with_object([]) do |line, acc|
       next if line.start_with?('#') || line.strip.empty?
       f = line.split("\t").map(&:strip)
@@ -355,7 +351,7 @@ module PprofConverter
   # code where CLR markers don't exist, and we'd misattribute by
   # walking back through transpiled.zig anyway. (Repro: `pprof -list
   # entryWrapper` showed it pointing at random source.cht lines.)
-  def resolve_addrs(addrs, binary, profile_dir)
+  def self.resolve_addrs(addrs, binary, profile_dir)
     return {} if addrs.empty? || binary.nil?
     raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
     lines_out = raw.split("\n")
@@ -392,14 +388,14 @@ module PprofConverter
   # path, so we match the basename pattern that signals user code.
   # addr2line may append "(discriminator N)" or other metadata after
   # the line number; strip that before extracting the basename.
-  def file_is_transpiled_zig?(addr2line_file, _zig_path)
+  def self.file_is_transpiled_zig?(addr2line_file, _zig_path)
     return false unless addr2line_file
     bare = addr2line_file.sub(/:\d+\b.*\z/, '')
     File.basename(bare).match?(/\A\._clear_tmp_.*\.zig\z/)
   end
 
   sig { params(s: String).returns(Integer) }
-  def parse_addr(s)
+  def self.parse_addr(s)
     s.start_with?('0x') ? s.to_i(16) : s.to_i
   end
 
@@ -410,7 +406,7 @@ module PprofConverter
   # split, runtime functions like `entryWrapper` rendered against
   # arbitrary .cht line numbers, badly misleading the user.
   sig { params(profile_dir: String, addr2line_file: String, is_user_zig: T.nilable(T::Boolean)).returns(String) }
-  def clear_source_path(profile_dir, addr2line_file, is_user_zig: nil)
+  def self.clear_source_path(profile_dir, addr2line_file, is_user_zig: nil)
     if is_user_zig.nil?
       cht = File.join(profile_dir, 'source.cht')
       return cht if File.exist?(cht)
@@ -422,4 +418,18 @@ module PprofConverter
     end
     addr2line_file.to_s.sub(/:\d+\z/, '')
   end
+
+  private_class_method :build_location_index
+  private_class_method :clear_source_path
+  private_class_method :convert_alloc
+  private_class_method :convert_channels
+  private_class_method :convert_locks
+  private_class_method :convert_mvcc
+  private_class_method :convert_perf
+  private_class_method :extract_zig_line
+  private_class_method :file_is_transpiled_zig?
+  private_class_method :parse_addr
+  private_class_method :parse_columns
+  private_class_method :resolve_addrs
+
 end

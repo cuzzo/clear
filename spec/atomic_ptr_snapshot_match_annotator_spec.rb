@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.8 -- annotator per-arm conflict-clause validation
 # for `WITH SNAPSHOT ... AS [MUTABLE] alias MATCH ... END`.
@@ -20,7 +20,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH SNAPSHOT MATCH annotator validation (M3.8)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

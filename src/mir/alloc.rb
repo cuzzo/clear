@@ -47,4 +47,6 @@ module AllocHelper
     ti = node.full_type!
     ti.resolve_resource_close(->(name) { lookup_type_schema(name) })
   end
+  private :downgrade_frame_to_stack
+
 end

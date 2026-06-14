@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Thunk Phase 4g -- per-variant stack-tier dispatch + @service
 # explicit-declaration requirement for plain :reentrant.
@@ -11,7 +11,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -209,7 +209,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       expect(finds).not_to be_empty
@@ -233,7 +233,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first

@@ -1,15 +1,15 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Atomics M1.3 -- Type axis for `:atomic`.
 #
 # Verifies the Type machinery accepts `:atomic` as a sync value and
 # maps it to `CheatLib.Atomic(T)` in zig_type. Mirrors the Type-level
-# coverage versioned_type_spec.rb provides for `:versioned`. Parser
+# coverage versioned_type_spec.rb provides for `:versioned`. ClearParser
 # sigil support (parsing `@atomic` from source) is M1.2; annotator
 # validation that the inner T is one of {Int64, Float64, Bool} is M1.4.
-RSpec.describe "Type @atomic axis" do
+RSpec.describe Type, "@atomic axis" do
   describe "predicates" do
     it "atomic? is true when sync == :atomic" do
       t = Type.new(:Int64, sync: :atomic)

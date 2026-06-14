@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tranche 5 of the test framework: `LET` fixtures.
 #
@@ -27,7 +27,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "LET fixtures" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def transpile(src)

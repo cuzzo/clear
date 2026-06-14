@@ -20,6 +20,7 @@
 require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
 require_relative "../ast/type"
+require_relative "../ast/ast"
 require_relative "../semantic/pass_state"
 require_relative "cleanup_entry"
 
@@ -138,9 +139,9 @@ module MIR
 
     sig { params(checked_arg_count: Integer).returns(CallableContract) }
     def self.no_ownership(checked_arg_count)
-      params = T.let([], T::Array[AST::Param])
+      params = T.let([], T::Array[::AST::Param])
       checked_arg_count.times do |idx|
-        params << AST::Param.new(name: "__arg#{idx}", type: Type.new(:Any))
+        params << ::AST::Param.new(name: "__arg#{idx}", type: Type.new(:Any))
       end
       new(
         FunctionSignature.new(params: params, return_type: Type.new(:Void)),
@@ -422,9 +423,9 @@ module MIR
       nil
     end
 
-    sig { params(name: Symbol, body: T.nilable(T::Array[Emittable]), writer: BodySlot::Writer).returns(BodySlot) }
+    sig { params(name: Symbol, body: T::Array[Emittable], writer: BodySlot::Writer).returns(BodySlot) }
     def body_slot(name, body, writer)
-      BodySlot.new(name, body || [], writer)
+      BodySlot.new(name, body, writer)
     end
 
     sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol).returns(OwnershipEffect) }
@@ -551,9 +552,9 @@ module MIR
       ])
     end
 
-    sig { params(body: T.nilable(T::Array[Emittable]), result_type: T.nilable(Type)).returns(OwnershipEffect) }
+    sig { params(body: T::Array[Emittable], result_type: T.nilable(Type)).returns(OwnershipEffect) }
     def self.from_block_body(body, result_type:)
-      stmts = body || []
+      stmts = body
       break_stmt = stmts.reverse.grep(MIR::BreakStmt).first
       value = break_stmt&.value
       first_active_effect([
@@ -748,76 +749,66 @@ module MIR
   class InlineAllocMetadata
     extend T::Sig
 
-    sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-    attr_reader :placeholders
-
-    sig { params(placeholders: T::Hash[T.any(Symbol, String), Symbol]).void }
-    def initialize(placeholders = {})
-      @placeholders = T.let(placeholders.dup.freeze, T::Hash[T.any(Symbol, String), Symbol])
+    sig do
+      params(
+        alloc: T.nilable(Symbol),
+        key_alloc: T.nilable(Symbol),
+        val_alloc: T.nilable(Symbol),
+        shard_alloc: T.nilable(Symbol),
+      ).void
     end
-
-    sig { params(value: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
-    def self.from(value)
-      return nil unless value
-      return value if value.is_a?(InlineAllocMetadata)
-      unless value.is_a?(Hash)
-        raise TypeError, "allocator metadata must be MIR::InlineAllocMetadata or Hash"
-      end
-
-      normalized = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-      value.each do |key, alloc|
-        unless alloc.is_a?(Symbol)
-          raise TypeError, "allocator metadata must map #{key.inspect} to a Symbol"
-        end
-        normalized[T.cast(key, T.any(Symbol, String))] = alloc
-      end
-      new(normalized)
+    def initialize(alloc: nil, key_alloc: nil, val_alloc: nil, shard_alloc: nil)
+      slots = T.let({}, T::Hash[Symbol, Symbol])
+      slots[:alloc] = alloc if alloc
+      slots[:key_alloc] = key_alloc if key_alloc
+      slots[:val_alloc] = val_alloc if val_alloc
+      slots[:shard_alloc] = shard_alloc if shard_alloc
+      @slots = T.let(slots.freeze, T::Hash[Symbol, Symbol])
     end
 
     sig { returns(T::Boolean) }
     def empty?
-      @placeholders.empty?
+      @slots.empty?
     end
 
-    sig { params(blk: T.proc.params(key: T.any(Symbol, String), alloc: Symbol).void).void }
+    sig { params(blk: T.proc.params(key: Symbol, alloc: Symbol).void).void }
     def each(&blk)
-      @placeholders.each { |key, alloc| blk.call(key, alloc) }
+      @slots.each { |key, alloc| blk.call(key, alloc) }
       nil
     end
 
+    private
+
     sig { returns(T::Array[Symbol]) }
     def values
-      @placeholders.values
+      @slots.values
     end
 
-    sig { params(key: T.any(Symbol, String)).returns(T::Boolean) }
-    def key?(key)
-      @placeholders.key?(key)
+    sig { params(key: Symbol).returns(T.nilable(Symbol)) }
+    def slot(key)
+      @slots[key]
     end
 
-    sig { params(key: T.any(Symbol, String)).returns(T.nilable(Symbol)) }
-    def [](key)
-      @placeholders[key]
-    end
+    public
 
     sig { returns(T.nilable(Symbol)) }
     def primary
-      self[:alloc]
+      slot(:alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def key_alloc
-      self[:key_alloc]
+      slot(:key_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def value_alloc
-      self[:val_alloc]
+      slot(:val_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def shard_alloc
-      self[:shard_alloc]
+      slot(:shard_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
@@ -848,37 +839,20 @@ module MIR
 
     sig { params(alloc: Symbol).returns(InlineAllocMetadata) }
     def with_all(alloc)
-      updated = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-      @placeholders.each_key { |key| updated[key] = alloc }
-      InlineAllocMetadata.new(updated)
-    end
-
-    sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-    def to_h
-      @placeholders.dup
+      updated = T.let({}, T::Hash[Symbol, Symbol])
+      @slots.each { |key, _slot_alloc| updated[key] = alloc }
+      InlineAllocMetadata.new(
+        alloc: updated[:alloc],
+        key_alloc: updated[:key_alloc],
+        val_alloc: updated[:val_alloc],
+        shard_alloc: updated[:shard_alloc],
+      )
     end
 
     sig { returns(String) }
     def inspect
-      @placeholders.inspect
+      @slots.inspect
     end
-  end
-
-  sig do
-    params(
-      alloc: T.nilable(Symbol),
-      key_alloc: T.nilable(Symbol),
-      val_alloc: T.nilable(Symbol),
-      shard_alloc: T.nilable(Symbol),
-    ).returns(InlineAllocMetadata)
-  end
-  def self.inline_alloc_metadata(alloc: nil, key_alloc: nil, val_alloc: nil, shard_alloc: nil)
-    placeholders = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-    placeholders[:alloc] = alloc if alloc
-    placeholders[:key_alloc] = key_alloc if key_alloc
-    placeholders[:val_alloc] = val_alloc if val_alloc
-    placeholders[:shard_alloc] = shard_alloc if shard_alloc
-    InlineAllocMetadata.new(placeholders)
   end
 
   # ================================================================
@@ -1594,12 +1568,12 @@ module MIR
     sig do
       params(
         code: BgBlockPlan,
-        captures: T.nilable(T::Hash[String, Type]),
-        run_body: T.nilable(T::Array[Emittable]),
+        captures: T::Hash[String, Type],
+        run_body: T::Array[Emittable],
         fsm_structure: Object,
       ).void
     end
-    def initialize(code, captures = nil, run_body = nil, fsm_structure = nil)
+    def initialize(code, captures = {}, run_body = [], fsm_structure = nil)
       unless MIR.structural_bg_block_plan?(code)
         raise TypeError, "MIR::BgBlock code must be a structural emission plan, got #{code.class}"
       end
@@ -1836,35 +1810,47 @@ module MIR
 
     sig { returns(T::Array[String]) }
     def required_move_guards
-      @required_move_guards = T.let(@required_move_guards, T.nilable(T::Array[String]))
-      @required_move_guards ||= []
+      raw = instance_variable_get(:@required_move_guards)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[String])
+        instance_variable_set(:@required_move_guards, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def required_move_guards=(value)
-      @required_move_guards = value
+      instance_variable_set(:@required_move_guards, value)
     end
 
     sig { returns(T::Array[String]) }
     def move_guard_writes
-      @move_guard_writes = T.let(@move_guard_writes, T.nilable(T::Array[String]))
-      @move_guard_writes ||= []
+      raw = instance_variable_get(:@move_guard_writes)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[String])
+        instance_variable_set(:@move_guard_writes, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def move_guard_writes=(value)
-      @move_guard_writes = value
+      instance_variable_set(:@move_guard_writes, value)
     end
 
     sig { returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts
-      @ownership_facts = T.let(@ownership_facts, T.nilable(T::Array[FsmOwnershipFact]))
-      @ownership_facts ||= []
+      raw = instance_variable_get(:@ownership_facts)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[FsmOwnershipFact])
+        instance_variable_set(:@ownership_facts, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[FsmOwnershipFact]).returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts=(value)
-      @ownership_facts = value
+      instance_variable_set(:@ownership_facts, value)
     end
 
     sig { returns(T::Boolean) }
@@ -1880,13 +1866,17 @@ module MIR
 
     sig { returns(T::Array[FsmDestroyAction]) }
     def destroy_actions
-      @destroy_actions = T.let(@destroy_actions, T.nilable(T::Array[FsmDestroyAction]))
-      @destroy_actions ||= []
+      raw = instance_variable_get(:@destroy_actions)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[FsmDestroyAction])
+        instance_variable_set(:@destroy_actions, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[FsmDestroyAction]).returns(T::Array[FsmDestroyAction]) }
     def destroy_actions=(value)
-      @destroy_actions = value
+      instance_variable_set(:@destroy_actions, value)
     end
   end
 
@@ -1998,7 +1988,7 @@ module MIR
   #
   # The types below replace that heredoc with explicit MIR nodes.
   # The lowering builds an `MIR::FsmIoBody` tree; the renderer in
-  # `src/mir/fsm_wrapper_emitter.rb` walks the tree and produces
+  # `src/backends/fsm_wrapper_emitter.rb` walks the tree and produces
   # the same Zig text — but now every structural piece is named,
   # typed, and inspectable. `FsmIoBody` lives inside an
   # `MIR::BgBlock.code` field for emitter compatibility, but the
@@ -2248,7 +2238,7 @@ module MIR
   #                       arms; structurally distinct from a flat
   #                       switch and remains template-driven for now.
   #
-  # The renderer is in src/mir/fsm_wrapper_emitter.rb#render_dispatch.
+  # The renderer is in src/backends/fsm_wrapper_emitter.rb#render_dispatch.
   # Tail variants are the entirety of "what happens after the arm's
   # member fn returns ok"; adding a new suspend kind = new tail
   # variant + new arm in `render_tail`. NEVER a new dispatcher.
@@ -2642,13 +2632,17 @@ module MIR
       super(code, branch_bodies)
     end
 
-    sig { returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
+    sig { returns(T::Array[MIR::ExecutionBoundaryFact]) }
     def boundary_facts
-      @boundary_facts = T.let(nil, T.nilable(T::Array[MIR::ExecutionBoundaryFact])) unless defined?(@boundary_facts)
-      @boundary_facts
+      raw = instance_variable_get(:@boundary_facts)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[MIR::ExecutionBoundaryFact])
+        instance_variable_set(:@boundary_facts, raw)
+      end
+      raw
     end
-    sig { params(value: T.nilable(T::Array[MIR::ExecutionBoundaryFact])).returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
-    def boundary_facts=(value); @boundary_facts = T.let(value, T.nilable(T::Array[MIR::ExecutionBoundaryFact])); end
+    sig { params(value: T::Array[MIR::ExecutionBoundaryFact]).returns(T::Array[MIR::ExecutionBoundaryFact]) }
+    def boundary_facts=(value); instance_variable_set(:@boundary_facts, value); end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
@@ -3074,7 +3068,7 @@ module MIR
   #
   # These replace what used to be hand-emitted opaque blobs in
   # mir_lowering.rb's :SNAPSHOT branch + emit_snapshot_mutable_call +
-  # lower_with_match_block. The emitter (mir_emitter.rb) maps each
+  # lower_with_match_block. The backend emitter maps each
   # structured node 1:1 to the same Zig text we used to generate, BUT
   # the construct is now visible to MIRChecker. Specifically:
   #
@@ -4355,6 +4349,7 @@ module MIR
     const :reason, String
     const :ownership_contract, OwnershipContract, default: OwnershipContract.empty
     prop :allocs, T.nilable(InlineAllocMetadata), default: nil
+    const :owned_result_alloc, T.nilable(Symbol), default: nil
     prop :target_var, T.nilable(String), default: nil
     const :result_type, T.nilable(Type), default: nil
     const :result_ownership_bearing, T.nilable(T::Boolean), default: nil
@@ -4397,10 +4392,10 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      heap_return = entry.heap_return_alloc? == true
+      result_alloc = owned_result_alloc || (entry.heap_return_alloc? ? :heap : nil)
       metadata = allocs
-      alloc = if heap_return
-        :heap
+      alloc = if result_alloc
+        result_alloc
       elsif metadata.is_a?(InlineAllocMetadata)
         metadata.single_alloc
       else
@@ -4411,9 +4406,9 @@ module MIR
                       !has_alloc_metadata?)
       OwnershipEffect.from_callable_facts(
         emits_allocating: entry.emits_allocating? == true,
-        heap_return_alloc: heap_return,
+        heap_return_alloc: !result_alloc.nil?,
         fixed_void_without_alloc_metadata: fixed_void,
-        mutates_receiver_without_heap_return: entry.mutates_receiver? && !heap_return,
+        mutates_receiver_without_heap_return: entry.mutates_receiver? && result_alloc.nil?,
         result_owns: result_ownership_bearing,
         result_type: result_type,
         alloc: alloc,
@@ -4429,6 +4424,7 @@ module MIR
         reason: reason,
         ownership_contract: ownership_contract,
         allocs: allocs,
+        owned_result_alloc: owned_result_alloc,
         target_var: target_var,
         result_type: result_type,
         result_ownership_bearing: result_ownership_bearing,
@@ -4578,6 +4574,52 @@ module MIR
     end
   end
 
+  class ShardConcurrentEach < T::Struct
+    extend T::Sig
+
+    include Stmt
+
+    const :id, Integer
+    const :map_expr, Emittable
+    const :map_var_name, String
+    const :map_type, Type
+    const :key_type, Type
+    const :shard_count, Integer
+    const :start_expr, Emittable
+    const :finish_expr, Emittable
+    const :inclusive, T::Boolean
+    const :capacity_expr, Emittable
+    const :batch_size_expr, Emittable
+    const :task_config_variant, String
+    prop :producer_key_body, T::Array[Emittable]
+    const :capture_fields, T::Array[ContextFieldDecl], factory: -> { [] }
+    const :capture_inits, T::Array[StructInitField], factory: -> { [] }
+    prop :capture_setup, T::Array[Emittable], factory: -> { [] }
+    prop :body, T::Array[Emittable]
+    const :key_allocates_frame, T::Boolean
+    const :body_allocates_frame, T::Boolean
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs(T.unsafe([
+        map_expr,
+        start_expr,
+        finish_expr,
+        capacity_expr,
+        batch_size_expr,
+      ]))
+    end
+
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      [
+        body_slot(:producer_key_body, producer_key_body, ->(new_body) { self.producer_key_body = new_body }),
+        body_slot(:capture_setup, capture_setup, ->(new_body) { self.capture_setup = new_body }),
+        body_slot(:body, body, ->(new_body) { self.body = new_body }),
+      ]
+    end
+  end
+
   # Inline bytecode. Consumed only by bc_emitter (the
   # VM backend). Emitted by MIR lowering when target == :bc AND the stdlib
   # registry entry opts into bc (entry[:bc] == true). Carries the op symbol
@@ -4678,10 +4720,10 @@ module MIR
                               :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol, target_var: T.nilable(String)).void }
+    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol, target_var: T.nilable(String)).void }
     def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
       super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind, target_var)
+        resolved_allocs, template_kind, target_var)
     end
     sig { returns(T::Boolean) }
     def expr?; true; end
@@ -4720,10 +4762,10 @@ module MIR
                               :resolved_allocs, :template_kind) do
     extend T::Sig
     include Expr
-    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol).void }
+    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol).void }
     def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
       super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind)
+        resolved_allocs, template_kind)
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key])

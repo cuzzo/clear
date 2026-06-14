@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../../src/lsp/hover"
-require_relative "../../src/lsp/document_store"
-require_relative "../../src/lsp/analyzer"
-require_relative "../../src/ast/fixable_error"
+require_relative "../../src/lsp/hover" unless defined?(LSP::Hover)
+require_relative "../../src/lsp/document_store" unless defined?(LSP::DocumentStore)
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
+require_relative "../../src/ast/fixable_error" unless defined?(FixCollector)
 
 RSpec.describe LSP::Hover do
   Token = Struct.new(:line, :column, :value, keyword_init: true)
@@ -12,7 +12,7 @@ RSpec.describe LSP::Hover do
     store = LSP::DocumentStore.new
     store.open("file:///t.cht", text, 1)
     doc = store.get("file:///t.cht")
-    doc.cached_findings = LSP::Analyzer::Result.new(findings: findings, fatal_error: fatal)
+    doc.cached_findings = LSP::AnalysisResult.new(findings: findings, fatal_error: fatal)
     doc
   end
 

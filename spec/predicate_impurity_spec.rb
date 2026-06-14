@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Coverage for the impurity-rejection paths in WITH GUARD / PRE / POST
 # predicates (capabilities.rb#predicate_impurity_reason). Predicates
@@ -13,7 +13,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "predicate-impurity rejection" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -104,8 +104,7 @@ RSpec.describe "predicate-impurity rejection" do
       alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_contract(allocates: true)
 
       suspend_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "wait", 1, 1), "wait", [])
-      suspend_sig = FunctionSignature.intrinsic_contract
-      suspend_sig.emit = IntrinsicEmit.new(suspends: true)
+      suspend_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, emit: IntrinsicEmit.new(suspends: true))
       suspend_call.matched_stdlib_def = suspend_sig
 
       expect(annotator.send(:predicate_impurity_reason, alloc_call, "make")).to eq("allocates")
@@ -149,7 +148,7 @@ end
 RSpec.describe "WITH GUARD structural errors" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -189,7 +188,7 @@ RSpec.describe "WITH GUARD parser errors" do
     CLEAR
     expect {
       tokens = Lexer.new(src).tokenize
-      Parser.new(tokens, src).parse
+      ClearParser.new(tokens, src).parse
     }.to raise_error(ParserError, /WITH GUARD requires an AS alias/)
   end
 end

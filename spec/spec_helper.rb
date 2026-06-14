@@ -81,7 +81,7 @@ if ENV["COVERAGE"] == "1"
 
     # Subsystem groups so the index page surfaces where coverage is
     # concentrated vs. missing.
-    add_group "AST + Parser",      "src/ast"
+    add_group "AST + ClearParser",      "src/ast"
     add_group "Annotator",         "src/annotator"
     add_group "Annotator helpers", "src/annotator/helpers"
     add_group "MIR",               "src/mir"
@@ -161,8 +161,8 @@ module MirPipelineSpecHelper
   end
 
   def compile_mir_frontend(src, source_dir: Dir.pwd)
-    require_relative "../src/backends/compiler_frontend"
-    require_relative "../src/backends/importer"
+    require_relative "../src/compiler/compiler_frontend"
+    require_relative "../src/compiler/module_importer"
 
     importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
     result = CompilerFrontend.compile(src, importer: importer, source_dir: source_dir)

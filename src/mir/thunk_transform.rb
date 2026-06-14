@@ -19,5 +19,4 @@ require_relative "thunk_transform/emit"
 
 module ThunkTransform
   extend T::Sig
-  module_function
 end

@@ -3,6 +3,21 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill runtime trace" do
+  it "does not re-enter source return or raise recording while collection hooks are disabled" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    rt = NilKillRuntimeTrace
+    path = File.join(NilKill::ROOT, "src", "nil_kill_runtime_trace_guard_spec.rb")
+
+    rt.with_collection_hooks_disabled do
+      rt.lock.synchronize do
+        expect(rt.record_source_method_return("GuardOwner", "call", "instance", path, 1, :ok)).to eq(:ok)
+        expect do
+          rt.record_source_method_raise("GuardOwner", "call", "instance", path, 1, RuntimeError.new("boom"))
+        end.not_to raise_error
+      end
+    end
+  end
+
   it "evicts @objects entries when a tracked collection is GC'd (no unbounded leak), keeping live collections linked" do
     require_relative "../lib/nil_kill/runtime_trace"
     rt = NilKillRuntimeTrace
@@ -233,7 +248,7 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
-  it "source-instruments only trace-plan methods when method TracePoint collection is disabled" do
+  it "source-instruments sampled and frame-only trace-plan methods when method TracePoint collection is disabled" do
     Dir.mktmpdir("nil-kill-runtime-source-plan", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -282,7 +297,7 @@ RSpec.describe "nil-kill runtime trace" do
       File.write(instrumented, instrumented_source)
 
       expect(instrumented_source).to include('record_source_method_call("Worker", "untyped"')
-      expect(instrumented_source).not_to include('record_source_method_call("Worker", "typed"')
+      expect(instrumented_source).to include('record_source_method_call("Worker", "typed"')
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
@@ -301,7 +316,7 @@ RSpec.describe "nil-kill runtime trace" do
       expect(status).to be_success, err
       method_events = Dir.glob(File.join(trace_dir, "methods-*.jsonl")).flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "untyped", "returns" => include("String")))
-      expect(method_events).not_to include(a_hash_including("class" => "Worker", "method" => "typed"))
+      expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "typed"))
     end
   end
 

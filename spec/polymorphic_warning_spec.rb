@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator/helpers/with_match_check"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator/helpers/with_match_check" unless defined?(WithMatchCheck)
 
 # True-Sync-Polymorphism step 5 (#327): polymorphic-warning surface
 # + the new effect names `contends_maybe` / `blocks_maybe`.
@@ -98,7 +98,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
   describe "warn integration in the annotator" do
     def annotate_capturing_notes(src)
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       capture = StringIO.new
       orig = $stderr
       $stderr = capture

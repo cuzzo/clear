@@ -641,10 +641,10 @@ wide for v0.1 comfort:
   actions, while `SymbolEntry` owns declared sync-contract facts. A future
   validator/executor split would mainly package the remaining visitor work; it
   is no longer a hidden phase-state dependency.
-* The legacy `@reentrant` bridge is compatibility debt. Parser, fix, and
-  annotation code still accept old annotation forms and normalize them to
-  `EFFECTS REENTRANT` metadata. Downstream MIR, thunk, and FSM consumers should
-  rely only on the normalized effect/reentrance facts, not on legacy syntax.
+* Legacy reentrance source syntax has been removed. Parser,
+  fix, and annotation code should accept only `EFFECTS REENTRANT[:VARIANT]` and
+  `REQUIRES <param>: NON_REENTRANT`. Downstream MIR, thunk, and FSM consumers
+  rely on normalized effect/reentrance facts, not legacy syntax.
 * Some MIR-facing facts are stamped directly on AST nodes from scattered helper
   code. The desired shape is a small number of authoritative outputs from
   `src/semantic` that lowering reads.

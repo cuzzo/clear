@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/analyzer"
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
 
 # Drives the LSP analyzer with real CLEAR snippets and asserts that
 # findings come back as expected. The analyzer is the bridge between
@@ -9,6 +9,26 @@ require_relative "../../src/lsp/analyzer"
 #   * FixCollector is left disabled afterwards (no leak)
 RSpec.describe LSP::Analyzer do
   describe ".run" do
+    it "passes source through lexer, parser, and annotator stages" do
+      source = "FN main() RETURNS Void -> END\n"
+      tokens = [:token]
+      ast = Object.new
+      lexer = instance_double(Lexer, tokenize: tokens)
+      parser = instance_double(ClearParser, parse: ast)
+      annotator = instance_double(SemanticAnnotator)
+
+      expect(Lexer).to receive(:new).with(source).and_return(lexer)
+      expect(ClearParser).to receive(:new).with(tokens, source).and_return(parser)
+      expect(SemanticAnnotator).to receive(:new).and_return(annotator)
+      expect(annotator).to receive(:source_code=).with(source)
+      expect(annotator).to receive(:annotate!).with(ast)
+
+      result = LSP::Analyzer.run(source)
+      expect(result.findings).to eq([])
+      expect(result.fatal_error).to be_nil
+      expect(FixCollector.enabled?).to be false
+    end
+
     it "returns an empty Result for clean source" do
       result = LSP::Analyzer.run("FN main() RETURNS Void -> END\n")
       expect(result.findings).to be_empty
@@ -41,15 +61,35 @@ RSpec.describe LSP::Analyzer do
       CLEAR
       expect(result.fatal?).to be true
       expect(result.fatal_error.message).to match(/Undefined variable/i)
+      expect(result.fatal_error.level).to eq(:error)
+      expect(result.fatal_error.category).to eq(:type)
+      expect(result.fatal_error.fixes).to eq([])
       expect(result.fatal_error.token).not_to be_nil
       expect(result.fatal_error.token.line).to eq(2)
+      expect(result.fatal_error.fatal?).to be true
+    end
+
+    it "uses a synthetic token for compiler errors without a token" do
+      allow(Lexer).to receive(:new)
+        .and_raise(CompilerError.new(nil, "missing token", ""))
+
+      result = LSP::Analyzer.run("anything")
+
+      expect(result.fatal?).to be true
+      expect(result.fatal_error.message).to eq("missing token")
+      expect(result.fatal_error.category).to eq(:type)
+      expect(result.fatal_error.token.line).to eq(1)
+      expect(result.fatal_error.token.column).to eq(1)
+      expect(result.fatal_error.token.value).to eq("")
     end
 
     it "surfaces a ParserError as a fatal_error finding" do
       # Missing closing brace — parser raises.
       result = LSP::Analyzer.run("FN main() RETURNS Void -> ")
       expect(result.fatal?).to be true
+      expect(result.fatal_error.level).to eq(:error)
       expect(result.fatal_error.category).to eq(:syntax)
+      expect(result.fatal_error.fixes).to eq([])
     end
 
     it "leaves FixCollector disabled after running" do
@@ -63,7 +103,14 @@ RSpec.describe LSP::Analyzer do
       allow(Lexer).to receive(:new).and_raise(RuntimeError, "synthetic")
       result = LSP::Analyzer.run("anything")
       expect(result.fatal?).to be true
-      expect(result.fatal_error.message).to include("synthetic")
+      expect(result.fatal_error.level).to eq(:error)
+      expect(result.fatal_error.category).to eq(:type)
+      expect(result.fatal_error.message).to eq("Internal compiler error: RuntimeError: synthetic")
+      expect(result.fatal_error.token.line).to eq(1)
+      expect(result.fatal_error.token.column).to eq(1)
+      expect(result.fatal_error.token.value).to eq("")
+      expect(result.fatal_error.fixes).to eq([])
+      expect(result.fatal_error.fatal?).to be true
       expect(FixCollector.enabled?).to be false
     end
   end

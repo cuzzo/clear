@@ -1,13 +1,13 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "COPY keyword" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     ann = SemanticAnnotator.new
     ann.annotate!(ast)
     [ast, ann]
@@ -26,7 +26,7 @@ RSpec.describe "COPY keyword" do
   # =========================================================================
   it "parses COPY as an expression" do
     tokens = Lexer.new("x = COPY y;").tokenize
-    ast = Parser.new(tokens, "x = COPY y;").parse
+    ast = ClearParser.new(tokens, "x = COPY y;").parse
     bind = ast.statements.first
     expect(bind.value).to be_a(AST::CopyNode)
     expect(bind.value.value).to be_a(AST::Identifier)

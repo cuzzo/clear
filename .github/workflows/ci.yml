@@ -20,6 +20,25 @@ env:
   COVERAGE: "0"
 
 jobs:
+  mutants-manual-pending:
+    name: mutants/manual pending
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark manual mutant gate pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/workflows/mutants-manual.yml
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state=pending \
+            -f context='mutants/manual' \
+            -f description='Run Manual mutants before merge' \
+            -f target_url="${TARGET_URL}"
+
   ruby-unit:
     name: Ruby unit specs (parallel, no integration)
     runs-on: ubuntu-latest
@@ -687,7 +706,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
-        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
+        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1 --test-timeout 240s
 
   zig-hammer:
     # Hammer stress tests (`*-hammer-test.zig`): high-iteration
@@ -831,7 +850,7 @@ jobs:
           zig_paths="$(find tmp/zig-coverage-artifacts -name cobertura.xml -type f | sort | paste -sd: -)"
           RUBY_COVERAGE_PATHS="$ruby_paths" \
           ZIG_COVERAGE_PATHS="$zig_paths" \
-            bundle exec ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown \
+            bundle exec ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown --src-visibility \
             > tmp/diff-bucket-summary.md
       - name: Update PR comment
         uses: actions/github-script@v7

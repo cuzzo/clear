@@ -1,10 +1,10 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe OwnershipDataflow do
   def analyze(src, fn_name)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
@@ -18,7 +18,7 @@ RSpec.describe OwnershipDataflow do
 
   def annotated_function(src, fn_name)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
@@ -153,17 +153,17 @@ RSpec.describe OwnershipDataflow do
         END
       SRC
       df = analyze(src, "main")
-      snapshot = df.exit_snapshot
+      snapshot = df.cleanup_summary_by_place
       yielded = []
 
-      snapshot.each_entry { |place, entry| yielded << [place, entry.state] }
+      snapshot.each { |place, decision| yielded << [place, decision.needs_cleanup] }
 
-      expect(snapshot.names).to eq(Set["a"])
-      expect(snapshot.entry_for("a").state).to eq(:owned)
-      place, state = yielded.first
+      expect(snapshot.keys.map(&:path).to_set).to eq(Set["a"])
+      expect(snapshot.values.first.needs_cleanup).to eq(true)
+      place, needs_cleanup = yielded.first
       expect(place.path).to eq("a")
       expect(place.binding_identity).not_to be_nil
-      expect(state).to eq(:owned)
+      expect(needs_cleanup).to eq(true)
     end
 
     it "keeps the legacy string snapshot adapter backed by typed places" do
@@ -209,7 +209,7 @@ RSpec.describe OwnershipDataflow do
         END
       SRC
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       PipelineRewriter.new.rewrite!(ast)
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
@@ -266,7 +266,7 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = OwnershipDataflow.analyze(fn_node)
 
-      expect(df.stmt_moves_name?(fn_node.body.fetch(1), "a")).to be(true)
+      expect(df.send(:stmt_moves_name?, fn_node.body.fetch(1), "a")).to be(true)
       expect(df.linear_scope_decl_always_moves?(fn_node.body, "a")).to be(true)
     end
   end
@@ -281,7 +281,7 @@ RSpec.describe OwnershipDataflow do
         begin
           code = File.read(f)
           tokens = Lexer.new(code).tokenize
-          ast = Parser.new(tokens, code).parse
+          ast = ClearParser.new(tokens, code).parse
           PipelineRewriter.new.rewrite!(ast)
           ann = SemanticAnnotator.new
           ann.annotate!(ast)

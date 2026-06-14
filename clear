@@ -518,7 +518,7 @@ when 'build'
       # concrete types. Imports are still required to be fully typed
       # (STRICT-imports boundary, §7).
       require_relative 'src/ast/parser'
-      Parser.gradual_mode = true
+      ClearParser.gradual_mode = true
       i += 1
     else
       remaining << args[i]
@@ -546,7 +546,7 @@ when 'build'
     begin
       src_text = File.read(source)
       tokens = Lexer.new(src_text).tokenize
-      ast = Parser.new(tokens, src_text).parse
+      ast = ClearParser.new(tokens, src_text).parse
       # Pass importer + source_dir so files that REQUIRE other files
       # (not just `REQUIRE "pkg:..."` which we skip via the guard above)
       # can be annotated. Without this, the annotator's REQUIRE handler
@@ -557,7 +557,7 @@ when 'build'
       # at ~478 KB), the missing tier upgrade leaves them on the default
       # 16 KB Standard stack, overflowing into adjacent slab memory
       # and corrupting fiber slab headers at scheduler shutdown.
-      require_relative 'src/backends/importer'
+      require_relative 'src/compiler/module_importer'
       source_dir = File.dirname(File.expand_path(source))
       importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
       annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)

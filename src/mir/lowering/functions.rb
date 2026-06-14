@@ -199,10 +199,14 @@ module MIRLoweringFunctions
       self.guarded_cleanup_names = context.guarded_cleanup_names
     end
 
+    private
+
     sig { returns(T::Boolean) }
     def current_decl_heap?
       current_decl_alloc == :heap
     end
+
+    public
 
     sig { returns(Symbol) }
     def current_decl_or_frame_alloc
@@ -295,7 +299,7 @@ module MIRLoweringFunctions
     fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node)
     if fn_needs_rt
       sig = fn_sigs[node.name.to_s] || fn_sigs[node.name.to_sym]
-      sig.needs_rt = true if sig && sig.respond_to?(:needs_rt=)
+      sig.mark_runtime_required! if sig
       node.needs_rt = true if node.respond_to?(:needs_rt=)
     end
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
@@ -321,7 +325,7 @@ module MIRLoweringFunctions
     end
 
     # Comptime params
-    comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
+    comptime_params = node.type_params.map { |tp| "comptime #{tp}: type" }
 
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
@@ -336,7 +340,7 @@ module MIRLoweringFunctions
       # other (`'eval' uses inferred error set of function 'evalList'
       # here -> dependency loop`). The `anyerror` prefix makes the
       # error set concrete and breaks the loop.
-      final_zig_type.fallible_return_type_for(reentrant: node.reentrant == :reentrant)
+      final_zig_type.fallible_return_type_for(reentrant: node.recursive_reentrance_declared?)
     else
       final_type
     end
@@ -370,8 +374,7 @@ module MIRLoweringFunctions
       fn_can_fail = true
       return_type_str = faulting_return_type_str(final_type, node)
       sig = fn_sigs[node.name.to_s] || fn_sigs[node.name.to_sym]
-      sig.can_fail = true if sig && sig.respond_to?(:can_fail=)
-      sig.alloc_fault = true if sig && sig.respond_to?(:alloc_fault=)
+      sig.mark_faulting_allocation! if sig
       node.can_fail = true if node.respond_to?(:can_fail=)
     end
 
@@ -583,7 +586,7 @@ module MIRLoweringFunctions
 
   sig { params(final_type: String, node: AST::FunctionDef).returns(String) }
   def faulting_return_type_str(final_type, node)
-    ZigType.new(final_type).fallible_return_type_for(reentrant: node.reentrant == :reentrant)
+    ZigType.new(final_type).fallible_return_type_for(reentrant: node.recursive_reentrance_declared?)
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
@@ -672,7 +675,7 @@ module MIRLoweringFunctions
 
   sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
   def reentrance_guard_prologue(node)
-    return [] unless node.reentrant == :non_reentrant
+    return [] unless node.reentrance_guard_required?
 
     if node.max_depth_n
       enter_call = MIR::Call.new(
@@ -1154,7 +1157,7 @@ module MIRLoweringFunctions
     return empty_stdlib_call_facts unless sig
 
     ast_args = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
-    if sig.arg_spec && sig.params.length != ast_args.length
+    if sig.intrinsic_fixed_arg_list? && sig.params.length != ast_args.length
       Kernel.raise "stdlib call #{node.name}: signature has #{sig.params.length} params for #{ast_args.length} args"
     end
     ownership = call_ownership_facts_for_signature(sig, ast_args)
@@ -1180,7 +1183,7 @@ module MIRLoweringFunctions
     found = FunctionSignature.unwrap(matched)
     return found if found
 
-    fallback = IntrinsicRegistry.sig(STD_LIB, T.unsafe(node).name.to_s)
+    fallback = IntrinsicRegistry.lookup(STD_LIB, T.unsafe(node).name.to_s)
     fallback = T.unsafe(fallback).first if fallback.is_a?(Array)
     FunctionSignature.unwrap(fallback)
   end
@@ -1685,7 +1688,9 @@ module MIRLoweringFunctions
     end
 
     result_type = Type.from_node!(node, context: "intrinsic result")
-    alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
+    result_ownership_bearing = intrinsic_result_ownership_bearing?(result_type)
+    alloc_metadata = MIR::InlineAllocMetadata.new(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
+    owned_result_alloc = intrinsic_owned_result_alloc(entry, node, alloc_metadata, result_ownership_bearing)
     ownership_contract = MIR::OwnershipContract.empty
     if ownership_facts.takes_any?
       operands = consumed_operands.empty? ? consumed_names.map { |name|
@@ -1706,9 +1711,10 @@ module MIRLoweringFunctions
       reason: "intrinsic",
       ownership_contract: ownership_contract,
       allocs: alloc_metadata.empty? ? nil : alloc_metadata,
+      owned_result_alloc: owned_result_alloc,
       target_var: target_var,
       result_type: result_type,
-      result_ownership_bearing: intrinsic_result_ownership_bearing?(result_type),
+      result_ownership_bearing: result_ownership_bearing,
       key_type: receiver_type&.key_type,
       value_type: receiver_type&.value_type,
     )
@@ -1817,6 +1823,26 @@ module MIRLoweringFunctions
     ti = type_info.success_type || type_info
     ti = ti.wrapped_type || ti if ti.optional?
     ti.ownership_bearing?(mir_schema_lookup)
+  end
+
+  sig do
+    params(
+      entry: FunctionSignature,
+      node: T.any(AST::FuncCall, AST::MethodCall),
+      alloc_metadata: MIR::InlineAllocMetadata,
+      result_ownership_bearing: T::Boolean
+    ).returns(T.nilable(Symbol))
+  end
+  def intrinsic_owned_result_alloc(entry, node, alloc_metadata, result_ownership_bearing)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless result_ownership_bearing
+
+    alloc = entry.return_alloc
+    return nil unless alloc
+    return alloc_metadata.primary if entry.emits_allocating? && alloc_metadata.primary
+    return alloc if alloc == :heap || alloc == :frame
+
+    resolve_alloc_sym(alloc, nil, node)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(Type)) }
@@ -2003,5 +2029,65 @@ module MIRLoweringFunctions
   # Collections
   # ================================================================
 
+  private :build_catch_clauses,
+    :build_extern_trampoline_call,
+    :build_extern_trampoline_method,
+    :call_owned_return?,
+    :collect_catch_reassigns
+
+  private :activate_function_context
+  private :ast_expr_produces_heap?
+  private :attach_explicit_move_consumption!
+  private :body_has_faulting_alloc?
+  private :borrowed_array_argument_required?
+  private :borrowed_ownership_operand?
+  private :build_post_inner_fn
+  private :build_post_outer_fn
+  private :call_never_returns_success?
+  private :call_owned_return_from_args?
+  private :call_type_owned_return?
+  private :concrete_call_type_owned_return?
+  private :cross_boundary_arg
+  private :empty_stdlib_call_facts
+  private :faulting_return_type_str
+  private :finalize_call_result
+  private :finalized_needs_rt!
+  private :function_body_has_value_return?
+  private :function_catch_clauses
+  private :function_entry_plan
+  private :function_lowering_context
+  private :function_param_fact
+  private :function_param_facts
+  private :function_param_zig_type
+  private :function_return_retains_shared_handle?
+  private :has_default_catch?
+  private :infer_catch_value_allocator
+  private :intrinsic_ast_arg
+  private :intrinsic_owned_result_alloc
+  private :intrinsic_result_ownership_bearing?
+  private :lower_extern_call
+  private :lower_extern_direct_call
+  private :lower_extern_direct_method
+  private :lower_extern_method
+  private :lower_intrinsic
+  private :lower_safe_nav_method_call
+  private :materialize_stdlib_arguments
+  private :mutable_scalar_param_shadows
+  private :owned_slice_argument_required?
+  private :ownership_consumed_arg_names
+  private :record_lowered_entry_markers!
+  private :recursion_yield_prologue
+  private :reentrance_guard_prologue
+  private :registry_call_args
+  private :runtime_frame_prologue
+  private :runtime_frame_save_required?
+  private :stdlib_call_facts
+  private :stdlib_coerce_type
+  private :stdlib_consumed_alloc
+  private :stdlib_sink_type_for_arg
+  private :takes_param_ownership_mir
+  private :typed_name_set
+  private :unused_param_suppressions
+  private :walk_catch_body_for_reassigns
 
 end

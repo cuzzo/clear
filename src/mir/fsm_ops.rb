@@ -168,57 +168,62 @@ module FsmOps
   module DSL
       extend T::Sig
 
-    extend self
 
     sig { params(field: String, value: FsmOps::Expr).returns(FsmOps::AssignField) }
-    def assign_field(field, value);          AssignField.new(field, value); end
+    def self.assign_field(field, value);          AssignField.new(field, value); end
     sig { params(name: String, zig_type: String, value: FsmOps::IntCast).returns(FsmOps::LetConst) }
-    def let_const(name, zig_type, value);    LetConst.new(name, zig_type, value); end
+    def self.let_const(name, zig_type, value);    LetConst.new(name, zig_type, value); end
     sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::StateField]).returns(FsmOps::ErrDeferCall) }
-    def err_defer_call(fn, args);            ErrDeferCall.new(fn, args); end
+    def self.err_defer_call(fn, args);            ErrDeferCall.new(fn, args); end
     sig { params(field: String).returns(FsmOps::ErrDeferFreeField) }
-    def err_defer_free_field(field);         ErrDeferFreeField.new(field); end
+    def self.err_defer_free_field(field);         ErrDeferFreeField.new(field); end
     sig { params(field: String).returns(FsmOps::DeferFreeField) }
-    def defer_free_field(field);             DeferFreeField.new(field); end
+    def self.defer_free_field(field);             DeferFreeField.new(field); end
     sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::StmtCall) }
-    def stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
-    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[FsmOps::Expr]).returns(FsmOps::IoSubmit) }
-    def io_submit(verb, waiter, extra_args)
+    def self.stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
+    sig do
+      params(
+        verb: Symbol,
+        waiter: T.any(String, FsmOps::StateField),
+        extra_args: T::Array[FsmOps::Expr]
+      ).returns(FsmOps::IoSubmit)
+    end
+    def self.io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
       waiter_op = waiter.is_a?(String) ? StateField.new(waiter) : waiter
       IoSubmit.new(verb, waiter_op, extra_args)
     end
     sig { params(field: String, sub: String, return_fn: FsmOps::FunctionPath, return_args: T::Array[FsmOps::SubField]).returns(FsmOps::IfFieldSubLtZeroReturnCall) }
-    def if_neg_return_call(field, sub, return_fn, return_args)
+    def self.if_neg_return_call(field, sub, return_fn, return_args)
       IfFieldSubLtZeroReturnCall.new(field, sub, return_fn, return_args)
     end
 
     sig { params(name: String).returns(FsmOps::FunctionPath) }
-    def fn(name);                             FunctionPath.static(name); end
+    def self.fn(name);                             FunctionPath.static(name); end
     sig { params(parts: T::Array[String]).returns(FsmOps::FunctionPath) }
-    def ctx_fn(parts);                        FunctionPath.context(parts); end
+    def self.ctx_fn(parts);                        FunctionPath.context(parts); end
 
     sig { params(idx: Integer).returns(FsmOps::ArgRef) }
-    def arg(idx);                            ArgRef.new(idx); end
+    def self.arg(idx);                            ArgRef.new(idx); end
     sig { params(name: String).returns(FsmOps::StateField) }
-    def state(name);                         StateField.new(name); end
+    def self.state(name);                         StateField.new(name); end
     sig { params(base: FsmOps::StateField, name: String).returns(FsmOps::SubField) }
-    def subf(base, name);                    SubField.new(base, name); end
+    def self.subf(base, name);                    SubField.new(base, name); end
     sig { params(name: String).returns(FsmOps::LocalRef) }
-    def local(name);                         LocalRef.new(name); end
+    def self.local(name);                         LocalRef.new(name); end
     sig { params(expr: FsmOps::StateField).returns(FsmOps::AddrOf) }
-    def addr(expr);                          AddrOf.new(expr); end
+    def self.addr(expr);                          AddrOf.new(expr); end
     sig { params(zig_type: String, expr: FsmOps::Expr).returns(FsmOps::IntCast) }
-    def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
+    def self.intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
     sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::CallExpr) }
-    def call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
+    def self.call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
     sig { params(elem_type: String, count: FsmOps::LocalRef).returns(FsmOps::AllocExpr) }
-    def alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
+    def self.alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
     sig { params(base: FsmOps::StateField, end_expr: FsmOps::SubField).returns(FsmOps::SliceUntilIntCast) }
-    def slice_intcast(base, end_expr);       SliceUntilIntCast.new(base, end_expr); end
+    def self.slice_intcast(base, end_expr);       SliceUntilIntCast.new(base, end_expr); end
     sig { params(op: String, left: FsmOps::CallExpr, right: FsmOps::IntCast).returns(FsmOps::BinOp) }
-    def binop(op, left, right);              BinOp.new(op, left, right); end
+    def self.binop(op, left, right);              BinOp.new(op, left, right); end
   end
 
   # =====================================================================
@@ -247,7 +252,6 @@ module FsmOps
   #
   # Constructor takes the same context as Emitter:
   #   ctx_id     Integer — for __ctx_<id>.X field references
-  #   bg_rt      String  — current BG runtime variable name
   #   arg_mirs   [MIR::*] — MIR expressions for the {N} template
   #                         arg slots; produced by lowering the
   #                         AST args (not their rendered Zig).
@@ -280,17 +284,15 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[Object]).void }
-    def initialize(ctx_id:, bg_rt:, arg_mirs:)
+    sig { params(ctx_id: Integer, arg_mirs: T::Array[Object]).void }
+    def initialize(ctx_id:, arg_mirs:)
       @ctx_id = ctx_id
-      @bg_rt = bg_rt
       @arg_mirs = arg_mirs
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
     sig { params(ops: T::Array[Stmt]).returns(T::Array[Object]) }
     def lower_stmts(ops)
-      return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 
@@ -347,8 +349,8 @@ module FsmOps
       case expr
       when ArgRef
         idx = expr.idx
-        unless @arg_mirs && idx < @arg_mirs.length
-          raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_mirs&.length || 0} args)"
+        unless idx >= 0 && idx < @arg_mirs.length
+          raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_mirs.length} args)"
         end
         @arg_mirs[idx]
       when StateField
@@ -423,7 +425,9 @@ module FsmOps
     def resolve_fn(fn_path)
       fn_path.render("__ctx_#{@ctx_id}")
     end
-  end
+    private :lower_stmt
+
+end
 
   # =====================================================================
   # Structure-derivation helpers
@@ -446,9 +450,9 @@ module FsmOps
   end
 
     sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
-    def self.alloc_state_fields(ops)
+  def self.alloc_state_fields(ops)
     out = []
-    Array(ops).each do |op|
+    ops.each do |op|
       if op.is_a?(AssignField) && op.value.is_a?(AllocExpr)
         out << op.field
       end
@@ -456,16 +460,27 @@ module FsmOps
     out.uniq
   end
 
-    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
-    def self.free_state_fields(ops)
+  sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+  def self.free_state_fields(ops)
     out = []
-    Array(ops).each do |op|
+    ops.each do |op|
       case op
       when ErrDeferFreeField, DeferFreeField
         out << op.field
       end
     end
     out.uniq
+  end
+
+  sig { params(expr: T.nilable(Expr), finalize_ops: T::Array[Stmt]).returns(T::Boolean) }
+  def self.finish_value_aliases_finalized_state?(expr, finalize_ops)
+    return false unless expr
+
+    finalized = free_state_fields(finalize_ops)
+    return false if finalized.empty?
+
+    refs = referenced_state_fields([expr])
+    refs.any? { |name| finalized.include?(name) }
   end
 
   sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }

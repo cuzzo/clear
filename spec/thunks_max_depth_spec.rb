@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Thunk Phase 4f.3 -- EFFECTS REENTRANT:MAX_DEPTH(N).
 #
@@ -15,7 +15,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)
@@ -97,7 +97,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "f" }
       expect(fn.reentrance_kind).to eq(:reentrant_max_depth)
-      expect(fn.reentrant).to eq(:non_reentrant)
+      expect(fn.reentrance_guard_required?).to be(true)
       expect(fn.max_depth_n).to eq(8)
     end
   end
@@ -124,7 +124,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
     it "now offers three interactive migrations" do
       FixCollector.enable!
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first
@@ -137,7 +137,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
     it ":MAX_DEPTH fix message warns against using N as an OS-thread workaround" do
       FixCollector.enable!
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first

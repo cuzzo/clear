@@ -1,8 +1,8 @@
 require "rspec"
 require "set"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/semantic/escape_analysis"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/semantic/escape_analysis" unless defined?(EscapeAnalysis::EscapeSink)
 
 # P1.4 / P1.5 / P1.6: pin the transitive sync propagation pass.
 #
@@ -13,10 +13,10 @@ require_relative "../src/semantic/escape_analysis"
 # transpile-tests/201_capability_passthrough.cht.disabled (enabled when
 # P1.7 lands).
 
-RSpec.describe "P1.4 caller-sync propagation" do
+RSpec.describe EscapeAnalysis do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     [ast, annotator]
@@ -196,50 +196,41 @@ RSpec.describe "P1.4 caller-sync propagation" do
     expect(fn_nodes["outer"].params.first[:symbol].sync).to eq(:locked)
     expect(fn_nodes["inner"].params.first[:symbol].sync).to eq(:locked)
   end
-end
+  describe "FunctionSignature carries per-param sync" do
+    it "exposes a :sync field on signature params (defaulting to nil today)" do
+      # The annotator currently refuses capability annotations on param types
+      # ("Counter @locked" on a param errors). The :sync field is therefore
+      # always nil in source-level tests; this spec pins that the FIELD is
+      # *present* on the signature, ready for Phase 2's REQUIRES to populate
+      # it across module boundaries.
+      src = <<~CHT
+        STRUCT Counter { value: Int64 }
 
-RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
-  def annotate(source)
-    tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-    [ast, annotator]
-  end
+        PUB FN bumpIt(c: Counter) ->
+          x = c.value;
+        END
+      CHT
 
-  it "exposes a :sync field on signature params (defaulting to nil today)" do
-    # The annotator currently refuses capability annotations on param types
-    # ("Counter @locked" on a param errors). The :sync field is therefore
-    # always nil in source-level tests; this spec pins that the FIELD is
-    # *present* on the signature, ready for Phase 2's REQUIRES to populate
-    # it across module boundaries.
-    src = <<~CHT
-      STRUCT Counter { value: Int64 }
+      ast, annotator = annotate(src)
+      sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
+      expect(sig).to be_a(FunctionSignature)
+      # The field is present on the Param struct (defaulting to nil).
+      expect(sig.params.first).to be_a(AST::Param)
+      expect(sig.params.first.sync).to be_nil
+    end
 
-      PUB FN bumpIt(c: Counter) ->
-        x = c.value;
-      END
-    CHT
+    it "leaves :sync nil for params with no sync annotation" do
+      src = <<~CHT
+        STRUCT Counter { value: Int64 }
 
-    ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
-    expect(sig).to be_a(FunctionSignature)
-    # The field is present on the Param struct (defaulting to nil).
-    expect(sig.params.first).to be_a(AST::Param)
-    expect(sig.params.first.sync).to be_nil
-  end
+        PUB FN bumpIt(c: Counter) ->
+          x = c.value;
+        END
+      CHT
 
-  it "leaves :sync nil for params with no sync annotation" do
-    src = <<~CHT
-      STRUCT Counter { value: Int64 }
-
-      PUB FN bumpIt(c: Counter) ->
-        x = c.value;
-      END
-    CHT
-
-    ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
-    expect(sig.params.first[:sync]).to be_nil
+      ast, annotator = annotate(src)
+      sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
+      expect(sig.params.first[:sync]).to be_nil
+    end
   end
 end

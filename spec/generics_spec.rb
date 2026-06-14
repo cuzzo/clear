@@ -3,13 +3,13 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -49,7 +49,7 @@ RSpec.describe SemanticAnnotator do
 
       it "a non-generic struct has empty type_params" do
         ast = run("STRUCT User { id: Float64 }")
-        expect(ast.statements.first.type_params).to be_nil.or(be_empty)
+        expect(ast.statements.first.type_params).to eq([])
       end
     end
 
@@ -391,7 +391,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "stores type_params in the registered function signature" do
-        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> PASS END"))
+        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END"))
         # Verify it doesn't raise — the signature is checked at call site
         expect(ast).not_to be_nil
       end

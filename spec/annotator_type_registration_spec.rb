@@ -1,9 +1,9 @@
 require "spec_helper"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/annotator/phases/declaration_index"
-require_relative "../src/annotator/phases/type_registration"
-require_relative "../src/ast/lexer"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/annotator/phases/declaration_index" unless defined?(Annotator::Phases::DeclarationIndexer)
+require_relative "../src/annotator/phases/type_registration" unless defined?(Annotator::Phases::TypeRegistration)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Annotator::Phases::TypeRegistration do
   def tok(value = "x")
@@ -35,7 +35,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     resource.close_method = "close"
 
     annotator, = register(struct, enum, native, resource)
-    scope = annotator.current_scope
+    scope = annotator.send(:current_scope)
 
     box_schema = scope.types.fetch(:Box).schema
     expect(box_schema).to be_a(Schemas::StructSchema)
@@ -63,6 +63,25 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     expect(resource.full_type!.resolved).to eq(:Void)
   end
 
+  it "rejects duplicate type declarations" do
+    first = AST::StructDef.new(tok("Box"), "Box", {}, :pub, [])
+    second = AST::StructDef.new(tok("Box"), "Box", {}, :pub, [])
+
+    expect {
+      register(first, second)
+    }.to raise_error(CompilerError, /Duplicate type declaration 'Box'/)
+  end
+
+  it "rejects inline union helper struct name collisions" do
+    helper = AST::StructDef.new(tok("Value_Data"), "Value_Data", {}, :pub, [])
+    inline = Schemas::InlineStructVariant.new(fields: { "owned" => Type.new(:String) })
+    union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline }, :package)
+
+    expect {
+      register(helper, union)
+    }.to raise_error(CompilerError, /Duplicate type declaration 'Value_Data'/)
+  end
+
   it "registers union schemas, helper structs, and typed inline deinit entries" do
     inline = Schemas::InlineStructVariant.new(fields: {
       "owned" => Type.new(:String),
@@ -73,7 +92,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline, Empty: nil }, :package)
 
     annotator, = register(union)
-    scope = annotator.current_scope
+    scope = annotator.send(:current_scope)
 
     union_schema = scope.types.fetch(:Value).schema
     expect(union_schema).to be_a(Schemas::UnionSchema)

@@ -430,4 +430,20 @@ module MIRLoweringLiterals
       rc_wrapped: ti.multiowned?,
     )
   end
+  private :composed_hash_literal_capability_plan
+  private :default_array_value
+  private :empty_hash_literal
+  private :hash_literal_allocator_expr
+  private :hash_literal_capability_plan
+  private :hash_literal_empty_needs_alloc?
+  private :hash_literal_plan
+  private :hash_literal_put_stmt
+  private :hash_literal_result
+  private :list_literal_capability_wrap_needed?
+  private :list_literal_plan
+  private :non_empty_hash_literal
+  private :striped_hash_literal_capability_plan
+  private :unwrapped_hash_literal_capability_plan
+  private :wrap_list_literal_capability
+
 end

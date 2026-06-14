@@ -1,7 +1,7 @@
 require "rspec"
 require "set"
 
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # P2.8: pin the REQUIRES + WITH MATCH grammar end-to-end.
 #
@@ -15,7 +15,7 @@ require_relative "../src/backends/transpiler"
 
 RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
   def parse(src)
-    Parser.new(Lexer.new(src).tokenize, src).parse
+    ClearParser.new(Lexer.new(src).tokenize, src).parse
   end
 
   def annotate(src)

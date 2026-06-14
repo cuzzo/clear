@@ -17,7 +17,6 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "../mir"
-require_relative "../fsm_wrapper_emitter"
 require_relative "context"
 require_relative "segments"
 require_relative "recursive_splitter"
@@ -27,7 +26,6 @@ require_relative "suspend_resolvers"
 module FsmTransform
   module Emit
     extend T::Sig
-    module_function
 
     PromotableFsmValue = T.type_alias { T.any(MIR::Node, Object) }
     FsmBodyEmission = T.type_alias { MIR::Node }
@@ -80,10 +78,6 @@ module FsmTransform
         fact_node_value
       end
 
-      sig { returns(T::Boolean) }
-      def blank?
-        false
-      end
     end
 
     class FsmSegmentFacts < T::Struct
@@ -217,7 +211,7 @@ module FsmTransform
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
     sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], promoted_field_decls: T::Array[MIR::ContextFieldDecl], lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
-    def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
+    def self.build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       return nil if segment_specs.empty?
 
       id = ctx.id
@@ -234,10 +228,10 @@ module FsmTransform
       #    segment graphs -- a suspend at position K can resume to
       #    any position M, and M's body must run K's bind.
       bind_for_index = T.let({}, T::Hash[Integer, T::Array[FsmBodyItem]])
-      segment_specs.each do |s|
+      segment_specs.each_with_index do |s, index|
         d = s.descriptor
-        next unless d && d.bind_stmts && !d.bind_stmts.empty?
-        target = tail_resume_target(s.tail) || (segment_specs.index(s) || 0) + 1
+        next unless d && !d.bind_stmts.empty?
+        target = tail_resume_target(s.tail) || index + 1
         bind_for_index[target] = fsm_body_mir_items(d.bind_stmts)
       end
 
@@ -255,10 +249,8 @@ module FsmTransform
         body_fn_names_by_index[spec.index] = fn_name
         body.concat(spec.body_stmts)
         if (d = spec.descriptor)
-          body.concat(fsm_body_mir_items(d.setup_stmts || []))
+          body.concat(fsm_body_mir_items(d.setup_stmts))
         end
-        body.compact!
-        body.reject!(&:blank?)
 
         MIR::FsmMemberFn.new(
           fn_name, id, bg_rt, spec.suppress_runtime_ref, fsm_body_emit_values(body),
@@ -271,8 +263,8 @@ module FsmTransform
       #    variants (FsmTailLockTry / FsmTailWokenCheck /
       #    FsmTailRetryOrError for the LOCK fan-out, etc.) -- no
       #    more per-shape dispatch overrides.
-      arms = segment_specs.map.with_index do |spec, k|
-        tail = build_dispatch_tail(spec, k, segment_specs, id)
+      arms = segment_specs.map do |spec|
+        tail = build_dispatch_tail(spec)
         MIR::FsmStateArm.new(
           spec.index,
           spec.pre_body_skip,
@@ -292,27 +284,29 @@ module FsmTransform
       segment_specs.each do |spec|
         d = spec.descriptor
         next unless d
-        extra_field_decls.concat(d.ctx_field_decls || [])
+        extra_field_decls.concat(d.ctx_field_decls)
       end
       extra_field_decls.concat(ctx.extra_ctx_fields)
-      seen_extra_names = T.let({}, T::Hash[String, T::Boolean])
+      seen_extra_names = T.let(Set.new, T::Set[String])
       extra_field_decls = extra_field_decls.reject do |decl|
         name = decl.name
-        duplicate = seen_extra_names[name] == true
-        seen_extra_names[name] = true
+        duplicate = seen_extra_names.include?(name)
+        seen_extra_names << name
         duplicate
       end
-      capture_field_names = ctx.capture_fields.each_with_object({}) do |field, names|
-        names[field.name] = true
-      end
+      capture_field_names = T.let(
+        ctx.capture_fields.map(&:name).to_set,
+        T::Set[String],
+      )
       extra_field_decls = extra_field_decls.reject do |decl|
-        capture_field_names[decl.name]
+        capture_field_names.include?(decl.name)
       end
-      extra_field_names = extra_field_decls.each_with_object(capture_field_names.dup) do |decl, names|
-        names[decl.name] = true unless decl.name.empty?
+      extra_field_names = T.let(capture_field_names.dup, T::Set[String])
+      extra_field_decls.each do |decl|
+        extra_field_names << decl.name
       end
       promoted_field_decls = promoted_field_decls.reject do |decl|
-        extra_field_names[decl.name]
+        extra_field_names.include?(decl.name)
       end
 
       # 4. Wrap in FsmGenericCtxStruct + spawn_setup + FsmGenericBody.
@@ -324,7 +318,7 @@ module FsmTransform
         extra_field_decls, promoted_field_decls,
         member_fns, dispatch, destroy_actions,
       )
-      spawn_setup = build_spawn_setup(ctx, lowering)
+      spawn_setup = build_spawn_setup(ctx)
       fsm_body = MIR::FsmGenericBody.new(ctx.blk_label, ctx_struct, spawn_setup)
       MIR::FsmLoweringResult.new(
         body: fsm_body,
@@ -333,7 +327,7 @@ module FsmTransform
     end
 
     sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], destroy_actions: T::Array[MIR::FsmDestroyAction], id: Integer).returns(MIR::FsmStructure) }
-    def build_fsm_structure(ctx, segment_specs, destroy_actions, id)
+    def self.build_fsm_structure(ctx, segment_specs, destroy_actions, id)
       cleanup_names = fsm_destroy_cleanup_names(destroy_actions)
       captured = ctx.captured
       capture_names = captured.keys.map(&:to_s)
@@ -359,24 +353,24 @@ module FsmTransform
     end
 
     sig { params(ctx: FsmEmitContext).returns(T::Array[MIR::FsmDestroyAction]) }
-    def fsm_destroy_actions(ctx)
+    def self.fsm_destroy_actions(ctx)
       ctx.destroy_actions
     end
 
     sig { params(ctx: FsmEmitContext).returns(T::Array[MIR::FsmDestroyAction]) }
-    def ordered_fsm_destroy_actions(ctx)
+    def self.ordered_fsm_destroy_actions(ctx)
       fsm_destroy_actions(ctx).each_with_index.sort_by do |action, index|
         [action.destroy_order_bucket, action.destroy_order_index(index)]
       end.map(&:first)
     end
 
     sig { params(actions: T::Array[MIR::FsmDestroyAction]).returns(T::Array[String]) }
-    def fsm_destroy_cleanup_names(actions)
+    def self.fsm_destroy_cleanup_names(actions)
       actions.filter_map(&:cleanup_name).uniq
     end
 
     sig { params(tail: SegmentTail).returns(T.nilable(Integer)) }
-    def tail_resume_target(tail)
+    def self.tail_resume_target(tail)
       case tail
       when Segments::IoSuspend, Segments::NextSuspend, Segments::LockSuspend
         tail.next_index
@@ -388,14 +382,14 @@ module FsmTransform
     end
 
     sig { params(segment_specs: T::Array[FsmSegmentSpec], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[FsmSegmentSpec]) }
-    def materialize_fsm_segment_facts(segment_specs, id, cleanup_names)
+    def self.materialize_fsm_segment_facts(segment_specs, id, cleanup_names)
       segment_specs.map do |spec|
         spec.with_facts(build_fsm_segment_facts(spec, id, cleanup_names))
       end
     end
 
     sig { params(spec: FsmSegmentSpec, id: Integer, cleanup_names: T::Array[String]).returns(FsmSegmentFacts) }
-    def build_fsm_segment_facts(spec, id, cleanup_names)
+    def self.build_fsm_segment_facts(spec, id, cleanup_names)
       nodes = collect_fsm_nodes(fsm_segment_fact_roots(spec))
       result_names = collect_result_names(nodes, id)
       result_facts = result_names.map do |name|
@@ -423,7 +417,7 @@ module FsmTransform
     end
 
     sig { params(spec: FsmSegmentSpec).returns(T::Array[MIR::Node]) }
-    def fsm_segment_fact_roots(spec)
+    def self.fsm_segment_fact_roots(spec)
       roots = T.let([], T::Array[MIR::Node])
       roots.concat(fsm_body_mir_nodes(spec.prologue_stmts))
       roots.concat(spec.structure_stmts.empty? ? fsm_body_mir_nodes(spec.body_stmts) : spec.structure_stmts)
@@ -436,32 +430,32 @@ module FsmTransform
     end
 
     sig { params(stmts: T::Array[FsmBodyItem]).returns(T::Array[MIR::Node]) }
-    def fsm_body_mir_nodes(stmts)
+    def self.fsm_body_mir_nodes(stmts)
       stmts.filter_map(&:fact_node)
     end
 
     sig { params(node: MIR::Node).returns(FsmBodyItem) }
-    def fsm_body_mir_item(node)
+    def self.fsm_body_mir_item(node)
       FsmBodyItem.mir(node)
     end
 
     sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[FsmBodyItem]) }
-    def fsm_body_mir_items(nodes)
+    def self.fsm_body_mir_items(nodes)
       nodes.map { |node| fsm_body_mir_item(node) }
     end
 
     sig { params(items: T::Array[FsmBodyItem]).returns(T::Array[FsmBodyEmission]) }
-    def fsm_body_emit_values(items)
+    def self.fsm_body_emit_values(items)
       items.map(&:emit_value)
     end
 
     sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
-    def mir_nodes_reference_ident?(nodes, name)
+    def self.mir_nodes_reference_ident?(nodes, name)
       MIR.nodes(nodes).grep(MIR::Ident).any? { |ident| ident.name.to_s == name }
     end
 
     sig { params(ctx_id: Integer, lock_index: Integer, lock_ref: String, unlock_method: String).returns(T::Array[MIR::Node]) }
-    def prior_lock_release_stmts(ctx_id, lock_index, lock_ref, unlock_method)
+    def self.prior_lock_release_stmts(ctx_id, lock_index, lock_ref, unlock_method)
       [
         MIR::Set.new(
           MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "__lock_held_#{lock_index}"),
@@ -476,14 +470,14 @@ module FsmTransform
     end
 
     sig { params(facts: T::Array[MIR::FsmOwnershipFact]).returns(T::Array[MIR::FsmOwnershipFact]) }
-    def unique_fsm_ownership_facts(facts)
+    def self.unique_fsm_ownership_facts(facts)
       facts.uniq do |fact|
         [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
       end
     end
 
     sig { params(nodes: T::Array[MIR::Node], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
-    def collect_required_move_guards(nodes, id, cleanup_names)
+    def self.collect_required_move_guards(nodes, id, cleanup_names)
       nodes.filter_map do |node|
         next nil unless node.is_a?(MIR::TransferMark)
         next nil unless node.target == :owned_sink || node.target == :return
@@ -493,7 +487,7 @@ module FsmTransform
     end
 
     sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
-    def collect_move_guard_writes(nodes, id)
+    def self.collect_move_guard_writes(nodes, id)
       nodes.filter_map do |node|
         if node.is_a?(MIR::MoveMark)
           name = node.name.to_s
@@ -510,12 +504,12 @@ module FsmTransform
     end
 
     sig { params(name: String, id: Integer).returns(String) }
-    def normalized_ctx_field_name(name, id)
+    def self.normalized_ctx_field_name(name, id)
       name.delete_prefix("__ctx_#{id}.")
     end
 
     sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
-    def collect_result_names(nodes, id)
+    def self.collect_result_names(nodes, id)
       nodes.filter_map do |node|
         next nil unless node.is_a?(MIR::Set)
         next nil unless ctx_inner_result_target?(node.target, id)
@@ -524,20 +518,20 @@ module FsmTransform
     end
 
     sig { params(name: String).returns(String) }
-    def fsm_fact_guard_name(name)
+    def self.fsm_fact_guard_name(name)
       return "" if fsm_ctx_name?(name)
       fsm_ctx_field_prefix(name) || name
     end
 
     sig { params(name: String).returns(T::Boolean) }
-    def fsm_ctx_name?(name)
+    def self.fsm_ctx_name?(name)
       return false unless name.start_with?("__ctx_")
       suffix = name.delete_prefix("__ctx_")
       decimal_digits?(suffix)
     end
 
     sig { params(name: String).returns(T.nilable(String)) }
-    def fsm_ctx_field_prefix(name)
+    def self.fsm_ctx_field_prefix(name)
       return nil unless name.start_with?("__ctx_")
       dot_index = name.index(".")
       return nil unless dot_index
@@ -548,27 +542,27 @@ module FsmTransform
     end
 
     sig { params(value: String).returns(T::Boolean) }
-    def decimal_digits?(value)
+    def self.decimal_digits?(value)
       return false if value.empty?
       value.each_char.all? { |char| char >= "0" && char <= "9" }
     end
 
     sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
-    def collect_ctx_field_reads(nodes, id)
+    def self.collect_ctx_field_reads(nodes, id)
       nodes.filter_map do |node|
         ctx_field_name(node, id)
       end.uniq
     end
 
     sig { params(roots: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
-    def collect_fsm_nodes(roots)
+    def self.collect_fsm_nodes(roots)
       out = T.let([], T::Array[MIR::Node])
       MIR.each_node(roots) { |node| out << node }
       out
     end
 
     sig { params(expr: MIR::Node, id: Integer).returns(T.nilable(String)) }
-    def ctx_field_name(expr, id)
+    def self.ctx_field_name(expr, id)
       return nil unless expr.is_a?(MIR::FieldGet)
       object = expr.object
       return nil unless object.is_a?(MIR::Ident)
@@ -577,7 +571,7 @@ module FsmTransform
     end
 
     sig { params(expr: MIR::Node, id: Integer).returns(T::Boolean) }
-    def ctx_inner_result_target?(expr, id)
+    def self.ctx_inner_result_target?(expr, id)
       return false unless expr.is_a?(MIR::FieldGet)
       return false unless expr.field.to_s == "result"
       inner = expr.object
@@ -588,7 +582,7 @@ module FsmTransform
     end
 
     sig { params(expr: MIR::Node, id: Integer).returns(T.nilable(String)) }
-    def result_source_name(expr, id)
+    def self.result_source_name(expr, id)
       if expr.is_a?(MIR::Ident)
         expr.name.to_s
       else
@@ -597,7 +591,7 @@ module FsmTransform
     end
 
     sig { params(expr: MIR::Node).returns(T::Boolean) }
-    def true_literal?(expr)
+    def self.true_literal?(expr)
       expr.is_a?(MIR::Lit) && expr.value.to_s == "true"
     end
 
@@ -605,10 +599,8 @@ module FsmTransform
     # tails consult the descriptor for the kind-specific tail variant
     # (Yield / RegisterYield); non-suspend tails (Goto / LoopBack /
     # CondBranch / Done) map to the structural tail variants directly.
-    sig { params(spec: FsmSegmentSpec, k: Integer, all_specs: T::Array[FsmSegmentSpec], id: Integer).returns(FsmTail) }
-    def build_dispatch_tail(spec, k, all_specs, id)
-      _ = k
-      _ = all_specs
+    sig { params(spec: FsmSegmentSpec).returns(FsmTail) }
+    def self.build_dispatch_tail(spec)
       tail = spec.tail
       desc = spec.descriptor
       index = spec.index
@@ -683,52 +675,24 @@ module FsmTransform
     #
     # `liveness` is the Liveness analysis result; promoted_field_decls
     # are derived from cross_segment_vars.
-    sig { params(ctx: FsmEmitContext, segments: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
-    def build_recursive(ctx, segments, liveness, lowering)
-      T.bind(self, T.untyped) rescue nil
-      return nil if segments.segments.empty?
+    sig { params(ctx: FsmEmitContext, segment_list: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
+    def self.build_recursive(ctx, segment_list, liveness, lowering)
+      segment_nodes = segment_list.segments
+      return nil if segment_nodes.empty?
 
       id = ctx.id
       bg_rt = ctx.bg_rt
       captured = ctx.captured
-      capture_close_plans = ctx.capture_close_plans
       pointer_captures = ctx.pointer_captures
       arena_init_flag = ctx.arena_init_flag
       recursive_promoted_names = ctx.recursive_promoted_names
-      extra_ctx_fields = ctx.extra_ctx_fields
-      fresh_heap_cleanup_names = ctx.fresh_heap_cleanup_names
-      capture_finalizers = ctx.capture_finalizers
       is_void = ctx.is_void
-      lowering_api = T.unsafe(lowering)
-
-      segment_list = segments
-      segments = segment_list.segments
 
       # Promoted field decls from Liveness. Cross-segment vars become
       # ctx fields. NEXT/IO result vars are added separately by their
       # descriptors, so exclude them here.
-      suspend_result_vars =
-        segments.flat_map { |seg|
-          [Segments.suspend_tail?(seg.tail) ? seg.tail.result_var : nil]
-        }.compact
-      # Conservative-promoted names are already represented in
-      # ctx[:extra_ctx_fields] by FsmTransform.transform; exclude
-      # them here to avoid duplicate struct members.
-      conservative_names = recursive_promoted_names.each_with_object({}) { |n, h| h[n] = true }
-      fsm_promoted_names = ((liveness && liveness.cross_segment_vars || {}).keys +
-                            recursive_promoted_names).compact.uniq
-      promoted_value_decls =
-        (liveness && liveness.cross_segment_vars || {})
-          .reject { |name, _|
-            suspend_result_vars.include?(name) ||
-              conservative_names.include?(name)
-          }
-          .map do |name, info|
-            type_info = info.type_info
-            ctx_field_decl(name.to_s, type_info ? type_info.zig_type : "anyopaque", MIR::Undef.new(nil))
-          end
-      promoted_guard_decls = fsm_promoted_names.map { |name| ctx_field_decl("#{name}_moved", "bool", MIR::Lit.new("false")) }
-      promoted_field_decls = promoted_value_decls + promoted_guard_decls
+      fsm_promoted_names = (liveness.cross_segment_vars.keys +
+                            recursive_promoted_names).uniq
 
       # capture_map: outer captures + promoted locals (liveness +
       # conservative) + suspend result vars. All names that resolve
@@ -738,18 +702,7 @@ module FsmTransform
       # isn't analyzed by liveness). Suspend result vars come from
       # the suspend descriptor's ctx_field_decls -- the body
       # reads them after the bind populates ctx.NAME.
-      capture_map = captured.map { |name, _| [name, "__ctx_#{id}.#{name}"] }.to_h
-      (liveness && liveness.cross_segment_vars || {}).each_key do |name|
-        capture_map[name] ||= "__ctx_#{id}.#{name}"
-      end
-      recursive_promoted_names.each do |name|
-        capture_map[name] ||= "__ctx_#{id}.#{name}"
-      end
-      segments.each do |seg|
-        next unless Segments.suspend_tail?(seg.tail)
-        rv = seg.tail.result_var
-        capture_map[rv] ||= "__ctx_#{id}.#{rv}" if rv && rv != "_"
-      end
+      capture_map = build_recursive_capture_map(ctx, segment_nodes, liveness)
 
       arena_init_stmt = if arena_init_flag
         MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new(bg_rt), "arena_mode"), MIR::Lit.new("true"), false)
@@ -763,45 +716,7 @@ module FsmTransform
       #
       # Three categories converge here as structural destroy actions:
       # locks, capture cleanups, and lifted body/owned-result cleanups.
-      ctx.destroy_actions = []
-      captured.each do |name, _|
-        close_plan = capture_close_plans[name]
-        next unless close_plan
-
-        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
-          source_kind: :capture,
-          name: name.to_s,
-          target: fsm_ctx_field(id, name.to_s),
-          cleanup_entry: CleanupEntry.build(
-            :resource,
-            alloc: :heap,
-            has_moved_guard: false,
-            resource_close_plan: close_plan,
-          ),
-        )
-      end
-      # FreshHeapCopy captures are fiber-owned ctx fields. Register the
-      # cleanup from the capture names and a CleanupEntry instead of
-      # stripping `defer` from a previously rendered Zig line.
-      fresh_heap_cleanup_names.each do |name|
-        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
-          source_kind: :fresh_heap,
-          name: name,
-          target: fsm_ctx_field(id, name),
-          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
-          allocator: fsm_ctx_field(id, "alloc"),
-        )
-      end
-      capture_finalizers.each do |finalizer|
-        name = fsm_destroy_finalizer_name(finalizer)
-        next unless name
-
-        fsm_destroy_actions(ctx) << MIR::FsmDestroyStmt.new(
-          source_kind: :capture,
-          name: name,
-          stmt: finalizer,
-        )
-      end
+      register_recursive_destroy_actions!(ctx)
 
       # Per-segment lowering. Stmts may be user AST nodes or MIR
       # nodes synthesized by the splitter. MIR nodes pass through
@@ -813,18 +728,18 @@ module FsmTransform
       # BGs the result is `{}` instead, appended later when the
       # spec is built.
       conservative_promoted = recursive_promoted_names
-      done_idx = segments.find_index { |s| s.tail.is_a?(Segments::Done) }
-      result_seg_indices = segments.each_with_index.with_object(Set.new) do |(seg, _i), acc|
+      done_idx = segment_nodes.find_index { |s| s.tail.is_a?(Segments::Done) }
+      result_seg_indices = segment_nodes.each_with_index.with_object(Set.new) do |(seg, _i), acc|
         next if seg.stmts.empty?
         if seg.tail.is_a?(Segments::Done) ||
            (seg.tail.is_a?(Segments::Goto) && seg.tail.target_index == done_idx)
           acc << seg.index
         end
       end
-      owned_result_guards = fsm_owned_result_guards(segments, lowering)
+      owned_result_guards = fsm_owned_result_guards(segment_nodes, lowering)
       seg_result_facts = T.let({}, T::Hash[Integer, T::Array[MIR::FsmResultTransferFact]])
       seg_mir_codes = T.let([], T::Array[T::Array[MIR::Node]])
-      seg_codes = segments.each_with_index.map do |seg, i|
+      seg_codes = segment_nodes.each_with_index.map do |seg, i|
         mir_stmts = T.let([], T::Array[MIR::Node])
         ast_stmts = T.let([], T::Array[AST::Node])
         seg.stmts.each do |stmt|
@@ -844,6 +759,7 @@ module FsmTransform
             T::Set[String],
           )
           captured.keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }
+          lowering_api = T.unsafe(lowering)
           # Per-segment alias overrides (e.g. WITH's `inner` ->
           # __ctx_<id>.c.ctrl.data.*.data) merged into the rendering
           # capture_map so identifier resolution sees the alias.
@@ -851,7 +767,7 @@ module FsmTransform
           eff_capture_map = seg_overrides ?
                               capture_map.merge(seg_overrides) : capture_map
           lowered_mir = lowering_api.with_fsm_segment_lowering_context(
-            pointer_captures: pointer_captures || Set.new,
+            pointer_captures: pointer_captures,
             inherited_alloc_names: inherited_capture_names,
             inherited_guard_names: inherited_capture_names,
             owned_result_guards: owned_result_guards,
@@ -895,7 +811,7 @@ module FsmTransform
       # checker that closes the historical hole where Pass 3 (which
       # validates cleanups assuming a single-fn body) couldn't see
       # Pass 4's segment splitting.
-      check_fsm_cleanup_invariant!(seg_mir_codes, segments,
+      check_fsm_cleanup_invariant!(seg_mir_codes, segment_nodes,
                                    liveness, captured,
                                    conservative_promoted)
 
@@ -917,8 +833,8 @@ module FsmTransform
       # to each NEXT/IO suspend. Decouples sp_N labels from arbitrary
       # segment-graph indices so a single-NEXT body always emits
       # sp_1 (matching the legacy NEXT-CHAIN naming).
-      sp_indices = compute_sp_indices(segments)
-      segment_specs = segments.each_with_index.map do |seg, i|
+      sp_indices = compute_sp_indices(segment_nodes)
+      segment_specs = segment_nodes.each_with_index.map do |seg, i|
         descriptor = build_segment_descriptor(seg, ctx, lowering, capture_map,
                                               sp_idx: sp_indices[seg.index])
         return nil if Segments.suspend_tail?(seg.tail) && descriptor.nil?
@@ -951,7 +867,6 @@ module FsmTransform
           index:           seg.index,
           prologue_stmts:  prologue_stmts,
           body_stmts:      body_stmts,
-          structure_stmts: seg_mir_codes[i] || [],
           tail:            seg.tail,
           descriptor:      descriptor,
           fsm_result_transfer_facts: seg_result_facts[seg.index] || [],
@@ -969,32 +884,119 @@ module FsmTransform
       # expansion concentrates that complexity here so the splitter
       # stays purely structural.
       lock_extra_fields = T.let([], T::Array[MIR::ContextFieldDecl])
-      next_extra_idx = segment_specs.length
-      expanded_specs = []
+      next_lock_segment_index = segment_specs.length
+      expanded_specs = T.let([], T::Array[FsmSegmentSpec])
       segment_specs.each do |spec|
         if spec.tail.is_a?(Segments::LockSuspend)
           out = expand_lock_segment(spec, ctx, capture_map,
-                                    lowering, next_extra_idx)
+                                    lowering, next_lock_segment_index)
           return nil if out.nil?
           expanded_specs << out.lock_try_spec
           expanded_specs.concat(out.appended_specs)
           lock_extra_fields.concat(out.extra_fields)
-          next_extra_idx += out.appended_specs.length
+          next_lock_segment_index += out.appended_specs.length
         else
           expanded_specs << spec
         end
       end
-      segment_specs = expanded_specs
 
       synthetic = segment_list.synthetic_fields
-      all_fields = extra_ctx_fields + synthetic + lock_extra_fields
-      # Dedupe by field name (before the colon). Conservative
-      # promotion (collect_body_locals) and splitter-synthesized
+      all_fields = ctx.extra_ctx_fields + synthetic + lock_extra_fields
+      deduped = dedupe_context_fields(all_fields)
+      ctx_with_extras = ctx.with_extra_ctx_fields(deduped)
+      suspend_result_vars =
+        segment_nodes.filter_map do |seg|
+          Segments.suspend_tail?(seg.tail) ? seg.tail.result_var : nil
+        end
+      conservative_names = recursive_promoted_names.each_with_object({}) { |n, h| h[n] = true }
+      promoted_value_decls =
+        liveness.cross_segment_vars
+          .reject { |name, _|
+            suspend_result_vars.include?(name) ||
+              conservative_names.include?(name)
+          }
+          .map do |name, info|
+            type_info = info.type_info
+            ctx_field_decl(name.to_s, type_info ? type_info.zig_type : "anyopaque", MIR::Undef.new(nil))
+          end
+      promoted_guard_decls = fsm_promoted_names.map { |name| ctx_field_decl("#{name}_moved", "bool", MIR::Lit.new("false")) }
+      promoted_field_decls = promoted_value_decls + promoted_guard_decls
+      build_fsm_unified(ctx_with_extras, expanded_specs, promoted_field_decls, lowering)
+    end
+
+    sig { params(ctx: FsmEmitContext, segments: T::Array[Segments::Segment], liveness: Liveness::Result).returns(T::Hash[String, String]) }
+    def self.build_recursive_capture_map(ctx, segments, liveness)
+      id = ctx.id
+      capture_map = T.let({}, T::Hash[String, String])
+      ctx.captured.each_key do |name|
+        capture_map[name] = "__ctx_#{id}.#{name}"
+      end
+      liveness.cross_segment_vars.each_key do |name|
+        capture_map[name] ||= "__ctx_#{id}.#{name}"
+      end
+      ctx.recursive_promoted_names.each do |name|
+        capture_map[name] ||= "__ctx_#{id}.#{name}"
+      end
+      segments.each do |seg|
+        next unless Segments.suspend_tail?(seg.tail)
+        rv = seg.tail.result_var
+        capture_map[rv] ||= "__ctx_#{id}.#{rv}" if rv && rv != "_"
+      end
+      capture_map
+    end
+
+    sig { params(ctx: FsmEmitContext).void }
+    def self.register_recursive_destroy_actions!(ctx)
+      id = ctx.id
+      ctx.destroy_actions = []
+      ctx.captured.each do |name, _|
+        close_plan = ctx.capture_close_plans[name]
+        next unless close_plan
+
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+          source_kind: :capture,
+          name: name.to_s,
+          target: fsm_ctx_field(id, name.to_s),
+          cleanup_entry: CleanupEntry.build(
+            :resource,
+            alloc: :heap,
+            has_moved_guard: false,
+            resource_close_plan: close_plan,
+          ),
+        )
+      end
+      # FreshHeapCopy captures are fiber-owned ctx fields. Register the
+      # cleanup from the capture names and a CleanupEntry instead of
+      # stripping `defer` from a previously rendered Zig line.
+      ctx.fresh_heap_cleanup_names.each do |name|
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+          source_kind: :fresh_heap,
+          name: name,
+          target: fsm_ctx_field(id, name),
+          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
+          allocator: fsm_ctx_field(id, "alloc"),
+        )
+      end
+      ctx.capture_finalizers.each do |finalizer|
+        name = fsm_destroy_finalizer_name(finalizer)
+        next unless name
+
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyStmt.new(
+          source_kind: :capture,
+          name: name,
+          stmt: finalizer,
+        )
+      end
+    end
+
+    sig { params(fields: T::Array[MIR::ContextFieldDecl]).returns(T::Array[MIR::ContextFieldDecl]) }
+    def self.dedupe_context_fields(fields)
+      # Dedupe by field name. Conservative promotion and splitter-synthesized
       # iteration vars can both name the same field; first wins.
-      seen_names = {}
-      deduped = all_fields.reject do |decl|
+      seen_names = T.let({}, T::Hash[String, T::Boolean])
+      fields.reject do |decl|
         name = decl.name.to_s
-        next false if name.nil? || name.empty?
+        next false if name.empty?
         if seen_names[name]
           true
         else
@@ -1002,19 +1004,17 @@ module FsmTransform
           false
         end
       end
-      ctx_with_extras = ctx.with_extra_ctx_fields(deduped)
-      build_fsm_unified(ctx_with_extras, segment_specs, promoted_field_decls, lowering)
     end
 
     sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], id: Integer).returns(T::Array[MIR::Node]) }
-    def promote_fsm_mir_to_ctx_fields(body, promoted_names, id)
+    def self.promote_fsm_mir_to_ctx_fields(body, promoted_names, id)
       body.map do |node|
         T.cast(rewrite_promoted_fsm_node(node, promoted_names, id), MIR::Node)
       end
     end
 
     sig { params(node: PromotableFsmValue, promoted_names: T::Array[String], id: Integer).returns(PromotableFsmValue) }
-    def rewrite_promoted_fsm_node(node, promoted_names, id)
+    def self.rewrite_promoted_fsm_node(node, promoted_names, id)
       case node
       when Array
         return node.map { |child| rewrite_promoted_fsm_node(child, promoted_names, id) }
@@ -1039,7 +1039,7 @@ module FsmTransform
     end
 
     sig { params(node: MIR::Emittable, promoted_names: T::Array[String], id: Integer).void }
-    def rewrite_promoted_fsm_struct_fields!(node, promoted_names, id)
+    def self.rewrite_promoted_fsm_struct_fields!(node, promoted_names, id)
       return unless node.is_a?(Struct)
       node.members.each do |field|
         value = node[field]
@@ -1050,12 +1050,12 @@ module FsmTransform
     end
 
     sig { params(id: Integer, name: String).returns(MIR::FieldGet) }
-    def fsm_ctx_field(id, name)
+    def self.fsm_ctx_field(id, name)
       MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), name)
     end
 
     sig { params(finalizer: MIR::Emittable).returns(T.nilable(String)) }
-    def fsm_destroy_finalizer_name(finalizer)
+    def self.fsm_destroy_finalizer_name(finalizer)
       return nil unless finalizer.is_a?(MIR::RcRelease)
 
       source = finalizer.source
@@ -1065,7 +1065,7 @@ module FsmTransform
     end
 
     sig { params(name: String, promoted_names: T::Array[String]).returns(T.nilable(String)) }
-    def promoted_fsm_field_name(name, promoted_names)
+    def self.promoted_fsm_field_name(name, promoted_names)
       return name if promoted_names.include?(name)
       promoted_names.each do |candidate|
         local_prefix = "#{candidate}_L"
@@ -1085,7 +1085,7 @@ module FsmTransform
     end
 
     sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], ctx_ref: String, ctx: FsmEmitContext).returns(T::Array[MIR::Node]) }
-    def lift_ctx_cleanups_to_destroy!(body, promoted_names, ctx_ref, ctx)
+    def self.lift_ctx_cleanups_to_destroy!(body, promoted_names, ctx_ref, ctx)
       body.filter_map do |node|
         if node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
           promoted_name = promoted_fsm_field_name(node.name.to_s, promoted_names)
@@ -1104,7 +1104,7 @@ module FsmTransform
     end
 
     sig { params(segments: T::Enumerable[Segments::Segment], lowering: Object).returns(T::Hash[String, String]) }
-    def fsm_owned_result_guards(segments, lowering)
+    def self.fsm_owned_result_guards(segments, lowering)
       T.bind(self, T.untyped) rescue nil
       guards = {}
       segments.each do |seg|
@@ -1120,7 +1120,7 @@ module FsmTransform
     end
 
     sig { params(segment_specs: T::Array[FsmSegmentSpec], ctx: FsmEmitContext, id: Integer).void }
-    def register_owned_suspend_result_cleanups!(segment_specs, ctx, id)
+    def self.register_owned_suspend_result_cleanups!(segment_specs, ctx, id)
       seen = Set.new
       segment_specs.each do |spec|
         desc = spec.descriptor
@@ -1150,7 +1150,7 @@ module FsmTransform
     # today, but the regex below requires the receiver to be a
     # bare identifier so it's robust against that case.
     sig { params(seg_codes: T::Array[T::Array[MIR::Node]], segments: T::Array[Segments::Segment], liveness: Liveness::Result, captured: T::Hash[String, Object], conservative_promoted: T::Array[String]).void }
-    def check_fsm_cleanup_invariant!(seg_codes, segments, liveness,
+    def self.check_fsm_cleanup_invariant!(seg_codes, segments, liveness,
                                      captured, conservative_promoted)
       T.bind(self, T.untyped) rescue nil
       forbidden = liveness.cross_segment_vars.keys.dup
@@ -1199,7 +1199,7 @@ module FsmTransform
     # Returns nil on metadata / error-arm failure (caller falls
     # back to stackful).
     sig { params(spec: FsmSegmentSpec, ctx: FsmEmitContext, capture_map: T::Hash[String, String], lowering: Object, base_idx: Integer).returns(T.nilable(ExpandedLockSegment)) }
-    def expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
+    def self.expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
       lowering_api = T.unsafe(lowering)
       tail      = T.cast(spec.tail, Segments::LockSuspend)
       with_node = tail.with_node
@@ -1341,14 +1341,14 @@ module FsmTransform
     # SuspendResolvers (which lowers under the surrounding fiber
     # capture-map).
     sig { params(seg: Segments::Segment, ctx: FsmEmitContext, lowering: Object, capture_map: T::Hash[String, String], sp_idx: T.nilable(Integer)).returns(T.nilable(MIR::SuspendDescriptor)) }
-    def build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
+    def self.build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
       lowering_api = T.unsafe(lowering)
       tail = seg.tail
       return nil unless Segments.suspend_tail?(tail)
 
       bg_rt = ctx.bg_rt
       pointer_captures = ctx.pointer_captures
-      result = lowering_api.with_bg_fiber_body_context(pointer_captures || Set.new) do
+      result = lowering_api.with_bg_fiber_body_context(pointer_captures) do
         lowering_api.with_fiber_capture_map(capture_map, rt_override: bg_rt) do
           # Caller-supplied sp_idx (allocated by compute_sp_indices in
           # dispatch order) takes precedence so sp_<N> labels track
@@ -1367,7 +1367,7 @@ module FsmTransform
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
     sig { params(segments: T::Array[Segments::Segment]).returns(T::Hash[Integer, Integer]) }
-    def compute_sp_indices(segments)
+    def self.compute_sp_indices(segments)
       out = T.let({}, T::Hash[Integer, Integer])
       counter = T.let(1, Integer)
       visited = T.let({}, T::Hash[Integer, T::Boolean])
@@ -1405,8 +1405,8 @@ module FsmTransform
 
     # Shared spawn/init/break setup. Identical across all FSM
     # body shapes.
-    sig { params(ctx: FsmEmitContext, lowering: Object).returns(MIR::FsmSpawnSetup) }
-    def build_spawn_setup(ctx, lowering)
+    sig { params(ctx: FsmEmitContext).returns(MIR::FsmSpawnSetup) }
+    def self.build_spawn_setup(ctx)
       is_local_pin = (ctx.pin_mode == true || ctx.pin_mode == :local)
       is_default_local = (ctx.pin_mode.nil? || ctx.pin_mode == false) && !ctx.parallel
       is_local_dispatch = is_local_pin || is_default_local
@@ -1474,12 +1474,12 @@ module FsmTransform
     end
 
     sig { params(name: String, type_zig: String, default_value: T.nilable(MIR::Emittable)).returns(MIR::ContextFieldDecl) }
-    def ctx_field_decl(name, type_zig, default_value)
+    def self.ctx_field_decl(name, type_zig, default_value)
       MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
     end
 
     sig { params(dispatch: T.untyped).returns(Integer) }
-    def profile_dispatch_id(dispatch)
+    def self.profile_dispatch_id(dispatch)
       T.bind(self, T.untyped) rescue nil
       case dispatch
       when :parallel then 2
@@ -1489,8 +1489,49 @@ module FsmTransform
     end
 
     sig { params(ctx: FsmEmitContext, dispatch: T.any(Symbol, T::Boolean), form: Symbol).returns(String) }
-    def bg_profile_site_comment(ctx, dispatch, form)
+    def self.bg_profile_site_comment(ctx, dispatch, form)
       "// CLEAR_PROFILE_TASK_SITE id=#{ctx.profile_site_id} kind=BG line=#{ctx.profile_line} column=#{ctx.profile_column} dispatch=#{dispatch} form=#{form}"
     end
-  end
+
+    private_class_method :build_fsm_segment_facts,
+      :build_fsm_structure,
+      :build_fsm_unified,
+      :collect_move_guard_writes,
+      :collect_result_names,
+      :lift_ctx_cleanups_to_destroy!,
+      :register_owned_suspend_result_cleanups!
+  private_class_method :build_dispatch_tail
+  private_class_method :build_recursive_capture_map
+  private_class_method :build_segment_descriptor
+  private_class_method :build_spawn_setup
+  private_class_method :check_fsm_cleanup_invariant!
+  private_class_method :collect_ctx_field_reads
+  private_class_method :collect_fsm_nodes
+  private_class_method :collect_required_move_guards
+  private_class_method :compute_sp_indices
+  private_class_method :ctx_inner_result_target?
+  private_class_method :dedupe_context_fields
+  private_class_method :decimal_digits?
+  private_class_method :expand_lock_segment
+  private_class_method :fsm_body_emit_values
+  private_class_method :fsm_ctx_field_prefix
+  private_class_method :fsm_ctx_name?
+  private_class_method :fsm_destroy_actions
+  private_class_method :fsm_destroy_finalizer_name
+  private_class_method :fsm_fact_guard_name
+  private_class_method :fsm_owned_result_guards
+  private_class_method :fsm_segment_fact_roots
+  private_class_method :materialize_fsm_segment_facts
+  private_class_method :mir_nodes_reference_ident?
+  private_class_method :ordered_fsm_destroy_actions
+  private_class_method :prior_lock_release_stmts
+  private_class_method :promote_fsm_mir_to_ctx_fields
+  private_class_method :register_recursive_destroy_actions!
+  private_class_method :result_source_name
+  private_class_method :rewrite_promoted_fsm_node
+  private_class_method :rewrite_promoted_fsm_struct_fields!
+  private_class_method :tail_resume_target
+  private_class_method :true_literal?
+
+end
 end

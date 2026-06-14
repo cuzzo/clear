@@ -140,7 +140,7 @@ class IntrinsicContract < T::Struct
       behavior: IntrinsicBehaviorContract.new(
         is_method: emit.is_method,
         suspends: emit.suspends,
-        fsm_setup_present: !emit.fsm_setup.nil?,
+        fsm_setup_present: emit.fsm_setup_present,
         narrows_collection: emit.narrows_collection,
         narrows_receiver_collection: emit.narrows_receiver_collection,
         reject_when: emit.reject_when,
@@ -155,8 +155,7 @@ class IntrinsicContract < T::Struct
   sig { params(emit: IntrinsicEmit, params: T::Array[AST::Param]).returns(T::Set[Integer]) }
   def self.normalized_takes_indices(emit, params)
     indices = T.let(Set.new, T::Set[Integer])
-    emit_indices = emit.takes_args
-    emit_indices&.each { |index| indices << index }
+    emit.takes_args.each { |index| indices << index }
     params.each_with_index { |param, index| indices << index if param.takes }
     indices
   end
@@ -164,7 +163,7 @@ class IntrinsicContract < T::Struct
   sig { params(emit: IntrinsicEmit).returns(T::Set[Integer]) }
   def self.normalized_argument_takes_indices(emit)
     indices = T.let(Set.new, T::Set[Integer])
-    emit.takes_args&.each { |index| indices << index }
+    emit.takes_args.each { |index| indices << index }
     indices
   end
 end

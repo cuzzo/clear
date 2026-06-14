@@ -1,5 +1,5 @@
 # typed: strict
-# src/mir_emitter.rb -- MIR -> Zig template engine.
+# src/backends/mir_emitter.rb -- MIR -> Zig template engine.
 #
 # CONTRACT: This file is a pure template engine. Each MIR node type maps to
 # exactly one fixed Zig text fragment. There is no ownership logic, no
@@ -22,14 +22,16 @@
 
 require "sorbet-runtime"
 
-require_relative "mir"
-require_relative "cleanup_entry"
-require_relative "placement"
-require_relative "../backends/zig_type"
+require_relative "../ast/error_registry"
+require_relative "../mir/mir"
+require_relative "../mir/cleanup_entry"
+require_relative "../mir/placement"
+require_relative "zig_type"
 
 class MIREmitter
     extend T::Sig
 
+  sig { returns(String) }
   attr_accessor :rt_name
 
   THUNK_COMBINE_OPERATOR = T.let({
@@ -101,6 +103,7 @@ class MIREmitter
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
     when MIR::BgBlock          then emit_bg_block(node)
+    when MIR::ShardConcurrentEach then emit_shard_concurrent_each(node)
     when MIR::DoBlock          then emit_do_block(node)
     when MIR::CatchWrapper     then emit_catch_wrapper(node)
     when MIR::Comment          then "// #{node.text}"
@@ -113,7 +116,7 @@ class MIREmitter
     when MIR::AllocSlice       then emit_alloc_slice(node)
     when MIR::FreeSlice        then emit_free_slice(node)
     when MIR::DestroyPtr       then emit_destroy_ptr(node)
-    when MIR::Cleanup          then emit_cleanup(node, errdefer: false)
+    when MIR::Cleanup          then emit_cleanup(node)
     when MIR::ErrCleanup       then emit_cleanup(node, errdefer: true)
     when MIR::MoveMark         then emit_move_mark(node)
     when MIR::DeepCopy         then emit_deep_copy(node)
@@ -493,8 +496,7 @@ class MIREmitter
     end
     pattern = pattern.gsub("{key_zig}", node.key_type.zig_type) if node.key_type
     pattern = pattern.gsub("{val_zig}", node.value_type.zig_type) if node.value_type
-    allocs = MIR::InlineAllocMetadata.from(node.resolved_allocs)
-    allocs&.each do |alloc_key, sym|
+    node.resolved_allocs.each do |alloc_key, sym|
       pattern = pattern.gsub("{#{alloc_key}}", alloc_zig(sym))
     end
     pattern
@@ -651,6 +653,201 @@ class MIREmitter
               .{ .stack_size = .#{node.task_config_variant} }
           )
     ZIG
+  end
+
+  sig { params(node: MIR::ShardConcurrentEach).returns(String) }
+  def emit_shard_concurrent_each(node)
+    id = node.id
+    idx_var = "__sh#{id}_i"
+    key_var = "__sh#{id}_key"
+    sh_var = "__sh#{id}_sh"
+    map_ptr = "__sh#{id}_map"
+    key_zig = node.key_type.zig_type
+    shard_count = node.shard_count
+    string_key = !node.map_type.numeric_map?
+
+    body_zig = emit_body_with_runtime(node.body, "__rt")
+    worker_body = body_zig.include?("__rt") ? body_zig : "_ = &__rt;\n#{body_zig}"
+    producer_key_body = emit_body(node.producer_key_body)
+    capture_setup = emit_body(node.capture_setup)
+    capture_fields = emit_shard_worker_capture_fields(node, map_ptr)
+    capture_inits = emit_shard_worker_capture_inits(node, map_ptr)
+
+    key_loop_mark = if node.key_allocates_frame
+      "const __sh#{id}_key_mark = rt.saveLoopMark();\ndefer rt.restoreLoopMark(__sh#{id}_key_mark);"
+    else
+      ""
+    end
+    body_loop_mark = if node.body_allocates_frame
+      "const __sh#{id}_body_mark = __rt.saveLoopMark();\ndefer __rt.restoreLoopMark(__sh#{id}_body_mark);"
+    else
+      ""
+    end
+    key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
+    key_free_work = shard_key_free_work(id, string_key)
+    key_free_success = string_key ? "__rt.heapAlloc().free(#{key_var});" : ""
+    key_free_remaining = string_key ? "errdefer for (__work.keys[__sh#{id}_ki..]) |__k| __rt.heapAlloc().free(__k);" : ""
+    key_slice_cleanup = string_key ? "for (__sh#{id}_keys) |__k| rt.heapAlloc().free(__k);" : ""
+    pending_batch_cleanup = string_key ? "for (__sh#{id}_batches[__s].items) |__k| rt.heapAlloc().free(__k);" : ""
+    op_str = node.inclusive ? "<=" : "<"
+
+    <<~ZIG.chomp
+      {
+          const #{map_ptr} = &#{emit(node.map_expr)};
+          #{map_ptr}.ensureOwnership();
+          const __sh#{id}_cap: usize = #{emit(node.capacity_expr)};
+          const __sh#{id}_batch: usize = @max(@as(usize, #{emit(node.batch_size_expr)}), 1);
+          const __ShWork#{id} = struct {
+              keys: []#{key_zig},
+          };
+          const __ShCleanup#{id} = struct {
+      #{indent_block(emit_shard_cleanup_buffered(id, string_key), 12)}
+          };
+          var __sh#{id}_chans: [#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}) = undefined;
+          for (0..#{shard_count}) |__s| {
+              __sh#{id}_chans[__s] = try CheatLib.BoundedChannel(__ShWork#{id}).init(rt.heapAlloc(), __sh#{id}_cap);
+          }
+          defer for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].deinit();
+      #{indent_block(capture_setup, 4)}
+          var __sh#{id}_wg = CheatHeader.WaitGroup.init(rt.getSched());
+          var __sh#{id}_err = std.atomic.Value(bool).init(false);
+          const __ShWorker#{id} = struct {
+              wg: *CheatHeader.WaitGroup,
+              chans: *[#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}),
+              err: *std.atomic.Value(bool),
+              shard: usize,
+      #{indent_block(capture_fields, 8)}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  errdefer {
+                      ctx.err.store(true, .release);
+                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(error.CheatError);
+                  }
+                  while (ctx.chans[ctx.shard].pop() catch |__err| {
+                      ctx.err.store(true, .release);
+                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(__err);
+                      return __err;
+                  }) |__work| {
+                      errdefer {
+      #{indent_block(key_free_work, 24)}
+                      }
+                      var __sh#{id}_ki: usize = 0;
+                      while (__sh#{id}_ki < __work.keys.len) : (__sh#{id}_ki += 1) {
+      #{indent_block(key_free_remaining, 24)}
+                          const #{key_var}: #{key_zig} = __work.keys[__sh#{id}_ki];
+      #{indent_block(body_loop_mark, 24)}
+      #{indent_block(worker_body, 24)}
+      #{indent_block(key_free_success, 24)}
+                      }
+                      __rt.heapAlloc().free(__work.keys);
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __sh#{id}_workers: [#{shard_count}]__ShWorker#{id} = undefined;
+          __sh#{id}_wg.add(#{shard_count});
+          for (0..#{shard_count}) |__s| {
+              __sh#{id}_workers[__s] = .{ .wg = &__sh#{id}_wg, .chans = &__sh#{id}_chans, .err = &__sh#{id}_err, .shard = __s#{capture_inits} };
+              try CheatHeader.spawnBest(
+                  @intFromPtr(&Runtime.entryWrapper),
+                  @as(CheatHeader.TaskFn, @ptrCast(&__ShWorker#{id}.run)),
+                  &__sh#{id}_workers[__s],
+                  .{ .stack_size = .#{node.task_config_variant} },
+              );
+          }
+
+          var __sh#{id}_batches: [#{shard_count}]std.ArrayListUnmanaged(#{key_zig}) = [_]std.ArrayListUnmanaged(#{key_zig}){.empty} ** #{shard_count};
+          defer for (0..#{shard_count}) |__s| {
+      #{indent_block(pending_batch_cleanup, 12)}
+              __sh#{id}_batches[__s].deinit(rt.heapAlloc());
+          };
+
+          var #{idx_var}: i64 = #{emit(node.start_expr)};
+          const __sh#{id}_end: i64 = #{emit(node.finish_expr)};
+          while ((#{idx_var} #{op_str} __sh#{id}_end) and !__sh#{id}_err.load(.acquire)) : (#{idx_var} += 1) {
+      #{indent_block(key_loop_mark, 12)}
+      #{indent_block(producer_key_body, 12)}
+              const #{sh_var} = @TypeOf(#{map_ptr}.*).shardIndexWithHash(#{key_var});
+              try __sh#{id}_batches[#{sh_var}.shard].append(rt.heapAlloc(), #{key_store_expr});
+              if (__sh#{id}_batches[#{sh_var}.shard].items.len >= __sh#{id}_batch) {
+                  const __sh#{id}_keys = try __sh#{id}_batches[#{sh_var}.shard].toOwnedSlice(rt.heapAlloc());
+                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
+                  __sh#{id}_chans[#{sh_var}.shard].push(__sh#{id}_work) catch |__err| {
+      #{indent_block(key_slice_cleanup, 20)}
+                      rt.heapAlloc().free(__sh#{id}_keys);
+                      __sh#{id}_err.store(true, .release);
+                      for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].setError(__err);
+                      break;
+                  };
+              }
+          }
+          for (0..#{shard_count}) |__s| {
+              if (__sh#{id}_batches[__s].items.len > 0 and !__sh#{id}_err.load(.acquire)) {
+                  const __sh#{id}_keys = try __sh#{id}_batches[__s].toOwnedSlice(rt.heapAlloc());
+                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
+                  __sh#{id}_chans[__s].push(__sh#{id}_work) catch |__err| {
+      #{indent_block(key_slice_cleanup, 20)}
+                      rt.heapAlloc().free(__sh#{id}_keys);
+                      __sh#{id}_err.store(true, .release);
+                      for (0..#{shard_count}) |__ss| __sh#{id}_chans[__ss].setError(__err);
+                      break;
+                  };
+              }
+          }
+          for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].close();
+          __sh#{id}_wg.wait();
+          for (0..#{shard_count}) |__s| __ShCleanup#{id}.cleanupBuffered(&__sh#{id}_chans[__s], rt);
+          if (__sh#{id}_err.load(.acquire)) return error.CheatError;
+      }
+    ZIG
+  end
+
+  sig { params(node: MIR::ShardConcurrentEach, map_ptr: String).returns(String) }
+  def emit_shard_worker_capture_fields(node, map_ptr)
+    fields = T.let([
+      "__shard_map: *@TypeOf(#{map_ptr}.*),",
+    ], T::Array[String])
+    rendered = emit_context_field_decls(node.capture_fields)
+    fields << rendered unless rendered.empty?
+    fields.join("\n")
+  end
+
+  sig { params(node: MIR::ShardConcurrentEach, map_ptr: String).returns(String) }
+  def emit_shard_worker_capture_inits(node, map_ptr)
+    fields = [".__shard_map = #{map_ptr}"]
+    rendered = emit_struct_init_fields(node.capture_inits)
+    fields << rendered unless rendered.empty?
+    ", #{fields.join(", ")}"
+  end
+
+  sig { params(id: Integer, string_key: T::Boolean).returns(String) }
+  def emit_shard_cleanup_buffered(id, string_key)
+    key_cleanup = if string_key
+      "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n__rt.heapAlloc().free(__work.keys);"
+    else
+      "__rt.heapAlloc().free(__work.keys);"
+    end
+    <<~ZIG.chomp
+      fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork#{id}), __rt: *Runtime) void {
+          const inner = chan.inner;
+          inner.mutex.lock();
+          while (inner.tail != inner.head) {
+              const __work = inner.buf[inner.tail & inner.mask];
+              inner.tail += 1;
+      #{indent_block(key_cleanup, 12)}
+          }
+          inner.mutex.unlock();
+      }
+    ZIG
+  end
+
+  sig { params(id: Integer, string_key: T::Boolean).returns(String) }
+  def shard_key_free_work(id, string_key)
+    return "__rt.heapAlloc().free(__work.keys);" unless string_key
+
+    "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n__rt.heapAlloc().free(__work.keys);"
   end
 
   sig { params(stmts: T::Array[MIR::Emittable], runtime_name: String).returns(String) }
@@ -2745,4 +2942,23 @@ class MIREmitter
     storage_type = ZigType.new(zig_type).cleanup_storage_type
     direct_cleanup_statement(name, "CheatLib.cleanup(#{storage_type}, #{alloc}, #{arg})", guarded)
   end
+
+  private :emit_bg_block,
+    :emit_bg_stackful_plan,
+    :emit_bg_stream_plan,
+    :emit_capture_cleanup_actions,
+    :emit_do_block_plan,
+    :emit_do_branch_plan,
+    :emit_sharded_map_get,
+    :emit_sharded_map_put
+  private :bg_stackful_runtime_suppress_line
+  private :emit_context_field_decls
+  private :emit_do_block
+  private :emit_fiber_spawn_call
+  private :emit_fsm_bg_body
+  private :emit_inline_bc_as_zig
+  private :emit_struct_init_fields
+  private :emit_task_config_plan
+  private :fsm_bg_body_plan?
+
 end

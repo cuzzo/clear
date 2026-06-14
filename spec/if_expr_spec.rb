@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/type"
-require_relative "../src/ast/source_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 def compile_if_expr_src(src)
   ZigTranspiler.new.transpile(src, test_mode: true)
@@ -11,12 +11,12 @@ end
 
 def parse_if_expr_src(src)
   tokens = Lexer.new(src).tokenize
-  Parser.new(tokens, src).parse
+  ClearParser.new(tokens, src).parse
 end
 
 def annotate_if_expr_src(src)
   tokens = Lexer.new(src).tokenize
-  ast    = Parser.new(tokens, src).parse
+  ast    = ClearParser.new(tokens, src).parse
   SemanticAnnotator.new.annotate!(ast)
   ast
 end
@@ -24,9 +24,9 @@ end
 RSpec.describe "IF/MATCH as expressions" do
 
   # =========================================================================
-  # Parser: IF in expression position
+  # ClearParser: IF in expression position
   # =========================================================================
-  describe "Parser" do
+  describe "ClearParser" do
     it "parses 'x = IF cond THEN a ELSE b END' as BindExpr with IfStatement value" do
       ast = parse_if_expr_src(<<~CLEAR)
         FN main() RETURNS Void ->

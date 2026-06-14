@@ -1,0 +1,195 @@
+name: Manual mutants
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Exact PR head SHA to mutant test"
+        required: true
+        type: string
+      base_sha:
+        description: "Base SHA for Ruby --since filtering; leave blank for full subject selection"
+        required: false
+        type: string
+      head_repository:
+        description: "Repository containing the head SHA; leave blank for this repository"
+        required: false
+        type: string
+      ruby_shards:
+        description: "Ruby spec mutant shard count"
+        required: true
+        default: "32"
+        type: string
+      fuzz_shards:
+        description: "Fuzz mutant shard count"
+        required: true
+        default: "8"
+        type: string
+      transpile_shards:
+        description: "Transpile mutant shard count"
+        required: true
+        default: "5"
+        type: string
+
+concurrency:
+  group: mutants-manual-${{ inputs.sha }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: "0.16.0"
+  RUBY_VERSION: "3.2"
+  COVERAGE: "0"
+
+jobs:
+  mark-pending:
+    name: Mark mutants/manual pending
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Set pending status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state=pending \
+            -f context='mutants/manual' \
+            -f description='Manual mutant gate is running' \
+            -f target_url="${TARGET_URL}"
+
+  plan:
+    name: Build shard matrices
+    runs-on: ubuntu-latest
+    outputs:
+      ruby_matrix: ${{ steps.matrix.outputs.ruby_matrix }}
+      fuzz_matrix: ${{ steps.matrix.outputs.fuzz_matrix }}
+      transpile_matrix: ${{ steps.matrix.outputs.transpile_matrix }}
+    steps:
+      - id: matrix
+        env:
+          RUBY_SHARDS: ${{ inputs.ruby_shards }}
+          FUZZ_SHARDS: ${{ inputs.fuzz_shards }}
+          TRANSPILE_SHARDS: ${{ inputs.transpile_shards }}
+        run: |
+          ruby <<'RUBY' >> "$GITHUB_OUTPUT"
+          require "json"
+
+          def matrix(env_name)
+            count = Integer(ENV.fetch(env_name))
+            raise "#{env_name} must be between 1 and 64" unless count.between?(1, 64)
+
+            { include: count.times.map { |index| { shard: index, count: count } } }
+          end
+
+          puts "ruby_matrix=#{JSON.generate(matrix("RUBY_SHARDS"))}"
+          puts "fuzz_matrix=#{JSON.generate(matrix("FUZZ_SHARDS"))}"
+          puts "transpile_matrix=#{JSON.generate(matrix("TRANSPILE_SHARDS"))}"
+          RUBY
+
+  ruby-spec-mutants:
+    name: Ruby spec mutants shard ${{ matrix.shard }}/${{ matrix.count }}
+    runs-on: ubuntu-latest
+    needs: plan
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.ruby_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Run Ruby spec mutants
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          args=(--shard "${{ matrix.shard }}/${{ matrix.count }}" --out "/tmp/clear-ruby-mutants-${{ matrix.shard }}")
+          if [ -n "${BASE_SHA}" ]; then
+            git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null || \
+              git fetch --no-tags --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "${BASE_SHA}"
+            args+=(--since "${BASE_SHA}")
+          fi
+          MUTANT_JOBS="$(nproc)" bundle exec ruby tools/mutants/ruby_specs.rb "${args[@]}"
+
+  fuzz-mutants:
+    name: Fuzz mutants shard ${{ matrix.shard }}/${{ matrix.count }}
+    runs-on: ubuntu-latest
+    needs: plan
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.fuzz_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
+          ref: ${{ inputs.sha }}
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: bundle exec ruby tools/fuzz/mutants/run.rb --all --shard ${{ matrix.shard }}/${{ matrix.count }} --out /tmp/clear-fuzz-mutants-${{ matrix.shard }}
+
+  transpile-mutants:
+    name: Transpile mutants shard ${{ matrix.shard }}/${{ matrix.count }}
+    runs-on: ubuntu-latest
+    needs: plan
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.transpile_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
+          ref: ${{ inputs.sha }}
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: bundle exec ruby tools/mutants/transpile_tests.rb --all --shard ${{ matrix.shard }}/${{ matrix.count }} --out /tmp/clear-transpile-mutants-${{ matrix.shard }}
+
+  complete:
+    name: mutants/manual
+    runs-on: ubuntu-latest
+    needs: [mark-pending, ruby-spec-mutants, fuzz-mutants, transpile-mutants]
+    if: always()
+    permissions:
+      statuses: write
+    steps:
+      - name: Set final status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUBY_RESULT: ${{ needs.ruby-spec-mutants.result }}
+          FUZZ_RESULT: ${{ needs.fuzz-mutants.result }}
+          TRANSPILE_RESULT: ${{ needs.transpile-mutants.result }}
+        run: |
+          state=success
+          description='Manual mutant gate passed'
+          if [ "${RUBY_RESULT}" != "success" ] || [ "${FUZZ_RESULT}" != "success" ] || [ "${TRANSPILE_RESULT}" != "success" ]; then
+            state=failure
+            description='Manual mutant gate failed'
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state="${state}" \
+            -f context='mutants/manual' \
+            -f description="${description}" \
+            -f target_url="${TARGET_URL}"
+
+          test "${state}" = "success"

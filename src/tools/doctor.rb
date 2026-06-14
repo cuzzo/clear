@@ -19,7 +19,6 @@ module Doctor
   FREEZE_MIN_AVG_BYTES  = 16   # below this = arena string/int bytes, not struct nodes
   FREEZE_MAX_AVG_BYTES  = 512
 
-  module_function
 
   # Scan a profile file for a `# WARNING: N samples dropped...` header
   # emitted by alloc-profile / lock-profile / mvcc-profile when the
@@ -27,14 +26,14 @@ module Doctor
   # leading `# `) or nil. Runtime modules emit at most one warning
   # line per dump, so the first match is authoritative.
   sig { params(file: String).returns(T.nilable(String)) }
-  def saturation_warning(file)
+  def self.saturation_warning(file)
     return nil unless File.exist?(file)
     line = File.foreach(file).find { |l| l.start_with?('# WARNING:') }
     line&.sub(/\A# /, '')&.rstrip
   end
 
   sig { params(profile_dir: T.nilable(String), cumulative: T::Boolean, focus: T.nilable(Regexp), ignore: T.nilable(Regexp), peek: T.nilable(Regexp), diff: T.nilable(String), by: Symbol).returns(NilClass) }
-  def run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil, by: :bytes)
+  def self.run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil, by: :bytes)
     if diff
       return run_diff(diff, profile_dir, focus: focus)
     end
@@ -63,21 +62,21 @@ module Doctor
     section_atomic_escape(profile_dir)
     section_syscalls(profile_dir)
     llc_miss_rate = section_hardware(profile_dir)
-    section_freeze(profile_dir, sites, resolved, llc_miss_rate)
+    section_freeze(profile_dir, sites || [], resolved || {}, llc_miss_rate)
   end
 
   # Returns true if a sample's trace (function names, leaf-first)
   # passes the focus/ignore filters. focus keeps only matches; ignore
   # drops matches; both can compose. With no filters set, every
   # sample passes.
-  def focus_match?(funcs)
+  def self.focus_match?(funcs)
     return false if @opts && @opts[:ignore] && funcs.any? { |f| f =~ @opts[:ignore] }
     return true unless @opts && @opts[:focus]
     funcs.any? { |f| f =~ @opts[:focus] }
   end
 
   sig { returns(T::Boolean) }
-  def cumulative?
+  def self.cumulative?
     !!(@opts && @opts[:cumulative])
   end
 
@@ -85,7 +84,7 @@ module Doctor
   # (`bytes` / `allocs` / `inuse_bytes` / `inuse_allocs`) to the
   # corresponding key in the parsed Site hash. Default `:bytes`.
   sig { returns(Symbol) }
-  def sort_key
+  def self.sort_key
     return :bytes unless @opts && @opts[:by]
     case @opts[:by]
     when :allocs        then :allocs
@@ -96,7 +95,7 @@ module Doctor
   end
 
   # Human-readable label for the sort axis (used in section headers).
-  def sort_label
+  def self.sort_label
     case sort_key
     when :allocs        then "allocations"
     when :inuse_bytes   then "in-use bytes (alloc - free)"
@@ -107,7 +106,7 @@ module Doctor
 
   # Format the sort metric as a string for the per-row display.
   # Bytes get KB/MB pretty-printing; counts get thousand-separators.
-  def fmt_sort_value(s)
+  def self.fmt_sort_value(s)
     v = s[sort_key]
     case sort_key
     when :allocs, :inuse_allocs
@@ -120,7 +119,7 @@ module Doctor
 
   # ── Heap Profile ──
   sig { params(profile_dir: String, binary: T.nilable(String)).returns(Array) }
-  def section_heap(profile_dir, binary)
+  def self.section_heap(profile_dir, binary)
     alloc_file = File.join(profile_dir, 'alloc.txt')
     unless File.exist?(alloc_file)
       puts "No heap profile found at #{alloc_file}"
@@ -302,7 +301,7 @@ module Doctor
 
   # ── CPU Profile + CLEAR Source Hot Lines ──
   sig { params(profile_dir: String, perf_data: String).returns(NilClass) }
-  def section_cpu(profile_dir, perf_data)
+  def self.section_cpu(profile_dir, perf_data)
     return unless File.exist?(perf_data)
     puts "=== CPU Profile ==="
     puts ""
@@ -378,7 +377,7 @@ module Doctor
   # capacity) or slow-producer-fast-consumer (consumer blocks often +
   # max_depth nowhere near capacity).
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_channels(profile_dir)
+  def self.section_channels(profile_dir)
     channel_file = File.join(profile_dir, 'channels.txt')
     return unless File.exist?(channel_file)
 
@@ -426,7 +425,7 @@ module Doctor
   # by sub-10us setup cost) and scheduler imbalance (one scheduler doing
   # most of the work while others are idle).
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_fibers(profile_dir)
+  def self.section_fibers(profile_dir)
     fiber_file = File.join(profile_dir, 'fibers.txt')
     return unless File.exist?(fiber_file)
 
@@ -523,7 +522,7 @@ module Doctor
     end
   end
 
-  def emit_parallel_bg_hint!(profile_dir, site_rows = [])
+  def self.emit_parallel_bg_hint!(profile_dir, site_rows = [])
     metadata = task_site_metadata(profile_dir)
     imbalanced_sites = site_rows.select do |site|
       next false unless site[:runs] && site[:runs] > 0
@@ -542,7 +541,7 @@ module Doctor
     emit_generic_local_bg_hint!(local_bg_source_lines(File.join(profile_dir, 'source.cht')))
   end
 
-  def emit_exact_local_bg_sites!(profile_dir, local_sites, metadata)
+  def self.emit_exact_local_bg_sites!(profile_dir, local_sites, metadata)
     puts ""
     puts "      Exact imbalanced local BG task sites:"
     local_sites.sort_by { |site| -site[:runs] }.first(8).each do |site|
@@ -560,7 +559,7 @@ module Doctor
     emit_parallel_bg_advice!
   end
 
-  def emit_generic_local_bg_hint!(local_bg_lines)
+  def self.emit_generic_local_bg_hint!(local_bg_lines)
     puts ""
     puts "      Profile contains local BG dispatches (`BG {}` defaults to the"
     puts "      current scheduler)."
@@ -573,18 +572,18 @@ module Doctor
     emit_parallel_bg_advice!
   end
 
-  def emit_parallel_bg_advice!
+  def self.emit_parallel_bg_advice!
     puts "      Use `BG { @parallel -> ... }` for CPU-parallel worker fanout."
     puts "      Keep plain `BG {}` for scheduler-affine, IO-affine, or"
     puts "      locality-sensitive work."
   end
 
-  def site_scheduler_skew(site)
+  def self.site_scheduler_skew(site)
     max_runs = site[:scheds].values.max || 0
     max_runs.to_f / site[:runs]
   end
 
-  def task_dispatch_counts(profile_dir)
+  def self.task_dispatch_counts(profile_dir)
     zig_source = File.join(profile_dir, 'transpiled.zig')
     return { local: 0, parallel: 0 } unless File.exist?(zig_source)
 
@@ -595,13 +594,13 @@ module Doctor
     }
   end
 
-  def local_dispatch_warning?(counts)
+  def self.local_dispatch_warning?(counts)
     local = counts[:local]
     parallel = counts[:parallel]
     local > 0 && (parallel == 0 || local > parallel)
   end
 
-  def task_site_metadata(profile_dir)
+  def self.task_site_metadata(profile_dir)
     zig_source = File.join(profile_dir, 'transpiled.zig')
     return {} unless File.exist?(zig_source)
 
@@ -623,14 +622,14 @@ module Doctor
     sites
   end
 
-  def source_line(profile_dir, line)
+  def self.source_line(profile_dir, line)
     return '' unless line && line != '?'
     clear_source = File.join(profile_dir, 'source.cht')
     return '' unless File.exist?(clear_source)
     File.readlines(clear_source)[line.to_i - 1]&.strip.to_s[0, 90]
   end
 
-  def local_bg_source_lines(clear_source)
+  def self.local_bg_source_lines(clear_source)
     return [] unless File.exist?(clear_source)
 
     lines = File.readlines(clear_source)
@@ -652,7 +651,7 @@ module Doctor
   #   - long critical sections (avg hold > 1ms)
   #   - hot lock (>10k acquires; recommends finer-grained locking)
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_locks(profile_dir)
+  def self.section_locks(profile_dir)
     lock_prof = File.join(profile_dir, 'locks.txt')
     return unless File.exist?(lock_prof)
 
@@ -821,7 +820,7 @@ module Doctor
 
   # Surface eligible locked-counter migrations only when the profile already
   # flagged write-heavy contention.
-  def emit_atomic_migration!(profile_dir)
+  def self.emit_atomic_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
@@ -853,7 +852,7 @@ module Doctor
 
   # Surface whole-struct-publish migrations only when static eligibility and
   # runtime contention both agree.
-  def emit_atomic_ptr_migration!(profile_dir)
+  def self.emit_atomic_ptr_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
@@ -902,7 +901,7 @@ module Doctor
   #     advantage is the lock-free read path; if writes dominate, the
   #     CAS-loop + EBR retire is just overhead.
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_mvcc(profile_dir)
+  def self.section_mvcc(profile_dir)
     mvcc_prof = File.join(profile_dir, 'mvcc.txt')
     return unless File.exist?(mvcc_prof)
 
@@ -1052,7 +1051,7 @@ module Doctor
 
   # Cross-reference runtime single-cell MVCC traffic with static whole-struct
   # replacement eligibility before suggesting @indirect:atomic.
-  def emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
+  def self.emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
@@ -1095,7 +1094,7 @@ module Doctor
   # Skipped silently when source.cht is missing or no atomic-
   # escape sites are detected.
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_atomic_escape(profile_dir)
+  def self.section_atomic_escape(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
@@ -1140,7 +1139,7 @@ module Doctor
 
   # ── Syscalls ──
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_syscalls(profile_dir)
+  def self.section_syscalls(profile_dir)
     strace_file = File.join(profile_dir, 'syscalls.txt')
     return unless File.exist?(strace_file)
 
@@ -1157,7 +1156,7 @@ module Doctor
   # Returns the LLC miss rate (or nil), so the FREEZE section can decide
   # whether to fire.
   sig { params(profile_dir: String).returns(NilClass) }
-  def section_hardware(profile_dir)
+  def self.section_hardware(profile_dir)
     perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
     return nil unless File.exist?(perf_stat_file)
 
@@ -1215,13 +1214,13 @@ module Doctor
   # ── FREEZE Recommendation ──
   # Fires when: high LLC miss rate + many small scattered heap allocations
   # (the signature of individually malloc'd tree/list nodes).
-  sig { params(profile_dir: String, sites: T.nilable(Array), resolved: T.nilable(Hash), llc_miss_rate: T.nilable(Float)).returns(NilClass) }
-  def section_freeze(profile_dir, sites, resolved, llc_miss_rate)
-    return unless llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites && sites.any?
+  sig { params(profile_dir: String, sites: Array, resolved: Hash, llc_miss_rate: T.nilable(Float)).returns(NilClass) }
+  def self.section_freeze(profile_dir, sites, resolved, llc_miss_rate)
+    return unless llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites.any?
 
     candidates = sites.select do |s|
       avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
-      r   = resolved&.dig(s[:addr])
+      r   = resolved.dig(s[:addr])
       fn  = r ? r[:func] : ''
       s[:allocs] >= FREEZE_MIN_ALLOCS &&
         avg >= FREEZE_MIN_AVG_BYTES && avg <= FREEZE_MAX_AVG_BYTES &&
@@ -1294,7 +1293,7 @@ module Doctor
   # per caller. For samples where `regex` matches a non-leaf frame,
   # also lists what's directly below — the callees this function
   # was on the path to. Mirrors `pprof -peek`'s shape.
-  def run_peek(profile_dir, regex)
+  def self.run_peek(profile_dir, regex)
     unless profile_dir && Dir.exist?(profile_dir)
       $stderr.puts "\e[31merror:\e[0m --peek requires a profile directory"
       exit 1
@@ -1364,7 +1363,7 @@ module Doctor
 
   # Same parsing as section_heap but without the printout — used by
   # run_peek so we can build caller/callee tables from the parsed sites.
-  def section_heap_silent(profile_dir, binary)
+  def self.section_heap_silent(profile_dir, binary)
     out = StringIO.new
     real, $stdout = $stdout, out
     sites, resolved = section_heap(profile_dir, binary)
@@ -1380,7 +1379,7 @@ module Doctor
   # newly trips "MVCC fit" gets called out, etc. Computes deltas
   # ourselves rather than shelling to `pprof -base` so doctor stays
   # self-contained and can attach commentary.
-  def run_diff(before_dir, after_dir, focus: nil)
+  def self.run_diff(before_dir, after_dir, focus: nil)
     before_dir = before_dir.to_s.chomp('/')
     after_dir  = after_dir.to_s.chomp('/')
     unless Dir.exist?(before_dir) && Dir.exist?(after_dir)
@@ -1410,7 +1409,7 @@ module Doctor
   # the same symbol table (ASLR / rebuild can shift addresses but the
   # function name should stay stable for the same source).
   sig { params(profile_dir: String, binary: T.nilable(String)).returns(Hash) }
-  def parse_alloc_for_diff(profile_dir, binary)
+  def self.parse_alloc_for_diff(profile_dir, binary)
     alloc_file = File.join(profile_dir, 'alloc.txt')
     return {} unless File.exist?(alloc_file)
 
@@ -1453,7 +1452,7 @@ module Doctor
     by_func
   end
 
-  def diff_heap(before_dir, after_dir, focus)
+  def self.diff_heap(before_dir, after_dir, focus)
     # Use the after-dir's binary for both lookups — that's the user's
     # current build. Falls back to the before-dir's binary if the
     # after-dir doesn't have one.
@@ -1509,7 +1508,7 @@ module Doctor
   end
 
   sig { params(profile_dir: String).returns(Hash) }
-  def parse_locks_for_diff(profile_dir)
+  def self.parse_locks_for_diff(profile_dir)
     lock_prof = File.join(profile_dir, 'locks.txt')
     return {} unless File.exist?(lock_prof)
     rows = File.readlines(lock_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
@@ -1533,7 +1532,7 @@ module Doctor
     by_addr
   end
 
-  def diff_locks(before_dir, after_dir, _focus)
+  def self.diff_locks(before_dir, after_dir, _focus)
     before = parse_locks_for_diff(before_dir)
     after  = parse_locks_for_diff(after_dir)
     return if before.empty? && after.empty?
@@ -1583,7 +1582,7 @@ module Doctor
   end
 
   sig { params(profile_dir: String).returns(Hash) }
-  def parse_mvcc_for_diff(profile_dir)
+  def self.parse_mvcc_for_diff(profile_dir)
     mvcc_prof = File.join(profile_dir, 'mvcc.txt')
     return {} unless File.exist?(mvcc_prof)
     rows = File.readlines(mvcc_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
@@ -1600,7 +1599,7 @@ module Doctor
     by_addr
   end
 
-  def diff_mvcc(before_dir, after_dir, _focus)
+  def self.diff_mvcc(before_dir, after_dir, _focus)
     before = parse_mvcc_for_diff(before_dir)
     after  = parse_mvcc_for_diff(after_dir)
     return if before.empty? && after.empty?
@@ -1649,7 +1648,7 @@ module Doctor
   # Prefers the after-dir's binary (the user's current build); falls
   # back to the before-dir's binary if the after-dir is missing one
   # (e.g. binary was deleted after profiling).
-  def locate_diff_binary(after_dir, before_dir)
+  def self.locate_diff_binary(after_dir, before_dir)
     [after_dir, before_dir].each do |dir|
       bin = dir.to_s.chomp('/').sub(/\.profile$/, '')
       return bin if File.exist?(bin)
@@ -1658,7 +1657,7 @@ module Doctor
   end
 
   sig { params(n: Integer).returns(String) }
-  def bytes_pretty(n)
+  def self.bytes_pretty(n)
     return "-" if n.zero?
     if n.abs >= 1024 * 1024
       "%.1f MB" % (n / (1024.0 * 1024.0))
@@ -1668,4 +1667,42 @@ module Doctor
       "#{n} B"
     end
   end
+
+  private_class_method :cumulative?,
+    :emit_parallel_bg_hint!,
+    :emit_exact_local_bg_sites!,
+    :focus_match?,
+    :run_diff
+  private_class_method :diff_heap
+  private_class_method :diff_locks
+  private_class_method :diff_mvcc
+  private_class_method :emit_atomic_migration!
+  private_class_method :emit_atomic_ptr_migration!
+  private_class_method :emit_atomic_ptr_upgrade_from_mvcc!
+  private_class_method :emit_generic_local_bg_hint!
+  private_class_method :emit_parallel_bg_advice!
+  private_class_method :local_bg_source_lines
+  private_class_method :local_dispatch_warning?
+  private_class_method :locate_diff_binary
+  private_class_method :parse_alloc_for_diff
+  private_class_method :parse_locks_for_diff
+  private_class_method :parse_mvcc_for_diff
+  private_class_method :run_peek
+  private_class_method :section_atomic_escape
+  private_class_method :section_channels
+  private_class_method :section_cpu
+  private_class_method :section_fibers
+  private_class_method :section_freeze
+  private_class_method :section_hardware
+  private_class_method :section_heap
+  private_class_method :section_heap_silent
+  private_class_method :section_locks
+  private_class_method :section_mvcc
+  private_class_method :section_syscalls
+  private_class_method :site_scheduler_skew
+  private_class_method :sort_key
+  private_class_method :sort_label
+  private_class_method :task_dispatch_counts
+  private_class_method :task_site_metadata
+
 end

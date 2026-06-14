@@ -73,7 +73,7 @@ based on parameter types and detected capabilities.
 | Parameter is `Int64` | 0, -1, max, min, powers of 2 |
 | Parameter is `HashMap<K,V>` | Keys that hash-collide (same bucket) |
 | Parameter uses `@sharded(N)` | Keys that all route to shard 0 (skew attack) |
-| Function is `@reentrant` | Recursive call to test stack depth limit |
+| Function declares `EFFECTS REENTRANT` | Recursive call to test stack depth limit |
 | Function has unbounded loops | Inputs that maximize iteration count |
 
 **The killer feature -- shard skew attack**:

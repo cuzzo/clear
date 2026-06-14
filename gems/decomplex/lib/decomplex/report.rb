@@ -30,6 +30,10 @@ module Decomplex
       @pcsc   = pc.scattered
       sm      = SequenceMine.scan(@files)
       @broken = sm.broken_protocol
+      icf     = ImplicitControlFlow.scan(@files)
+      @implicit_control_flow = icf.ordered_protocols(
+        min_support: Integer(ENV.fetch("DECOMPLEX_ICF_MIN_SUPPORT", "1"))
+      )
       @derived = DerivedState.scan(@files)
       @rename_clones = InconsistentRenameClone.scan(@files)
       @similarity = FlaySimilarity.scan(
@@ -47,6 +51,84 @@ module Decomplex
       @state_heat = state_mesh.findings
       @state_branch = StateBranchDensity.scan(@files).findings
       @temporal_ordering = TemporalOrderingPressure.scan(@files)
+      @weighted_inlined_complexity = WeightedInlinedCognitiveComplexity.scan(
+        @files,
+        min_score: Float(ENV.fetch(
+          "DECOMPLEX_WICC_MIN_SCORE",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_SCORE
+        )),
+        min_hidden: Float(ENV.fetch(
+          "DECOMPLEX_WICC_MIN_HIDDEN",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_HIDDEN
+        )),
+        max_depth: Integer(ENV.fetch(
+          "DECOMPLEX_WICC_MAX_DEPTH",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
+        ))
+      )
+      @locality_drag = LocalityDrag.scan(
+        @files,
+        min_unrelated_statements: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_UNRELATED_STATEMENTS",
+          LocalityDrag::DEFAULT_MIN_UNRELATED_STATEMENTS
+        )),
+        min_gap_lines: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_GAP_LINES",
+          LocalityDrag::DEFAULT_MIN_GAP_LINES
+        )),
+        min_local_complexity: Float(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_LOCAL_COMPLEXITY",
+          LocalityDrag::DEFAULT_MIN_LOCAL_COMPLEXITY
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_SCORE",
+          LocalityDrag::DEFAULT_MIN_SCORE
+        )),
+        max_findings_per_method: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MAX_FINDINGS_PER_METHOD",
+          LocalityDrag::DEFAULT_MAX_FINDINGS_PER_METHOD
+        ))
+      )
+      @function_lcom = FunctionLCOM.scan(
+        @files,
+        min_components: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_COMPONENTS",
+          FunctionLCOM::DEFAULT_MIN_COMPONENTS
+        )),
+        min_locals: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_LOCALS",
+          FunctionLCOM::DEFAULT_MIN_LOCALS
+        )),
+        min_statements: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_STATEMENTS",
+          FunctionLCOM::DEFAULT_MIN_STATEMENTS
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_SCORE",
+          FunctionLCOM::DEFAULT_MIN_SCORE
+        ))
+      )
+      operational_discontinuity = OperationalDiscontinuity.scan(
+        @files,
+        min_dead: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_DEAD",
+          OperationalDiscontinuity::DEFAULT_MIN_DEAD
+        )),
+        min_new: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_NEW",
+          OperationalDiscontinuity::DEFAULT_MIN_NEW
+        )),
+        max_continuing: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MAX_CONTINUING",
+          OperationalDiscontinuity::DEFAULT_MAX_CONTINUING
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_SCORE",
+          OperationalDiscontinuity::DEFAULT_MIN_SCORE
+        ))
+      )
+      @operational_discontinuity_high_confidence, @operational_discontinuity =
+        operational_discontinuity.partition { |finding| OperationalDiscontinuity.high_confidence?(finding) }
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
@@ -77,6 +159,12 @@ module Decomplex
       ["Neglected Path Conditions", :@pcneg, 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)"],
       ["Oversized Predicates", :@oversized_predicates, 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate"],
       ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"],
+      ["Implicit Control Flow", :@implicit_control_flow, 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure"],
+      ["Weighted Inlined Cognitive Complexity", :@weighted_inlined_complexity, 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method"],
+      ["Locality Drag", :@locality_drag, 2, "local initialized far before first use while unrelated work runs -- move setup closer or extract a private phase"],
+      ["Operational Discontinuity (High Confidence)", :@operational_discontinuity_high_confidence, 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary"],
+      ["Function LCOM", :@function_lcom, 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns"],
+      ["Operational Discontinuity", :@operational_discontinuity, 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary"],
       ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)"],
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
     ].freeze
@@ -254,6 +342,95 @@ module Decomplex
 
     private
 
+    def render_state_heatmap_item(item)
+      out = "- `#{item[:field]}` -- messiness **#{item[:messiness]}** " \
+            "(writes=#{item[:writes]}, reads=#{item[:reads]}, re-derived=#{item[:re_derivations]}, " \
+            "scatter=#{item[:scatter]}, receiver patterns=#{item[:receiver_types]})\n"
+      writers = item[:top_writers].map { |site| nav(site) }
+      readers = item[:top_readers].map { |site| nav(site) }
+      out << "  - writers: #{writers.join(' ; ')}\n" unless writers.empty?
+      out << "  - readers: #{readers.join(' ; ')}\n" unless readers.empty?
+      out
+    end
+
+    def render_implicit_control_flow_item(item)
+      if item[:kind] == :order_drift
+        return "- *POSSIBLE* [order_drift] conf=#{item[:confidence]} support=#{item[:support]} " \
+               "#{nav(item[:at])} observed `#{item[:observed].join(' -> ')}` " \
+               "against protocol `#{item[:protocol].join(' -> ')}` " \
+               "(#{item[:dependency].join('|')} state=`#{item[:states].join(' | ')}`)\n"
+      end
+
+      sites = item[:sites].first(4).map { |site| nav(site) }.join(" ; ")
+      more = item[:sites].size > 4 ? " (+#{item[:sites].size - 4} more)" : ""
+      "- *POSSIBLE* [protocol_pressure] support=#{item[:support]} " \
+        "`#{item[:protocol].join(' -> ')}` " \
+        "(#{item[:dependency].join('|')} state=`#{item[:states].join(' | ')}`) -- " \
+        "#{nav(item[:at])}\n" \
+        "  - sites: #{sites}#{more}\n"
+    end
+
+    def render_weighted_inlined_complexity_item(item)
+      "- *POSSIBLE* #{nav(item[:at])} -- inlined=#{item[:inlined]} " \
+        "(local=#{item[:local]}, hidden=#{item[:hidden]}, depth=#{item[:depth]})\n" \
+        "  - chain: `#{item[:call_chain].join(' -> ')}`\n" \
+        "  - single-caller helpers: `#{item[:single_caller_callees].first(8).join(' | ')}`\n" \
+        "  - reason: #{item[:reason]}\n"
+    end
+
+    def render_locality_drag_item(item)
+      out = "- *POSSIBLE* #{nav(item[:at])} -- `#{item[:variable]}` dormant until line " \
+            "#{item[:used_at]} score=#{item[:score]} " \
+            "(gap=#{item[:gap_lines]} lines, unrelated=#{item[:unrelated_statements]}, " \
+            "boundaries=#{item[:boundary_crossings]}, local=#{item[:local_complexity]})\n" \
+            "  - reason: #{item[:reason]}\n"
+      out << "  - ignored setup initializers: #{item[:setup_statements]}\n" if item[:setup_statements].positive?
+      unless item[:definition_deps].empty?
+        out << "  - definition deps: `#{item[:definition_deps].first(6).join(' | ')}`\n"
+      end
+      unless item[:use_reads].empty?
+        out << "  - first-use reads: `#{item[:use_reads].first(8).join(' | ')}`\n"
+      end
+      item[:boundaries].first(2).each do |boundary|
+        out << "  - crosses line #{boundary[:line]} #{boundary[:marker]}\n"
+      end
+      item[:examples].first(2).each do |example|
+        out << "  - unrelated line #{example[:line]}: `#{example[:source]}`\n"
+      end
+      out
+    end
+
+    def render_function_lcom_item(item)
+      mode = item[:mode] == :late_join ? "late_join" : "disjoint"
+      out = "- *POSSIBLE* [#{mode}] #{nav(item[:at])} -- score=#{item[:score]} " \
+            "components=#{item[:components]}, locals=#{item[:locals]}, statements=#{item[:statements]}\n"
+      item[:component_vars].first(4).each_with_index do |vars, index|
+        lines = item[:component_lines][index]
+        out << "  - component #{index + 1}: `#{vars.first(8).join(' | ')}`"
+        out << " (lines #{lines.first}-#{lines.last})" if lines && !lines.empty?
+        out << "\n"
+      end
+      out
+    end
+
+    def render_operational_discontinuity_item(item)
+      reasons = Array(item[:confidence_reasons]).join(", ")
+      confidence = item[:confidence] || :review
+      out = "- *POSSIBLE* #{nav(item[:at])} -- score=#{item[:score]} " \
+            "reset_boundaries=#{item[:resets]}, dead=#{item[:dead_total]}, new=#{item[:new_total]}, " \
+            "confidence=#{confidence}"
+      out << " (#{reasons})" unless reasons.empty?
+      out << "\n"
+      item[:reset_points].first(3).each do |reset|
+        marker = reset[:text].to_s.empty? ? reset[:kind].to_s : reset[:text]
+        out << "  - line #{reset[:line]} #{marker}: dead `#{reset[:dead].first(6).join(' | ')}` " \
+               "-> new `#{reset[:new].first(6).join(' | ')}`"
+        out << " (continuing `#{reset[:continuing].join(' | ')}`)" unless reset[:continuing].empty?
+        out << "\n"
+      end
+      out
+    end
+
     def render(out, title, v)
       v.first(25).each do |h|
         out << case title
@@ -272,11 +449,7 @@ module Decomplex
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \
                  "  - #{h[:sites].first(6).map { |s| nav(s) }.join(' ; ')}\n"
                when "State Heatmap"
-                 "- `#{h[:field]}` -- messiness **#{h[:messiness]}** " \
-                 "(writes=#{h[:writes]}, reads=#{h[:reads]}, re-derived=#{h[:re_derivations]}, " \
-                 "scatter=#{h[:scatter]}, receiver patterns=#{h[:receiver_types]})\n" \
-                 "  - writers: #{h[:top_writers].map { |s| nav(s) }.join(' ; ')}\n" \
-                 "  - readers: #{h[:top_readers].map { |s| nav(s) }.join(' ; ')}\n"
+                 render_state_heatmap_item(h)
                when "State-Based Branch Density"
                  "- #{nav(h[:at])} -- **#{h[:decisions]}** state-based branch decision(s), " \
                  "refs=`#{h[:state_refs].first(8).join(' | ')}` score=#{h[:score]}\n" \
@@ -306,6 +479,16 @@ module Decomplex
                when "Broken Protocols"
                  "- *POSSIBLE* conf=#{h[:confidence]} support=#{h[:support]} " \
                  "#{nav(h[:at])} does `#{h[:has]}` without `#{h[:missing]}`\n"
+               when "Implicit Control Flow"
+                 render_implicit_control_flow_item(h)
+               when "Weighted Inlined Cognitive Complexity"
+                 render_weighted_inlined_complexity_item(h)
+               when "Locality Drag"
+                 render_locality_drag_item(h)
+               when "Function LCOM"
+                 render_function_lcom_item(h)
+               when "Operational Discontinuity", "Operational Discontinuity (High Confidence)"
+                 render_operational_discontinuity_item(h)
                when "False Simplicity"
                  "- *POSSIBLE* [#{h[:kind]}] scatter=#{h[:scatter]} " \
                  "support=#{h[:support]} `#{h[:detail]}` -- #{nav(h[:at])}" \

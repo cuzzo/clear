@@ -1,5 +1,5 @@
 # typed: strict
-# src/compiler_frontend.rb - Shared compilation front-end
+# src/compiler/compiler_frontend.rb - Shared compilation front-end
 #
 # Extracts the common pipeline shared by transpile(), transpile_mir(),
 # and gen.rb: lex -> parse -> annotate -> rewrite -> MIRPass -> collect metadata.
@@ -13,8 +13,8 @@ require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../ast/ast"
 require_relative "../annotator"
-require_relative "pipeline_rewriter"
-require_relative "string_concat_rewriter"
+require_relative "../mir/rewriters/pipeline_rewriter"
+require_relative "../mir/rewriters/string_concat_rewriter"
 require_relative "../mir/hoist"
 require_relative "../semantic/pass_state"
 require_relative "../mir/control_flow"
@@ -41,7 +41,7 @@ class CompilerFrontend
   sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false)
     tokens = Lexer.new(cheat_code).tokenize
-    ast    = Parser.new(tokens, cheat_code).parse
+    ast    = ClearParser.new(tokens, cheat_code).parse
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
@@ -95,7 +95,7 @@ class CompilerFrontend
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
       when AST::UnionDef  then union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(
         variants: stmt.variants,
-        type_params: stmt.type_params&.any? ? stmt.type_params.map(&:to_sym) : nil,
+        type_params: stmt.type_params.map(&:to_sym),
         visibility: stmt.visibility || :package,
       )
       end

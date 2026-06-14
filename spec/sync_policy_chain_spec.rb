@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # True-Sync-Polymorphism step 6 (#328): the policy chain at lowering
 # time. For a WITH that didn't get an inline `ON <Error> ...` handler,
@@ -22,7 +22,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "SYNC POLICY chain (#328)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

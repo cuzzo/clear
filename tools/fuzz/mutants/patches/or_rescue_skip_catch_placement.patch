@@ -1,0 +1,13 @@
+diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
+--- a/src/mir/mir_lowering.rb
++++ b/src/mir/mir_lowering.rb
+@@ -676,7 +676,7 @@
+   end
+ 
+   sig { params(mir: MIR::TryCatch, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
+   def place_owned_try_catch_for_destination(mir, ti, dest_alloc)
+-    right = place_owned_branch_value_for_destination(mir.catch_body, ti, dest_alloc)
++    right = mir.catch_body # MUTANT: fallback branch placement no longer matches the destination allocator.
+     right = owned_branch_result_value(right, ti, dest_alloc) if mir_allocates?(right)
+     source_alloc = mir_owned_alloc(mir.expr) || mir_owned_alloc(mir)
+     if source_alloc && source_alloc != dest_alloc

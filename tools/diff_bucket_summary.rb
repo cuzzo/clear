@@ -22,10 +22,26 @@ def sh_quiet(*args)
 end
 
 def parse_options(argv)
-  options = { format: "text" }
+  options = {
+    format: "text",
+    src_visibility: false,
+    src_visibility_only: false,
+    src_visibility_path: "src",
+  }
   OptionParser.new do |parser|
-    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown]"
+    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown] [--src-visibility]"
     parser.on("--format FORMAT", %w[text markdown], "Output format") { |value| options[:format] = value }
+    parser.on("--src-visibility", "Append src/**/*.rb public/private/OTHER code-line breakdown") do
+      options[:src_visibility] = true
+    end
+    parser.on("--src-visibility-only", "Print only the src/**/*.rb public/private/OTHER code-line breakdown") do
+      options[:src_visibility] = true
+      options[:src_visibility_only] = true
+    end
+    parser.on("--src-visibility-path PATH", "Directory to scan for --src-visibility (default: src)") do |value|
+      options[:src_visibility] = true
+      options[:src_visibility_path] = value
+    end
   end.parse!(argv)
   options[:base] = argv.shift
   abort "unexpected arguments: #{argv.join(" ")}" unless argv.empty?
@@ -49,6 +65,11 @@ def numstat(base)
   end
 end
 
+def diff_base_commit(base)
+  commit = sh_quiet("git", "merge-base", base, "HEAD").strip
+  commit.empty? ? base : commit
+end
+
 def zig_test_or_harness_file?(path)
   return false unless path.start_with?("zig/") && path.end_with?(".zig")
 
@@ -69,35 +90,380 @@ def bucket_for(path)
   :other
 end
 
-def added_lines(base)
-  current = nil
-  adds = Hash.new { |h, k| h[k] = Set.new }
-  sh("git", "diff", "--unified=0", "#{base}...HEAD").each_line do |line|
-    if line.start_with?("+++ b/")
-      current = line.delete_prefix("+++ b/").strip
-      next
-    end
-    next unless current
+def diff_header_path(line, prefix)
+  path = line.delete_prefix(prefix).strip
+  return nil if path == "/dev/null"
 
-    if (m = line.match(/\A@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/))
-      start = m[1].to_i
-      count = (m[2] || "1").to_i
-      @next_new_line = start
-      @hunk_end = start + count
+  path.sub(/\A[ab]\//, "")
+end
+
+def changed_lines(base)
+  old_path = nil
+  new_path = nil
+  old_line = nil
+  new_line = nil
+  adds = Hash.new { |h, k| h[k] = Set.new }
+  dels = Hash.new { |h, k| h[k] = Set.new }
+  sh("git", "diff", "--unified=0", "#{base}...HEAD").each_line do |line|
+    if line.start_with?("diff --git ")
+      old_path = nil
+      new_path = nil
+      old_line = nil
+      new_line = nil
       next
     end
-    next unless @next_new_line && @hunk_end
+    if line.start_with?("--- ")
+      old_path = diff_header_path(line, "--- ")
+      next
+    end
+    if line.start_with?("+++ ")
+      new_path = diff_header_path(line, "+++ ")
+      next
+    end
+    next unless old_path || new_path
+
+    if (m = line.match(/\A@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+      old_line = m[1].to_i
+      new_line = m[2].to_i
+      next
+    end
+    next unless old_line && new_line
+    next if line.start_with?("\\")
 
     if line.start_with?("+") && !line.start_with?("+++")
-      adds[current] << @next_new_line
-      @next_new_line += 1
+      adds[new_path] << new_line if new_path
+      new_line += 1
     elsif line.start_with?("-") && !line.start_with?("---")
-      next
+      dels[old_path] << old_line if old_path
+      old_line += 1
     else
-      @next_new_line += 1
+      old_line += 1
+      new_line += 1
     end
   end
-  adds
+  { added: adds, deleted: dels }
+end
+
+def added_lines(base)
+  changed_lines(base)[:added]
+end
+
+SrcRubyMethodSpan = Struct.new(:name, :visibility, :start_line, :end_line, :singleton, keyword_init: true)
+
+SRC_RUBY_CHANGE_BUCKETS = {
+  src_public_fn: "src/**/*.rb public functions",
+  src_private_fn: "src/**/*.rb private functions",
+  src_other: "src/**/*.rb OTHER",
+}.freeze
+
+SRC_RUBY_VISIBILITY_BUCKET_LABELS = {
+  src_public_fn: "public functions",
+  src_private_fn: "private functions",
+  src_other: "OTHER",
+}.freeze
+
+SRC_RUBY_VISIBILITY_CALLS = {
+  public: :public,
+  private: :private,
+  protected: :protected,
+}.freeze
+
+SRC_RUBY_CLASS_VISIBILITY_CALLS = {
+  public_class_method: :public,
+  private_class_method: :private,
+}.freeze
+
+def ruby_ast_node?(value)
+  defined?(RubyVM::AbstractSyntaxTree::Node) && value.is_a?(RubyVM::AbstractSyntaxTree::Node)
+end
+
+def ruby_method_spans(source)
+  ruby_method_spans_result(source)[:spans]
+end
+
+def ruby_method_spans_result(source)
+  { spans: collect_ruby_method_spans(RubyVM::AbstractSyntaxTree.parse(source)), parse_error: nil }
+rescue SyntaxError => e
+  { spans: [], parse_error: e.message }
+end
+
+def collect_ruby_method_spans(node, singleton_context: false)
+  return [] unless ruby_ast_node?(node)
+
+  case node.type
+  when :SCOPE
+    collect_ruby_method_spans(node.children[2], singleton_context: singleton_context)
+  when :CLASS
+    collect_ruby_method_spans(node.children[2], singleton_context: false)
+  when :MODULE
+    collect_ruby_method_spans(node.children[1], singleton_context: false)
+  when :SCLASS
+    collect_ruby_method_spans(node.children[1], singleton_context: true)
+  when :BLOCK
+    collect_ruby_method_spans_from_statements(node.children, singleton_context: singleton_context)
+  else
+    node.children.flat_map { |child| collect_ruby_method_spans(child, singleton_context: singleton_context) }
+  end
+end
+
+def collect_ruby_method_spans_from_statements(statements, singleton_context:)
+  visibility = :public
+  direct_spans = []
+  nested_spans = []
+  overrides = { instance: {}, singleton: {} }
+
+  statements.each do |statement|
+    next unless ruby_ast_node?(statement)
+
+    if statement.type == :DEFN || statement.type == :DEFS
+      direct_spans << ruby_method_span_from_ast(statement, visibility, singleton_context)
+      next
+    end
+
+    if (call_visibility = src_ruby_visibility_call(statement))
+      visibility = update_ruby_visibility_from_call(
+        statement,
+        call_visibility,
+        singleton_context,
+        direct_spans,
+        overrides,
+      ) || visibility
+      next
+    end
+
+    nested_spans.concat(collect_ruby_method_spans(statement, singleton_context: singleton_context))
+  end
+
+  direct_spans.each do |span|
+    target = span.singleton ? :singleton : :instance
+    override = overrides[target][span.name]
+    span.visibility = override if override
+  end
+
+  direct_spans + nested_spans
+end
+
+def src_ruby_visibility_call(node)
+  name = src_ruby_call_name(node)
+  SRC_RUBY_VISIBILITY_CALLS[name] || SRC_RUBY_CLASS_VISIBILITY_CALLS[name]
+end
+
+def src_ruby_call_name(node)
+  return nil unless ruby_ast_node?(node)
+  return nil unless node.type == :VCALL || node.type == :FCALL
+
+  node.children[0]
+end
+
+def src_ruby_call_args(node)
+  return nil unless ruby_ast_node?(node)
+  return nil unless node.type == :FCALL
+
+  node.children[1]
+end
+
+def update_ruby_visibility_from_call(node, call_visibility, singleton_context, direct_spans, overrides)
+  args = src_ruby_call_args(node)
+  if (defs = src_ruby_method_defs(args)).any?
+    defs.each do |definition|
+      direct_spans << ruby_method_span_from_ast(definition, call_visibility, singleton_context, forced_visibility: call_visibility)
+    end
+    return nil
+  end
+
+  names = src_ruby_symbol_literals(args)
+  return call_visibility if args.nil?
+  return nil if names.empty?
+
+  target = if SRC_RUBY_CLASS_VISIBILITY_CALLS.key?(src_ruby_call_name(node))
+             :singleton
+           elsif singleton_context
+             :singleton
+           else
+             :instance
+           end
+  names.each { |name| overrides[target][name] = call_visibility }
+  nil
+end
+
+def src_ruby_method_defs(node)
+  return [] unless ruby_ast_node?(node)
+  return [node] if node.type == :DEFN || node.type == :DEFS
+
+  node.children.flat_map { |child| src_ruby_method_defs(child) }
+end
+
+def src_ruby_symbol_literals(node)
+  return [] unless ruby_ast_node?(node)
+
+  case node.type
+  when :LIT
+    value = node.children[0]
+    value.is_a?(Symbol) ? [value] : []
+  when :STR
+    [node.children[0].to_s.to_sym]
+  else
+    node.children.flat_map { |child| src_ruby_symbol_literals(child) }
+  end
+end
+
+def ruby_method_span_from_ast(node, current_visibility, singleton_context, forced_visibility: nil)
+  singleton = node.type == :DEFS || singleton_context
+  visibility = forced_visibility || (node.type == :DEFS && !singleton_context ? :public : current_visibility)
+  name = node.type == :DEFS ? node.children[1] : node.children[0]
+  SrcRubyMethodSpan.new(
+    name: name,
+    visibility: visibility,
+    start_line: node.first_lineno,
+    end_line: node.last_lineno,
+    singleton: singleton,
+  )
+end
+
+def src_ruby_line_bucket(line, spans)
+  span = spans.select { |candidate| line.between?(candidate.start_line, candidate.end_line) }
+              .min_by { |candidate| candidate.end_line - candidate.start_line }
+  return :src_other unless span
+
+  case span.visibility
+  when :public
+    :src_public_fn
+  when :private
+    :src_private_fn
+  else
+    :src_other
+  end
+end
+
+def empty_src_ruby_change_breakdown
+  SRC_RUBY_CHANGE_BUCKETS.keys.to_h do |bucket|
+    [bucket, { additions: 0, deletions: 0, added_lines: Set.new }]
+  end
+end
+
+def classify_src_ruby_line_changes(new_source:, old_source:, added_lines:, deleted_lines:)
+  breakdown = empty_src_ruby_change_breakdown
+  new_spans = ruby_method_spans(new_source.to_s)
+  old_spans = ruby_method_spans(old_source.to_s)
+
+  added_lines.each do |line|
+    bucket = src_ruby_line_bucket(line, new_spans)
+    breakdown[bucket][:additions] += 1
+    breakdown[bucket][:added_lines] << line
+  end
+  deleted_lines.each do |line|
+    bucket = src_ruby_line_bucket(line, old_spans)
+    breakdown[bucket][:deletions] += 1
+  end
+  breakdown
+end
+
+def empty_src_ruby_visibility_counts
+  SRC_RUBY_CHANGE_BUCKETS.keys.to_h { |bucket| [bucket, 0] }
+end
+
+def src_ruby_code_line?(line)
+  stripped = line.strip
+  !stripped.empty? && !stripped.start_with?("#")
+end
+
+def classify_src_ruby_source_lines(source)
+  parsed = ruby_method_spans_result(source.to_s)
+  counts = empty_src_ruby_visibility_counts
+  source.to_s.lines.each_with_index do |line, idx|
+    next unless src_ruby_code_line?(line)
+
+    bucket = src_ruby_line_bucket(idx + 1, parsed[:spans])
+    counts[bucket] += 1
+  end
+  {
+    counts: counts,
+    total: counts.values.sum,
+    parse_error: parsed[:parse_error],
+  }
+end
+
+def src_ruby_visibility_files(root: ROOT, directory: "src")
+  scan_root = File.expand_path(directory, root)
+  Dir.glob(File.join(scan_root, "**", "*.rb")).select { |path| File.file?(path) }.sort
+end
+
+def relative_to_root(path, root)
+  value = path.to_s
+  prefix = "#{root}/"
+  value.start_with?(prefix) ? value.delete_prefix(prefix) : value
+end
+
+def src_ruby_visibility_breakdown(root: ROOT, directory: "src")
+  files = src_ruby_visibility_files(root: root, directory: directory)
+  counts = empty_src_ruby_visibility_counts
+  parse_failures = []
+
+  files.each do |path|
+    result = classify_src_ruby_source_lines(File.read(path))
+    result[:counts].each { |bucket, count| counts[bucket] += count }
+    next unless result[:parse_error]
+
+    parse_failures << {
+      path: relative_to_root(path, root),
+      error: result[:parse_error],
+    }
+  end
+
+  {
+    directory: directory,
+    files: files.length,
+    counts: counts,
+    total: counts.values.sum,
+    parse_failures: parse_failures,
+  }
+end
+
+def current_source(path, root: ROOT)
+  full_path = File.join(root, path)
+  File.file?(full_path) ? File.read(full_path) : ""
+end
+
+def source_at_commit(commit, path)
+  sh_quiet("git", "show", "#{commit}:#{path}")
+end
+
+def bucketed_diff_entries(stats, line_changes, base_commit:, root: ROOT)
+  grouped = Hash.new { |h, k| h[k] = [] }
+  src_adds_by_bucket = Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = Set.new } }
+
+  stats.each do |entry|
+    path = entry[:path]
+    if bucket_for(path) != :src_rb
+      grouped[bucket_for(path)] << entry
+      next
+    end
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: current_source(path, root: root),
+      old_source: source_at_commit(base_commit, path),
+      added_lines: line_changes.fetch(:added, {}).fetch(path, Set.new),
+      deleted_lines: line_changes.fetch(:deleted, {}).fetch(path, Set.new),
+    )
+    if breakdown.values.none? { |bucket| bucket[:additions].positive? || bucket[:deletions].positive? }
+      grouped[:src_other] << entry
+      next
+    end
+
+    breakdown.each do |bucket, counts|
+      next unless counts[:additions].positive? || counts[:deletions].positive?
+
+      grouped[bucket] << {
+        path: path,
+        additions: counts[:additions],
+        deletions: counts[:deletions],
+      }
+      src_adds_by_bucket[bucket][path].merge(counts[:added_lines])
+    end
+  end
+
+  grouped[:total] = stats
+  { grouped: grouped, src_adds_by_bucket: src_adds_by_bucket }
 end
 
 def coverage_paths(env_name, default_paths)
@@ -493,6 +859,60 @@ def print_markdown(base, rows)
   end
 end
 
+def src_ruby_visibility_rows(breakdown)
+  total = breakdown[:total]
+  rows = [["bucket", "lines", "share"]]
+  SRC_RUBY_VISIBILITY_BUCKET_LABELS.each do |bucket, label|
+    count = breakdown[:counts].fetch(bucket, 0)
+    rows << [label, count.to_s, pct(count, total)]
+  end
+  rows << ["total", total.to_s, pct(total, total)]
+end
+
+def src_ruby_visibility_scope(breakdown)
+  File.join(breakdown[:directory].to_s, "**", "*.rb")
+end
+
+def print_src_ruby_visibility_text(breakdown)
+  puts
+  puts "Src Ruby visibility breakdown:"
+  puts "  scope: #{src_ruby_visibility_scope(breakdown)}"
+  puts "  files: #{breakdown[:files]}"
+  puts "  counted lines: nonblank, non-comment Ruby source lines; protected methods are grouped into OTHER"
+  print_table(src_ruby_visibility_rows(breakdown))
+  return if breakdown[:parse_failures].empty?
+
+  puts "  parse failures:"
+  breakdown[:parse_failures].first(10).each do |failure|
+    puts "    #{failure[:path]} - #{failure[:error].lines.first.to_s.strip}"
+  end
+  puts "    ... #{breakdown[:parse_failures].length - 10} more" if breakdown[:parse_failures].length > 10
+end
+
+def print_src_ruby_visibility_markdown(breakdown)
+  puts
+  puts "## Src Ruby Visibility Breakdown"
+  puts
+  puts "**Scope:** `#{src_ruby_visibility_scope(breakdown)}`"
+  puts
+  puts "**Files:** #{breakdown[:files]}"
+  puts
+  puts "Counts are nonblank, non-comment Ruby source lines. Protected methods are grouped into `OTHER`."
+  puts
+  src_ruby_visibility_rows(breakdown).each_with_index do |row, idx|
+    puts "| #{row.map { |cell| markdown_escape(cell) }.join(" | ")} |"
+    puts "| --- | ---: | ---: |" if idx.zero?
+  end
+  return if breakdown[:parse_failures].empty?
+
+  puts
+  puts "**Parse failures:**"
+  breakdown[:parse_failures].first(10).each do |failure|
+    puts "- `#{failure[:path]}` - #{markdown_escape(failure[:error].lines.first.to_s.strip)}"
+  end
+  puts "- _#{breakdown[:parse_failures].length - 10} more parse failures omitted._" if breakdown[:parse_failures].length > 10
+end
+
 def type_guardrail_findings(adds_by_path)
   NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
     rubocop_guardrail_findings(adds_by_path) +
@@ -680,15 +1100,27 @@ end
 
 if $PROGRAM_NAME == __FILE__
   options = parse_options(ARGV)
+  if options[:src_visibility_only]
+    src_visibility = src_ruby_visibility_breakdown(directory: options[:src_visibility_path])
+    if options[:format] == "markdown"
+      print_src_ruby_visibility_markdown(src_visibility)
+    else
+      print_src_ruby_visibility_text(src_visibility)
+    end
+    exit
+  end
+
   base = options[:base] || default_base_ref
   stats = numstat(base)
-  adds_by_path = added_lines(base)
+  line_changes = changed_lines(base)
+  adds_by_path = line_changes[:added]
   guardrail_findings = type_guardrail_findings(adds_by_path)
   special_alerts = special_coverage_alerts(adds_by_path)
+  src_visibility = options[:src_visibility] ? src_ruby_visibility_breakdown(directory: options[:src_visibility_path]) : nil
 
   bucket_order = [
     [:total, "total"],
-    [:src_rb, "src/**/*.rb"],
+    *SRC_RUBY_CHANGE_BUCKETS.to_a,
     [:zig_src, "zig/**/*.zig prod"],
     [:spec, "spec/"],
     [:transpile_tests, "transpile-tests/"],
@@ -698,14 +1130,16 @@ if $PROGRAM_NAME == __FILE__
     [:other, "other"],
   ]
 
-  grouped = Hash.new { |h, k| h[k] = [] }
-  stats.each { |entry| grouped[bucket_for(entry[:path])] << entry }
-  grouped[:total] = stats
+  bucketed = bucketed_diff_entries(stats, line_changes, base_commit: diff_base_commit(base))
+  grouped = bucketed[:grouped]
+  src_adds_by_bucket = bucketed[:src_adds_by_bucket]
 
-  src_paths = grouped[:src_rb].map { |e| e[:path] }
   zig_paths = grouped[:zig_src].map { |e| e[:path] }
   zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
-  src_cov = ruby_added_coverage(adds_by_path, src_paths)
+  src_cov_by_bucket = SRC_RUBY_CHANGE_BUCKETS.keys.to_h do |bucket|
+    bucket_adds = src_adds_by_bucket[bucket]
+    [bucket, ruby_added_coverage(bucket_adds, bucket_adds.keys)]
+  end
   zig_cov = zig_added_coverage(adds_by_path, zig_paths)
   zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
 
@@ -715,7 +1149,7 @@ if $PROGRAM_NAME == __FILE__
     additions = entries.sum { |e| e[:additions] }
     deletions = entries.sum { |e| e[:deletions] }
     coverage = case key
-               when :src_rb then src_cov
+               when *SRC_RUBY_CHANGE_BUCKETS.keys then src_cov_by_bucket.fetch(key)
                when :zig_src then zig_cov
                when :zig_tests then zig_test_cov
                when :spec, :tools then ["not tracked", "not tracked"]
@@ -726,11 +1160,13 @@ if $PROGRAM_NAME == __FILE__
 
   if options[:format] == "markdown"
     print_markdown(base, rows)
+    print_src_ruby_visibility_markdown(src_visibility) if src_visibility
     print_type_guardrails_markdown(guardrail_findings)
     print_special_coverage_markdown(special_alerts)
   else
     puts "Diff base: #{base}...HEAD"
     print_table(rows)
+    print_src_ruby_visibility_text(src_visibility) if src_visibility
     print_type_guardrails_text(guardrail_findings)
     print_special_coverage_text(special_alerts)
   end

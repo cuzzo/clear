@@ -3,13 +3,13 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -36,7 +36,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type predicates" do
       it "shared_promise? is true for ~Float64@shared" do
         tokens = Lexer.new("~Float64 @shared").tokenize
-        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.shared_promise?).to be true
       end
 
@@ -50,13 +50,13 @@ RSpec.describe SemanticAnnotator do
 
       it "shared_promise? is false for plain Float64@shared" do
         tokens = Lexer.new("Float64 @shared").tokenize
-        t = Parser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
         expect(t.shared_promise?).to be false
       end
 
       it "requires_move? is false for shared promises (non-affine)" do
         tokens = Lexer.new("~Float64 @shared").tokenize
-        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.requires_move?).to be false
       end
 
@@ -66,13 +66,13 @@ RSpec.describe SemanticAnnotator do
 
       it "any_rc? is false for shared promises (SharedPromise is not Rc/Arc)" do
         tokens = Lexer.new("~Float64 @shared").tokenize
-        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.any_rc?).to be false
       end
 
       it "any_rc? is still true for plain Float64@shared (Arc wrapper)" do
         tokens = Lexer.new("Float64 @shared").tokenize
-        t = Parser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "Float64 @shared").send(:parse_type_annotation)
         expect(t.any_rc?).to be true
       end
     end
@@ -80,13 +80,13 @@ RSpec.describe SemanticAnnotator do
     describe "Zig type emission" do
       it "emits CheatLib.SharedPromise(f64) for ~Float64@shared" do
         tokens = Lexer.new("~Float64 @shared").tokenize
-        t = Parser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Float64 @shared").send(:parse_type_annotation)
         expect(t.zig_type).to eq("CheatLib.SharedPromise(f64)")
       end
 
       it "emits CheatLib.SharedPromise(bool) for ~Bool@shared" do
         tokens = Lexer.new("~Bool @shared").tokenize
-        t = Parser.new(tokens, "~Bool @shared").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Bool @shared").send(:parse_type_annotation)
         expect(t.zig_type).to eq("CheatLib.SharedPromise(bool)")
       end
 
@@ -96,7 +96,7 @@ RSpec.describe SemanticAnnotator do
 
       it "still emits CheatLib.Rc(f64) for Float64@multiOwned" do
         tokens = Lexer.new("Float64 @multiowned").tokenize
-        t = Parser.new(tokens, "Float64 @multiowned").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "Float64 @multiowned").send(:parse_type_annotation)
         expect(t.zig_type).to eq("CheatLib.Rc(f64)")
       end
     end
@@ -344,12 +344,12 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
-    # Parser
+    # ClearParser
     # ------------------------------------------------------------------
-    describe "Parser: parse_type_annotation" do
+    describe "ClearParser: parse_type_annotation" do
       it "parses ~Float64[3] as a bounded stream type" do
         tokens = Lexer.new("~Float64[3]").tokenize
-        t = Parser.new(tokens, "~Float64[3]").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Float64[3]").send(:parse_type_annotation)
         expect(t.bounded_stream?).to be true
         expect(t.stream_capacity).to eq(3)
         expect(t.stream_element_type.to_sym).to eq(:Float64)
@@ -357,7 +357,7 @@ RSpec.describe SemanticAnnotator do
 
       it "parses ~Bool[1] as a bounded stream type" do
         tokens = Lexer.new("~Bool[1]").tokenize
-        t = Parser.new(tokens, "~Bool[1]").send(:parse_type_annotation)
+        t = ClearParser.new(tokens, "~Bool[1]").send(:parse_type_annotation)
         expect(t.bounded_stream?).to be true
         expect(t.stream_capacity).to eq(1)
       end
@@ -735,7 +735,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------
-    # Parser: [?] in type annotations
+    # ClearParser: [?] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
       it "parses ~?Float64[] as a type annotation" do
@@ -1191,7 +1191,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------
-    # Parser: [INF] in type annotations
+    # ClearParser: [INF] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
       it "parses ~Float64[INF] as a type annotation" do

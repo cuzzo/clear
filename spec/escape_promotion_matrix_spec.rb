@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Escape promotion matrix — combinatoric coverage for Phase 1a of the
 # unified-classification refactor (silly-churning-simon.md plan).
@@ -192,18 +192,18 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       Type.new(:String)   => :slice_managed,  # default String has no rodata stamp
     }.each do |t, expected|
       it "#{t.resolved.inspect} → #{expected.inspect}" do
-        expect(t.escape_class).to eq(expected)
+        expect(t.send(:escape_class)).to eq(expected)
       end
     end
 
     it "rodata-stamped String is :slice_rodata" do
       t = Type.new(:String, location: :rodata)
-      expect(t.escape_class).to eq(:slice_rodata)
+      expect(t.send(:escape_class)).to eq(:slice_rodata)
     end
 
     it "any unknown user-type defaults to :by_ref" do
       t = Type.new(:SomeNewlyAddedUserType)
-      expect(t.escape_class).to eq(:by_ref)
+      expect(t.send(:escape_class)).to eq(:by_ref)
     end
   end
 end

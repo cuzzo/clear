@@ -37,16 +37,16 @@ unless options[:checked]
 end
 
 require "benchmark"
-require "backends/compiler_frontend"
-require "backends/importer"
-require "backends/pipeline_rewriter"
-require "backends/string_concat_rewriter"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
+require "mir/rewriters/pipeline_rewriter"
+require "mir/rewriters/string_concat_rewriter"
 require "mir/hoist"
 require "mir/pre_mir_type_check"
 require "mir/mir_pass"
 require "mir_lowering"
 require "mir_checker"
-require "mir_emitter"
+require "backends/mir_emitter"
 
 T::Private::Methods.run_all_sig_blocks if !options[:checked] && defined?(T::Private::Methods)
 
@@ -159,7 +159,7 @@ items = nil
 begin
   importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
   tokens = timed_phase("lex", sampler, timings) { Lexer.new(source).tokenize }
-  ast = timed_phase("parse", sampler, timings) { Parser.new(tokens, source).parse }
+  ast = timed_phase("parse", sampler, timings) { ClearParser.new(tokens, source).parse }
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: false, source_code: source)
   timed_phase("annotate", sampler, timings) { annotator.annotate!(ast) }
   timed_phase("pipeline_rewrite", sampler, timings) do

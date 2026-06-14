@@ -8,6 +8,7 @@
 require 'fileutils'
 require 'open3'
 require 'optparse'
+require_relative '../../mutants/support'
 require_relative 'registry'
 
 opts = {
@@ -18,12 +19,14 @@ opts = {
   list: false,
   dry_run: false,
   allow_dirty: false,
+  shard: nil,
 }
 
 OptionParser.new do |o|
-  o.banner = 'Usage: ruby tools/fuzz/mutants/run.rb [--mutant NAME | --all] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
+  o.banner = 'Usage: ruby tools/fuzz/mutants/run.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
   o.on('--mutant NAME') { |v| opts[:mutant] = v.to_sym }
   o.on('--all') { opts[:all] = true }
+  o.on('--shard INDEX/COUNT') { |v| opts[:shard] = MutationTesting.parse_shard(v) }
   o.on('--out DIR') { |v| opts[:out] = File.expand_path(v) }
   o.on('--keep') { opts[:keep] = true }
   o.on('--dry-run') { opts[:dry_run] = true }
@@ -190,24 +193,31 @@ def run_mutant(mutant, root_out)
   killed
 end
 
+def selected_mutants(opts)
+  mutants =
+    if opts[:all]
+      FuzzMutants::REGISTRY
+    elsif opts[:mutant]
+      found = FuzzMutants.find(opts[:mutant])
+      abort "unknown mutant: #{opts[:mutant]}" unless found
+      [found]
+    else
+      abort 'pass --mutant NAME, --all, or --list'
+    end
+
+  MutationTesting.shard_items(mutants, opts[:shard])
+end
+
 if opts[:list]
-  FuzzMutants::REGISTRY.each do |m|
+  mutants = opts[:shard] ? MutationTesting.shard_items(FuzzMutants::REGISTRY, opts[:shard]) : FuzzMutants::REGISTRY
+  mutants.each do |m|
     kill = m.kill || { bucket: :unexpected_pass, min_delta: 1 }
     puts "#{m.name} - #{m.description} [#{kill.fetch(:bucket)} +#{kill.fetch(:min_delta, 1)}]"
   end
   exit 0
 end
 
-mutants =
-  if opts[:all]
-    FuzzMutants::REGISTRY
-  elsif opts[:mutant]
-    found = FuzzMutants.find(opts[:mutant])
-    abort "unknown mutant: #{opts[:mutant]}" unless found
-    [found]
-  else
-    abort 'pass --mutant NAME, --all, or --list'
-  end
+mutants = selected_mutants(opts)
 
 FileUtils.rm_rf(opts[:out]) unless opts[:keep]
 FileUtils.mkdir_p(opts[:out])
@@ -215,5 +225,11 @@ FileUtils.mkdir_p(opts[:out])
 $dry_run = opts[:dry_run]
 $allow_dirty = opts[:allow_dirty]
 
+if mutants.empty?
+  puts "no fuzz mutants selected for shard #{MutationTesting.shard_label(opts[:shard])}"
+  exit 0
+end
+
+puts "fuzz mutant shard #{MutationTesting.shard_label(opts[:shard])}: #{mutants.length} mutant(s)"
 results = mutants.map { |m| run_mutant(m, opts[:out]) }
 exit(results.all? ? 0 : 1)

@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # When a function body mutates a parameter the caller declared
 # without `MUTABLE`, three errors can fire depending on the mutation
@@ -18,7 +18,7 @@ RSpec.describe "Immutable param auto-fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -109,7 +109,7 @@ RSpec.describe "Immutable param auto-fix" do
     it "ASSIGN_VAR_IMMUTABLE — falls back to plain error! when no fix is locatable" do
       src = "FN bump(p: Int64) RETURNS Int64 ->\n  p = p + 1;\n  RETURN p;\nEND\nFN main() RETURNS Void -> END"
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       ann = SemanticAnnotator.new
       allow(ann).to receive(:build_declare_mutable_fix).and_return(nil)
       FixCollector.disable!

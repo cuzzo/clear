@@ -10,7 +10,7 @@ module NilKill
       @trace_plan = File.exist?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : { "methods" => {} }
       @trace_plan.fetch("methods", {}).each do |raw_key, plan|
         owner, method_id, kind, path, line = raw_key.split("\0", 5)
-        next if plan && plan["sample"] == false
+        next if plan && plan["sample"] == false && plan["frame"] == false
         @method_plans_by_file_line[File.expand_path(path, ROOT)][line.to_i] = {
           "class" => owner,
           "method" => method_id,

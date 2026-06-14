@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/formatter"
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
 
 # Verifies that prefix calls of stdlib functions tagged as METHODs
 # in std_lib.rb / POOL_METHODS / SET_METHODS / MAP_METHODS get

@@ -20,8 +20,8 @@ $LOAD_PATH.unshift(File.join(src_root, "annotator-helpers"))
 
 require_relative "bc_emitter"
 require_relative "register_bc_emitter"
-require "compiler_frontend"
-require "importer"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
 require "mir_checker"
 require "mir_lowering"
 

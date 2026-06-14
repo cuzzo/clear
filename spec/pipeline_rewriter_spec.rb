@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/backends/transpiler"  # loads compiler, annotator, lexer, parser, ast
-require_relative "../src/backends/pipeline_rewriter"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)  # loads compiler, annotator, lexer, parser, ast
+require_relative "../src/mir/rewriters/pipeline_rewriter" unless defined?(PipelineRewriter)
 
 RSpec.describe PipelineRewriter do
   # Real pipeline order: lex -> parse -> annotate -> rewrite.
@@ -11,11 +11,31 @@ RSpec.describe PipelineRewriter do
   # skipped annotation, an unrealistic path that masked the contract.
   def parse_and_rewrite(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     annotator = SemanticAnnotator.new(source_code: src)
     annotator.annotate!(ast)
     PipelineRewriter.new(annotator).rewrite!(ast)
     ast
+  end
+
+  it "traverses ordinary binary operators without treating them as pipelines" do
+    source = AST::Identifier.new(nil, "items")
+    source.full_type = Type.new(:"Int64[]", collection: :list)
+    binary = AST::BinaryOp.new(
+      nil,
+      source,
+      :PLUS,
+      AST::WhereOp.new(nil, AST::Literal.new(nil, :Bool, true, nil)),
+    )
+
+    expect(PipelineRewriter.new.rewrite!(binary)).to equal(binary)
+  end
+
+  it "rewrites block expressions with no result expression" do
+    block = AST::BlockExpr.new(nil, [], nil)
+
+    expect(PipelineRewriter.new.rewrite!(block)).to equal(block)
+    expect(block.result).to be_nil
   end
 
   it "rewrites simple function pipelines into FuncCall" do
@@ -33,6 +53,22 @@ RSpec.describe PipelineRewriter do
     expect(bind.value.name).to eq("double")
     expect(bind.value.args.first).to be_a(AST::Identifier)
     expect(bind.value.args.first.name).to eq("x")
+  end
+
+  it "keeps overloaded stdlib pipeline template metadata" do
+    ast = parse_and_rewrite(<<~CLEAR)
+      FN main() RETURNS Void ->
+          text = "abc";
+          result = text |> length;
+          RETURN;
+      END
+    CLEAR
+    main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+    bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
+
+    expect(bind.value).to be_a(AST::FuncCall)
+    expect(bind.value.name).to eq("length")
+    expect(bind.value.zig_pattern).to eq("CheatLib.len({0})")
   end
 
   it "rewrites RECOVER pipelines into OR fallback expressions" do

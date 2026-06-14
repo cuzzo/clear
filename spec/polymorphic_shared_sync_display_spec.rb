@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Coverage for shared_call_capability_display (generic_analysis.rb:449-462).
 # The method renders the per-arg sync portion of the
@@ -16,7 +16,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "polymorphic @shared sync-mismatch error display" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

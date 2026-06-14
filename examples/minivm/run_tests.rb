@@ -189,7 +189,7 @@ REGISTER_ROADMAP = [
     detail: "Single-threaded VM: branches run sequentially. Faithful for " \
             "side-effect ordering only when each branch is order-" \
             "independent; needs a sequential-equivalence assertion." },
-  # @reentrant variants and Set landed in the P2 batch; remaining
+  # Reentrance variants and Set landed in the P2 batch; remaining
   # tests in those clusters need runtime work for set iteration /
   # sharded-list value-kind.
   { priority: "P2", title: "Map .values() / .keys() iteration",
@@ -263,10 +263,10 @@ def print_concurrency_report(paths)
   $LOAD_PATH.unshift(File.expand_path("../../src/mir", __dir__))
   $LOAD_PATH.unshift(File.expand_path("../../src/ast", __dir__))
   require_relative "register_bc_emitter"
-  require "compiler_frontend"
+  require "compiler/compiler_frontend"
   require "mir_lowering"
   require "mir_checker"
-  require "importer"
+  require "compiler/module_importer"
   require "mir"
 
   ok = true

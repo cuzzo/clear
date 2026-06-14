@@ -3,13 +3,13 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -32,9 +32,9 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: parse_fn_type_annotation
+    # ClearParser: parse_fn_type_annotation
     # -------------------------------------------------------------------------
-    describe "Parser" do
+    describe "ClearParser" do
       context "FN(Int64) -> Bool in a type annotation position" do
         let(:code) { "cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;" }
         it "parses without error" do
@@ -83,7 +83,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type#fn_type?" do
       it "returns true for a parsed FN type annotation" do
         tokens = Lexer.new("cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;").tokenize
-        ast    = Parser.new(tokens, "").parse
+        ast    = ClearParser.new(tokens, "").parse
         bind   = ast.statements.first
         expect(bind.type.fn_type?).to be true
       end
@@ -100,7 +100,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type#zig_type for fn_type" do
       def fn_type_for(source)
         tokens = Lexer.new(source).tokenize
-        ast    = Parser.new(tokens, "").parse
+        ast    = ClearParser.new(tokens, "").parse
         ast.statements.first.type
       end
 
@@ -321,7 +321,7 @@ RSpec.describe SemanticAnnotator do
       context "cb(5) where cb: FN(Int64) -> Bool" do
         let(:source) {
           <<~CLEAR
-            FN main() RETURNS Void @nonReentrant ->
+            FN main() RETURNS !Void ->
               cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;
               result: Bool = cb(5);
             END
@@ -336,7 +336,7 @@ RSpec.describe SemanticAnnotator do
       context "add(3, 4) where add: FN(Int64, Int64) -> Int64" do
         let(:source) {
           <<~CLEAR
-            FN main() RETURNS Void @nonReentrant ->
+            FN main() RETURNS !Void ->
               add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;
               sum: Int64 = add(3, 4);
             END
@@ -381,7 +381,8 @@ RSpec.describe SemanticAnnotator do
             FN isPositive(n: Int64) RETURNS Bool ->
               RETURN n > 0;
             END
-            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool @nonReentrant ->
+            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool
+              REQUIRES cb: NON_REENTRANT ->
               RETURN cb(n);
             END
             result: Bool = apply(isPositive, 5);
@@ -435,7 +436,8 @@ RSpec.describe SemanticAnnotator do
           FN isPositive(n: Int64) RETURNS Bool ->
             RETURN n > 0;
           END
-          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(n);
           END
           FN main() RETURNS Void ->
@@ -458,34 +460,36 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
-  # FN-TYPE PARAMETER @reentrant CONSTRAINT
+  # FN-type reentrance constraints
   # ===========================================================================
-  describe "fn-type parameter @reentrant constraint" do
+  describe "fn-type reentrance constraints" do
 
     # -------------------------------------------------------------------------
-    # Blocking @reentrant functions at non-reentrant parameters
+    # Blocking plain EFFECTS REENTRANT functions at NON_REENTRANT parameters
     # -------------------------------------------------------------------------
-    describe "passing @reentrant functions to non-@reentrant parameters" do
-      it "raises a reentrancy error when passing a @reentrant function to a plain fn-type param" do
+    describe "passing plain reentrant functions to NON_REENTRANT parameters" do
+      it "raises a reentrancy error when passing a plain reentrant function to a constrained fn-type param" do
         code = <<~CLEAR
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(fib, 5);
         CLEAR
-        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*@reentrant/)
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*NON_REENTRANT/)
       end
 
-      it "does not raise when passing a non-reentrant function to a plain fn-type param" do
+      it "does not raise when passing a non-reentrant function to a constrained fn-type param" do
         code = <<~CLEAR
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);
@@ -495,16 +499,17 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Allowing @reentrant functions at @reentrant-annotated parameters
+    # Allowing plain EFFECTS REENTRANT callbacks by propagating the effect
     # -------------------------------------------------------------------------
-    describe "passing @reentrant functions to @reentrant-annotated fn-type params" do
-      it "accepts a @reentrant function when the param declares @reentrant" do
+    describe "passing plain reentrant functions to EFFECTS REENTRANT callees" do
+      it "accepts a plain reentrant function when the callee declares EFFECTS REENTRANT" do
         code = <<~CLEAR
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(fib, 5);
@@ -512,12 +517,13 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.not_to raise_error
       end
 
-      it "also accepts a non-reentrant function at a @reentrant-annotated param (covariant)" do
+      it "also accepts a non-reentrant function at an EFFECTS REENTRANT callee" do
         code = <<~CLEAR
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);
@@ -527,24 +533,22 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: @reentrant on fn-type annotation
+    # ClearParser: fn-type annotation has no legacy reentrance marker
     # -------------------------------------------------------------------------
     describe "parser" do
-      it "parses @reentrant on a fn-type param annotation" do
+      it "rejects @reentrant on a fn-type param annotation" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 ->
             RETURN cb(x);
           END
         CLEAR
-        tree = run(code)
-        fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
-        cb_param = fn.params.find { |p| p[:name] == "cb" }
-        expect(cb_param[:type].raw.reentrant).to be true
+        expect { run(code) }.to raise_error(ParserError)
       end
 
       it "leaves reentrant false on a plain fn-type param annotation" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(x);
           END
         CLEAR
@@ -556,16 +560,17 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Type: @reentrant propagated on fn_ref
+    # Type: EFFECTS REENTRANT propagated on fn_ref
     # -------------------------------------------------------------------------
     describe "fn_ref type propagation" do
-      it "marks the fn_ref type as reentrant when the named function is @reentrant" do
+      it "marks the fn_ref type as reentrant when the named function is plain EFFECTS REENTRANT" do
         code = <<~CLEAR
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(fib, 5);
@@ -576,12 +581,13 @@ RSpec.describe SemanticAnnotator do
         expect(fib_arg.full_type.raw.reentrant).to be true
       end
 
-      it "does not mark the fn_ref type as reentrant for a non-@reentrant function" do
+      it "does not mark the fn_ref type as reentrant for a non-reentrant function" do
         code = <<~CLEAR
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+            REQUIRES cb: NON_REENTRANT ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);

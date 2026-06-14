@@ -17,17 +17,18 @@ require "set"
 require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../ast/ast"
-require_relative "./importer"
+require_relative "../compiler/entrypoint"
+require_relative "../compiler/module_importer"
 require_relative "../annotator"
 require_relative "./zig_type_mapper"
 require_relative "../mir/cleanup_classifier"
-require_relative "./pipeline_rewriter"
-require_relative "./string_concat_rewriter"
+require_relative "../mir/rewriters/pipeline_rewriter"
+require_relative "../mir/rewriters/string_concat_rewriter"
 require_relative "../mir/control_flow"
-require_relative "./compiler_frontend"
+require_relative "../compiler/compiler_frontend"
 require_relative "../mir/mir"
 require_relative "../mir/mir_lowering"
-require_relative "../mir/mir_emitter"
+require_relative "mir_emitter"
 require_relative "../mir/mir_checker"
 
 class ZigTranspiler
@@ -51,8 +52,8 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
                   test_mode: test_mode, strict_test: strict_test,
@@ -61,8 +62,8 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @default_stack_size = default_stack unless default_stack.nil?
@@ -71,7 +72,7 @@ class ZigTranspiler
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
 
     # Apply exact stack tier overrides (from post-build binary analysis).
-    if exact_tiers && !exact_tiers.empty?
+    if !exact_tiers.empty?
       bg_nodes = T.let([], T::Array[AST::BgBlock])
       T.must(result).ast.statements.each do |stmt|
         next unless stmt.is_a?(AST::FunctionDef)
@@ -84,22 +85,23 @@ class ZigTranspiler
       end
     end
 
+    compiled = T.must(result)
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
-      struct_schemas: T.must(result).struct_schemas,
-      enum_schemas: T.must(result).enum_schemas,
-      union_schemas: T.must(result).union_schemas,
-      fn_sigs: T.must(result).fn_sigs,
-      moved_guard_info: T.must(result).moved_guard_info,
+      struct_schemas: compiled.struct_schemas,
+      enum_schemas: compiled.enum_schemas,
+      union_schemas: compiled.union_schemas,
+      fn_sigs: compiled.fn_sigs,
+      moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir,
       debug_mode: @default_stack_size == "Large"
     ))
 
     needs_c_alloc = use_c_allocator
-    program = lowering.lower_program(T.must(result).ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
+    program = lowering.lower_program(compiled.ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
 
     # Post-MIR verification: check the ACTUAL code that will be emitted.
-    checker = MIRChecker.new
+    checker = MIRChecker.new(schema_lookup: ->(name) { compiled.annotator.lookup_type_schema(name) })
     mir_errors = checker.check_program!(T.must(program), strict: true)
     unless mir_errors.empty?
       raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
@@ -109,7 +111,7 @@ class ZigTranspiler
     body = emitter.emit(program)
     error_name_enum = emit_error_name_enum
 
-    main_variant = main_stack_variant(T.must(result).fn_nodes["main"], override: main_tier)
+    main_variant = main_stack_variant(compiled.fn_nodes["main"], override: main_tier)
     footer = File.read(File.join(File.dirname(__FILE__), '..', '..', 'zig', 'runtime', 'runtime-footer.zig'))
     footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
                          ".{ .stack_size = .#{main_variant}, .pinned = true }")
@@ -163,21 +165,22 @@ class ZigTranspiler
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
+    compiled = T.must(result)
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
-      struct_schemas: T.must(result).struct_schemas,
-      enum_schemas: T.must(result).enum_schemas,
-      union_schemas: T.must(result).union_schemas,
-      fn_sigs: T.must(result).fn_sigs,
-      moved_guard_info: T.must(result).moved_guard_info,
+      struct_schemas: compiled.struct_schemas,
+      enum_schemas: compiled.enum_schemas,
+      union_schemas: compiled.union_schemas,
+      fn_sigs: compiled.fn_sigs,
+      moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir
     ))
 
-    mod_result = lowering.lower_module(T.must(result).ast)
+    mod_result = lowering.lower_module(compiled.ast)
 
     # Post-MIR verification on module functions.
-    checker = MIRChecker.new
-    T.must(mod_result[:items]).flatten.each do |item|
+    checker = MIRChecker.new(schema_lookup: ->(name) { compiled.annotator.lookup_type_schema(name) })
+    mod_result[:items].flatten.each do |item|
       next unless item.is_a?(MIR::FnDef)
       mir_errors = checker.check_fn!(item, strict: true)
       unless mir_errors.empty?
@@ -188,7 +191,7 @@ class ZigTranspiler
     # In module mode, EXTERN FN imports use named modules (e.g. -Mhttp=lib.zig).
     # Strip the .zig suffix from simple (non-path) module imports so @import("http")
     # matches the declared module name rather than looking for a file "http.zig".
-    all_items = (T.must(mod_result[:items]) + T.must(mod_result[:type_items])).flatten
+    all_items = (mod_result[:items] + mod_result[:type_items]).flatten
     all_items.each do |item|
       next unless item.is_a?(MIR::Import)
       next if item.module_path.include?("/")      # filesystem path, leave as-is
@@ -196,8 +199,8 @@ class ZigTranspiler
     end
 
     emitter = MIREmitter.new
-    items_zig = T.must(mod_result[:items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs_zig = T.must(mod_result[:type_items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    items_zig = mod_result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     body = [type_defs_zig, items_zig].reject(&:empty?).join("\n\n")
     safety_line = body.include?("safety.") ? "const safety = @import(\"safety\");\n" : ""
@@ -205,7 +208,7 @@ class ZigTranspiler
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
     # Uses a single-threaded scheduler so BG blocks (spawnBest) work correctly.
-    has_cheat_main = T.must(result).ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+    has_cheat_main = T.must(result).ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == Compiler::Entrypoint::NAME }
     test_block = if has_cheat_main
       <<~ZIG_TEST
 
@@ -258,6 +261,11 @@ class ZigTranspiler
       #{test_block}
     ZIG
   end
+
+  private :transpile_mir
+  private :emit_error_name_enum
+  private :main_stack_variant
+
 end
 
 # --- RUN IT ---
@@ -327,7 +335,7 @@ if __FILE__ == $0
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 use_c_allocator: !!options[:use_c_allocator],
                                 use_debug_allocator: !!options[:use_debug_allocator],
-                                exact_tiers: options[:exact_tiers],
+                                exact_tiers: options[:exact_tiers] || {},
                                 main_tier: options[:main_tier],
                                 default_stack: options[:default_stack])
     end

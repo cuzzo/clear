@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/symbol_entry"
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
 
 # Atomics M2.1: SymbolEntry.lifetime is the single mechanism for
 # "where can this binding escape to". One shape:
@@ -99,8 +99,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       expect(result).to eq([a, b])
     end
 
-    it "tied_lifetime returns an empty array for empty / nil input (unconstrained)" do
-      expect(SymbolEntry.tied_lifetime(nil)).to eq([])
+    it "tied_lifetime returns an empty array for empty input (unconstrained)" do
       expect(SymbolEntry.tied_lifetime([])).to eq([])
     end
 

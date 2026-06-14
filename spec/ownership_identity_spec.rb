@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/semantic/ownership_identity"
+require_relative "../src/semantic/ownership_identity" unless defined?(OwnershipIdentity::PlaceId)
 
 RSpec.describe OwnershipIdentity do
   describe OwnershipIdentity::BindingId do
@@ -19,9 +19,9 @@ RSpec.describe OwnershipIdentity do
       child = described_class.from_path("root.child")
 
       expect(place.path).to eq("root")
-      expect(place.child?).to be(false)
+      expect(place.send(:child?)).to be(false)
       expect(place.parent).to be_nil
-      expect(child.child?).to be(true)
+      expect(child.send(:child?)).to be(true)
       expect(child.parent).to be_a(described_class)
       expect(T.must(child.parent).path).to eq(place.path)
       expect(T.must(child.parent)).to eql(place)

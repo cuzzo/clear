@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Field-access on a known struct with an unknown field used to raise a
 # bare ILLEGAL_FIELD_LOOKUP. With a known schema we have the candidate
@@ -14,7 +14,7 @@ RSpec.describe "Struct field typo auto-fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -72,7 +72,7 @@ RSpec.describe "Struct field typo auto-fix" do
     it "raises plain CompilerError when no candidate is within Levenshtein threshold" do
       ann = SemanticAnnotator.new
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       FixCollector.disable!
       expect { ann.annotate!(ast) }.to raise_error(CompilerError, /no field|TYPO_SUGGESTION_REJECTED/)
     end

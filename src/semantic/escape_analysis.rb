@@ -167,18 +167,14 @@ module EscapeAnalysis
     [result.heap_fns, result.bg_heap]
   end
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: T.nilable(BodySummaries), hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
-  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = nil, hoist_bindings = nil)
-    validate_escape_sink_handlers!
-    validate_derived_placement_handlers!
-    validate_escape_sinks!
-
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: BodySummaries, hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
+  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = {}, hoist_bindings = nil)
     bg_heap = T.let(Set.new, T::Set[String])
     placements = EscapePlacementFacts.new
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
 
     fn_nodes.each do |name, fn|
-      facts_by_name[name] = function_facts(fn, body_summaries&.[](name), hoist_bindings&.[](name)) if fn.body
+      facts_by_name[name] = function_facts(fn, body_summaries[name], hoist_bindings&.[](name) || []) if fn.body
     end
 
     facts_by_name.each_value do |facts|
@@ -188,23 +184,21 @@ module EscapeAnalysis
     end
 
     facts_by_name.each_value do |facts|
-      fn = facts.fn
       record_placement_phase!(placements, facts, :receiver_backing_storage) do
-        mark_param_receiver_allocations_heap!(facts.escape_nodes) if fn.body
+        mark_param_receiver_allocations_heap!(facts.escape_nodes)
       end
       record_placement_phase!(placements, facts, :recursive_aggregate_owner) do
-        mark_recursive_aggregate_owners_heap!(facts, schema_lookup) if fn.body
+        mark_recursive_aggregate_owners_heap!(facts, schema_lookup)
       end
     end
 
-    fn_nodes.each do |name, fn|
-      next unless fn.body
-      facts = T.must(facts_by_name[name])
+    facts_by_name.each_value do |facts|
+      body = facts.fn.body
       record_placement_phase!(placements, facts, :escape_sink) do
         mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
       end
       record_placement_phase!(placements, facts, :loop_receiver_backing_storage) do
-        mark_loop_receiver_allocations_heap!(fn.body)
+        mark_loop_receiver_allocations_heap!(body)
       end
       record_placement_phase!(placements, facts, :assignment_ownership) do
         propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
@@ -279,36 +273,31 @@ module EscapeAnalysis
   # @param body_summaries [Hash] name -> annotated function body facts
   sig { params(fn_nodes: FnNodes, body_summaries: BodySummaries).void }
   def self.propagate_caller_sync!(fn_nodes, body_summaries)
-    return if fn_nodes.empty?
-
     # Index annotated call sites by callee name. These facts are collected once
     # during body analysis and keyed by stable CallSiteId.
-    callsites = T.let(Hash.new { |h, k| h[k] = [] }, CallSitesByCallee)
+    callsites = T.let({}, CallSitesByCallee)
     body_summaries.each_value do |summary|
       summary.call_site_facts.each do |call_site|
         next if call_site.fn_var_call
-        T.must(callsites[call_site.callee_name]) << call_site
+        (callsites[call_site.callee_name] ||= []) << call_site
       end
     end
 
-    max_iters = 8
-    max_iters.times do
+    fn_nodes.length.times do
       changed = T.let(false, T::Boolean)
       fn_nodes.each do |callee_name, callee_fn|
-        next unless callee_fn&.params
-        sites = T.must(callsites[callee_name])
-        next if sites.empty?
+        sites = callsites.fetch(callee_name, [])
 
         callee_fn.params.each_with_index do |param, idx|
           entry = param.symbol
           next unless entry
 
           # ── sync axis ────────────────────────────────────────────────
-          unless entry.sync && param_sync_was_declared?(param)
+          unless param_sync_was_declared?(param)
             unified = unify_caller_attr(sites, idx) do |s|
-              next s.sync if s&.sync
-              t = s&.type
-              t.is_a?(Type) ? t.sync : nil
+              next s.sync if s.sync
+              t = s.type
+              t.sync
             end
             if unified && entry.sync != unified && param_accepts_caller_sync?(callee_fn, param, unified)
               entry.sync = unified
@@ -324,12 +313,10 @@ module EscapeAnalysis
           # @shared:locked + collection to :heap, so the wrapping fact
           # lives on entry.type.ownership instead. Check both axes.
           unified_storage = unify_caller_attr(sites, idx) do |s|
-            next s.storage if s&.rc_stored?
-            t = s&.type
-            if t.is_a?(Type)
-              next :shared     if t.respond_to?(:shared?)     && t.shared?
-              next :multiowned if t.respond_to?(:multiowned?) && t.multiowned?
-            end
+            next s.storage if s.rc_stored?
+            t = s.type
+            next :shared     if t.shared?
+            next :multiowned if t.multiowned?
             nil
           end
           if unified_storage && entry.storage != unified_storage
@@ -494,9 +481,7 @@ module EscapeAnalysis
     return false if t.rodata? || t.borrowed_reference?
 
     if t.collection_value?
-      elem = t.element_type
-      return false unless elem
-      return elem.ownership_bearing?(schema_lookup)
+      return t.needs_explicit_cleanup?(:frame, schema_lookup)
     end
 
     return false if t.string? || t.heap_ptr?
@@ -517,8 +502,10 @@ module EscapeAnalysis
 
   sig { params(body: T::Array[T.untyped]).void }
   private_class_method def self.mark_receiver_allocations_in_loop!(body)
-    local_names = MIR::LocalBindingAnalysis.direct_loop_body_facts(body).names
-    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
+    return unless loop_body_has_frame_allocation_candidate?(body)
+
+    declared_names = loop_body_declared_names(body)
+    each_loop_body_node(body) do |node|
       case node
       when AST::MethodCall
         sig = FunctionSignature.unwrap(node.matched_signature)
@@ -536,7 +523,7 @@ module EscapeAnalysis
         next
       end
       next unless root&.symbol
-      next if local_names.include?(root.name.to_s)
+      next if declared_names.include?(root.name.to_s)
       mark_symbol_heap!(root.symbol)
       if node.is_a?(AST::MethodCall)
         value_params.each_with_index do |param, idx|
@@ -645,7 +632,6 @@ module EscapeAnalysis
   private_class_method def self.mark_takes_args_heap!(args, params, schema_lookup)
     params.each_with_index do |param, idx|
       arg = args[idx]
-      next unless arg
       next unless param.takes || symbol_heap?(param.symbol)
       arg_type = arg.is_a?(AST::Locatable) ? arg.full_type!(context: "TAKES argument") : nil
       next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||
@@ -682,6 +668,60 @@ module EscapeAnalysis
       mark_symbol_heap!(receiver_sym)
       return
     end
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  private_class_method def self.loop_body_has_frame_allocation_candidate?(body)
+    found = T.let(false, T::Boolean)
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
+      next if found
+      found = true if loop_binding_frame_allocation_candidate?(node)
+    end
+    found
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  private_class_method def self.loop_binding_frame_allocation_candidate?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false if node.respond_to?(:symbol) && node.symbol&.heap_storage?
+
+    value = node.respond_to?(:value) ? node.value : nil
+    return true if string_concat_expr?(unwrap_value(value))
+
+    entry = MIR::LocalBindingAnalysis.binding_entry(node)
+    return true if entry&.present? && entry.frame?
+
+    ti = node.full_type!(context: "loop receiver heap promotion")
+    ti.needs_cleanup? && ti.cleanup_allocator == :frame
+  rescue StandardError
+    false
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  private_class_method def self.loop_body_declared_names(body)
+    names = T.let(Set.new, T::Set[String])
+    each_loop_body_node(body) do |node|
+      name = MIR::LocalBindingAnalysis.binding_decl_name(node)
+      names << name if name
+    end
+    names
+  end
+
+  sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: AST::Node).void).void }
+  private_class_method def self.each_loop_body_node(body, &block)
+    stack = T.let(body.reverse, T::Array[T.untyped])
+    until stack.empty?
+      node = stack.pop
+      next unless node.is_a?(AST::Locatable)
+      yield node
+      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
+              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock)
+
+      AST.child_bodies(node).reverse_each do |child_body|
+        child_body.reverse_each { |child| stack << child }
+      end
+    end
+    nil
   end
 
   sig { params(arg: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
@@ -865,8 +905,8 @@ module EscapeAnalysis
     facts.symbols[name]
   end
 
-  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary), hoist_bindings: T.nilable(T::Array[AST::VarDecl])).returns(FunctionFacts) }
-  private_class_method def self.function_facts(fn, summary = nil, hoist_bindings = nil)
+  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary), hoist_bindings: T::Array[AST::VarDecl]).returns(FunctionFacts) }
+  private_class_method def self.function_facts(fn, summary = nil, hoist_bindings = [])
     symbols = T.let({}, T::Hash[String, SymbolEntry])
     binding_values = T.let({}, T::Hash[String, T::Array[AST::Locatable]])
     return_values = T.let([], T::Array[AST::Node])
@@ -882,10 +922,10 @@ module EscapeAnalysis
         record_symbol_fact!(node, symbols) if node.is_a?(AST::BindExpr)
         assignment_nodes << node
       end
-      hoist_bindings&.each { |node| record_binding_fact!(node, symbols, binding_values) }
+      hoist_bindings.each { |node| record_binding_fact!(node, symbols, binding_values) }
       summary.return_nodes.each { |node| return_values << node.value if node.value }
       escape_nodes.concat(summary.escape_nodes)
-      escape_nodes.concat(hoist_bindings) if hoist_bindings
+      escape_nodes.concat(hoist_bindings)
       return FunctionFacts.new(
         fn: fn,
         symbols: symbols,
@@ -1094,15 +1134,15 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(value: AST::Node, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T.nilable(T::Hash[String, FunctionFacts])).returns(T::Boolean) }
-  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: nil)
+  sig { params(value: AST::Node, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T::Hash[String, FunctionFacts]).returns(T::Boolean) }
+  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: {})
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
     return false unless AST.call?(call)
     call = T.cast(call, T.any(AST::FuncCall, AST::MethodCall))
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
-    callee_facts = facts_by_name&.[](call.name.to_s)
+    callee_facts = facts_by_name[call.name.to_s]
     return call_result_is_heap_for_callee?(call, callee, schema_lookup, facts: callee_facts) if callee
 
     sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil

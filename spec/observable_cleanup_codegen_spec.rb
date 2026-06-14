@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # A14: pin H4's load-bearing invariant — every `~T@observable` and
 # `~T[]@set:observable` binding must emit `wait(); destroy(...)` (in
@@ -8,7 +8,7 @@ require_relative "../src/backends/transpiler"
 # only surface the bug as a flaky leak/UAF in the DebugAllocator. The
 # codegen-shape assertion makes any regression a deterministic spec
 # failure.
-RSpec.describe ":observable cleanup codegen shape" do
+RSpec.describe CleanupClassifier do
   def transpile(src)
     ZigTranspiler.new.transpile(src)
   end

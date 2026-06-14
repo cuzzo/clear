@@ -1,11 +1,11 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests CALLER-side cleanup for heap-promoted return values.
 # When a function with returns_promoted returns data, the caller must
 # emit defer cleanup so heap allocations are freed.
 
-RSpec.describe "Caller-side cleanup for promoted returns" do
+RSpec.describe CleanupClassifier do
   def transpile(src)
     ZigTranspiler.new.transpile(src)
   end

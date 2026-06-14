@@ -8,6 +8,7 @@ require_relative "../../ast/ast"
 # statements. Mixed into SemanticAnnotator.
 module MethodAnalysis
     extend T::Sig
+  IndexOpDefinition = T.type_alias { T::Hash[T.untyped, T.untyped] }
 
   # Attempt to resolve a method call on a collection type (Pool, Set, or HashMap).
   # Returns true if handled, false if the caller should fall through to UFCS.
@@ -35,7 +36,6 @@ module MethodAnalysis
     return unless matched_def.intrinsic_contract.behavior.narrows_collection && args.size >= 2
 
     list_arg = args[0]
-    val_arg  = args[1]
     return unless list_arg.is_a?(AST::Identifier)
 
     scope_entry = list_arg.symbol
@@ -44,6 +44,7 @@ module MethodAnalysis
     return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
+    val_arg = args[1]
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.copy_collection_shape_from!(ti)
@@ -58,7 +59,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
-    defn = IntrinsicRegistry.sig(registry, T.unsafe(node).name)
+    defn = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, T.unsafe(node).name))
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(
@@ -71,18 +72,20 @@ module MethodAnalysis
     end
 
     # Arity check
-    if defn.arity && defn.arity >= 0 && node.args.length != defn.arity
-      if defn.arity == 0
+    arity = defn.arity
+    if arity && arity >= 0 && node.args.length != arity
+      if arity == 0
         error!(node, :STDLIB_METHOD_NO_ARGS, label: type_label, method: node.name, got: node.args.length)
       else
-        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: defn.arity, got: node.args.length)
+        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: arity, got: node.args.length)
       end
       return true
     end
 
     # Type validation (optional)
-    if defn.arg_validator
-      defn.arg_validator.call(node, node.args, obj_type, method(:error!))
+    arg_validator = defn.arg_validator
+    if arg_validator
+      arg_validator.call(node, node.args, obj_type, method(:error!))
     end
 
     # Set tag and return type
@@ -128,7 +131,7 @@ module MethodAnalysis
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = T.must(node.args[arg_idx])
+      arg_node = node.args[arg_idx]
       move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 
@@ -165,7 +168,7 @@ module MethodAnalysis
   # Look up the INDEX_OPS entry for a container type.
   # Returns the :get or :set sub-entry, or nil.
   # Dispatch is driven by Type#dispatch_key — add new indexable types there.
-  sig { params(type_info: Type, op: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(type_info: Type, op: Symbol).returns(T.nilable(IndexOpDefinition)) }
   def resolve_index_op(type_info, op)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil if type_info.promise_list?

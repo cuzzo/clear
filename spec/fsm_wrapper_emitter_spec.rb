@@ -1,7 +1,7 @@
 require 'bundler/setup'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_ops'
-require_relative '../src/mir/fsm_wrapper_emitter'
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_ops' unless defined?(FsmOps::Lowerer)
+require_relative '../src/backends/fsm_wrapper_emitter' unless defined?(FsmWrapperEmitter)
 
 # Tests for the FSM-IO state-machine wrapper renderer that
 # replaces the heredoc previously inlined in
@@ -130,8 +130,9 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("break :__bg0 __bg0_promise;")
     end
 
-    it "rejects non-FsmIoBody inputs" do
-      expect { FsmWrapperEmitter.render("oops") }.to raise_error(ArgumentError)
+    it "rejects non-FsmBody inputs with the rejected class" do
+      expect { FsmWrapperEmitter.render("oops") }
+        .to raise_error(ArgumentError, /expected an FsmBody node, got String/)
     end
   end
 
@@ -262,7 +263,7 @@ RSpec.describe FsmWrapperEmitter do
         true,
       )
 
-      out = FsmWrapperEmitter.render_dispatch(dispatch)
+      out = FsmWrapperEmitter.send(:render_dispatch, dispatch)
 
       expect(out).to include("if (__ctx_4.skip) {")
       expect(out).to include("__ctx_4.step = 2;")
@@ -270,7 +271,7 @@ RSpec.describe FsmWrapperEmitter do
     end
 
     it "rejects unknown dispatch tails" do
-      expect { FsmWrapperEmitter.render_tail(Object.new, 0) }
+      expect { FsmWrapperEmitter.send(:render_tail, Object.new, 0) }
         .to raise_error(ArgumentError, /unknown tail/)
     end
   end
@@ -411,7 +412,7 @@ RSpec.describe FsmWrapperEmitter do
         stmt: MIR::ExprStmt.new(MIR::Call.new("releaseShared", [], false), false),
       )
 
-      out = FsmWrapperEmitter.render_destroy_stmt_action(action, MIREmitter.new)
+      out = FsmWrapperEmitter.send(:render_destroy_stmt_action, action, MIREmitter.new)
 
       expect(out).to eq("releaseShared();")
     end

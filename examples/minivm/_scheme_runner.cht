@@ -70,7 +70,7 @@ END
 #      30=number->string 31=string->number 32=string? 33=display
 #      34=list-ref 35=list-length 36=list-push 62=list-set!
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
+FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     # Arithmetic
     # Modulo
     IF id == 37 THEN
@@ -502,7 +502,7 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool EFFECTS REENTRANT ->
     IF pool[envId] AS env THEN
         IF env.vars.contains?(name) THEN
             env.vars[name] = COPY val;
@@ -645,7 +645,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
 END
 
 # resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
-FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
@@ -658,7 +658,7 @@ END
 
 # eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -682,7 +682,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
     RETURN Value.Nil;
 END
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
     MUTABLE bouncing = isTco?(result);
     WHILE bouncing DO
@@ -694,7 +694,7 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
     RETURN result;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -1782,7 +1782,7 @@ END
 
 # runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -2035,7 +2035,7 @@ END
 # compile! stores results in pool env at __bc_ops and __bc_consts keys.
 # Caller reads them from pool[envId] after the call.
 
-FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EFFECTS REENTRANT ->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
 
@@ -2173,7 +2173,7 @@ END
 # Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 # Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;

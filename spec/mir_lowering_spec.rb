@@ -1,16 +1,16 @@
 require "rspec"
 require "ostruct"
 require "stringio"
-require_relative "../src/mir/mir"
-require_relative "../src/ast/std_lib"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_emitter"
-require_relative "../src/mir/mir_checker"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/type"
-require_relative "../src/backends/importer"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/mir/mir_checker" unless defined?(MIRChecker::FsmStructureError)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 
 RSpec.describe MIRLowering do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
@@ -246,7 +246,7 @@ RSpec.describe MIRLowering do
       profiled = low.send(:profiled_task_config_plan, base, 9, :parallel)
 
       expect(profiled).to be_a(MIR::TaskConfigPlan)
-      expect(MIREmitter.new.emit_task_config_plan(profiled))
+      expect(MIREmitter.new.send(:emit_task_config_plan, profiled))
         .to eq(".{ .stack_size = .Large, .profile_site_id = 9, .profile_dispatch = 2 }")
     end
 
@@ -263,7 +263,7 @@ RSpec.describe MIRLowering do
 
       task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
       spawn = low.send(:fiber_spawn_call_plan, "__rt", "__Worker", "__worker", task_config, :parallel)
-      out = MIREmitter.new.emit_fiber_spawn_call(spawn)
+      out = MIREmitter.new.send(:emit_fiber_spawn_call, spawn)
 
       expect(out).to include("CheatHeader.spawnBest")
       expect(out).to include("&__Worker.run")
@@ -297,7 +297,7 @@ RSpec.describe MIRLowering do
       expect(names.ctx_type).to eq("__BgCtx12")
       expect(types.promise_zig).to include("Promise")
       expect(capture.capture_inits.map(&:name)).to include(:inner, :alloc)
-      expect(MIREmitter.new.emit_struct_init_fields(capture.capture_inits))
+      expect(MIREmitter.new.send(:emit_struct_init_fields, capture.capture_inits))
         .to include(".inner = __bg12_promise.inner")
       expect(scheduler.dispatch).to eq(true)
       expect(MIREmitter.new.emit(T.must(scheduler.arena_init))).to eq("__rt_bg12.arena_mode = true;")
@@ -327,7 +327,7 @@ RSpec.describe MIRLowering do
         Set.new,
       )
 
-      expect(MIREmitter.new.emit_capture_cleanup_actions(capture.capture_frees))
+      expect(MIREmitter.new.send(:emit_capture_cleanup_actions, capture.capture_frees))
         .to include("defer __ctx_2.map.deinit(rt.heapAlloc(), rt.heapAlloc());")
     end
 
@@ -505,7 +505,7 @@ RSpec.describe MIRLowering do
       # charAt(s, i) == "\\"
       charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
       charat.full_type = :String
-      charat.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "charAt").first
+      charat.matched_stdlib_def = IntrinsicRegistry.lookup(STD_LIB, "charAt").first
       charat.zig_pattern = charat.matched_stdlib_def.emit.zig
       eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
       eq_node.full_type = :Boolean
@@ -681,6 +681,34 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BinOp)
       expect(emit(result)).to eq("(x > 10.0)")
+    end
+
+    it "lowers left-optional equality to a nil-safe payload comparison" do
+      left = make_id("maybe", full_type: :"?Int64")
+      right = make_lit(:INT64, 1, full_type: :Int64)
+      node = make_binop(left, :EQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to eq("(if (maybe) |__opt_cmp_1| (__opt_cmp_1 == 1) else false)")
+    end
+
+    it "lowers right-optional inequality with a true nil fallback" do
+      left = make_lit(:INT64, 1, full_type: :Int64)
+      right = make_id("maybe", full_type: :"?Int64")
+      node = make_binop(left, :NEQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to eq("(if (maybe) |__opt_cmp_1| (1 != __opt_cmp_1) else true)")
+    end
+
+    it "lowers optional string equality through the string comparison helper" do
+      left = make_id("maybe_name", full_type: :"?String")
+      right = make_lit(:STRING, "alice", full_type: :String)
+      node = make_binop(left, :EQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to include("CheatLib.eql(__opt_cmp_1,")
+      expect(emit(result)).to end_with(" else false)")
     end
 
     it "lowers string equality" do
@@ -2050,9 +2078,6 @@ RSpec.describe MIRLowering do
       expect(lits.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
     end
 
-    it "returns empty array for nil" do
-      expect(lowering.lower_body(nil)).to eq([])
-    end
   end
 
   # =========================================================================
@@ -2091,7 +2116,7 @@ RSpec.describe MIRLowering do
   describe "function definitions" do
     def make_fn(name, params: [], return_type: :Void, body: [], visibility: nil,
                 needs_rt: true, can_fail: true, uses_frame: false, uses_alloc: false,
-                type_params: nil, catch_clauses: nil, default_catch: nil)
+                type_params: [], catch_clauses: nil, default_catch: nil)
       fn = AST::FunctionDef.new(tok, name, params, nil, return_type, nil, body,
                                  catch_clauses, default_catch, visibility, nil, uses_frame)
       fn.full_type = return_type
@@ -2515,9 +2540,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers call without rt when fn_sig says needs_rt=false" do
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-      sig.needs_rt = false
-      sig.can_fail = false
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64), needs_rt: false, can_fail: false)
       l = lowering(fn_sigs: { "pure" => sig })
       node = AST::FuncCall.new(tok, "pure", [])
       node.full_type = :Int64
@@ -2531,10 +2554,10 @@ RSpec.describe MIRLowering do
       # into registers. Do NOT pass by *const T — that would prevent SROA.
       sig = FunctionSignature.new(
         params: [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)],
-        return_type: Type.new(:Int64)
+        return_type: Type.new(:Int64),
+        needs_rt: false,
+        can_fail: false
       )
-      sig.needs_rt = false
-      sig.can_fail = false
       l = lowering(
         fn_sigs: { "sum3" => sig },
         struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Int64, "y" => :Int64 }) }
@@ -2578,9 +2601,9 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       sig = FunctionSignature.new(
         params: [AST::Param.new(name: "count", type: Type.new(:Int64), mutable: true)],
-        return_type: Type.new(:Void)
+        return_type: Type.new(:Void),
+        needs_rt: false
       )
-      sig.needs_rt = false
 
       result = lowering(fn_sigs: { "bump" => sig }).lower(node)
 
@@ -2595,8 +2618,11 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "identity", [arg])
       node.full_type = :Int64
       node.generic_type_args = [:Int64]
-      sig = FunctionSignature.new(params: [AST::Param.new(name: "x", type: Type.new(:Int64))], return_type: Type.new(:Int64))
-      sig.needs_rt = true
+      sig = FunctionSignature.new(
+        params: [AST::Param.new(name: "x", type: Type.new(:Int64))],
+        return_type: Type.new(:Int64),
+        needs_rt: true
+      )
 
       result = lowering(fn_sigs: { "identity" => sig }).lower(node)
 
@@ -2619,8 +2645,12 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "toString", [arg])
       node.full_type = :String
       node.zig_pattern = "try CheatLib.intToString({alloc}, {0})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "try CheatLib.intToString({alloc}, {0})", alloc: :frame)
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:String),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "try CheatLib.intToString({alloc}, {0})", alloc: :frame)
+      )
       node.matched_stdlib_def = sig
       result = lowering.lower(node)
       expect(result).to be_a(MIR::RegistryCall)
@@ -2845,24 +2875,43 @@ RSpec.describe MIRLowering do
       expect(zig).to match(/defer __counter_guard_\d+\.release\(\)/)
     end
 
-    it "lowers BORROWED capability" do
-      var_node = make_id("data", full_type: :Data)
-      cap = { var_node: var_node, alias: "d", capability: :BORROWED, resolved_type: nil }
-      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
-      body_lit.coerced_type = :Int64
+	    it "lowers BORROWED capability" do
+	      var_node = make_id("data", full_type: :Data)
+	      cap = { var_node: var_node, alias: "d", capability: :BORROWED, resolved_type: nil }
+	      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+	      body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
       attach_capability_plan!(node)
 
       result = lowering.lower(node)
-      zig = emit(result)
-      expect(zig).to include("const d = data")
-    end
+	      zig = emit(result)
+	      expect(zig).to include("const d = data")
+	    end
 
-    it "lowers RESTRICT capability" do
-      var_node = make_id("buf", full_type: :Buffer)
-      resolved = Type.new(:Buffer)
-      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: false, resolved_type: resolved }
+	    it "does not dereference borrowed raw array parameters" do
+	      array_type = Type.array_of(:Int64)
+	      var_node = make_id("data", full_type: array_type)
+	      symbol = SymbolEntry.new(reg: "data", type: array_type, mutable: false, storage: :stack)
+	      symbol.is_param = true
+	      var_node.symbol = symbol
+	      cap = { var_node: var_node, alias: "ref", capability: :BORROWED, resolved_type: array_type }
+	      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+	      body_lit.coerced_type = :Int64
+	      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+	      node.full_type = :Void
+	      attach_capability_plan!(node)
+
+	      result = lowering.lower(node)
+	      zig = emit(result)
+	      expect(zig).to include("const ref = data;")
+	      expect(zig).not_to include("data.*")
+	    end
+
+	    it "lowers RESTRICT capability" do
+	      var_node = make_id("buf", full_type: :Buffer)
+	      resolved = Type.new(:Buffer)
+	      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: false, resolved_type: resolved }
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
@@ -3309,8 +3358,12 @@ RSpec.describe MIRLowering do
       source = AST::StaticCall.new(tok, "Streams", "source", [])
       source.full_type = Type.new(:"~Int64[INF]")
       source.zig_pattern = "makeStream()"
-      source_sig = FunctionSignature.new(params: [], return_type: source.full_type!, intrinsic: true)
-      source_sig.emit = IntrinsicEmit.new(zig: "makeStream()")
+      source_sig = FunctionSignature.new(
+        params: [],
+        return_type: source.full_type!,
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "makeStream()")
+      )
       source.matched_stdlib_def = source_sig
       node = AST::NextExpr.new(tok, source)
       node.full_type = Type.new(:Int64)
@@ -3338,8 +3391,12 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "sqrt", [arg])
       node.full_type = :Number
       node.zig_pattern = "std.math.sqrt({0})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "std.math.sqrt({0})")
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Number),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "std.math.sqrt({0})")
+      )
       node.matched_stdlib_def = sig
 
       result = lowering.lower(node)
@@ -3356,8 +3413,12 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "max", [arg0, arg1])
       node.full_type = :Number
       node.zig_pattern = "std.math.max({0}, {1})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "std.math.max({0}, {1})")
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Number),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "std.math.max({0}, {1})")
+      )
       node.matched_stdlib_def = sig
 
       result = lowering.lower(node)
@@ -3659,9 +3720,13 @@ RSpec.describe MIRLowering do
       imported_fn_ast = AST::FunctionDef.new(tok, "helper_value", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
       imported_fn_ast.needs_rt = false
       imported_fn_ast.can_fail = false
+      imported_main_ast = AST::FunctionDef.new(tok, "main", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
+      imported_main_ast.needs_rt = false
+      imported_main_ast.can_fail = false
       imported_ast = AST::Program.new(tok, [
         AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
         imported_fn_ast,
+        imported_main_ast,
       ])
       imported_type = MIR::StructDef.new("PublicType", [], nil, :pub)
       imported_mod = ModuleImporter::CompiledModule.new(
@@ -3680,13 +3745,18 @@ RSpec.describe MIRLowering do
       importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
       node = AST::RequireNode.new(tok, "helper.cht", "helper", :local)
 
-      result = lowering(importer: importer, source_dir: Dir.pwd).lower(node)
+      low = lowering(importer: importer, source_dir: Dir.pwd)
+      result = low.lower(node)
 
       expect(result).to include(imported_type)
       namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
       expect(namespace.name).to eq("helper")
       expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
+      expect(namespace.items).not_to include(an_object_having_attributes(name: "main"))
+      expect(low.send(:program_state).fn_sigs).to include("helper_value")
+      expect(low.send(:program_state).fn_sigs).not_to include("main")
       expect(emit(namespace)).to include("const helper = struct")
+      expect(emit(namespace)).not_to include("clearMain")
     end
 
     it "emits a repeated local require module only once" do
@@ -4434,7 +4504,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     assignment = AST::Assignment.new(tok, target, value)
     assignment.full_type = Type.new(:Void)
 
-    body = l.lower_step_stmts([assignment], no_result: false, ctx_id: 3)
+    body = l.send(:lower_step_stmts, [assignment], no_result: false, ctx_id: 3)
 
     expect(body.length).to eq(1)
     expect(body.first).to be_a(MIR::Set)
@@ -4477,7 +4547,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     l.function_state.fn_name_rename_map = { "owned" => "owned_renamed" }
     l.function_state.guarded_cleanup_names = {}
 
-    l.guard_fsm_result_cleanup!(
+    l.send(
+      :guard_fsm_result_cleanup!,
       [MIR::Cleanup.new("owned", cleanup)],
       [MIR::FsmResultTransferFact.new(name: "owned_renamed", target_alloc: :heap, move_guarded: true)],
     )

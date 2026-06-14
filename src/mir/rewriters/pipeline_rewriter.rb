@@ -1,8 +1,8 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "../ast/ast"
-require_relative "../ast/std_lib"
+require_relative "../../ast/ast"
+require_relative "../../ast/std_lib"
 
 # Pipeline Rewriter — transforms high-level pipeline operators (|>) into 
 # regular AST nodes (ForEach, IfStatement, BlockExpr) AFTER annotation.
@@ -18,16 +18,14 @@ class PipelineRewriter
   # OrderByOp, IndexOp, WindowOp, JoinOp: require structural MIR/runtime
   # lowering that the MIR pipeline lowerers own.
 
-  sig { params(annotator: T.nilable(SemanticAnnotator)).void }
+  sig { params(annotator: T.untyped).void }
   def initialize(annotator = nil)
-    @annotator = annotator
+    @annotator = T.let(annotator, T.untyped)
     @var_counter = T.let(0, Integer)
   end
 
   sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite!(node)
-    return node unless node
-
     # Handle SMOOTH nodes BEFORE recursing into children.
     # This preserves pipeline chains (a |> WHERE |> SELECT |> SUM)
     # so collect_chain can discover and fuse them into a single loop.
@@ -36,7 +34,6 @@ class PipelineRewriter
     end
 
     rewrite_children!(node)
-    node
   end
 
   private
@@ -87,7 +84,7 @@ class PipelineRewriter
       node.items.map! { |i| rewrite!(i) }
     when AST::BlockExpr
       node.body.map! { |s| rewrite!(s) }
-      node.result = rewrite!(node.result)
+      node.result = rewrite!(node.result) if node.result
     end
 
     node
@@ -223,9 +220,9 @@ class PipelineRewriter
       call = AST::FuncCall.new(rhs.token, rhs.name, [lhs_node])
       AST.stamp_synthetic_type!(call, node.full_type!, context: "synthetic AST type")
       call.storage   = node.storage
-      config = IntrinsicRegistry.sig(STD_LIB, T.unsafe(rhs).name)
-      if config
-        sig0 = config.is_a?(Array) ? config.first : config
+      config = IntrinsicRegistry.lookup(STD_LIB, T.unsafe(rhs).name)
+      sig0 = T.let(config.is_a?(Array) ? config.first : FunctionSignature.unwrap(config), T.nilable(FunctionSignature))
+      if sig0
         call.zig_pattern = sig0.intrinsic_pattern
       end
       return call
@@ -702,7 +699,7 @@ class PipelineRewriter
 
   sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
   def synthetic_append_call(token, receiver, value)
-    defn = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+    defn = T.must(FunctionSignature.unwrap(IntrinsicRegistry.lookup(STD_LIB, "append")))
     call = AST::MethodCall.new(token, receiver, "append", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
     call.zig_pattern = defn.intrinsic_pattern
@@ -712,7 +709,7 @@ class PipelineRewriter
 
   sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
   def synthetic_set_insert_call(token, receiver, value)
-    defn = T.must(IntrinsicRegistry.sig(SET_METHODS, "insert"))
+    defn = T.must(FunctionSignature.unwrap(IntrinsicRegistry.lookup(SET_METHODS, "insert")))
     call = AST::MethodCall.new(token, receiver, "insert", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
     call.zig_pattern = defn.intrinsic_pattern

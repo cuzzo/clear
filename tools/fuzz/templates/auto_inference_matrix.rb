@@ -14,7 +14,7 @@ AUTO_INFERENCE_CELLS = [
   { shape: :return_int },
   { shape: :local_scalar, expected: :compile_error },
   { shape: :local_string, expected: :compile_error },
-  { shape: :local_empty_list, expected: :compile_error },
+  { shape: :local_empty_list },
   { shape: :local_empty_map, expected: :compile_error },
   { shape: :mutable_reassign, expected: :compile_error },
   { shape: :ambiguous_param, expected: :compile_error },

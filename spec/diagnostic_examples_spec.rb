@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/diagnostic_examples"
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/diagnostic_examples" unless defined?(DiagnosticExamples::FixScan)
 
 # Audit the `@example_for: CODE` annotation convention. Every annotated
 # describe block must (a) reference a real registry code and (b) carry
@@ -62,7 +62,7 @@ RSpec.describe DiagnosticExamples do
         "describe \"example\" do\n",
       ]
 
-      scan = DiagnosticExamples.scan_fix_lines(lines, 1)
+      scan = DiagnosticExamples.send(:scan_fix_lines, lines, 1)
 
       expect(scan.fix_lines).to eq([
         "Add the missing argument.",

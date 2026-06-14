@@ -80,8 +80,10 @@ FuzzGenerator.register(:extern_boundary_matrix, cells: EXTERN_BOUNDARY_CELLS) do
       EXTERN FN native_sqrt(x: Float64) RETURNS Float64 FROM "math";
 
       FN main() RETURNS Void ->
-        LOOP TIGHT 4 DO
+        MUTABLE i: Int64 = 0_i64;
+        TIGHT WHILE i < 4_i64 DO
           _ = native_sqrt(4.0);
+          i = i + 1_i64;
         END
         RETURN;
       END

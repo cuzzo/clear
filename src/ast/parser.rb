@@ -11,7 +11,7 @@ require_relative "../annotator/helpers/fixable_helpers"
 # ==========================================
 # PARSER
 # ==========================================
-class Parser
+class ClearParser
     extend T::Sig
 
   class CapabilityParseResult < T::Struct
@@ -50,15 +50,15 @@ class Parser
   @@suffix_rules = T.let({}, T::Hash[T.untyped, T.untyped])
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
 
-  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
-  def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
-    if pattern
+  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
+  def self.stmt(type, value, node_class = nil, pattern = [], inject: [], &block)
+    unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@stmt_rules[[type, value]] = lambda do
-        T.bind(self, Parser) rescue nil
+        T.bind(self, ClearParser) rescue nil
         start_token = current
         args = process_pattern(pattern)
-        T.must(args).concat(inject)
+        args.concat(inject)
         T.unsafe(node_class).new(start_token, *args)
       end
     else
@@ -66,12 +66,12 @@ class Parser
     end
   end
 
-  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(Proc) }
-  def self.primary(type, value=nil, node_class = nil, pattern = nil,  &block)
-    if pattern
+  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], block: T.untyped).returns(Proc) }
+  def self.primary(type, value=nil, node_class = nil, pattern = [],  &block)
+    unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@primary_rules[[type, value]] = lambda do
-        T.bind(self, Parser) rescue nil
+        T.bind(self, ClearParser) rescue nil
         start_token = current
         args = process_pattern(pattern)
         T.unsafe(node_class).new(start_token, *args)
@@ -96,7 +96,7 @@ class Parser
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per
     # docs/agents/gradual-typing.md §3.3). Defaults to the global
-    # Parser.gradual_mode flag set by the CLI; can be overridden
+    # ClearParser.gradual_mode flag set by the CLI; can be overridden
     # per-instance by passing the kwarg explicitly. Without gradual
     # mode, omitted annotations behave exactly as before this feature
     # landed.
@@ -107,7 +107,7 @@ class Parser
     extend T::Sig
 
     # Process-global gradual-mode flag. Set by `clear --gradual` at
-    # build start; read by Parser.new instances that don't pass an
+    # build start; read by ClearParser.new instances that don't pass an
     # explicit gradual: kwarg. This matches how the existing CLI
     # threads compile-time choices (--optimized, --tsan, etc.) — one
     # build, one mode.
@@ -143,46 +143,46 @@ class Parser
   end
 
   # COMMANDS
-  stmt(:KEYWORD, 'REQUIRE') { T.bind(self, Parser); parse_require }
-  stmt(:KEYWORD, 'EXTERN')  { T.bind(self, Parser); parse_extern_decl }
-  stmt(:KEYWORD, 'MUTABLE') { T.bind(self, Parser); parse_mutable_var_decl }
-  stmt(:KEYWORD, 'FN')      { T.bind(self, Parser); parse_function_def }
-  stmt(:KEYWORD, 'METHOD')  { T.bind(self, Parser); parse_function_def(:package, is_method: true) }
-  stmt(:KEYWORD, 'PUB')     { T.bind(self, Parser); parse_visibility_decl(:pub) }
-  stmt(:KEYWORD, 'PRIVATE') { T.bind(self, Parser); parse_visibility_decl(:private) }
-  stmt(:KEYWORD, 'IF') { T.bind(self, Parser); parse_if_statement }
-  stmt(:KEYWORD, 'STRUCT') { T.bind(self, Parser); parse_struct_def }
-  stmt(:KEYWORD, 'ENUM')   { T.bind(self, Parser); parse_enum_def }
-  stmt(:KEYWORD, 'UNION')  { T.bind(self, Parser); parse_union_def }
-  stmt(:KEYWORD, 'WHILE') { T.bind(self, Parser); parse_while_loop }
-  stmt(:KEYWORD, 'FOR') { T.bind(self, Parser); parse_for_range }
-  stmt(:KEYWORD, 'TIGHT') { T.bind(self, Parser); parse_tight_stmt }
-  stmt(:KEYWORD, 'RETURN') { T.bind(self, Parser); parse_return }
+  stmt(:KEYWORD, 'REQUIRE') { T.bind(self, ClearParser); parse_require }
+  stmt(:KEYWORD, 'EXTERN')  { T.bind(self, ClearParser); parse_extern_decl }
+  stmt(:KEYWORD, 'MUTABLE') { T.bind(self, ClearParser); parse_mutable_var_decl }
+  stmt(:KEYWORD, 'FN')      { T.bind(self, ClearParser); parse_function_def }
+  stmt(:KEYWORD, 'METHOD')  { T.bind(self, ClearParser); parse_function_def(:package, is_method: true) }
+  stmt(:KEYWORD, 'PUB')     { T.bind(self, ClearParser); parse_visibility_decl(:pub) }
+  stmt(:KEYWORD, 'PRIVATE') { T.bind(self, ClearParser); parse_visibility_decl(:private) }
+  stmt(:KEYWORD, 'IF') { T.bind(self, ClearParser); parse_if_statement }
+  stmt(:KEYWORD, 'STRUCT') { T.bind(self, ClearParser); parse_struct_def }
+  stmt(:KEYWORD, 'ENUM')   { T.bind(self, ClearParser); parse_enum_def }
+  stmt(:KEYWORD, 'UNION')  { T.bind(self, ClearParser); parse_union_def }
+  stmt(:KEYWORD, 'WHILE') { T.bind(self, ClearParser); parse_while_loop }
+  stmt(:KEYWORD, 'FOR') { T.bind(self, ClearParser); parse_for_range }
+  stmt(:KEYWORD, 'TIGHT') { T.bind(self, ClearParser); parse_tight_stmt }
+  stmt(:KEYWORD, 'RETURN') { T.bind(self, ClearParser); parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
-  stmt(:KEYWORD, 'ASSERT_RAISES') { T.bind(self, Parser); parse_assert_raises }
-  stmt(:KEYWORD, 'TEST') { T.bind(self, Parser); parse_test_block }
-  stmt(:KEYWORD, 'STUB') { T.bind(self, Parser); parse_stub }
-  stmt(:KEYWORD, 'BENCHMARK') { T.bind(self, Parser); parse_benchmark_stmt }
-  stmt(:KEYWORD, 'SMASH') { T.bind(self, Parser); parse_smash_stmt }
-  stmt(:KEYWORD, 'PROFILE') { T.bind(self, Parser); parse_profile_stmt }
-  stmt(:KEYWORD, 'RAISE') { T.bind(self, Parser); parse_raise_stmt }
-  stmt(:KEYWORD, 'EXIT') { T.bind(self, Parser); parse_exit }
-  stmt(:KEYWORD, 'DIE') { T.bind(self, Parser); parse_die }
+  stmt(:KEYWORD, 'ASSERT_RAISES') { T.bind(self, ClearParser); parse_assert_raises }
+  stmt(:KEYWORD, 'TEST') { T.bind(self, ClearParser); parse_test_block }
+  stmt(:KEYWORD, 'STUB') { T.bind(self, ClearParser); parse_stub }
+  stmt(:KEYWORD, 'BENCHMARK') { T.bind(self, ClearParser); parse_benchmark_stmt }
+  stmt(:KEYWORD, 'SMASH') { T.bind(self, ClearParser); parse_smash_stmt }
+  stmt(:KEYWORD, 'PROFILE') { T.bind(self, ClearParser); parse_profile_stmt }
+  stmt(:KEYWORD, 'RAISE') { T.bind(self, ClearParser); parse_raise_stmt }
+  stmt(:KEYWORD, 'EXIT') { T.bind(self, ClearParser); parse_exit }
+  stmt(:KEYWORD, 'DIE') { T.bind(self, ClearParser); parse_die }
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
-  stmt(:KEYWORD, 'WITH') { T.bind(self, Parser); parse_with_capability }
-  stmt(:KEYWORD, 'SYNC') { T.bind(self, Parser); parse_sync_policy_block }
-  stmt(:KEYWORD, 'DO')   { T.bind(self, Parser); parse_do_block }
-  stmt(:KEYWORD, 'BG')   { T.bind(self, Parser); parse_bg_block }
-  stmt(:KEYWORD, 'YIELD') { T.bind(self, Parser); parse_yield_expr }
-  stmt(:KEYWORD, 'MATCH') { T.bind(self, Parser); parse_match_statement }
+  stmt(:KEYWORD, 'WITH') { T.bind(self, ClearParser); parse_with_capability }
+  stmt(:KEYWORD, 'SYNC') { T.bind(self, ClearParser); parse_sync_policy_block }
+  stmt(:KEYWORD, 'DO')   { T.bind(self, ClearParser); parse_do_block }
+  stmt(:KEYWORD, 'BG')   { T.bind(self, ClearParser); parse_bg_block }
+  stmt(:KEYWORD, 'YIELD') { T.bind(self, ClearParser); parse_yield_expr }
+  stmt(:KEYWORD, 'MATCH') { T.bind(self, ClearParser); parse_match_statement }
   stmt(:KEYWORD, 'PARTIAL') do
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     consume(:KEYWORD, 'PARTIAL')
     parse_match_statement(partial: true)
   end
   stmt(:KEYWORD, 'PASS') do
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     tok = consume(:KEYWORD, 'PASS')
     match!(:CHAR, ';')  # optional semicolon — PASS may appear bare before a ','
     AST::PassStmt.new(tok)
@@ -190,42 +190,42 @@ class Parser
 
 
   # IF and MATCH as expressions: x = IF cond THEN a ELSE b END
-  primary(:KEYWORD, 'IF')    { T.bind(self, Parser); parse_if_expr }
-  primary(:KEYWORD, 'MATCH') { T.bind(self, Parser); parse_match_expr }
+  primary(:KEYWORD, 'IF')    { T.bind(self, ClearParser); parse_if_expr }
+  primary(:KEYWORD, 'MATCH') { T.bind(self, ClearParser); parse_match_expr }
   primary(:KEYWORD, 'PARTIAL') do
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     consume(:KEYWORD, 'PARTIAL')
     parse_match_expr(partial: true)
   end
 
   # Primaries
-  primary(:NUMBER) { T.bind(self, Parser); parse_literal(:NUMBER, :stack) }
-  primary(:INT64) { T.bind(self, Parser); parse_literal(:INT64, :stack) }
-  primary(:STRING) { T.bind(self, Parser); parse_literal(:STRING, :stack) }
+  primary(:NUMBER) { T.bind(self, ClearParser); parse_literal(:NUMBER, :stack) }
+  primary(:INT64) { T.bind(self, ClearParser); parse_literal(:INT64, :stack) }
+  primary(:STRING) { T.bind(self, ClearParser); parse_literal(:STRING, :stack) }
   # Symbol literal: :identifier — only valid in expression position.
   # The ':' char is already consumed by the time the primary body runs.
   primary(:CHAR, ':') do
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     colon_tok = consume(:CHAR, ':')
     error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID)
     ident_tok = consume(:VAR_ID)
     AST::Literal.new(colon_tok, :SYMBOL, T.must(ident_tok).value, :stack)
   end
-  primary(:BYTE) { T.bind(self, Parser); parse_literal(:BYTE, :stack) }
-  primary(:PREFIXED_INT) { T.bind(self, Parser); parse_literal(:PREFIXED_INT, :stack) }
-  primary(:INT8)    { T.bind(self, Parser); parse_literal(:INT8,    :stack) }
-  primary(:INT16)   { T.bind(self, Parser); parse_literal(:INT16,   :stack) }
-  primary(:INT32)   { T.bind(self, Parser); parse_literal(:INT32,   :stack) }
-  primary(:UINT16)  { T.bind(self, Parser); parse_literal(:UINT16,  :stack) }
-  primary(:UINT32)  { T.bind(self, Parser); parse_literal(:UINT32,  :stack) }
-  primary(:UINT64)  { T.bind(self, Parser); parse_literal(:UINT64,  :stack) }
-  primary(:FLOAT32) { T.bind(self, Parser); parse_literal(:FLOAT32, :stack) }
-  primary(:VAR_ID) { T.bind(self, Parser); parse_var_id }
+  primary(:BYTE) { T.bind(self, ClearParser); parse_literal(:BYTE, :stack) }
+  primary(:PREFIXED_INT) { T.bind(self, ClearParser); parse_literal(:PREFIXED_INT, :stack) }
+  primary(:INT8)    { T.bind(self, ClearParser); parse_literal(:INT8,    :stack) }
+  primary(:INT16)   { T.bind(self, ClearParser); parse_literal(:INT16,   :stack) }
+  primary(:INT32)   { T.bind(self, ClearParser); parse_literal(:INT32,   :stack) }
+  primary(:UINT16)  { T.bind(self, ClearParser); parse_literal(:UINT16,  :stack) }
+  primary(:UINT32)  { T.bind(self, ClearParser); parse_literal(:UINT32,  :stack) }
+  primary(:UINT64)  { T.bind(self, ClearParser); parse_literal(:UINT64,  :stack) }
+  primary(:FLOAT32) { T.bind(self, ClearParser); parse_literal(:FLOAT32, :stack) }
+  primary(:VAR_ID) { T.bind(self, ClearParser); parse_var_id }
 
-  primary(:KEYWORD, 'TRUE') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
-  primary(:KEYWORD, 'FALSE') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
-  primary(:KEYWORD, 'NIL') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
-  primary(:KEYWORD, 'DEFAULT') { T.bind(self, Parser); t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
+  primary(:KEYWORD, 'TRUE') { T.bind(self, ClearParser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
+  primary(:KEYWORD, 'FALSE') { T.bind(self, ClearParser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
+  primary(:KEYWORD, 'NIL') { T.bind(self, ClearParser); t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
+  primary(:KEYWORD, 'DEFAULT') { T.bind(self, ClearParser); t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
@@ -236,9 +236,9 @@ class Parser
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'FREEZE', AST::FreezeNode, ['FREEZE', :expression])
-  primary(:KEYWORD, 'BG')   { T.bind(self, Parser); parse_bg_block }
-  primary(:KEYWORD, 'NEXT') { T.bind(self, Parser); parse_next_expr }
-  primary(:PERCENT, '%') { T.bind(self, Parser); parse_sigil_construct }
+  primary(:KEYWORD, 'BG')   { T.bind(self, ClearParser); parse_bg_block }
+  primary(:KEYWORD, 'NEXT') { T.bind(self, ClearParser); parse_next_expr }
+  primary(:PERCENT, '%') { T.bind(self, ClearParser); parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
   # Pipeline operators use :pipe_expression (min precedence 2) so their
@@ -247,14 +247,14 @@ class Parser
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :pipe_expression])
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :pipe_expression])
   primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :pipe_expression])
-  primary(:KEYWORD, 'REDUCE') { T.bind(self, Parser); parse_reduce_op }
+  primary(:KEYWORD, 'REDUCE') { T.bind(self, ClearParser); parse_reduce_op }
   primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :pipe_expression])
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :pipe_expression])
   primary(:KEYWORD, 'SKIP', AST::SkipOp, ['SKIP', :pipe_expression])
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :pipe_expression])
   primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :pipe_expression])
-  primary(:KEYWORD, 'EACH')  { T.bind(self, Parser); parse_each_op }
-  primary(:KEYWORD, 'TAP')   { T.bind(self, Parser); parse_tap_op }
+  primary(:KEYWORD, 'EACH')  { T.bind(self, ClearParser); parse_each_op }
+  primary(:KEYWORD, 'TAP')   { T.bind(self, ClearParser); parse_tap_op }
   primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :pipe_expression])
   primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :pipe_expression])
   primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :pipe_expression])
@@ -264,18 +264,18 @@ class Parser
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
-  primary(:KEYWORD, 'RECOVER') { T.bind(self, Parser); parse_recover_op }
+  primary(:KEYWORD, 'RECOVER') { T.bind(self, ClearParser); parse_recover_op }
   # COLLECT: pipe-terminal that joins a `~T@observable` (blocking)
   # and returns the underlying T. Takes no expression argument.
   primary(:KEYWORD, 'COLLECT', AST::CollectOp, ['COLLECT'])
-  primary(:KEYWORD, 'WINDOW') { T.bind(self, Parser); parse_window_op }
-  primary(:KEYWORD, 'JOIN') { T.bind(self, Parser); parse_join_op }
-  primary(:KEYWORD, 'SHARD') { T.bind(self, Parser); parse_shard_op }
-  primary(:KEYWORD, 'CONCURRENT') { T.bind(self, Parser); parse_concurrent_op }
+  primary(:KEYWORD, 'WINDOW') { T.bind(self, ClearParser); parse_window_op }
+  primary(:KEYWORD, 'JOIN') { T.bind(self, ClearParser); parse_join_op }
+  primary(:KEYWORD, 'SHARD') { T.bind(self, ClearParser); parse_shard_op }
+  primary(:KEYWORD, 'CONCURRENT') { T.bind(self, ClearParser); parse_concurrent_op }
 
   # Expression Grouping
   primary(:CHAR, '(') do
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     consume(:CHAR, '(')
     expr = parse_expression
     # (expr AS name): optional binding group used in IF (expr AS name) && ...
@@ -295,7 +295,7 @@ class Parser
 
   # Array Indexing: arr[index]
   suffix(:CHAR, '[') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     start_token = consume(:CHAR, '[')
     first = parse_expression
     if first.is_a?(AST::RangeLit)
@@ -318,7 +318,7 @@ class Parser
 
   # Static Call: TypeName::method(args)
   suffix(:DOUBLE_COLON, '::') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     colon_token = consume(:DOUBLE_COLON, '::')
     method_token = consume(:VAR_ID)
     _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
@@ -327,7 +327,7 @@ class Parser
 
   # Dot Access: obj.field OR obj.method() OR EnumType.Variant
   suffix(:CHAR, '.') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     dot_token = consume(:CHAR, '.')
 
     if match?(:CHAR, '*')
@@ -356,14 +356,14 @@ class Parser
 
   # Functor/Call: myVar()
   suffix(:CHAR, '(') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
     AST::FuncCall.new(start_token, lhs, args)
   end
 
   # Optional Unwrap: maybe_value?
   suffix(:CHAR, '?') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     q_token = consume(:CHAR, '?')
     AST::OptionalUnwrap.new(q_token, lhs)
   end
@@ -394,7 +394,7 @@ class Parser
   }.freeze, T::Hash[T.untyped, T.untyped])
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -403,7 +403,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@shared') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -412,7 +412,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@locked') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -421,7 +421,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -430,35 +430,35 @@ class Parser
   end
 
   suffix(:VAR_ID, '@local') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@versioned') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@atomic') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@indirect') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -469,7 +469,7 @@ class Parser
   # Returns SUFFIX_DECLINE (without consuming '{') for any other lhs, so callers
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
-    T.bind(self, Parser) rescue nil
+    T.bind(self, ClearParser) rescue nil
     if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && AST.inline_union_constructor_target?(lhs)
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
@@ -492,7 +492,7 @@ class Parser
   end
 
   ## START PATTERN DSL
-  sig { params(pattern: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(pattern: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def process_pattern(pattern)
     captures = []
 
@@ -636,7 +636,7 @@ class Parser
     leader     = (expected_value == ';') ? '' : ' '
 
     fix = Fix.new(
-      description: "Insert `#{expected_value}` at end of line #{prev_tok.line}.",
+      description: fix_description(:INSERT_EXPECTED_AT_END_OF_LINE, expected: expected_value, line: prev_tok.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: prev_tok.line, col: insert_col, length: 0),
@@ -644,8 +644,13 @@ class Parser
       )]
     )
 
-    message = "Expected `#{expected_value}` at end of line #{prev_tok.line}; got '#{next_tok.value}' on line #{next_tok.line}."
-    fixable!(next_tok, message: message, category: :type, level: :error,
+    fixable!(next_tok,
+             code: :PARSER_EXPECTED_AT_END_OF_LINE,
+             expected: expected_value,
+             expected_line: prev_tok.line,
+             got: next_tok.value,
+             got_line: next_tok.line,
+             category: :type, level: :error,
              fixes: [fix], raise_in_collector: true)
   end
 
@@ -655,7 +660,7 @@ class Parser
   sig { params(token: Lexer::Token, expected_value: String).returns(T.untyped) }
   def emit_syntax_insert_before_token!(token, expected_value)
     fix = Fix.new(
-      description: "Insert `#{expected_value}` before '#{token.value}' at line #{token.line}.",
+      description: fix_description(:INSERT_EXPECTED_BEFORE_TOKEN, expected: expected_value, got: token.value, line: token.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: token.line, col: token.column, length: 0),
@@ -663,7 +668,10 @@ class Parser
       )]
     )
     fixable!(token,
-      message: "Expected `#{expected_value}`, got '#{token.value}' (line #{token.line}).",
+      code: :PARSER_EXPECTED_BEFORE_TOKEN,
+      expected: expected_value,
+      got: token.value,
+      line: token.line,
       category: :type, level: :error,
       fixes: [fix], raise_in_collector: true)
   end
@@ -1100,8 +1108,8 @@ class Parser
     match!(:CHAR, ';')
     node = AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
     node.owner_type = owner_type if owner_type
-    node.owner_type_params = owner_type_params if owner_type_params.any?
-    node.fn_type_params = fn_type_params if fn_type_params.any?
+    node.owner_type_params = owner_type_params
+    node.fn_type_params = fn_type_params
     node
   end
 
@@ -1134,7 +1142,7 @@ class Parser
     end
     match!(:CHAR, ';')
     node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
-    node.type_params = type_params if type_params.any?
+    node.type_params = type_params
     node.close_method = close_method
     node.as_type = as_type
     node
@@ -1198,10 +1206,12 @@ class Parser
           ret_type = parse_type_annotation
         end
         # Optional default body: FN name(...) RETURNS T -> body END
-        default_body = T.let(nil, T.nilable(T::Array[AST::Node]))
+        default_body = T.let([], T::Array[AST::Node])
+        has_default_body = false
         if match?(:ARROW, '->')
           consume(:ARROW, '->')
           default_body = T.cast(parse_block_body(['END']), T::Array[AST::Node])
+          has_default_body = true
           consume(:KEYWORD, 'END')
         end
         method_reqs << AST::UnionMethodRequirement.new(
@@ -1210,6 +1220,7 @@ class Parser
           params: raw_params,
           return_type: ret_type,
           body: default_body,
+          has_default_body: has_default_body,
           visibility: stub_vis,
         )
       else
@@ -1239,7 +1250,7 @@ class Parser
     end
     consume(:CHAR, '}')
     node = AST::UnionDef.new(tok, name, variants, visibility)
-    node.type_params = type_params unless type_params.empty?
+    node.type_params = type_params
     node.methods = method_reqs unless method_reqs.empty?
     node
   end
@@ -1369,23 +1380,6 @@ class Parser
       early_requires_clauses = @last_requires_clauses
     end
 
-    # Legacy reentrance annotations are still accepted so `clear fix` can
-    # migrate them to EFFECTS REENTRANT declarations.
-    reentrant = nil
-    tail_call = false
-    reentrant_token = nil
-    if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
-      cap_tok = consume(:VAR_ID)
-      reentrant = T.must(cap_tok).value == '@reentrant' ? :reentrant : :non_reentrant
-      reentrant_token = cap_tok if reentrant == :reentrant
-      # Check for :tailCall suffix
-      if reentrant == :reentrant && match?(:CHAR, ':') && @tokens[@pos + 1]&.value == 'tailCall'
-        consume(:CHAR, ':')
-        consume(:VAR_ID)
-        tail_call = true
-      end
-    end
-
     # EFFECTS REENTRANT variants:
     #   EFFECTS REENTRANT             -> :reentrant              (real recursion;
     #                                                             caller runs on @service)
@@ -1394,9 +1388,6 @@ class Parser
     #   EFFECTS REENTRANT:NOT_LOGICAL -> :reentrant_not_logical  (runtime StackGuard;
     #                                                             requires `!T` return)
     effects_decl, effects_span = parse_effects_decl
-    if effects_decl && reentrant
-      error!(fn_token, :REENTRANT_LEGACY_AND_NEW, name: name)
-    end
 
     # Reentrance constraints bind by parameter name; the annotator validates
     # that each name references a real parameter so the parser stays syntactic.
@@ -1508,11 +1499,9 @@ class Parser
     node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body,
       catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
     node.explicit_return_type = explicit_return  # post-#335: enforce-fallible-returns gate
-    node.type_params = type_params unless type_params.empty?
-    node.reentrant = reentrant
-    node.tail_call = tail_call
+    node.type_params = type_params
+    node.tail_call = effects_decl == :reentrant_tail_call
     node.requires = requires_clause
-    node.reentrant_token = reentrant_token
     node.arrow_token = arrow_token
     node.name_token = name_tok
     node.effects_decl = effects_decl
@@ -1550,7 +1539,7 @@ class Parser
   # into `requires_clauses` so they don't pollute the capability-family hash.
   REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
-  sig { returns(T.nilable(T::Hash[String, T::Set[Symbol]])) }
+  sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def parse_requires_clause
     requires_hash = {}
     @last_requires_clauses = {}
@@ -1565,10 +1554,14 @@ class Parser
       families = Set.new
       reentrance_kinds = []
       first = parse_requires_family_or_reentrance
-      T.must(first)[:family] ? (families << T.must(first)[:family]) : reentrance_kinds << T.must(first)[:reentrance]
+      first_family = first[:family]
+      first_reentrance = first[:reentrance]
+      first_family ? (families << first_family) : reentrance_kinds << first_reentrance if first_family || first_reentrance
       while match!(:CHAR, '|')
         nxt = parse_requires_family_or_reentrance
-        T.must(nxt)[:family] ? (families << T.must(nxt)[:family]) : reentrance_kinds << T.must(nxt)[:reentrance]
+        next_family = nxt[:family]
+        next_reentrance = nxt[:reentrance]
+        next_family ? (families << next_family) : reentrance_kinds << next_reentrance if next_family || next_reentrance
       end
 
       names.each do |n|
@@ -1585,7 +1578,7 @@ class Parser
   # Returns { family: Symbol } or { reentrance: Symbol } based on the
   # token. Family kinds go into the capability `requires` hash; reentrance
   # kinds are forwarded into `requires_clauses`.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T::Hash[Symbol, T.nilable(Symbol)]) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
     if REQUIRES_VALID_FAMILIES.include?(T.must(tok).value)
@@ -1603,6 +1596,7 @@ class Parser
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
+      {}
     end
   end
 
@@ -1610,8 +1604,9 @@ class Parser
   sig { returns(Symbol) }
   def parse_requires_family
     res = parse_requires_family_or_reentrance
-    error!(current, :EXPECTED_CAP_FAMILY) unless T.must(res)[:family]
-    T.must(res)[:family]
+    family = res[:family]
+    error!(current, :EXPECTED_CAP_FAMILY) unless family
+    T.must(family)
   end
 
   # Legacy reentrance REQUIRES clauses can appear between the function header
@@ -1648,7 +1643,7 @@ class Parser
 
   # REENTRANT, THUNK, and TAIL_CALL parse as TYPE_IDs matched by value because
   # the only context they appear in is right after EFFECTS.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
@@ -2011,7 +2006,8 @@ class Parser
 
     # Paren-bind form: IF (expr AS name) [&& (expr2 AS name2)] THEN ...
     # Paren primary marks BinaryOp(:BIND_VAR) with paren_bind:true when (expr AS name) is parsed.
-    if (bindings = extract_paren_bindings(condition, if_token))
+    bindings = extract_paren_bindings(condition, if_token)
+    unless bindings.empty?
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -2053,27 +2049,27 @@ class Parser
   end
 
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
-  # Returns nil if condition is not a paren-bind pattern.
+  # Returns [] if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[AST::Binding])) }
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T::Array[AST::Binding]) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
       if node.op == :BIND_VAR
-        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : nil
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : []
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)
         # Only treat as bind-chain if at least one side is a paren-bind
-        if left_binds || right_binds
+        unless left_binds.empty? && right_binds.empty?
           # Validate: bare binds in && position are illegal
-          validate_no_bare_bind!(node.left,  if_token) unless left_binds
-          validate_no_bare_bind!(node.right, if_token) unless right_binds
-          return (left_binds || []).concat(right_binds || [])
+          validate_no_bare_bind!(node.left,  if_token) if left_binds.empty?
+          validate_no_bare_bind!(node.right, if_token) if right_binds.empty?
+          return left_binds.concat(right_binds)
         end
       end
     end
-    nil
+    []
   end
 
   # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
@@ -2437,7 +2433,7 @@ class Parser
     AST::WhileLoop.new(tok, condition, body)
   end
 
-  sig { returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
@@ -2712,19 +2708,14 @@ class Parser
     consume(:CHAR, ')')
     consume(:ARROW, '->')
     return_type = parse_type_annotation
-    # Parse optional @reentrant capability on fn-type annotations.
-    # FN(Int64) -> Bool @reentrant means the parameter accepts @reentrant functions.
-    allows_reentrant = false
-    if match?(:VAR_ID) && current.value == '@reentrant'
-      consume(:VAR_ID)
-      allows_reentrant = true
+    if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
+      error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
     Type.new(FunctionSignature.new(
       params: param_types.each_with_index.map { |t, i|
         AST::Param.new(name: "arg#{i}", type: t, required: true, mutable: false, takes: false)
       },
-      return_type: return_type,
-      reentrant: allows_reentrant
+      return_type: return_type
     ))
   end
 
@@ -2849,7 +2840,7 @@ class Parser
     end
 
     # Capability suffix: T @shared, T[]@list:soa, T[N]@soa:shared:locked, HashMap<V>@sharded(N), etc.
-    # Parser only does token consumption and duplicate detection. Semantic validation
+    # ClearParser only does token consumption and duplicate detection. Semantic validation
     # (e.g., "@list requires array", "@soa requires fixed array") is in the annotator.
     caps = parse_capabilities
     ownership   = caps&.ownership
@@ -3067,19 +3058,19 @@ class Parser
   sig do
     params(
       result: CapabilityParseResult,
-      allowed_values: T.nilable(T::Array[String]),
+      allowed_values: T::Array[String],
       cap_tok: T.nilable(Lexer::Token),
       validate_shard_count: T::Boolean
     ).void
   end
-  def parse_capability_chain!(result, allowed_values: nil, cap_tok: nil, validate_shard_count: false)
+  def parse_capability_chain!(result, allowed_values: [], cap_tok: nil, validate_shard_count: false)
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
       error!(current, :EXPECTED_CAP_AFTER_COLON) unless current.type == :VAR_ID
 
       tok = T.must(consume(:VAR_ID))
       normalized_value = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
-      if allowed_values && !allowed_values.include?(normalized_value)
+      if !allowed_values.empty? && !allowed_values.include?(normalized_value)
         error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok&.value || "capability", modifier: tok.value)
       end
       apply_capability!(result, tok, normalized_value, validate_shard_count: validate_shard_count)
@@ -3449,7 +3440,7 @@ class Parser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3592,7 +3583,7 @@ class Parser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
-  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T::Array[T.untyped]) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3854,7 +3845,7 @@ class Parser
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)
@@ -4246,4 +4237,34 @@ class Parser
       error!(kind_tok, :STUB_BAD_AFTER, fn: fn_name)
     end
   end
+
+  private :match_optional_retry!,
+    :parse_lock_rank_arg!,
+    :starts_function_requirement?,
+    :parse_when_block
+   private :apply_cap_dim!
+   private :deep_clone_node
+   private :parse_benchmark_stmt
+   private :parse_bg_body_stmt
+   private :parse_bg_prefix
+   private :parse_bg_stream_block
+   private :parse_bg_then_body
+   private :parse_branch_prefix
+   private :parse_comma_seq
+   private :parse_error_selector
+   private :parse_error_selectors
+   private :parse_generic_type_param_names
+   private :parse_generic_type_param_symbols
+   private :parse_lock_action
+   private :parse_lock_error_clause
+   private :parse_profile_stmt
+   private :parse_smash_stmt
+   private :parse_snapshot_block
+   private :parse_stub
+   private :parse_test_that
+   private :parse_view_block
+   private :parse_when_tags
+   private :parse_with_match_arms
+   private :test_hook_match?
+
 end

@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # I1 + I2: tighten declaration-site validation around `~T@observable`.
 #
@@ -17,7 +17,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "I1/I2: @observable lockdown" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

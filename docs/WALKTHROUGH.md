@@ -205,10 +205,10 @@ END
 
 ### Recursion
 
-Recursive functions must be explicitly annotated with `@reentrant`:
+Recursive functions must explicitly declare their reentrance effect:
 
 ```ruby clear
-FN fib(n: Int64) RETURNS Int64 @reentrant ->
+FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
     IF n <= 1 -> RETURN n;
     RETURN fib(n - 1) + fib(n - 2);
 END
@@ -494,7 +494,7 @@ Like arrays, Strings have capabilities:
 
 ## 13. Graphs, Cycles, and @indirect
 
-For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combined with `@reentrant` for recursive traversal:
+For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combine it with `EFFECTS REENTRANT` for recursive traversal:
 
 ```ruby clear illustrative
 # Recursive tree node using @indirect for child pointers
@@ -504,8 +504,8 @@ STRUCT Node {
     right: ?Node@indirect
 }
 
-# Recursive traversal must be @reentrant
-FN sumTree(n: Node) RETURNS Int64 @reentrant ->
+# Recursive traversal must declare EFFECTS REENTRANT
+FN sumTree(n: Node) RETURNS Int64 EFFECTS REENTRANT ->
     MUTABLE total = n.value;
     IF n.left -> total += sumTree(n?.left OR 0);
     IF n.right -> total += sumTree(n?.right OR 0);

@@ -1,4 +1,5 @@
 # typed: strict
+require "set"
 require "sorbet-runtime"
 require_relative "diagnostic_registry"
 
@@ -25,7 +26,6 @@ require_relative "diagnostic_registry"
 # per bucket. Dev-only — not part of the user-facing `clear` CLI.
 module DiagnosticBuckets
   extend T::Sig
-  module_function
 
   BUCKETS = T.let([
     # ============================================================
@@ -46,6 +46,8 @@ module DiagnosticBuckets
         MATCH_FIELD_UNKNOWN MATCH_DESTRUCTURE_FIELD_UNKNOWN
         UNKNOWN_TYPE UNKNOWN_STRUCT_TYPE UNION_TYPE_UNKNOWN
         UNION_INLINE_VARIANT_UNKNOWN_FIELD
+        DUPLICATE_DECLARATION DUPLICATE_FUNCTION_DECLARATION
+        DUPLICATE_EXTERN_METHOD_DECLARATION
       ],
     },
 
@@ -131,6 +133,8 @@ module DiagnosticBuckets
         UNWRAP_NON_OPTIONAL IF_AS_NEEDS_OPTIONAL WHILE_AS_NEEDS_OPTIONAL
         MODIFIER_NEEDS_ERROR_UNION TYPE_MISMATCH_IN_OR
         OR_BREAK_OUTSIDE_WHILE
+        PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN
+        FALLIBLE_RETURN_NEEDS_ERROR_UNION
         CATCH_WITH_UNREGISTERED ERROR_TYPE_NOT_REGISTERED
         ERROR_TYPE_RESERVED_BY_STDLIB ERROR_TYPE_KIND_CONFLICT
         RETRY_ONLY_TRANSIENT
@@ -225,6 +229,8 @@ module DiagnosticBuckets
       summary: "CLEAR's `--gradual` mode lets parameters omit type annotations and infer from call-site usage. Niche; only matters for users opting into gradual typing.",
       codes: %i[
         AUTO_NOT_ALLOWED_IN_FIELD AUTO_PREFIX_NOT_SUPPORTED
+        AUTO_INFERRED_TYPE AUTO_INFERRED_BINDING_TYPE
+        AUTO_AMBIGUOUS_TYPE AUTO_UNRESOLVED_TYPE
       ],
     },
 
@@ -298,6 +304,7 @@ module DiagnosticBuckets
         LOCAL_INDIRECT_ATOMIC MULTIOWNED_INDIRECT_ATOMIC
         OBSERVABLE_REQUIRES_SET OBSERVABLE_NOT_COMBINABLE
         OBSERVABLE_TERMINAL_MISMATCH
+        OBSERVABLE_BINDING_NEEDS_FOLD_PIPE
         POLY_SHARED_INCONSISTENT
         ARG_NEEDS_ATOMIC_CELL ARG_NEEDS_SHARED
       ],
@@ -379,7 +386,8 @@ module DiagnosticBuckets
       codes: %i[
         WITH_CAP_BAD_TARGET WITH_EXCLUSIVE_NEEDS_LOCK
         WITH_READ_NEEDS_WRITE_LOCK WITH_RESTRICT_NEEDS_MUTABLE
-        WITH_MATERIALIZED_NEEDS_TENSE WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC
+        WITH_MATERIALIZED_NEEDS_TENSE WITH_VIEW_NEEDS_OBSERVABLE
+        WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC
         WITH_NEEDS_MULTIOWNED WITH_NEEDS_SHARED
         WITH_ATOMIC_NEEDS_SHARED_ATOMIC UNKNOWN_WITH_CAP_TYPE
       ],
@@ -497,17 +505,25 @@ module DiagnosticBuckets
     },
   ].freeze, T::Array[T::Hash[Symbol, T.untyped]])
 
+  COVERED_CODES = T.let(BUCKETS.flat_map { |bucket|
+    T.cast(bucket[:codes], T::Array[Symbol])
+  }.to_set.freeze, T::Set[Symbol])
+
+  BUCKETS_BY_CATEGORY = T.let(BUCKETS.group_by { |bucket|
+    T.cast(bucket[:category], Symbol)
+  }.transform_values { |buckets| buckets.freeze }.freeze, T::Hash[Symbol, T::Array[T::Hash[Symbol, T.untyped]]])
+
   # All codes referenced by any bucket — used by the audit to confirm
   # bucket assignments are exhaustive for their category.
   sig { returns(T::Set[Symbol]) }
-  def covered_codes
-    @covered ||= T.let(BUCKETS.flat_map { |b| b[:codes] }.to_set, T.nilable(T::Set[Symbol]))
+  def self.covered_codes
+    COVERED_CODES
   end
 
   # Buckets for a specific category (e.g. `:type`).
   sig { params(cat: Symbol).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
-  def for_category(cat)
-    BUCKETS.select { |b| b[:category] == cat }
+  def self.for_category(cat)
+    BUCKETS_BY_CATEGORY.fetch(cat, [])
   end
 
   # Status of a single code:
@@ -518,7 +534,7 @@ module DiagnosticBuckets
   # `examples` should be the `DiagnosticExamples.all` hash; passed in
   # so callers can reuse it across many lookups.
   sig { params(code: Symbol, examples: T::Hash[Symbol, T.untyped]).returns(Symbol) }
-  def status_of(code, examples)
+  def self.status_of(code, examples)
     return :pending if DiagnosticRegistry.pending?(code)
     e = examples[code]
     return :annotated if e && e[:bad] && e[:good]
@@ -527,13 +543,13 @@ module DiagnosticBuckets
 
   # ASCII stars for the frequency rank (1..5).
   sig { params(rank: Integer).returns(String) }
-  def frequency_stars(rank)
+  def self.frequency_stars(rank)
     "#{'★' * rank}#{'☆' * (5 - rank)}"
   end
 
   # ASCII tag for the alien-factor severity.
   sig { params(level: Symbol).returns(String) }
-  def alien_label(level)
+  def self.alien_label(level)
     case level
     when :low    then "Low"
     when :medium then "Med"
@@ -542,5 +558,3 @@ module DiagnosticBuckets
     end
   end
 end
-
-require "set"

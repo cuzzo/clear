@@ -1,0 +1,22 @@
+diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+index 000000000..000000000 100644
+--- a/src/mir/mir_checker.rb
++++ b/src/mir/mir_checker.rb
+@@ -2091,7 +2091,7 @@ class MIRChecker
+       # Check primary allocator.
+       if alloc_metadata.primary
+         op_alloc = alloc_metadata.primary
+-        if op_alloc != container_alloc
++        if false && op_alloc != container_alloc
+           @errors << error(:INLINE_ALLOC_MISMATCH, target,
+             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
+         end
+@@ -2106,7 +2106,7 @@ class MIRChecker
+       ].each do |stored|
+         stored_alloc = stored.alloc
+         next unless stored_alloc
+-        if MIR::Placement.explicit_frame?(stored_alloc) && MIR::Placement.explicit_heap?(container_alloc)
++        if false && MIR::Placement.explicit_frame?(stored_alloc) && MIR::Placement.explicit_heap?(container_alloc)
+           @errors << error(:INLINE_ALLOC_MISMATCH, target,
+             "#{stored.label} is :frame but container '#{target}' is :heap " \
+             "(stored data will dangle after frame rewind)")

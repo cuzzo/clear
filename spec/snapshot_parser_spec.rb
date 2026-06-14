@@ -1,8 +1,8 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # MVCC L4 -- `WITH SNAPSHOT ...` parser + AST.
 #
@@ -19,7 +19,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
   def parse_block(src)
     full = "FN main() RETURNS Void -> #{src} END"
     tokens = Lexer.new(full).tokenize
-    ast = Parser.new(tokens, full).parse
+    ast = ClearParser.new(tokens, full).parse
     fn = ast.statements.first
     fn.body.find { |s| s.is_a?(AST::WithBlock) }
   end

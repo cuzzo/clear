@@ -45,6 +45,8 @@ require "sorbet-runtime"
 
 module DiagnosticRegistry
   extend T::Sig
+
+  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
@@ -73,6 +75,12 @@ module DiagnosticRegistry
       severity: :error, category: :syntax,
       template: "Unknown operator '%{value}'.",
       summary:  "The lexer saw an operator-shaped token it does not recognise.",
+    },
+    OPERATOR_TYPO_SUGGESTION: {
+      severity: :error, category: :syntax,
+      template: "Unknown operator `%{match}` -- did you mean `%{replace}`?",
+      summary: "A source pre-scan found an operator typo with a mechanical replacement.",
+      fix_hint: "Accept the suggested replacement when the surrounding expression expects that operator.",
     },
 
     # ===================================================================
@@ -588,12 +596,6 @@ module DiagnosticRegistry
       template: ":MAX_DEPTH(N) requires a positive integer N (got %{got}).",
       summary:  "EFFECTS REENTRANT:MAX_DEPTH(N) needs N > 0.",
     },
-    REENTRANT_LEGACY_AND_NEW: {
-      severity: :error, category: :syntax,
-      template: "Function '%{name}' has both legacy '@reentrant' annotation and new 'EFFECTS REENTRANT' clause. Pick one.",
-      summary:  "Legacy `@reentrant` and new `EFFECTS REENTRANT` are mutually exclusive.",
-    },
-
     # ===================================================================
     # PARSER — WITH / MATCH / SYNC POLICY / error clauses
     # ===================================================================
@@ -729,6 +731,18 @@ module DiagnosticRegistry
       template: "Expected %{expected}, got %{got} (%{type}) line %{line}",
       summary:  "Generic Expected-X-got-Y. Used by the central `consume()` parser helper.",
     },
+    PARSER_EXPECTED_AT_END_OF_LINE: {
+      severity: :error, category: :syntax,
+      template: "Expected `%{expected}` at end of line %{expected_line}; got '%{got}' on line %{got_line}.",
+      summary: "Parser expected a token at the end of the previous line.",
+      fix_hint: "Insert the expected token at the end of the previous line.",
+    },
+    PARSER_EXPECTED_BEFORE_TOKEN: {
+      severity: :error, category: :syntax,
+      template: "Expected `%{expected}`, got '%{got}' (line %{line}).",
+      summary: "Parser expected a token before the current token.",
+      fix_hint: "Insert the expected token before the current token.",
+    },
     UNEXPECTED_TOKEN_LINE: {
       severity: :error, category: :syntax,
       template: "Unexpected token %{value} (%{type}) line %{line}",
@@ -775,6 +789,13 @@ module DiagnosticRegistry
       summary:  "MATERIALIZED VIEW snapshots a tense / observable source — the binding must have type `~T`.",
       cause: "MATERIALIZED VIEW snapshots a *tense aggregate* (`~T`) at the WITH boundary — copying its current contents into an owned, locally-scoped value. On a non-tense source there's no snapshot semantics: the binding is already concrete, and the MATERIALIZED prefix has no effect to apply.",
       fix_hint: "Prefix the declared type with `~` so the source is tense (`MUTABLE %{name}: ~T = ...`), OR drop the MATERIALIZED clause and use the source directly (no WITH needed for a non-tense aggregate).",
+    },
+    WITH_VIEW_NEEDS_OBSERVABLE: {
+      severity: :error, category: :capability,
+      template: "WITH VIEW requires an `@observable` source, but '%{name}' has type %{got}. Use `WITH MATERIALIZED VIEW` for non-observable aggregates, or annotate the binding as `~T@observable`.",
+      summary: "WITH VIEW can only borrow a live observable aggregate.",
+      cause: "WITH VIEW reads a live observable aggregate in place. Non-observable tense values can still be read safely, but only by taking a materialized snapshot.",
+      fix_hint: "Use `WITH MATERIALIZED VIEW` for non-observable aggregates, or change the binding declaration to `~T@observable` and initialize it from a pipeline-terminal fold.",
     },
     WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC: {
       severity: :error, category: :capability,
@@ -911,6 +932,18 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "DEBUG_POST clauses cannot be combined with CATCH on the same function. Split into two functions (one with CATCH, one with DEBUG_POST that calls it), or move the assertion into a separate validation helper.",
       summary:  "DEBUG_POST and CATCH on the same function aren't supported.",
+    },
+    PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN: {
+      severity: :error, category: :type,
+      template: "Function '%{fn}' has PRE clauses but no explicit return type. PRE clauses can fail at runtime, so the function must declare an error-union return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) to the signature.",
+      summary: "PRE clauses require an explicit fallible return type.",
+      fix_hint: "Add `RETURNS !Void` for an otherwise Void function, or `RETURNS !T` for a value-returning function.",
+    },
+    FALLIBLE_RETURN_NEEDS_ERROR_UNION: {
+      severity: :error, category: :type,
+      template: "Function '%{fn}' can fail (%{hint}) but its return type doesn't declare it. Change `RETURNS %{return_type}` to `RETURNS !%{return_type}` so callers can see the error union and handle it (Zig-style discipline). Add a CATCH at the call site, propagate via `try`, or mark the call's result with `OR <action>`.",
+      summary: "A fallible function must declare an error-union return type.",
+      fix_hint: "Prefix the declared return type with `!`, or handle the failure before it crosses the function boundary.",
     },
 
     # Purity / parallel restrictions
@@ -1166,13 +1199,46 @@ module DiagnosticRegistry
       template: "Style Error: Function '%{name}' has MUTABLE parameters. Its name must end in '!'",
       summary:  "Functions that take MUTABLE params should end with `!` to surface the mutation at every call site.",
     },
+    MUTABLE_UNUSED: {
+      severity: :warning, category: :lint,
+      template: "MUTABLE '%{name}' is never reassigned — consider removing MUTABLE",
+      summary: "A binding was declared MUTABLE but never reassigned.",
+      fix_hint: "Remove the MUTABLE keyword unless the declaration is intentionally reserving future mutability.",
+    },
+    LOCAL_NEVER_SHARED: {
+      severity: :info, category: :lint,
+      template: "Variable '%{name}' is @local but never shared across fibers. You are paying for a heap allocation with no sharing benefit. Consider removing @local.",
+      summary: "An @local binding never crosses a fiber boundary.",
+      fix_hint: "Remove `@local` from the declaration when the binding stays within one fiber.",
+    },
+    BARE_VERSIONED_UNSHARED: {
+      severity: :warning, category: :lint,
+      template: "Bare `@versioned` on '%{name}' is unusual: a single-owner MVCC cell isn't reachable from another thread, so the lock-free commit path has no concurrent benefit. Use `@shared:versioned` for cross-thread sharing, or remove `@versioned` if the cell is truly local.",
+      summary: "A single-owner @versioned cell pays MVCC cost without cross-thread reachability.",
+      fix_hint: "Use `@shared:versioned` for cross-thread sharing, or remove `@versioned` if the binding is truly local.",
+    },
+    DUPLICATE_DECLARATION: {
+      severity: :error, category: :type,
+      template: "Duplicate %{label} declaration '%{name}'",
+      summary: "A declaration name was registered more than once in the same namespace.",
+    },
+    DUPLICATE_FUNCTION_DECLARATION: {
+      severity: :error, category: :type,
+      template: "Duplicate function declaration '%{name}'",
+      summary: "A function name was registered more than once.",
+    },
+    DUPLICATE_EXTERN_METHOD_DECLARATION: {
+      severity: :error, category: :type,
+      template: "Duplicate extern method declaration '%{owner}.%{name}'",
+      summary: "An extern method was registered more than once for the same owner.",
+    },
 
     # Reentrance
     REENTRANCE_DIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' directly calls itself. Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
-      summary:  "Function calls itself directly without an `@reentrant` annotation declaring the recursion budget.",
-      fix_hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
+      template: "Reentrancy Error: '%{name}' directly calls itself. Add `EFFECTS REENTRANT` to the function signature to declare the recursion budget.",
+      summary:  "Function calls itself directly without declaring the recursion budget.",
+      fix_hint: "Add `EFFECTS REENTRANT` to the function signature.",
     },
     REENTRANCE_INDIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
@@ -1188,9 +1254,9 @@ module DiagnosticRegistry
     },
     REENTRANCE_TAIL_CALL_NOT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "@reentrant:tailCall on '%{name}' but the function is not recursive. Remove :tailCall - it only applies to self-recursive functions.",
-      summary:  "`@reentrant:tailCall` declared on a function that doesn't recurse.",
-      fix_hint: "Remove :tailCall - it only applies to self-recursive functions.",
+      template: "EFFECTS REENTRANT:TAIL_CALL on '%{name}' but the function is not recursive. Remove :TAIL_CALL - it only applies to self-recursive functions.",
+      summary:  "`EFFECTS REENTRANT:TAIL_CALL` declared on a function that doesn't recurse.",
+      fix_hint: "Remove :TAIL_CALL - it only applies to self-recursive functions.",
     },
 
     # IF / MATCH / WHEN
@@ -1269,28 +1335,28 @@ module DiagnosticRegistry
     },
     USE_OF_MOVED_IN_LOOP: {
       severity: :error, category: :ownership,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Loop body consumes a value on the first iteration; subsequent iterations have nothing left to GIVE.",
       cause: "An affine value can only be TAKEN once. The loop body moves (GIVE / TAKES / RETURN / etc.) the binding, so the second iteration would be reading something that's already been transferred.",
       fix_hint: "Hoist the move out of the loop, or wrap the consuming reference with `COPY` (if the type permits) so each iteration gets its own owned copy. For shared aggregation, declare the binding `@multiowned` (single-scheduler Rc) or `@shared` (cross-fiber Arc).",
     },
     USE_OF_MOVED_VALUE: {
       severity: :error, category: :ownership,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Binding was already TAKEN / GIVEN at a prior site and is no longer accessible.",
       cause: "An affine binding has exactly one owner. A prior expression (a `TAKES` parameter, `GIVE`, `RETURN`, `SHARE`, `NEXT`, etc.) consumed ownership; the current use is left holding nothing.",
       fix_hint: "Wrap the consuming reference with `COPY` (if the type permits — primitives, strings, and enums are Copy by default; non-Copy types need `@multiowned` / `@shared` to share). Or restructure so only one site consumes the value.",
     },
     USE_OF_MOVED_IN_LOOP_SHORT: {
       severity: :error, category: :ownership,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Loop body uses a value that was already TAKEN on a prior iteration.",
       cause: "Same as USE_OF_MOVED_IN_LOOP — the binding was consumed on the first iteration; the second iteration has nothing left to GIVE.",
       fix_hint: "Same: hoist the move out of the loop, or `COPY` per-iteration, or upgrade to `@multiowned` / `@shared`.",
     },
     USE_OF_MOVED_PATH: {
       severity: :error, category: :ownership,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Path's owner (root binding) was already TAKEN or GIVEN; sub-paths are no longer accessible.",
       cause: "Sub-path access (`b.field`, `arr[i]`) reads through an owner. If the owner itself was transferred (TAKES / GIVE / RETURN / etc.), the sub-path goes with it — the owner takes its fields along.",
       fix_hint: "Either consume the field directly (`GIVE b.field`) before the owner is transferred, or `COPY` the field, or restructure so the owner isn't moved before the field's last use.",
@@ -1491,8 +1557,32 @@ module DiagnosticRegistry
     },
     TYPE_ERROR_GENERIC: {
       severity: :error, category: :type,
-      template: "Type Error: %{message}",
+      template: "Type Error: %{detail}",
       summary:  "Generic type-error wrapper for messages produced elsewhere (e.g., Type#coerce_error).",
+    },
+    AUTO_INFERRED_TYPE: {
+      severity: :info, category: :type,
+      template: "Inferred type for %{label}: %{type}.",
+      summary: "Auto inference resolved a type annotation.",
+      fix_hint: "Replace `Auto` with the inferred type if you want the source to be explicit.",
+    },
+    AUTO_INFERRED_BINDING_TYPE: {
+      severity: :info, category: :type,
+      template: "Inferred type for `%{name}`: %{type}.",
+      summary: "Auto inference resolved a binding type annotation.",
+      fix_hint: "Replace `Auto` with the inferred type if you want the source to be explicit.",
+    },
+    AUTO_AMBIGUOUS_TYPE: {
+      severity: :error, category: :type,
+      template: "%{detail}",
+      summary: "Auto inference found multiple incompatible candidate types.",
+      fix_hint: "Choose a concrete type and update the annotation, or narrow the call sites that produce incompatible observations.",
+    },
+    AUTO_UNRESOLVED_TYPE: {
+      severity: :error, category: :type,
+      template: "%{detail}",
+      summary: "Auto inference could not observe enough uses to choose a type.",
+      fix_hint: "Replace `Auto` with a concrete type, or add enough typed use sites for inference to converge.",
     },
 
     # OR / IF expression / unwrap
@@ -1839,6 +1929,13 @@ module DiagnosticRegistry
       cause: "Every heap allocation must have a matching cleanup on every control-flow path, including error paths and early returns. The checker found a path where the AllocMark is reachable but no Cleanup/ErrCleanup is.",
       fix_hint: "Usually a lowering bug — the cleanup classifier should have inserted the cleanup. Check src/mir/cleanup_classifier.rb. If your code has an unusual control-flow shape (early RETURN inside a complex block), that path may need explicit attention.",
     },
+    CLEANUP_REQUIRED_WITHOUT_FINALIZER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Cleanup-bearing AllocMark has no checker-visible finalizer or transfer.",
+      cause: "The MIR carries an AllocMark whose concrete Type says the binding owns cleanup-bearing data, but no Cleanup, ErrCleanup, DestroyPtr errdefer, or TransferMark closes the ownership path. Frame arena rewind is not sufficient for values that own internal resources or collection storage requiring deinit.",
+      fix_hint: "Lowering bug — make cleanup classification emit a Cleanup/ErrCleanup for the binding, or emit a TransferMark when ownership leaves the current scope. Do not rely on frame allocation alone as the cleanup story for cleanup-bearing types.",
+    },
     CLEANUP_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",
@@ -2155,13 +2252,31 @@ module DiagnosticRegistry
     },
     TIGHT_CALLS_REENTRANT_FN: {
       severity: :error, category: :reentrance,
-      template: "TIGHT loop cannot call @reentrant function '%{name}'",
-      summary:  "TIGHT loops disallow calls to @reentrant functions (unbounded depth).",
+      template: "TIGHT loop cannot call plain EFFECTS REENTRANT function '%{name}'",
+      summary:  "TIGHT loops disallow calls to plain EFFECTS REENTRANT functions (unbounded depth).",
     },
     REENTRANCY_MUTUAL_CYCLE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' is part of a mutually recursive call cycle. Add @reentrant or @nonReentrant to the function signature.",
-      summary:  "Function is in a mutual-recursion cycle but lacks an explicit reentrancy annotation.",
+      template: "Reentrancy Error: '%{name}' is part of a mutually recursive call cycle. Add EFFECTS REENTRANT or a bounded REENTRANT variant to the function signature.",
+      summary:  "Function is in a mutual-recursion cycle but lacks an explicit reentrance declaration.",
+    },
+    PLAIN_REENTRANT_VARIANT_SUGGESTION: {
+      severity: :info, category: :reentrance,
+      template: "'%{fn}' is plain `EFFECTS REENTRANT` (forces callers onto `@service` / OS thread). %{reason} -- migrating to `%{suggestion}` lets callers stay on the regular fiber stack. (Phase 5 audit; opt-in via `clear fix`.)",
+      summary: "A plain reentrant function appears to fit a bounded reentrance variant.",
+      fix_hint: "Accept the suggested bounded variant when the body shape and recursion semantics match.",
+    },
+    REENTRANT_MAX_DEPTH_MUTUAL_DEMOTED: {
+      severity: :warning, category: :reentrance,
+      template: "EFFECTS REENTRANT:MAX_DEPTH(%{max_depth}) on '%{fn}' is silently demoted to ':unbounded' stack tier (4 MB :service OS thread per fiber) because the function is part of a mutual cycle (%{cycle}) and the compiler can't bound the SCC's interleaved-counter product (Phase 5+ work). The MAX_DEPTH(N) bound on this fn alone does NOT cap the cycle's stack depth -- a bounce between members can still grow the fiber stack arbitrarily. To fix: refactor the cycle into ONE directly-self-recursive fn (inline the partner's body or pass a state tag in a single combined fn) so the MAX_DEPTH counter actually bounds it; or accept ':unbounded' explicitly via the auto-fix below.",
+      summary: "MAX_DEPTH on one member of a mutual-recursion cycle does not bound the whole cycle.",
+      fix_hint: "Refactor the cycle into one directly self-recursive function, or accept plain `EFFECTS REENTRANT` explicitly.",
+    },
+    UNCONSTRAINED_FN_PARAM_REENTRANCE: {
+      severity: :warning, category: :lint,
+      template: "Function '%{fn}' has %{subject} (%{candidates}). Add 'REQUIRES <name>: NON_REENTRANT' (rejects reentrant callbacks) or 'EFFECTS REENTRANT' on '%{fn}' (propagates the cost).",
+      summary: "A function accepts callback parameters without constraining their reentrance cost.",
+      fix_hint: "Add a NON_REENTRANT requirement for callback parameters that must stay bounded, or declare the owner function reentrant.",
     },
     INT_LITERAL_OVERFLOW: {
       severity: :error, category: :type,
@@ -2366,8 +2481,8 @@ module DiagnosticRegistry
     },
     REENTRANT_FN_TO_NON_REENTRANT_PARAM: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' is @reentrant but parameter '%{param}' does not accept @reentrant functions. Declare the parameter type as 'FN(...) -> Type @reentrant' to allow this.",
-      summary:  "@reentrant function passed to a parameter that doesn't permit @reentrant callees.",
+      template: "Reentrancy Error: '%{name}' is plain EFFECTS REENTRANT but parameter '%{param}' does not accept plain reentrant callbacks. Add EFFECTS REENTRANT to the callee that owns '%{param}', or constrain the parameter explicitly with REQUIRES %{param}: NON_REENTRANT and pass a bounded/non-reentrant callback.",
+      summary:  "Plain EFFECTS REENTRANT function passed to a parameter that doesn't permit plain reentrant callees.",
     },
     ARG_NEEDS_ATOMIC_CELL: {
       severity: :error, category: :type,
@@ -2679,35 +2794,42 @@ module DiagnosticRegistry
     # rendered text is whatever the call site produces.
     CAPABILITY_VIOLATION_FIXABLE: {
       severity: :error, category: :capability,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Capability mismatch with an interactive auto-fix available.",
       cause: "The capability declared on a binding (locked / write_locked / shared / multiowned / observable / ...) doesn't satisfy the operation being performed. The Capabilities validator computes a precise reason (wrong tense, missing wrapper, incompatible combination) and the message field carries the specific text.",
       fix_hint: "Read the message — it describes the exact mismatch and usually points at the right capability. `clear fix` typically offers an interactive auto-fix when the change is mechanical (add a missing wrapper, swap a tense).",
     },
     PURITY_VIOLATION: {
       severity: :error, category: :type,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "A pure function calls into impure code (effects / surface).",
       cause: "A function declared as pure (PURE keyword or implied via REQUIRES) called into code that has effects (yield / alloc_heap / io / fail). The effect lattice is inferred per-function and propagated through the call graph; a pure caller cannot escape its purity.",
       fix_hint: "Either remove the PURE declaration on the caller, or remove the impure call. If the impure work is needed, isolate it in a non-pure helper and only call into pure code from inside the pure body.",
     },
     VARDECL_TYPE_MISMATCH_FIXABLE: {
       severity: :error, category: :type,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Variable declaration's value type doesn't match the declared type, with an interactive fix.",
       cause: "The value bound to the variable doesn't fit the declared type. Coercion was tried (slice widening, primitive autocast) and failed. An interactive fix is available when the language can suggest a literal CAST or the type annotation can be inferred from the value.",
       fix_hint: "Either change the declared type to match the value, change the value to the declared type, or use `CAST x AS Type` for an explicit conversion.",
     },
+    OBSERVABLE_BINDING_NEEDS_FOLD_PIPE: {
+      severity: :error, category: :type,
+      template: "`~T@observable` bindings must be initialized by a pipeline-terminal fold over a tense stream (e.g. `running: ~Int64@observable = stream |> SUM _`). The producer fiber, atomic accumulator, and WaitGroup wiring all live in the fold's codegen path -- a bare declaration or a non-fold initializer has no producer, so NEXT/COLLECT would deadlock and cleanup would touch an uninitialized wrapper.",
+      summary: "`~T@observable` bindings need a fold-pipe initializer.",
+      cause: "Observable bindings are implemented by the fold-pipe codegen path. That path allocates the producer fiber, accumulator, and WaitGroup bridge. A bare observable declaration or arbitrary initializer would create a wrapper with no producer.",
+      fix_hint: "Initialize the binding from a pipeline-terminal fold over a tense stream, or drop `@observable` if this binding should behave like a regular tense value.",
+    },
     ATOMIC_ESCAPE_ASSIGN: {
       severity: :error, category: :escape,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Assigning a value whose lifetime is tied to a sync-axis source escapes the source's scope.",
       cause: "A value whose lifetime is tied to a sync-axis source (e.g. `@shared:atomic` cell) was assigned into a binding that outlives the source's scope. The atomic cell is bounded by its declaring scope; the assignment would dangle.",
       fix_hint: "Migrate the source to `@shared:locked` (a longer lifetime model) — `clear fix` offers this as an interactive transformation. Or restructure so the assignment doesn't escape the source scope.",
     },
     ATOMIC_ESCAPE_RETURN: {
       severity: :error, category: :escape,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Returning a value whose lifetime is tied to a sync-axis source escapes the source's scope.",
       cause: "A value whose lifetime is tied to a sync-axis source was returned from a function that doesn't declare `RETURNS source:T`. The source is bounded by its declaring scope; returning the value would dangle.",
       fix_hint: "Either declare `RETURNS x:T` on the function (propagates the lifetime to the caller), COPY the value before returning, or migrate the source to `@shared:locked`.",
@@ -2721,76 +2843,130 @@ module DiagnosticRegistry
     },
     REENTRANT_MUTUAL_THUNK_UNSUPPORTED: {
       severity: :error, category: :reentrance,
-      template: "%{message}",
+      template: "EFFECTS REENTRANT:THUNK on '%{name}' is mutually recursive (cycle through other functions: %{cycle}) and the cycle's body shape isn't supported by the current tagged-union codegen (only IF base cases + a RETURN partner(args) tail call). Pick one: declare 'EFFECTS REENTRANT' on every cycle member (callers run on @service / OS thread); declare 'EFFECTS REENTRANT:NOT_LOGICAL' on every cycle member (return type changes from `T` to `!T`; runtime StackGuard raises System UnexpectedRecursion on actual re-entry); or declare 'EFFECTS REENTRANT:MAX_DEPTH(N)' on every cycle member (also `T` -> `!T`; runtime depth counter raises System MaxDepthExceeded above N -- pick N tight, this is NOT a workaround for being forced onto OS threads. If depth is unknown or unbounded, prefer ':THUNK' (heap CPS) or plain 'EFFECTS REENTRANT' + OS threads).",
       summary:  "Mutual-recursion cycle of :THUNK functions whose body shape isn't supported by the tagged-union codegen.",
       cause: "Mutual recursion through `:THUNK` functions requires a tagged-union trampoline whose codegen only handles a specific body shape: IF base cases plus a `RETURN partner(args)` tail call. The cycle's body shape isn't supported.",
       fix_hint: "Three options: (a) declare plain `EFFECTS REENTRANT` on every cycle member (callers run on `@service` / OS thread), (b) declare `:NOT_LOGICAL` (asserts no actual recursion at runtime), (c) declare `:MAX_DEPTH(N)` (bounded counter). `clear fix` offers each as an interactive auto-fix.",
     },
     INTRINSIC_REJECTED: {
       severity: :error, category: :type,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Stdlib intrinsic rejected this call (the matched signature's reject_when fired).",
       cause: "A stdlib intrinsic (`.negative?`, `.zero?`, ...) rejected this call because the argument type isn't allowed. The stdlib uses `reject_when` patterns to rule out call shapes that look valid but produce wrong results — e.g. `.negative?` on an unsigned int.",
       fix_hint: "Check the message for the specific reject reason. Often the fix is to remove the call entirely (the answer is statically known) or use a different intrinsic.",
     },
     TYPE_COERCION_FAILED: {
       severity: :error, category: :type,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Type coercion produced an error (Type#coerce! returned a diagnostic).",
       cause: "Type#coerce! tried to widen a value into the target type and failed. Common cases: array-overflow (initializer larger than `T[N]`), unrelated types (assigning Float64 to String), or capability mismatch.",
       fix_hint: "The error text describes the specific failure. Either change the source value, change the target type, or use `CAST x AS Type` for an explicit conversion.",
     },
     LOCK_CYCLE_DETECTED: {
       severity: :error, category: :concurrency,
-      template: "%{message}",
+      template: "Potential %{kind} over [%{types}]. Sites contributing to the cycle:\n%{sites}\nFix: acquire in a consistent order everywhere, or mark individual sites POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE if the ordering is programmer-enforced.",
       summary:  "Static lock-acquire graph contains a cycle (potential deadlock).",
       cause: "Static analysis of the lock-acquire graph found a cycle (or self-loop). Two locks A and B are acquired in inconsistent orders across different sites — at runtime this can deadlock if two threads hit them simultaneously.",
       fix_hint: "Fix the order — pick a consistent total order (rank locks by type, name, or memory address) and acquire ascending everywhere. Or, when the order is enforced by a different discipline (sharded data, CAS-loop), mark individual sites POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE.",
     },
     REGISTRY_MISMATCH_REJECTED: {
       severity: :error, category: :registry,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Identifier doesn't match any registered candidate, no typo-suggestion fix available.",
       cause: "An identifier was checked against a closed registry (error kinds, error types, sync families) and didn't match any candidate. The Levenshtein distance to every candidate exceeded the typo-suggestion threshold, so no auto-fix is offered.",
       fix_hint: "Check the spelling and the message for the list of valid candidates. The registry is closed — only the listed identifiers are accepted.",
     },
     TYPO_SUGGESTION_REJECTED: {
       severity: :error, category: :registry,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Identifier rejected, no close-enough candidate to suggest as a typo fix.",
       cause: "An identifier didn't match any candidate in the relevant scope (variable, struct field, union variant, ...) and the closest candidate was outside the typo-suggestion threshold. No auto-fix is offered.",
       fix_hint: "Check the spelling and the surrounding scope. If the identifier should exist, verify it's been declared / imported in this scope.",
     },
     EFFECT_INFERENCE_VIOLATION: {
       severity: :error, category: :type,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Per-function effect inference (P3.x) rejected the program (yield-across-lock, naked nested-WITH, recursive lock acquire, etc.).",
       cause: "Per-function effect inference (yield / alloc_heap / io / fail) detected a violation: hold-lock-across-yield, naked nested-WITH, recursive lock acquire on the same binding, etc. The specific check is described in the message.",
-      fix_hint: "Most are structural: split the WITH (no nested re-acquire), avoid yielding while holding a lock, mark a function `@reentrant` if recursion is intentional. The message names the specific check.",
+      fix_hint: "Most are structural: split the WITH (no nested re-acquire), avoid yielding while holding a lock, add `EFFECTS REENTRANT` if recursion is intentional. The message names the specific check.",
     },
     CAPABILITY_INVALID: {
       severity: :error, category: :capability,
-      template: "%{message}",
+      template: "%{detail}",
       summary:  "Capability declaration rejected by Capabilities.validate! (unsupported sigil combination, primitive cap, etc.).",
       cause: "Capabilities.validate! rejected the binding's capability stack — either an unsupported sigil combination (`@local:atomic`), a capability on an incompatible type (capability on a primitive), or a missing required capability.",
       fix_hint: "Read the message for the specific rejection. Common fixes: drop a contradictory sigil, wrap a primitive in a struct, add a missing wrapper (`@shared` for cross-fiber sharing).",
     },
   }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
-  module_function
+  FIX_DESCRIPTIONS = T.let({
+    ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
+    ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+    ADD_ERROR_UNION_TO_RETURN: "Add `!` to the return type to declare the error union (Zig-style fallible signature).",
+    ADD_NON_REENTRANT_REQUIRES: "Add %{requires} (rejects reentrant callbacks).",
+    ADD_WITH_GUARD_ALIASES: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
+    APPEND_MUTABLE_PARAM_BANG: "Append `!` to '%{name}' (signals that it takes a MUTABLE parameter).",
+    CHANGE_BINDING_CAPABILITY_FOR_MOVE: "Change '%{name}' to `%{cap}` at its declaration (%{reason}).",
+    CHANGE_DECL_CAPABILITY_GENERIC: "Change `%{old_sigil}` to `%{new_sigil}` on '%{name}' (line %{line}).",
+    DECLARE_FN_REENTRANT: "Declare '%{fn}' as 'EFFECTS REENTRANT' (propagates the cost; caller runs on @service).",
+    DECLARE_MAX_DEPTH_CYCLE: "Declare every cycle member ':MAX_DEPTH(%{depth})' and change each return type from `T` to `!T`. Runtime depth counter raises System MaxDepthExceeded above %{depth} entries. PICK N TIGHT: large N is not a workaround for being forced onto OS threads -- if depth is unknown/unbounded, prefer ':THUNK' (heap CPS) or plain 'EFFECTS REENTRANT' (OS threads).",
+    DECLARE_MUTABLE_BINDING: "Declare '%{name}' as MUTABLE at its binding site (line %{line}).",
+    DECLARE_NOT_LOGICAL_CYCLE: "Declare every cycle member ':NOT_LOGICAL' and change each return type from `T` to `!T`. Runtime StackGuard raises System UnexpectedRecursion if the cycle actually re-enters; callers must handle (or propagate via `!T`) that error.",
+    DROP_MAX_DEPTH_MUTUAL: "Drop ':MAX_DEPTH(%{max_depth})' and accept the ':unbounded' tier explicitly. Same runtime cost as today but the choice is now in the source.",
+    DROP_OBSERVABLE_CAPABILITY: "Drop `%{token}` from the binding's type annotation. The remaining type behaves as a regular binding (no producer fiber, no WITH VIEW); use this if you didn't actually want streaming-aggregate semantics.",
+    DROP_THUNK_CYCLE: "Drop ':THUNK' on every cycle member; use plain 'EFFECTS REENTRANT' (callers run on @service).",
+    DROP_WITH_GUARD_MUTABLE: "Drop `MUTABLE` from %{target} so the GUARD predicate stays valid (the body only reads through the alias).",
+    INSERT_EXPECTED_AT_END_OF_LINE: "Insert `%{expected}` at end of line %{line}.",
+    INSERT_EXPECTED_BEFORE_TOKEN: "Insert `%{expected}` before '%{got}' at line %{line}.",
+    INSERT_RETURNS_ANY: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
+    INSERT_RETURNS_FALLIBLE_VOID: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
+    INSERT_SERVICE_AFTER_OPEN_BRACE: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",
+    MIGRATE_ATOMIC_ESCAPE: "Migrate '%{name}' from `@shared:atomic` to `@shared:locked` so its lifetime can outlive the declaring scope. NOTE: `@shared:locked` typically needs a STRUCT wrap around the primitive (e.g. `STRUCT Counter { v: Int64 }; c = Counter{v: 0} @shared:locked`); read/write sites become `WITH EXCLUSIVE c AS a { ... }`. Alternatively, wait for v0.3 atomic struct fields, which lift this escape restriction without the Arc cost.",
+    PIN_AUTO_SLOT: "(%{position}) Pin %{label} to `%{type}`.%{note}",
+    PREFIX_TENSE_TYPE: "Prefix the declared type with `~` so '%{name}' becomes a tense (`~T`) source. MATERIALIZED VIEW snapshots a tense aggregate at the WITH boundary.",
+    REMOVE_LOCAL_CAPABILITY: "Remove `@local` capability from '%{name}' (never shared across fibers).",
+    REMOVE_MUTABLE_UNUSED: "Remove MUTABLE keyword (binding is never reassigned).",
+    REPLACE_CAN_SMASH_WITH_SERVICE: "Replace `@canSmash` with `@service` (OS-thread spawn -- supported today).",
+    REPLACE_IDENTIFIER_WITH_CANDIDATE: "Replace '%{name}' with '%{best}' (%{label}).",
+    REPLACE_LOCKED_WITH_WRITE_LOCKED: "Change `@locked` to `@writeLocked` on '%{name}' so concurrent readers can take `WITH READ` alongside `WITH EXCLUSIVE` writers.",
+    REPLACE_MATCH_WITH_PARTIAL: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
+    REPLACE_OPERATOR_TYPO: "Replace `%{match}` with `%{replace}` -- %{label}.",
+    REPLACE_REENTRANT_WITH_VARIANT: "Replace `EFFECTS REENTRANT` with `%{suggestion}` (%{reason}).",
+    REPLACE_STACK_SIGIL_WITH_SERVICE: "Replace `@%{stack}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
+    UPGRADE_VERSIONED_TO_SHARED: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",
+    WITH_ADD_INDIRECT_ATOMIC: "Add `@indirect:atomic` to '%{name}' (lock-free atomic-pointer cell -- readers snapshot, writers CAS-publish).",
+    WITH_ADD_LOCKED: "Add `@locked` to '%{name}' (Mutex -- single-writer EXCLUSIVE access).",
+    WITH_ADD_MULTIOWNED: "Add `@multiowned` to '%{name}' (Rc -- single-scheduler refcount; cheap clones%{suffix}).",
+    WITH_ADD_SHARED: "Add `@shared` to '%{name}' (Arc -- atomic refcount; safe %{suffix}).",
+    WITH_ADD_SHARED_ATOMIC: "Add `@shared:atomic` to '%{name}' (lock-free atomic primitive -- `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC).",
+    WITH_ADD_VERSIONED: "Add `@versioned` to '%{name}' (MVCC cell -- readers see a stable snapshot; writers retry on conflict).",
+    WITH_ADD_WRITE_LOCKED: "Add `@writeLocked` to '%{name}' (RwLock -- readers %{reader}; writers via `WITH EXCLUSIVE`).",
+    WITH_VIEW_TO_MATERIALIZED: "Replace `VIEW` with `MATERIALIZED VIEW` (owned O(N) snapshot, works on any `~T` aggregate).",
+    WIDEN_INT_ANNOTATION: "Widen annotation `%{old_type}` to `%{new_type}` (smallest type that fits %{value}).",
+    WIDEN_INT_SUFFIX: "Widen suffix `_%{old_suffix}` to `_%{new_suffix}` (smallest type that fits %{value}).",
+    WRAP_CAPABILITY_ACCESS: "Wrap with `WITH %{permission} %{name} AS %{alias_name} { ... }` to acquire the %{capability} unwrap; access the inner value through %{alias_name}.",
+    WRAP_CONSUMER_WITH_CLONE: "Wrap the consuming reference with CLONE at line %{line} (bumps the refcount; both bindings stay live).",
+    WRAP_CONSUMER_WITH_COPY: "Wrap the consuming reference with COPY at line %{line} (the original survives for the later use).",
+    WRAP_RETURN_WITH_COPY: "Wrap the returned value with `COPY ` so it doesn't borrow from the parameter.",
+    WRAP_VALUE_WITH_CAST: "Wrap value with `CAST(... AS %{type})` (narrowing -- verify it can't lose data).",
+    REPLACE_AUTO_WITH_INFERRED: "Replace `Auto` with the inferred type `%{type}`.",
+  }.freeze, T::Hash[Symbol, String])
 
-  sig { params(code: Symbol).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
-  def lookup(code)
+
+  DiagnosticEntry = T.type_alias { T::Hash[Symbol, T.untyped] }
+
+  sig { params(code: Symbol).returns(T.nilable(DiagnosticEntry)) }
+  def self.lookup(code)
     DIAGNOSTICS[code]
   end
 
   sig { params(code: Symbol).returns(T::Boolean) }
-  def known?(code)
+  def self.known?(code)
     DIAGNOSTICS.key?(code)
   end
 
   sig { returns(T::Array[Symbol]) }
-  def codes
+  def self.codes
     DIAGNOSTICS.keys
   end
 
@@ -2799,7 +2975,7 @@ module DiagnosticRegistry
   # tooling skips these — we can't write a bad/good example for an
   # unimplemented compiler check.
   sig { params(code: Symbol).returns(T::Boolean) }
-  def pending?(code)
+  def self.pending?(code)
     entry = DIAGNOSTICS[code]
     !entry.nil? && entry[:pending] == true
   end
@@ -2808,7 +2984,7 @@ module DiagnosticRegistry
   # when the code isn't known. The caller decides what to do with
   # nil — the legacy helper raises an internal-compiler-error there.
   sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
-  def format(code, args = [], **kwargs)
+  def self.format(code, args = [], **kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
     template = entry[:template]
@@ -2821,17 +2997,37 @@ module DiagnosticRegistry
     end
   end
 
+  sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
+  def self.fix_description_from_hash(code, kwargs)
+    template = FIX_DESCRIPTIONS[code]
+    Kernel.raise "Internal Compiler Error: Unknown fix description code :#{code}" unless template
+
+    begin
+      template % kwargs
+    rescue KeyError, ArgumentError => e
+      "#{template} [Internal Args Error: #{e.message} kwargs=#{kwargs.inspect}]"
+    end
+  end
+
+  sig { params(code: Symbol, kwargs: DiagnosticKwValue).returns(String) }
+  def self.fix_description(code, **kwargs)
+    fix_description_from_hash(code, kwargs)
+  end
+
   # Self-check: every entry is well-formed. Returns an array of
   # error strings; empty == registry is consistent. Run by the
   # spec to make sure new entries don't drift.
   sig { returns(T::Array[String]) }
-  def validate
+  def self.validate
     issues = T.let([], T::Array[String])
     DIAGNOSTICS.each do |code, entry|
       issues << "#{code}: missing :severity"  unless SEVERITIES.include?(entry[:severity])
       issues << "#{code}: missing :category"  unless CATEGORIES.include?(entry[:category])
       issues << "#{code}: missing :template"  unless entry[:template].is_a?(String)
       issues << "#{code}: missing :summary"   unless entry[:summary].is_a?(String)
+    end
+    FIX_DESCRIPTIONS.each do |code, template|
+      issues << "#{code}: missing fix description template" unless template.is_a?(String)
     end
     issues
   end

@@ -698,6 +698,8 @@ class OwnershipDataflow
     MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
+  private
+
   sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
   def stmt_moves_name?(stmt, var)
     return false if stmt.is_a?(AST::ReturnNode)
@@ -705,6 +707,8 @@ class OwnershipDataflow
     collect_binding_move_places(stmt, state).any? { |place| place.path == var } ||
       (AST.call?(stmt) && collect_bg_capture_places_in_args(T.cast(stmt, T.any(AST::FuncCall, AST::MethodCall)), state).any? { |place| place.path == var })
   end
+
+  public
 
   sig { params(place: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupDecision)) }
   def block_exit_cleanup_summary(place)
@@ -1261,6 +1265,16 @@ class OwnershipDataflow
   def dup_state(state)
     state.dup
   end
+    private :block_exit_cleanup_summaries
+    private :block_exit_cleanup_summary
+    private :cleanup_entry_pairs
+    private :declares_name?
+    private :duplicate_binding_names
+    private :exit_snapshot
+    private :insert_ordered_worklist!
+    private :preserve_guard_after_full_move?
+    private :reverse_postorder_index
+
 end
 
 # ==========================================
@@ -1377,9 +1391,12 @@ class UseAfterMoveChecker
   sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall), state: OwnershipDataflow::OwnershipState).void }
   def check_call_reads(call_node, state)
     (call_node.args || []).each do |arg|
-      if (arg.is_a?(AST::Identifier) && arg.was_moved) || arg.is_a?(AST::MoveNode)
+      if arg.is_a?(AST::Identifier) && arg.was_moved
         # This is a TAKES/GIVE arg -- the move itself is valid, not a read.
         next
+      elsif arg.is_a?(AST::MoveNode)
+        # Simple GIVE x consumes x. Complex GIVE expr.field still reads expr.
+        check_reads_in_expr(arg, state) unless arg.value.is_a?(AST::Identifier)
       elsif arg.is_a?(AST::ShareNode)
         check_share_reads(arg, state)
       elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode) || arg.is_a?(AST::FreezeNode)
@@ -1442,7 +1459,8 @@ class UseAfterMoveChecker
       node.items.each { |i| check_reads_in_expr(i, state) }
 
     when AST::HashLit
-      node.pairs.each { |_k, v|
+      node.pairs.each { |k, v|
+        check_reads_in_expr(k, state)
         val = v.is_a?(Array) ? v[1] : v
         check_reads_in_expr(val, state)
       }
@@ -1470,13 +1488,13 @@ class UseAfterMoveChecker
   end
 
   # Check a single identifier read against the ownership state.
-  sig { params(node: AST::Identifier, state: OwnershipDataflow::OwnershipState).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::Identifier, state: OwnershipDataflow::OwnershipState).void }
   def check_identifier_node_read(node, state)
     place = OwnershipDataflow.place_for_binding_node(node.name.to_s, node)
     check_identifier_read(node.name.to_s, state, node.token, place)
   end
 
-  sig { params(name: String, state: OwnershipDataflow::OwnershipState, token: Lexer::Token, place: T.nilable(OwnershipDataflow::PlaceId)).returns(T.nilable(T::Array[String])) }
+  sig { params(name: String, state: OwnershipDataflow::OwnershipState, token: Lexer::Token, place: T.nilable(OwnershipDataflow::PlaceId)).void }
   def check_identifier_read(name, state, token, place = nil)
     entry = OwnershipDataflow.lookup_state_entry(state, place || name)
     return unless entry  # not tracked (not in scope, or primitive)
@@ -1526,11 +1544,9 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[AST::Node]), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
+  sig { params(stmts: T::Array[AST::Node], schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
   def self.walk_stmts!(stmts, schema_lookup = nil, fn_nodes = {})
-    return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s, schema_lookup, fn_nodes) }
-    nil
   end
 
   sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
@@ -1687,18 +1703,17 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
-  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).void }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     AST.each_locatable(nodes, descend_functions: true) do |node|
       next unless visited.add?(node.object_id)
       yield node
     end
-    nil
   end
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).void }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1836,9 +1851,7 @@ class BorrowChecker
 
   sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Array[String]) }
   def self.check(fn_node, schema_lookup:)
-    checker = new(fn_node, schema_lookup: schema_lookup)
-    checker.check!
-    checker.errors
+    new(fn_node, schema_lookup: schema_lookup).check!
   end
 
   sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
@@ -1858,9 +1871,9 @@ class BorrowChecker
   private
 
   # Extract the root variable name from a capability's var_node.
-  sig { params(var_node: AST::Identifier).returns(T.nilable(String)) }
+  sig { params(var_node: AST::Node).returns(T.nilable(String)) }
   def cap_source_name(var_node)
-    AST.root_identifier(var_node)&.name&.to_s
+    AST.root_identifier(var_node)&.name
   end
 
   sig { params(token: Lexer::Token).returns(String) }
@@ -1868,11 +1881,9 @@ class BorrowChecker
     token.line ? " (line #{token.line})" : ""
   end
 
-  sig { params(stmts: T.nilable(T::Array[AST::Node]), state: BorrowState).void }
+  sig { params(stmts: T::Array[AST::Node], state: BorrowState).void }
   def check_stmts(stmts, state)
-    return unless stmts.is_a?(Array)
     stmts.each { |stmt| check_stmt(stmt, state) }
-    nil
   end
 
   sig { params(stmt: AST::Node, state: BorrowState).void }
@@ -1912,7 +1923,7 @@ class BorrowChecker
 
     CapabilityPlan.require_for(stmt).all.each do |cap|
       var_node = cap.var_node
-      source = var_node.is_a?(AST::Identifier) ? cap_source_name(var_node) : nil
+      source = cap_source_name(var_node)
       next unless source
 
       # Only RESTRICT and BORROWED create compile-time borrows.
@@ -1935,28 +1946,23 @@ class BorrowChecker
     end
 
     check_stmts(stmt.body, body_state)
-    nil
   end
 
   # Check if any identifier being moved in a binding RHS is currently borrowed.
   # Mirrors OwnershipDataflow#collect_binding_move_places.
-  sig { params(expr: AST::Node, token: Lexer::Token, state: BorrowState).void }
+  sig { params(expr: T.nilable(AST::Node), token: Lexer::Token, state: BorrowState).void }
   def check_binding_moves(expr, token, state)
-    return if state.empty?
     return unless expr
     collect_moved_names(expr).each { |name| check_borrowed_move(name, token, state) }
-    nil
   end
 
   # Check explicit moves (was_moved) in function/method call arguments.
   sig { params(stmt: AST::Node, token: Lexer::Token, state: BorrowState).void }
   def check_explicit_moves(stmt, token, state)
-    return if state.empty?
     owner_state = synthetic_owner_state
     transfer_collector.send(:collect_explicit_move_places, stmt, owner_state).each do |place|
       check_borrowed_move(place.path, token, state)
     end
-    nil
   end
 
   sig { params(name: String, token: Lexer::Token, state: BorrowState).void }
@@ -1965,7 +1971,6 @@ class BorrowChecker
     return unless borrow_kind
     @errors << "[MOVE_WHILE_BORROWED] #{@fn_name}::#{name} -- " \
                "cannot move while #{borrow_kind} borrow is active#{line_info(token)}"
-    nil
   end
 
   # Collect variable names being moved by an expression (binding RHS context).
@@ -1977,14 +1982,8 @@ class BorrowChecker
 
   sig { returns(OwnershipDataflow) }
   def transfer_collector
-    fn_node = if @fn_node.is_a?(AST::FunctionDef)
-      @fn_node
-    else
-      token = Lexer::Token.new(:VAR_ID, @fn_name, 1, 1)
-      AST::FunctionDef.new(token, @fn_name, [], [], :Void, nil, @fn_node.respond_to?(:body) ? @fn_node.body : [], [], nil, :private, [], false)
-    end
     @transfer_collector ||= T.let(
-      OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node, schema_lookup: @schema_lookup),
+      OwnershipDataflow.new(FunctionCFG.build(@fn_node), @fn_node, schema_lookup: @schema_lookup),
       T.nilable(OwnershipDataflow),
     )
   end
@@ -1993,14 +1992,6 @@ class BorrowChecker
   def synthetic_owner_state
     default_entry = OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)
     T.let(Hash.new(default_entry), OwnershipDataflow::OwnershipState)
-  end
-
-  sig { params(node: T.untyped, blk: T.proc.params(node: T.untyped).void).void }
-  def walk_for_was_moved(node, &blk)
-    moved = transfer_collector.send(:collect_explicit_move_places, node, synthetic_owner_state).map(&:path).to_set
-    AST.each_locatable(node) do |expr|
-      blk.call(expr) if expr.is_a?(AST::Identifier) && moved.include?(expr.name.to_s)
-    end
   end
 
 end

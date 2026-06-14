@@ -17,7 +17,6 @@ module LSP
   # Edits (used by CodeActions).
   module Position
     extend T::Sig
-    module_function
 
     # Convert a CLEAR token + length into an LSP `Range` hash.
     # `source` is the full document text (needed for the UTF-16
@@ -25,12 +24,12 @@ module LSP
     # ASCII, this falls through to the fast byte-equals-character
     # path.
     sig { params(token: T.untyped, length: Integer, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
-    def range_for(token, length, source = nil)
+    def self.range_for(token, length, source = nil)
       line = token.line - 1
       col_start_byte = token.column - 1
       col_end_byte   = col_start_byte + length
 
-      line_text = line_at(source, line) if source
+      line_text = line_at(source, line)
       start_char = byte_to_utf16(line_text, col_start_byte)
       end_char   = byte_to_utf16(line_text, col_end_byte)
 
@@ -44,31 +43,24 @@ module LSP
     # extent) into an LSP `Range`. CLEAR Spans currently always live
     # on a single line; if that changes, the helper extends naturally.
     sig { params(span: T.untyped, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
-    def range_for_span(span, source = nil)
+    def self.range_for_span(span, source = nil)
       start_line = span.line - 1
       end_line   = span.end_line - 1
       start_byte = span.col - 1
       end_byte   = span.end_col - 1
 
-      if start_line == end_line
-        line_text = line_at(source, start_line) if source
-        {
-          start: { line: start_line, character: byte_to_utf16(line_text, start_byte) },
-          end:   { line: start_line, character: byte_to_utf16(line_text, end_byte) },
-        }
-      else
-        start_text = line_at(source, start_line) if source
-        end_text   = line_at(source, end_line) if source
-        {
-          start: { line: start_line, character: byte_to_utf16(start_text, start_byte) },
-          end:   { line: end_line,   character: byte_to_utf16(end_text,   end_byte) },
-        }
-      end
+      start_text = line_at(source, start_line)
+      end_text = start_line == end_line ? start_text : line_at(source, end_line)
+
+      {
+        start: { line: start_line, character: byte_to_utf16(start_text, start_byte) },
+        end:   { line: end_line,   character: byte_to_utf16(end_text,   end_byte) },
+      }
     end
 
     # Test whether an LSP position falls within an LSP range.
     sig { params(position: T::Hash[T.untyped, T.untyped], range: T::Hash[T.untyped, T.untyped]).returns(T::Boolean) }
-    def position_in_range?(position, range)
+    def self.position_in_range?(position, range)
       pl, pc = position[:line] || position["line"], position[:character] || position["character"]
       sl, sc = range[:start][:line], range[:start][:character]
       el, ec = range[:end][:line],   range[:end][:character]
@@ -84,11 +76,11 @@ module LSP
     # nil if out of bounds. We split lazily to keep large documents
     # cheap for single-token lookups.
     sig { params(source: T.nilable(String), line_idx: Integer).returns(T.nilable(String)) }
-    def line_at(source, line_idx)
+    def self.line_at(source, line_idx)
       return nil unless source
       lines = source.lines
       return nil if line_idx < 0 || line_idx >= lines.size
-      T.must(lines[line_idx]).chomp
+      lines.fetch(line_idx).chomp
     end
 
     # Given a line of text and a byte offset, return the UTF-16 code
@@ -96,7 +88,7 @@ module LSP
     # circuit to the byte count. For multi-byte source, walk the line's
     # codepoints and sum their UTF-16 widths.
     sig { params(line_text: T.nilable(String), byte_offset: Integer).returns(Integer) }
-    def byte_to_utf16(line_text, byte_offset)
+    def self.byte_to_utf16(line_text, byte_offset)
       return byte_offset if line_text.nil? || line_text.ascii_only?
 
       bytes = 0

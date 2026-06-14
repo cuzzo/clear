@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/predicate_rewriter"
+require_relative "../src/tools/predicate_rewriter" unless defined?(PredicateRewriter::CompareSpan)
 
 # `PredicateRewriter.lint!` emits FixableFindings for length-comparison
 # patterns whose result is constant for any non-negative length:
@@ -11,7 +11,7 @@ require_relative "../src/tools/predicate_rewriter"
 # linter surfaces them as warnings during `clear fix`. No auto-fix
 # is offered because the user has to decide which sense they meant.
 
-RSpec.describe "PredicateRewriter.lint!" do
+RSpec.describe PredicateRewriter do
   def lint(src)
     FixCollector.enable!
     PredicateRewriter.lint!(src)
@@ -73,5 +73,21 @@ RSpec.describe "PredicateRewriter.lint!" do
     # or emit anything.
     expect { PredicateRewriter.lint!(src) }.not_to raise_error
     expect(FixCollector.enabled?).to be false
+  end
+
+  it "does not lex source when FixCollector is disabled" do
+    allow(Lexer).to receive(:new).and_raise(StandardError, "should not lex")
+
+    expect { PredicateRewriter.lint!("not parsed") }.not_to raise_error
+    expect(FixCollector.enabled?).to be false
+  end
+
+  it "ignores malformed source while FixCollector is enabled" do
+    FixCollector.enable!
+
+    expect { PredicateRewriter.lint!("FN main( RETURNS Void ->") }.not_to raise_error
+    expect(FixCollector.drain).to eq([])
+  ensure
+    FixCollector.disable!
   end
 end

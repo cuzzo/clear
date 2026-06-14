@@ -1,11 +1,11 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe "Stack Tier Recommendations" do
   def analyze(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     fn_nodes = annotator.semantic_function_nodes
@@ -43,15 +43,15 @@ RSpec.describe "Stack Tier Recommendations" do
       expect(tier_for(src, "make")).to eq(:standard)
     end
 
-    it "assigns :unbounded to @reentrant functions" do
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+    it "assigns :unbounded to plain EFFECTS REENTRANT functions" do
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n"
       expect(tier_for(src, "fib")).to eq(:unbounded)
     end
 
-    it "propagates :unbounded to callers of @reentrant functions" do
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+    it "propagates :unbounded to callers of plain EFFECTS REENTRANT functions" do
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN wrapper(n: Float64) RETURNS Float64 ->\n" \
@@ -169,10 +169,10 @@ RSpec.describe "Stack Tier Recommendations" do
   end
 
   describe "@canSmash validation" do
-    it "errors when BG calls @reentrant without explicit @service (Phase 4g)" do
+    it "errors when BG calls plain EFFECTS REENTRANT without explicit @service (Phase 4g)" do
       # Phase 4g: plain :reentrant requires explicit @service on the
       # spawn site. The compiler no longer auto-infers OS-thread cost.
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
@@ -181,8 +181,8 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.to raise_error(CompilerError, /Declare `@service` explicitly/)
     end
 
-    it "compiles when BG with @service calls @reentrant" do
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+    it "compiles when BG with @service calls plain EFFECTS REENTRANT" do
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
@@ -195,7 +195,7 @@ RSpec.describe "Stack Tier Recommendations" do
       # The runtime has stack-hysteresis page-guards, but the
       # compiler does not yet wire that feature on. The user
       # must use @service instead.
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
@@ -257,8 +257,8 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.not_to raise_error
     end
 
-    it "errors when DO branch calls @reentrant without @service (Phase 4g)" do
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+    it "errors when DO branch calls plain EFFECTS REENTRANT without @service (Phase 4g)" do
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN work() RETURNS Float64 ->\n" \
@@ -270,7 +270,7 @@ RSpec.describe "Stack Tier Recommendations" do
     end
 
     it "compiles when DO branch declares @service" do
-      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+      src = "FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN work() RETURNS Float64 ->\n" \
@@ -282,34 +282,34 @@ RSpec.describe "Stack Tier Recommendations" do
     end
   end
 
-  describe "@reentrant:tailCall" do
+  describe "EFFECTS REENTRANT:TAIL_CALL" do
     it "parses the annotation" do
-      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 EFFECTS REENTRANT:TAIL_CALL ->\n" \
             "    IF n < 1.0 THEN RETURN a; END\n" \
             "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
       _, fn_nodes = analyze(src)
       expect(fn_nodes["fib"].tail_call).to be true
-      expect(fn_nodes["fib"].reentrant).to eq(:reentrant)
+      expect(fn_nodes["fib"].reentrance_kind).to eq(:reentrant_tail_call)
     end
 
     it "errors when tail call is not in tail position" do
       # Phase 3 made the strictness whole-body: every recursive
       # self-call must be the direct value of a RETURN node. The
       # error message names the offending site as "non-tail position".
-      src = "FN bad(n: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+      src = "FN bad(n: Float64) RETURNS Float64 EFFECTS REENTRANT:TAIL_CALL ->\n" \
             "    IF n < 1.0 THEN RETURN bad(0.0); END\n" \
             "    RETURN bad(n - 1.0) + 1.0;\nEND\n"
       expect { analyze(src) }.to raise_error(CompilerError, /non-tail position/)
     end
 
     it "errors when applied to non-recursive function" do
-      src = "FN add(a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+      src = "FN add(a: Float64, b: Float64) RETURNS Float64 EFFECTS REENTRANT:TAIL_CALL ->\n" \
             "    RETURN a + b;\nEND\n"
       expect { analyze(src) }.to raise_error(CompilerError, /not recursive/)
     end
 
     it "emits @call(.always_tail) in release mode" do
-      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 EFFECTS REENTRANT:TAIL_CALL ->\n" \
             "    IF n < 1.0 THEN RETURN a; END\n" \
             "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
       # Simulate release mode (no default stack override)
@@ -319,7 +319,7 @@ RSpec.describe "Stack Tier Recommendations" do
     end
 
     it "emits regular call in debug mode (stage2 backend)" do
-      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
+      src = "FN fib(n: Float64, a: Float64, b: Float64) RETURNS Float64 EFFECTS REENTRANT:TAIL_CALL ->\n" \
             "    IF n < 1.0 THEN RETURN a; END\n" \
             "    RETURN fib(n - 1.0, b, a + b);\nEND\n"
       t = ZigTranspiler.new
@@ -350,7 +350,7 @@ RSpec.describe "Stack Tier Recommendations" do
 
     it "@stack does not silently become @service for plain reentrant callees" do
       src = <<~CLEAR
-        FN fib(n: Float64) RETURNS Float64 @reentrant ->
+        FN fib(n: Float64) RETURNS Float64 EFFECTS REENTRANT ->
             IF n < 2.0 THEN RETURN n; END
             RETURN fib(n - 1.0) + fib(n - 2.0);
         END

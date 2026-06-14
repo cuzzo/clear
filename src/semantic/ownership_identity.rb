@@ -54,10 +54,14 @@ module OwnershipIdentity
       BindingId.new(name: name, binding_id: id)
     end
 
+    private
+
     sig { returns(T::Boolean) }
     def child?
       path.include?(".")
     end
+
+    public
 
     sig { returns(T.nilable(PlaceId)) }
     def parent

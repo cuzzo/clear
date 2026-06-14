@@ -40,6 +40,7 @@ module AST
     :@storage_override,
     :@var_used,
     :@slot_size,
+    :@container_borrow,
   ].freeze, T::Array[Symbol])
   PipelineRewriteCallMetadataIvars = T.let([
     :@zig_pattern,
@@ -715,14 +716,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.untyped, block: T.untyped).void }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped, block: T.untyped).void }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -740,7 +741,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(expr: T.untyped, block: T.untyped).void }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -1257,7 +1258,7 @@ module AST
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil
     const :message, T.nilable(Node), default: nil
-    const :body, T.nilable(T::Array[Node]), default: nil
+    const :body, T::Array[Node], default: []
   end
 
   class ErrorClause < T::Struct
@@ -1269,7 +1270,7 @@ module AST
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil
     const :message, T.nilable(Node), default: nil
-    const :body, T.nilable(T::Array[Node]), default: nil
+    const :body, T::Array[Node], default: []
     prop :matched_types, T::Array[Symbol], default: []
     prop :bubble_types, T::Array[Symbol], default: []
 
@@ -1342,6 +1343,7 @@ module AST
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
+      @type_params = T.let([], T::Array[String])
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
@@ -1374,7 +1376,21 @@ module AST
       self[:params] = val
     end
 
-    attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
+    sig { returns(T::Array[String]) }
+    def type_params
+      @type_params
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
+
+    sig { returns(T::Boolean) }
+    def generic?
+      !type_params.empty?
+    end
+
     # True when the user wrote RETURNS explicitly; fallible-signature checks
     # only enforce on user-authored return types.
     attr_accessor :explicit_return_type
@@ -1383,9 +1399,7 @@ module AST
     attr_accessor :effect_set    # projected EffectSet (yield/alloc_heap/io/fail)
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
-    attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
-    attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
-    attr_accessor :reentrant_token   # Token for the legacy @reentrant annotation (drives `clear fix` span)
+    attr_accessor :tail_call     # true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion
     attr_accessor :arrow_token       # Token for the `->` after the function header (drives REQUIRES insertion span)
     attr_accessor :name_token        # Token for the function name itself (drives the `!`-suffix fix for STYLE_MUTABLE_PARAM_NEEDS_BANG)
     # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
@@ -1419,12 +1433,9 @@ module AST
     #   :reentrant_max_depth      EFFECTS REENTRANT:MAX_DEPTH(N) (runtime depth counter;
     #                                                             requires `!T` return type;
     #                                                             max_depth_n stamped on FunctionDef)
-    # The annotator bridges this with the legacy `@reentrant`/`tail_call` attrs into a
-    # canonical reentrance_kind via src/annotator/helpers/reentrance.rb (Phase 1.3).
     attr_accessor :effects_decl
     # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
-    # `effects_decl` or `reentrant` directly. Same value space as effects_decl;
-    # the bridge unifies legacy and new declarations into one field.
+    # `effects_decl` directly. Same value space as effects_decl.
     attr_accessor :reentrance_kind
     # Thunk Phase 4c: when the splitter recognizes a simple-recurrence
     # shape on a `:reentrant_thunk` function, the annotator stamps the
@@ -1457,6 +1468,33 @@ module AST
     sig { returns(T::Boolean) }
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
+    end
+
+    sig { returns(T::Boolean) }
+    def declared_plain_reentrant?
+      (reentrance_kind || effects_decl) == :reentrant
+    end
+
+    sig { returns(T::Boolean) }
+    def plain_reentrant?
+      reentrance_kind == :reentrant
+    end
+
+    sig { returns(T::Boolean) }
+    def tail_call_reentrant?
+      reentrance_kind == :reentrant_tail_call
+    end
+
+    sig { returns(T::Boolean) }
+    def reentrance_guard_required?
+      reentrance_kind == :reentrant_not_logical || reentrance_kind == :reentrant_max_depth
+    end
+
+    sig { returns(T::Boolean) }
+    def recursive_reentrance_declared?
+      reentrance_kind == :reentrant ||
+        reentrance_kind == :reentrant_thunk ||
+        reentrance_kind == :reentrant_tail_call
     end
 
     sig { params(recursion_yield: T::Boolean, declared_runtime_return: T::Boolean).returns(T::Boolean) }
@@ -1524,8 +1562,25 @@ module AST
   StructDef    = Struct.new(:token, :name, :field_decls, :visibility, :type_params) do
     extend T::Sig
     include Locatable
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:type_params] ||= []
+    end
+
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
+
+    sig { returns(T::Array[String]) }
+    def type_params
+      self[:type_params] ||= []
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      self[:type_params] = value.dup
+    end
   end
 	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     extend T::Sig
@@ -1920,13 +1975,17 @@ module AST
 
     sig { returns(T::Array[AST::WithBlock]) }
     def semantic_with_blocks
-      @semantic_with_blocks = T.let(@semantic_with_blocks, T.nilable(T::Array[AST::WithBlock]))
-      @semantic_with_blocks ||= []
+      raw_blocks = instance_variable_get(:@semantic_with_blocks)
+      unless raw_blocks.is_a?(Array)
+        raw_blocks = T.let([], T::Array[AST::WithBlock])
+        instance_variable_set(:@semantic_with_blocks, raw_blocks)
+      end
+      raw_blocks
     end
 
     sig { params(blocks: T::Array[AST::WithBlock]).void }
     def semantic_with_blocks=(blocks)
-      @semantic_with_blocks = T.let(blocks, T.nilable(T::Array[AST::WithBlock]))
+      instance_variable_set(:@semantic_with_blocks, blocks)
     end
   end
 
@@ -2259,8 +2318,17 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
-    attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
-    attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
+    # [:T, :U] for TypeName<T, U>.method
+    sig { returns(T::Array[Symbol]) }
+    def owner_type_params
+      @owner_type_params
+    end
+
+    # [:T] for fnName<T>(...)
+    sig { returns(T::Array[Symbol]) }
+    def fn_type_params
+      @fn_type_params
+    end
 
     sig { params(args: T.untyped).void }
     def initialize(*args)
@@ -2268,6 +2336,18 @@ module AST
       self[:params] = self[:params] || []
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
+      @owner_type_params = T.let([], T::Array[Symbol])
+      @fn_type_params = T.let([], T::Array[Symbol])
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def owner_type_params=(value)
+      @owner_type_params = value.dup
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def fn_type_params=(value)
+      @fn_type_params = value.dup
     end
 
     sig { params(val: T.untyped).returns(T.untyped) }
@@ -2291,9 +2371,25 @@ module AST
   ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module) do
     extend T::Sig
     include Locatable
-    attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
+    # [:T, :U] for EXTERN STRUCT Name<T, U>
+    sig { returns(T::Array[Symbol]) }
+    def type_params
+      @type_params
+    end
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      @type_params = T.let([], T::Array[Symbol])
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
+
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
   end
@@ -2317,7 +2413,8 @@ module AST
     const :name, String
     const :params, T::Array[UnionMethodParamRequirement]
     const :return_type, T.nilable(Type), default: nil
-    const :body, T.nilable(T::Array[AST::Node]), default: nil
+    const :body, T::Array[AST::Node], default: []
+    const :has_default_body, T::Boolean, default: false
     const :visibility, Symbol, default: :package
   end
 
@@ -2330,9 +2427,25 @@ module AST
   # methods (optional): Array of UnionMethodRequirement records.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
+    extend T::Sig
     include Locatable
-    attr_accessor :type_params   # Array of type param name strings, e.g. ["T"], or nil
+    # Array of type param name strings, e.g. ["T"]
+    sig { returns(T::Array[String]) }
+    def type_params
+      @type_params
+    end
     attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      @type_params = T.let([], T::Array[String])
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
   end
 
   # UnionVariantLit: TypeName.VariantName{ field: val, ... }

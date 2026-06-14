@@ -12,7 +12,7 @@ require_relative "../../ast/ast"
 # Requires host class to provide:
 #   error!(node, msg, *args)       — raise CompilerError
 #   lookup_type_schema(name)       — resolve a type name to its schema Hash
-#   current_fn_ctx&.type_params        — Array<Symbol> of active fn type params
+#   current_function_type_params      — Array<Symbol> of active fn type params
 #
 module GenericAnalysis
     extend T::Sig
@@ -40,7 +40,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
-  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).returns(T.nilable(T::Array[String])) }
+  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).void }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
@@ -74,7 +74,7 @@ module GenericAnalysis
   #   3. Non-generic type with args: Int64<Number> — error
   #   4. Type param used as arg: Cache<T> — skip validation (resolved at monomorphization)
   #
-  # Respects current_fn_ctx&.type_params so that Cache<T> in a generic function
+  # Respects current_function_type_params so that Cache<T> in a generic function
   # does not raise "unknown type argument T".
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
@@ -96,14 +96,13 @@ module GenericAnalysis
   sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
   def type_annotation_facts(node, type_obj, is_param)
     T.bind(self, SemanticAnnotator)
-    fn_tps = current_fn_ctx&.type_params || []
     TypeAnnotationFacts.new(
       node: node,
       type_obj: type_obj,
       is_param: is_param,
       inner: type_annotation_inner(type_obj),
       inner_array: type_obj.tense? && type_obj.tense_type&.array? == true,
-      fn_type_params: fn_tps,
+      fn_type_params: current_function_type_params,
     )
   end
 
@@ -269,7 +268,7 @@ module GenericAnalysis
   def schema_type_params(schema)
     return [] unless schema.respond_to?(:type_params)
 
-    T.cast(T.unsafe(schema).type_params || [], T::Array[Symbol])
+    T.cast(T.unsafe(schema).type_params, T::Array[Symbol])
   end
 
   # ----------------------------------------
@@ -283,7 +282,7 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T::Hash[Symbol, T.untyped]) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     subst = {}
@@ -624,20 +623,8 @@ module GenericAnalysis
       ti = expr.target.full_type!(context: "slice container source")
       return root_variable_name(expr.target) if ti.array?
     end
-    # Non-Copy field extraction from a struct is a borrow of the parent.
-    # Without this, the extracted variable gets its own cleanup defer while
-    # the parent's cleanup also frees the field -- double-free.
-    # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
-    # values, not borrows from an existing variable.
     if expr.is_a?(AST::GetField)
-      if expr.target.is_a?(AST::Identifier)
-        target_schema = lookup_type_schema(expr.target.name.to_sym)
-        return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
-      end
-      field_ti = expr.full_type!(context: "field container source")
-      if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) }
-        return root_variable_name(expr.target)
-      end
+      return field_container_source(expr)
     end
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return find_container_source(expr.left)
@@ -648,5 +635,50 @@ module GenericAnalysis
     end
     nil
   end
+
+  sig { params(expr: AST::GetField).returns(T.nilable(String)) }
+  def field_container_source(expr)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    # Non-Copy field extraction from a struct is a borrow of the parent.
+    # Without this, the extracted variable gets its own cleanup defer while
+    # the parent's cleanup also frees the field -- double-free.
+    # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
+    # values, not borrows from an existing variable.
+    if expr.target.is_a?(AST::Identifier)
+      target_schema = lookup_type_schema(expr.target.name.to_sym)
+      return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
+    end
+    field_ti = expr.full_type!(context: "field container source")
+    return nil if field_ti.implicitly_copyable? { |type_name| lookup_type_schema(type_name) }
+
+    root_variable_name(expr.target)
+  end
+
+  private :apply_type_subst,
+    :enforce_shared_family_call_sync!,
+    :field_container_source,
+    :extract_type_bindings!,
+    :validate_generic_annotation!,
+    :validate_observable_annotation_capabilities!,
+    :validate_generic_instance_annotation!
+     private :annotation_schema_for!
+     private :find_container_source
+     private :generic_binding_value
+     private :generic_shared_family_param?
+     private :generic_type_has_capabilities?
+     private :observable_capability_explanation
+     private :observable_capability_labels
+     private :same_generic_binding?
+     private :same_shared_call_capability?
+     private :shared_call_capability_display
+     private :type_annotation_facts
+     private :type_annotation_inner
+     private :type_annotation_token
+     private :validate_collection_annotation_capabilities!
+     private :validate_generic_type_arg!
+     private :validate_param_annotation_capabilities!
+     private :validate_plain_type_annotation!
+     private :validate_shape_annotation_capabilities!
 
 end

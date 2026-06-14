@@ -1,13 +1,13 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Phase L2 -- Type axis for `:versioned` (MVCC).
 #
 # Verifies the Type machinery accepts `:versioned` as a sync value
-# and maps it to `CheatLib.Versioned(T)` in zig_type. Parser sigil
+# and maps it to `CheatLib.Versioned(T)` in zig_type. ClearParser sigil
 # support (parsing `@versioned` from source) comes in L3.
-RSpec.describe "Type @versioned axis" do
+RSpec.describe Type, "@versioned axis" do
   describe "predicates" do
     it "versioned? is true when sync == :versioned" do
       t = Type.new("Counter", sync: :versioned)
