@@ -29,7 +29,7 @@ module Decomplex
     ].freeze
     IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
     OPTIONAL_DIAGNOSTIC_MIDS = %w[
-      error! fixable! warn!
+      error! fixable! read_interpolated_string warn!
     ].freeze
     MUTATING_MIDS = %w[
       << []= add append clear collect! compact! concat declare delete delete_if

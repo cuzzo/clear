@@ -418,6 +418,11 @@ module Decomplex
         when "method", "function_definition", "function_declaration",
              "method_definition", "function_item"
           named_field(node, "name")&.text || first_named_text(node, %w[identifier constant property_identifier])
+        when "singleton_method"
+          named_field(node, "name")&.text ||
+            node.named_children.reverse.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+        when "argument_list"
+          inline_def_name(node)
         when "method_declaration"
           named_field(node, "name")&.text || first_named_text(node, %w[field_identifier identifier])
         end
@@ -438,6 +443,7 @@ module Decomplex
       def function_params(node)
         params = named_field(node, "parameters") ||
                  node.named_children.find { |child| %w[parameters formal_parameters parameter_list].include?(child.kind) }
+        params ||= node.named_children.find { |child| child.kind == "method_parameters" } if inline_def_argument_list?(node)
         return [] unless params
 
         params.named_children.filter_map do |param|
@@ -485,9 +491,16 @@ module Decomplex
       end
 
       def record_decision_site(document, node, stack, out)
+        if boolean_container?(node) && boolean_and?(node)
+          record_conjunction_decision(document, node, stack, out)
+          return
+        end
+
         case node.kind
         when "case", "switch_statement", "expression_switch_statement", "switch_expression",
              "match_statement", "match_expression"
+          return if ruby_predicate_less_case?(node)
+
           patterns = case_patterns(node)
           return if patterns.size < 2
 
@@ -500,8 +513,10 @@ module Decomplex
             span: span(node),
             predicate: decision_predicate(node)
           )
-        when "body_statement"
+        when "body_statement", "block_body", "argument_list"
           return unless hidden_case?(node)
+          return if node.named_children.any? { |child| child.kind == "case" }
+          return if ruby_predicate_less_case?(node)
 
           patterns = case_patterns(node)
           return if patterns.size < 2
@@ -530,25 +545,35 @@ module Decomplex
             span: span(node),
             predicate: decision_predicate(node)
           )
-        when "binary", "binary_expression", "boolean_operator"
-          return unless boolean_and?(node)
-          return if ts_node?(node.parent) &&
-                    %w[binary binary_expression boolean_operator].include?(node.parent.kind) &&
-                    boolean_and?(node.parent)
-
-          members = flatten_boolean_and(node).map { |child| normalize_text(child.text) }.uniq.sort
-          return if members.size < 2
-
-          out << DecisionSite.new(
-            kind: :conjunction,
-            members: members,
-            file: document.file,
-            function: current_function(stack),
-            line: line(node),
-            span: span(node),
-            predicate: normalize_text(node.text)
-          )
         end
+      end
+
+      def record_conjunction_decision(document, node, stack, out)
+        from_wrapper = parenthesized_wrapper?(node)
+        return if from_wrapper &&
+                  ts_node?(node.parent) &&
+                  boolean_container?(node.parent) &&
+                  boolean_and?(node.parent)
+
+        node = node.named_children.first if from_wrapper
+        return if !from_wrapper &&
+                  ts_node?(node.parent) &&
+                  boolean_container?(node.parent) &&
+                  boolean_and?(node.parent) &&
+                  !same_span?(node.parent, node)
+
+        members = flatten_boolean_and(node).map { |child| decision_member_text(child) }.uniq.sort
+        return if members.size < 2
+
+        out << DecisionSite.new(
+          kind: :conjunction,
+          members: members,
+          file: document.file,
+          function: current_function(stack),
+          line: conjunction_span(node)[0],
+          span: conjunction_span(node),
+          predicate: normalize_text(node.text)
+        )
       end
 
       def record_function_def(document, node, stack, out)
@@ -616,23 +641,58 @@ module Decomplex
       end
 
       def case_patterns(node)
-        case_arms(node).filter_map do |child|
-          normalized = case_arm_pattern(child)
-          normalized unless default_case_pattern?(normalized)
+        case_arms(node).flat_map do |child|
+          case_arm_patterns(child).reject { |normalized| default_case_pattern?(normalized) }
         end.uniq.sort
       end
 
-      def case_arm_pattern(child)
+      def case_arm_patterns(child)
         case child.kind
         when "when", "match_arm"
-          pattern = named_field(child, "pattern") || child.named_children.first
-          normalize_text(pattern.text) if pattern
+          patterns = child.named_children.select { |node| %w[pattern case_pattern match_pattern].include?(node.kind) }
+          patterns = [named_field(child, "pattern") || child.named_children.first].compact if patterns.empty?
+          ruby_when_pattern_texts(patterns)
         when "switch_case", "case_clause", "expression_case"
-          return nil if child.text.to_s.lstrip.start_with?("else")
+          return [] if child.text.to_s.lstrip.start_with?("else")
 
           value = named_field(child, "value") || child.named_children.first
-          normalize_text(value.text) if value && value.kind !~ /statement|block/
+          value && value.kind !~ /statement|block/ ? [normalize_text(value.text)] : []
+        else
+          []
         end
+      end
+
+      def case_arm_pattern(child)
+        patterns = case_arm_patterns(child)
+        return nil if patterns.empty?
+
+        patterns.join(", ")
+      end
+
+      def ruby_when_pattern_texts(patterns)
+        return [] if patterns.empty?
+
+        texts = patterns.map { |pattern| normalize_text(pattern.text) }
+        return texts unless texts.any? { |text| text.start_with?("*") }
+
+        out = []
+        pending_plain = []
+        texts.each_with_index do |text, index|
+          splat = text.start_with?("*")
+          if splat
+            out << pending_plain.join(", ") unless pending_plain.empty?
+            pending_plain = []
+            out << if texts.size == 1 || index.positive?
+                     text.delete_prefix("*")
+                   else
+                     text
+                   end
+          else
+            pending_plain << text
+          end
+        end
+        out << pending_plain.join(", ") unless pending_plain.empty?
+        out
       end
 
       def case_arm_body(child)
@@ -664,12 +724,22 @@ module Decomplex
       def decision_predicate(node)
         return normalize_text(modifier_condition(node).text) if hidden_modifier_if?(node) && modifier_condition(node)
 
-        target = named_field(node, "value") || named_field(node, "subject") ||
-                 named_field(node, "condition") ||
-                 node.named_children.find do |child|
-                   !%w[when switch_case case_clause expression_case match_arm].include?(child.kind)
-                 end
+        target = decision_subject(node)
         normalize_text(target ? target.text : node.text)
+      end
+
+      def decision_subject(node)
+        named_field(node, "value") || named_field(node, "subject") ||
+          named_field(node, "condition") ||
+          node.named_children.find do |child|
+            !%w[when switch_case case_clause expression_case match_arm else then comment].include?(child.kind)
+          end
+      end
+
+      def ruby_predicate_less_case?(node)
+        return false unless node.kind == "case" || hidden_case?(node)
+
+        !decision_subject(node)
       end
 
       def default_case_pattern?(text)
@@ -677,20 +747,93 @@ module Decomplex
       end
 
       def boolean_and?(node)
-        node.text.include?("&&") || node.text.match?(/\band\b/)
+        if parenthesized_wrapper?(node)
+          child = node.named_children.first
+          return boolean_and?(child)
+        end
+
+        %w[&& and].include?(direct_operator(node))
       end
 
       def flatten_boolean_and(node)
         return [node] unless ts_node?(node) &&
-                             %w[binary binary_expression boolean_operator].include?(node.kind) &&
+                             boolean_container?(node) &&
                              boolean_and?(node)
+        return flatten_boolean_and(node.named_children.first) if parenthesized_wrapper?(node)
 
         node.named_children.flat_map { |child| flatten_boolean_and(child) }
       end
 
+      def boolean_container?(node)
+        return false unless ts_node?(node)
+        return true if %w[binary binary_expression boolean_operator].include?(node.kind)
+        return boolean_container?(node.named_children.first) if parenthesized_wrapper?(node)
+        return false unless %w[body_statement block_body statement pattern argument_list].include?(node.kind)
+        return false unless %w[&& and].include?(direct_operator(node))
+        return false if node.named_children.size < 2
+
+        node.children.all? do |child|
+          child.named? || %w[&& and ( )].include?(child.text.to_s)
+        end
+      end
+
+      def same_span?(left, right)
+        span(left) == span(right)
+      end
+
+      def conjunction_span(node)
+        base = span(node)
+        if node.kind == "pattern" && node.text.to_s.lstrip.start_with?("(")
+          base = base.dup
+          base[1] += 1
+        end
+        base
+      end
+
+      def parenthesized_wrapper?(node)
+        ts_node?(node) && %w[parenthesized_statements parenthesized_expression].include?(node.kind) &&
+          node.named_children.size == 1
+      end
+
+      def decision_member_text(node)
+        normalize_text(strip_enclosing_parentheses(node.text))
+      end
+
+      def strip_enclosing_parentheses(text)
+        value = text.to_s.strip
+        loop do
+          break value unless value.start_with?("(") && value.end_with?(")")
+          break value unless enclosing_parentheses_wrap_all?(value)
+
+          value = value[1...-1].strip
+        end
+        value
+      end
+
+      def enclosing_parentheses_wrap_all?(text)
+        depth = 0
+        text.each_char.with_index do |char, index|
+          depth += 1 if char == "("
+          depth -= 1 if char == ")"
+          return false if depth.zero? && index < text.length - 1
+          return false if depth.negative?
+        end
+        depth.zero?
+      end
+
+      def direct_operator(node)
+        node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s
+      rescue StandardError
+        ""
+      end
+
       def record_state_write(document, node, stack, out)
+        return if document.language == :ruby && node.kind == "operator_assignment"
+        return if document.language == :ruby && assignment_lhs?(node) && next_sibling(node)&.text.to_s != "=" &&
+                  !instance_variable_node?(node)
+
         lhs =
-          if %w[assignment assignment_expression augmented_assignment assignment_statement].include?(node.kind)
+          if %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(node.kind)
             named_field(node, "left") || node.named_children.first
           elsif assignment_lhs?(node)
             node
@@ -700,14 +843,16 @@ module Decomplex
         target = state_target(lhs)
         return unless target
         return if target[:field] == "[]"
+        return if document.language == :ruby && target[:field].to_s.start_with?("$")
 
+        source_node = document.language == :ruby && assignment_lhs?(node) ? (parent_node(node) || node) : node
         out << StateWrite.new(
           field: target[:field],
           receiver: target[:receiver],
           file: document.file,
           function: current_function(stack),
-          line: line(node),
-          span: span(node),
+          line: line(source_node),
+          span: span(source_node),
           owner: current_owner(document, stack)
         )
       end
@@ -915,7 +1060,7 @@ module Decomplex
 
       def hidden_case?(node)
         return false unless ts_node?(node)
-        return false unless node.kind == "body_statement"
+        return false unless %w[body_statement block_body argument_list].include?(node.kind)
 
         first_token_kind(node) == "case"
       end
@@ -1357,6 +1502,10 @@ module Decomplex
         sibling && %w[= += -= *= /= %= &&= ||=].include?(sibling.text.to_s)
       end
 
+      def instance_variable_node?(node)
+        ts_node?(node) && node.kind == "instance_variable"
+      end
+
       def next_sibling(node)
         node.next_sibling
       rescue StandardError
@@ -1404,6 +1553,18 @@ module Decomplex
       def first_named_text(node, kinds)
         child = node.named_children.find { |c| kinds.include?(c.kind) }
         child&.text
+      end
+
+      def inline_def_argument_list?(node)
+        ts_node?(node) && node.kind == "argument_list" && node.children.first&.kind.to_s == "def"
+      end
+
+      def inline_def_name(node)
+        return nil unless inline_def_argument_list?(node)
+
+        receiver_index = node.named_children.index { |child| child.kind == "self" || child.kind == "constant" }
+        search = receiver_index ? node.named_children[(receiver_index + 1)..] : node.named_children
+        search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
       end
 
       def ts_node?(node)
