@@ -4,8 +4,10 @@
 
 require 'optparse'
 require 'fileutils'
+require 'json'
 require 'shellwords'
 require 'sorbet-runtime'
+require 'time'
 require 'yaml'
 require_relative 'support'
 
@@ -26,6 +28,7 @@ module RubySpecMutants
     const :subject, Subject
     const :ok, T::Boolean
     const :blocking, T::Boolean
+    const :summary, T.nilable(MutationTesting::MutantSummary), default: nil
   end
 
   SUBJECT_FILE = T.let(File.expand_path('src_subjects.yml', __dir__), String)
@@ -36,6 +39,7 @@ module RubySpecMutants
     prop :since, T.nilable(String)
     prop :shard, T.nilable(MutationTesting::Shard)
     prop :out, String
+    prop :facts, T.nilable(String), default: nil
     prop :list, T::Boolean
   end
 
@@ -66,13 +70,13 @@ module RubySpecMutants
   sig { params(subject: Subject, summary: MutationTesting::MutantSummary).returns(SubjectResult) }
   def self.evaluate_summary(subject, summary)
     if summary.mutations.zero?
-      return SubjectResult.new(subject: subject, ok: true, blocking: false)
+      return SubjectResult.new(subject: subject, ok: true, blocking: false, summary: summary)
     end
 
     ok = summary.selected_tests.positive? &&
       summary.coverage >= subject.min_coverage &&
       summary.timeouts <= subject.max_timeouts
-    SubjectResult.new(subject: subject, ok: ok, blocking: !ok && subject.hard_gate)
+    SubjectResult.new(subject: subject, ok: ok, blocking: !ok && subject.hard_gate, summary: summary)
   end
 
   sig { params(require_string: String).returns(T::Array[String]) }
@@ -147,13 +151,14 @@ module RubySpecMutants
 
   sig { params(argv: T::Array[String]).returns(Options) }
   def self.parse_options(argv)
-    opts = Options.new(subject: nil, since: nil, shard: nil, out: '/tmp/clear-ruby-mutants', list: false)
+    opts = Options.new(subject: nil, since: nil, shard: nil, out: '/tmp/clear-ruby-mutants', facts: nil, list: false)
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby tools/mutants/ruby_specs.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--list]'
+      o.banner = 'Usage: ruby tools/mutants/ruby_specs.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--facts FILE] [--list]'
       o.on('--subject NAME') { |v| opts.subject = v }
       o.on('--since REV') { |v| opts.since = v }
       o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
       o.on('--out DIR') { |v| opts.out = File.expand_path(v) }
+      o.on('--facts FILE') { |v| opts.facts = File.expand_path(v) }
       o.on('--list') { opts.list = true }
       o.on('-h', '--help') { puts o; exit 0 }
     end.parse!(argv)
@@ -171,7 +176,7 @@ module RubySpecMutants
 
     if summary.mutations.zero?
       puts "#{subject.name}: skipped (0 mutations selected)"
-      return SubjectResult.new(subject: subject, ok: true, blocking: false)
+      return SubjectResult.new(subject: subject, ok: true, blocking: false, summary: summary)
     end
 
     evaluated = evaluate_summary(subject, summary)
@@ -182,7 +187,61 @@ module RubySpecMutants
          "mutations=#{summary.mutations} killed=#{summary.kills} alive=#{summary.alive} " \
          "timeouts=#{summary.timeouts} selected_tests=#{summary.selected_tests} " \
          "min=#{format('%.2f', subject.min_coverage)}% gate=#{gate} log=#{log_path}"
-    evaluated
+    SubjectResult.new(subject: subject, ok: evaluated.ok, blocking: evaluated.blocking, summary: summary)
+  end
+
+  sig { params(results: T::Array[SubjectResult], path: String).void }
+  def self.write_facts(results, path)
+    body = {
+      schema: 'mutant-facts/v1',
+      generated_at: Time.now.utc.iso8601,
+      source: 'tools/mutants/ruby_specs.rb',
+      subjects: results.filter_map { |result| fact_for_result(result) },
+    }
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, JSON.pretty_generate(body))
+  end
+
+  sig { params(result: SubjectResult).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  def self.fact_for_result(result)
+    summary = result.summary
+    return nil unless summary
+
+    subject = result.subject
+    {
+      method: subject.expression,
+      file: source_file_for(subject),
+      kill_rate: summary.coverage,
+      gate_status: subject.hard_gate ? 'hard' : 'advisory',
+      mutations: summary.mutations,
+      killed: summary.kills,
+      alive: summary.alive,
+      timeouts: summary.timeouts,
+      selected_tests: summary.selected_tests,
+      ok: result.ok,
+      blocking: result.blocking,
+    }.compact
+  end
+
+  sig { params(subject: Subject).returns(T.nilable(String)) }
+  def self.source_file_for(subject)
+    owner = subject.expression.delete_suffix('*').split(/[.#]/, 2).first.to_s
+    hint = underscore(owner.split('::').last.to_s)
+    candidates = subject.requires.filter_map do |req|
+      ['src', 'tools'].filter_map do |root|
+        rel = File.join(root, "#{req.delete_suffix('.rb')}.rb")
+        rel if File.file?(File.join(MutationTesting::ROOT, rel))
+      end
+    end.flatten.uniq
+    candidates.find { |rel| rel.include?(hint) } || candidates.first
+  end
+
+  sig { params(value: String).returns(String) }
+  def self.underscore(value)
+    value.gsub(/([A-Z]+)([A-Z][a-z])/, '\\1_\\2')
+      .gsub(/([a-z\d])([A-Z])/, '\\1_\\2')
+      .tr('-', '_')
+      .downcase
   end
 
   sig { params(opts: Options).returns(T::Array[Subject]) }
@@ -225,6 +284,9 @@ module RubySpecMutants
     results = subjects.map do |subject|
       run_subject(subject, opts.since, File.join(opts.out, "#{subject.name}.log"))
     end
+    facts_path = opts.facts || File.join(opts.out, 'mutant-facts.json')
+    write_facts(results, facts_path)
+    puts "wrote #{facts_path}"
     results.any?(&:blocking) ? 1 : 0
   end
 end

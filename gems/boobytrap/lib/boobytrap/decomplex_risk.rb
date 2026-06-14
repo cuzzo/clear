@@ -77,6 +77,19 @@ module Boobytrap
       true
     end
 
+    def load_decomplex_source_filter
+      return true if defined?(Decomplex::SourceFilter)
+
+      require "decomplex/source_filter"
+      true
+    rescue LoadError
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/source_filter", __dir__)
+      return false unless ::File.file?("#{sibling}.rb")
+
+      require sibling
+      true
+    end
+
     def tree_sitter?
       ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
     end
@@ -96,6 +109,21 @@ module Boobytrap
 
     def tree_sitter_supported_source?(file)
       supported_source?(file, parser: "tree_sitter")
+    end
+
+    def source_file?(file, root:, parser: nil, exclude: [])
+      selected = parser || (tree_sitter? ? "tree_sitter" : "rubyvm")
+      if load_decomplex_source_filter
+        Decomplex::SourceFilter.source_file?(file, parser: selected, root: root, exclude: exclude)
+      else
+        abs = ::File.expand_path(file.to_s.start_with?("/") ? file : ::File.join(root, file))
+        ::File.file?(abs) && supported_source?(abs, parser: selected)
+      end
+    end
+
+    def excluded_path?(file, root:, exclude: [])
+      load_decomplex_source_filter &&
+        Decomplex::SourceFilter.excluded_path?(file, root: root, exclude: exclude)
     end
 
     def with_tree_sitter_for_non_ruby(files)

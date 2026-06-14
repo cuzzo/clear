@@ -19,7 +19,10 @@ module Boobytrap
                      :executable_lines, :covered_lines, :missed_lines,
                      :line_gap, :decomplex_score, :decomplex_findings,
                      :decomplex_detectors, :state_writes,
-                     :uncovered_branches, :risk,
+                     :uncovered_branches, :risk, :fix_norm,
+                     :verification_status, :mutation_kill_rate,
+                     :mutation_gate_status, :risk_profile,
+                     :verification_multiplier,
                      keyword_init: true)
 
     module_function

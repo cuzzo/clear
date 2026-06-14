@@ -12,13 +12,16 @@ module SlopCop
     # link ../../src/x.rb, not src/x.rb). Defaults to repo root
     # (correct for stdout / a root-level report).
     def initialize(files:, repo:, resultset:, ffi_boundary: [],
-                   diagnostic_mids: [], top: 50, link_base: nil)
+                   diagnostic_mids: [], top: 50, link_base: nil, mutation: nil,
+                   exclude: [])
       @repo = File.realpath(repo)
       @top = top
       @link_root = Pathname.new(File.expand_path(link_base || @repo))
       @r = Rollup.run(files: files, repo: repo, resultset: resultset,
                       ffi_boundary: ffi_boundary,
-                      diagnostic_mids: diagnostic_mids)
+                      diagnostic_mids: diagnostic_mids,
+                      mutation: mutation,
+                      exclude: exclude)
     end
 
     # href from the report's directory to a repo-relative source file.
@@ -54,7 +57,8 @@ module SlopCop
       o << "> Top true coverage gaps, ranked by fix-churn x structural\n" \
            "> deviance. Every dark arm is categorized; only GENUINE\n" \
            "> reachable ones are gaps. Apex = uncovered AND historically\n" \
-           "> churned (boobytrap) AND structurally deviant (decomplex).\n" \
+           "> churned (boobytrap), structurally deviant (decomplex),\n" \
+           "> and weakly verified when mutation facts are supplied.\n" \
            "> Owns categorization; consumes boobytrap (churn) and\n" \
            "> optional decomplex (spurious filter + deviance rank).\n\n"
 
@@ -64,8 +68,13 @@ module SlopCop
       if gaps.empty?
         o << "None.\n\n"
       else
-        o << "| # | gap | method | churn | decomplex deviance |\n" \
-             "|---|---|---|---|---|\n"
+        if @r[:mutation_label]
+          o << "| # | gap | method | churn | decomplex deviance | verification | profile |\n" \
+               "|---|---|---|---|---|---|---|\n"
+        else
+          o << "| # | gap | method | churn | decomplex deviance |\n" \
+               "|---|---|---|---|---|\n"
+        end
         gaps.first(@top).each_with_index do |x, i|
           link = "[`#{x[:file]}:#{x[:line]}`](#{href(x[:file])}#L#{x[:line]})"
           dets = x[:detectors].to_a
@@ -83,8 +92,12 @@ module SlopCop
                   "**#{x[:deviance]}**#{mark} (#{dets.first(3).join(', ')}" \
                   "#{dets.size > 3 ? ", +#{dets.size - 3}" : ''})"
                 end
-          o << "| #{i + 1} | #{link} | `#{x[:method]}` | " \
-               "#{x[:churn]} | #{dev} |\n"
+          row = "| #{i + 1} | #{link} | `#{x[:method]}` | " \
+                "#{x[:churn]} | #{dev} "
+          if @r[:mutation_label]
+            row << "| #{x[:verification]} | #{x[:risk_profile]} "
+          end
+          o << "#{row}|\n"
         end
         o << "\n- ...(+#{gaps.size - @top} more genuine gaps)\n" if gaps.size > @top
         o << "\n"
@@ -117,6 +130,7 @@ module SlopCop
       o << "- Files: #{@r[:per_file].size}; dark arms: #{g}; " \
            "genuine gaps: #{gaps.size}\n"
       o << "- Coverage input: #{@r[:coverage_label]}\n" if @r[:coverage_label]
+      o << "- Mutation facts: #{@r[:mutation_label] || 'not supplied'}\n"
       unless @r[:sources].to_h.empty?
         source_bits = @r[:sources].sort.map { |source, count| "#{source}=#{count}" }.join(", ")
         o << "- Branch source: #{source_bits}\n"

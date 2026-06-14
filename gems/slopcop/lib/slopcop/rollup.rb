@@ -35,7 +35,8 @@ module SlopCop
     # SimpleCov json. ffi_boundary and diagnostic_mids are
     # caller-supplied lexicons (the gem ships none beyond general Ruby
     # raise/fail/abort -- consuming projects provide their own).
-    def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [])
+    def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [],
+            mutation: nil, exclude: [])
       repo = File.realpath(repo)
       churn = begin
         Boobytrap::Bugspots.from_git(repo)
@@ -49,12 +50,21 @@ module SlopCop
       mx = 1.0 if mx.nil? || mx.zero?
 
       abs_for = {}
-      files.each do |rel|
-        a = File.join(repo, rel)
+      files.each do |file|
+        next unless Boobytrap::DecomplexRisk.source_file?(
+          file,
+          root: repo,
+          parser: Classifier.tree_sitter? ? "tree_sitter" : "rubyvm",
+          exclude: exclude
+        )
+
+        a = file.to_s.start_with?("/") ? file.to_s : File.join(repo, file.to_s)
+        rel = repo_relative(a, repo)
         abs_for[rel] = a if File.exist?(a)
       end
       # decomplex verdict, keyed [abs, method]. {} if decomplex absent.
       dv = DecomplexVerdict.index(abs_for.values)
+      mutation_facts = Boobytrap::MutationFacts.load(mutation, root: repo)
 
       per_file = {}
       gaps = []
@@ -93,7 +103,8 @@ module SlopCop
                     deviance: (v ? v[:deviance] : 0),
                     detectors: (v ? v[:detectors] : []),
                     precise: (v ? v[:precise] : nil),
-                    coarse_dup: (v ? v[:coarse_dup] : false) }
+                    coarse_dup: (v ? v[:coarse_dup] : false),
+                    verification_fact: mutation_facts.status_for(rel, a.defn) }
         end
         per_file[rel] = { total: arms.size, counts: counts, churn: cn }
       end
@@ -106,7 +117,31 @@ module SlopCop
       maxd = gaps.map { |x| x[:deviance] }.max.to_i
       maxd = 1 if maxd.zero?
       gaps.each do |x|
-        x[:priority] = (x[:churn] + x[:deviance].to_f / maxd).round(4)
+        structural = x[:deviance].to_f / maxd
+        priority = x[:churn] + structural
+        if mutation_facts.active?
+          fact = x[:verification_fact]
+          x[:verification] = fact.summary
+          x[:mutation_kill_rate] = fact.kill_rate
+          x[:mutation_gate_status] = fact.gate_status
+          x[:risk_profile] = Boobytrap::MutationFacts.profile(
+            fact,
+            active: true,
+            complexity: x[:deviance],
+            history: x[:churn],
+            coverage_gap: 1.0
+          )
+          x[:verification_multiplier] = Boobytrap::MutationFacts.risk_multiplier(
+            fact,
+            active: true,
+            complexity: x[:deviance],
+            history: x[:churn],
+            coverage_gap: 1.0
+          )
+          priority *= x[:verification_multiplier]
+        end
+        x.delete(:verification_fact)
+        x[:priority] = priority.round(4)
       end
 
       totals = Hash.new(0)
@@ -125,8 +160,16 @@ module SlopCop
           [-g[:priority], -g[:churn], g[:file], g[:line]]
         end,
         coverage_label: coverage && !coverage.empty? ? coverage.label : nil,
+        mutation_label: mutation_facts.active? ? mutation_facts.label : nil,
         sources: sources
       }
+    end
+
+    def repo_relative(path, repo)
+      root = File.expand_path(repo).tr("\\", "/").chomp("/")
+      expanded = File.expand_path(path).tr("\\", "/")
+      prefix = "#{root}/"
+      expanded.start_with?(prefix) ? expanded[prefix.length..] : path.to_s
     end
   end
 end

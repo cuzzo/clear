@@ -6,6 +6,7 @@ require_relative "boobytrap/coverage_gap"
 require_relative "boobytrap/decomplex_risk"
 require_relative "boobytrap/hotspot"
 require_relative "boobytrap/method_gap"
+require_relative "boobytrap/mutation_facts"
 require_relative "boobytrap/report"
 
 # boobytrap: defect-risk hotspots = recurring bug-fix locality

@@ -6,6 +6,7 @@ require_relative "coverage_gap"
 require_relative "decomplex_risk"
 require_relative "hotspot"
 require_relative "method_gap"
+require_relative "mutation_facts"
 
 module Boobytrap
   # Single markdown report, structured like decomplex / nil-kill: TOC,
@@ -17,10 +18,13 @@ module Boobytrap
     # global fix-history time span is deliberately UNCHANGED -- recency
     # weighting stays consistent with the whole project; we only filter
     # WHICH files are ranked. Empty = whole repo.
-    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [])
+    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [],
+                   mutation: nil, exclude: [])
       @repo = ::File.realpath(repo)
       @top = top
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
+      @exclude = Array(exclude)
+      @mutation_facts = MutationFacts.load(mutation, root: @repo)
       events = Bugspots.events_from_git(@repo, fix_re: fix_re)
       @fix_commits = events.size
       scores = filter_paths(Bugspots.score(events))
@@ -32,7 +36,7 @@ module Boobytrap
       has_coverage = coverage && !coverage.empty?
       covered_files = if has_coverage
                         filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
-                          DecomplexRisk.tree_sitter_supported_source?(::File.join(@repo, rel))
+                          source_file?(rel, parser: "tree_sitter")
                         end
                       else
                         []
@@ -72,10 +76,12 @@ module Boobytrap
         else
           []
         end
+      apply_empirical_method_risk!(@method_gaps)
       @state_branch_hotspots = build_state_branch_hotspots(coverage)
     end
 
     def in_scope?(rel)
+      return false if excluded_path?(rel)
       return true if @only.empty?
 
       @only.any? { |p| rel == p || rel.start_with?("#{p}/") }
@@ -99,7 +105,7 @@ module Boobytrap
         rel = line.strip
         next if rel.empty?
         next unless in_scope?(rel) && current_file?(rel)
-        next unless DecomplexRisk.supported_source?(::File.join(@repo, rel))
+        next unless source_file?(rel)
 
         files << rel
       end
@@ -108,9 +114,18 @@ module Boobytrap
       exts = DecomplexRisk.supported_exts
       Dir.chdir(@repo) do
         Dir["**/*"].select do |rel|
-          in_scope?(rel) && ::File.file?(rel) && exts.include?(::File.extname(rel).downcase)
+          in_scope?(rel) && ::File.file?(rel) &&
+            exts.include?(::File.extname(rel).downcase) && source_file?(rel)
         end
       end
+    end
+
+    def source_file?(rel, parser: nil)
+      DecomplexRisk.source_file?(rel, root: @repo, parser: parser, exclude: @exclude)
+    end
+
+    def excluded_path?(rel)
+      DecomplexRisk.excluded_path?(rel, root: @repo, exclude: @exclude)
     end
 
     def coverage_mode(coverage, source_files, gaps)
@@ -170,6 +185,12 @@ module Boobytrap
                "(score=#{blast.score}, avg files/fix=#{blast.avg_touched}, " \
                "max=#{blast.max_touched}).\n"
         end
+        if (method = dark_methods.first)
+          o << "- Highest empirical method risk: " \
+               "`#{method.file}:#{method.first_line}` `#{method.name}` " \
+               "(risk=#{method.risk.round(2)}, fix_norm=#{method.fix_norm}, " \
+               "verification=#{method.verification_status || 'not supplied'}).\n"
+        end
         unless @have_cov
           o << "- WARNING: no branch-coverage resultset supplied; " \
                "only fix-churn is shown (gap assumed unknown).\n"
@@ -195,8 +216,9 @@ module Boobytrap
 
       o << "## Mostly Uncovered Methods (#{dark_method_count})\n"
       o << "_non-trivial methods (`>=5` executable lines) with very low line coverage; " \
-           "risk = missed lines x gap, plus Decomplex detector score, " \
-           "instance-state writes, and dark branches._\n\n"
+           "risk = missed lines x gap, Decomplex detector score, " \
+           "instance-state writes, dark branches, fix history, and " \
+           "mutation verification when supplied._\n\n"
       if @method_gaps.empty?
         o << "_No line-coverage method data available._\n\n"
       elsif dark_method_count.zero?
@@ -210,13 +232,25 @@ module Boobytrap
         o << "- <=10% covered: #{le10}\n"
         o << "- <=20% covered: #{le20}\n"
         o << "- <=50% covered: #{le50}\n\n"
-        o << "| # | method | risk | covered | missed | decomplex | findings | writes | dark branches |\n"
-        o << "|---|--------|------|---------|--------|-----------|----------|--------|---------------|\n"
+        if @mutation_facts.active?
+          o << "| # | method | risk | covered | missed | fix_norm | decomplex | verification | profile | writes | dark branches |\n"
+          o << "|---|--------|------|---------|--------|----------|-----------|--------------|---------|--------|---------------|\n"
+        else
+          o << "| # | method | risk | covered | missed | fix_norm | decomplex | findings | writes | dark branches |\n"
+          o << "|---|--------|------|---------|--------|----------|-----------|----------|--------|---------------|\n"
+        end
         dark_methods.first(@top).each_with_index do |m, i|
-          o << "| #{i + 1} | `#{m.file}:#{m.first_line}` `#{m.name}` " \
-               "| #{m.risk.round(2)} | #{m.covered_lines}/#{m.executable_lines} " \
-               "| #{m.missed_lines} | #{m.decomplex_score} | #{m.decomplex_findings} | #{m.state_writes} " \
-               "| #{m.uncovered_branches} |\n"
+          common = "| #{i + 1} | `#{m.file}:#{m.first_line}` `#{m.name}` " \
+                   "| #{m.risk.round(2)} | #{m.covered_lines}/#{m.executable_lines} " \
+                   "| #{m.missed_lines} | #{m.fix_norm} | #{m.decomplex_score} "
+          if @mutation_facts.active?
+            o << common
+            o << "| #{m.verification_status} | #{m.risk_profile} | #{m.state_writes} "
+            o << "| #{m.uncovered_branches} |\n"
+          else
+            o << common
+            o << "| #{m.decomplex_findings} | #{m.state_writes} | #{m.uncovered_branches} |\n"
+          end
         end
         o << "\n- ...(+#{dark_method_count - @top} more)\n" if dark_method_count > @top
         o << "\n"
@@ -280,9 +314,11 @@ module Boobytrap
            "multi-file fix blast rows: #{@blast_radius.size}\n"
       o << "- Branch-coverage resultset: " \
            "#{@have_cov ? @coverage_mode : 'ABSENT (fix-churn only)'}\n"
+      o << "- Mutation facts: #{@mutation_facts.active? ? @mutation_facts.label : 'not supplied'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
-           "x normalized coverage branch gap; method gaps use Decomplex detector scores " \
+           "x normalized coverage branch gap; method gaps use Decomplex detector scores, " \
+           "fix history, and mutation verification when supplied " \
            "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
     end
@@ -296,6 +332,40 @@ module Boobytrap
       dark_methods.size
     end
 
+    def apply_empirical_method_risk!(rows)
+      rows.each do |row|
+        fix_norm = (@fix_scores[row.file].to_f / @fix_max).round(3)
+        row.fix_norm = fix_norm
+        row.risk = (row.risk.to_f * (1.0 + fix_norm)).round(4)
+        next unless @mutation_facts.active?
+
+        fact = @mutation_facts.status_for(row.file, row.name)
+        row.verification_status = fact.summary
+        row.mutation_kill_rate = fact.kill_rate
+        row.mutation_gate_status = fact.gate_status
+        structural_score = empirical_structural_score(row)
+        row.risk_profile = MutationFacts.profile(
+          fact,
+          active: true,
+          complexity: structural_score,
+          history: fix_norm,
+          coverage_gap: row.line_gap
+        )
+        row.verification_multiplier = MutationFacts.risk_multiplier(
+          fact,
+          active: true,
+          complexity: structural_score,
+          history: fix_norm,
+          coverage_gap: row.line_gap
+        )
+        row.risk = (row.risk * row.verification_multiplier).round(4)
+      end
+    end
+
+    def empirical_structural_score(row)
+      row.decomplex_score.to_f + row.state_writes.to_i + row.uncovered_branches.to_i
+    end
+
     def build_state_branch_hotspots(coverage)
       files = if coverage && !coverage.empty?
                 coverage.covered_files(root: @repo)
@@ -304,7 +374,7 @@ module Boobytrap
               end
       files = files.select do |rel|
         in_scope?(rel) && current_file?(rel) &&
-          DecomplexRisk.tree_sitter_supported_source?(::File.join(@repo, rel))
+          source_file?(rel, parser: "tree_sitter")
       end
       files = current_source_files if DecomplexRisk.tree_sitter? && files.empty?
       findings = DecomplexRisk.state_branch_density(

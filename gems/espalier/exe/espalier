@@ -3,18 +3,11 @@
 
 require "optparse"
 require_relative "../lib/espalier"
-
-TREE_SITTER_EXTS = Decomplex::Syntax.supported_exts(parser: "tree_sitter").freeze
-DEFAULT_EXCLUDE_PATTERNS = %w[
-  **/.clear-cache/**
-  **/.clear-transpile-cache/**
-  **/.global-zig-cache/**
-  **/.zig-cache/**
-  **/zig-cache/**
-  **/zig-out/**
-  **/node_modules/**
-  **/all-tests.zig
-].freeze
+begin
+  require "decomplex/source_filter"
+rescue LoadError
+  require_relative "../../decomplex/lib/decomplex/source_filter"
+end
 
 options = {
   format: :markdown,
@@ -28,39 +21,6 @@ options = {
 
 def report_link_base(output)
   output && File.dirname(File.expand_path(output))
-end
-
-def excluded_path?(path, patterns)
-  path = path.to_s.tr("\\", "/")
-  expanded = File.expand_path(path).tr("\\", "/")
-  patterns.any? do |pattern|
-    pat = pattern.to_s.tr("\\", "/")
-    directory_exclude_match?(path, pat) ||
-      directory_exclude_match?(expanded, pat) ||
-      File.fnmatch?(pat, path, File::FNM_PATHNAME | File::FNM_EXTGLOB) ||
-      File.fnmatch?(pat, expanded, File::FNM_PATHNAME | File::FNM_EXTGLOB) ||
-      File.fnmatch?(pat, File.basename(path), File::FNM_EXTGLOB)
-  end
-end
-
-def directory_exclude_match?(path, pattern)
-  return false unless pattern.end_with?("/**")
-
-  prefix = pattern.delete_suffix("/**")
-  if prefix.start_with?("**/")
-    suffix = prefix.delete_prefix("**/")
-    path == suffix || path.start_with?("#{suffix}/") || path.include?("/#{suffix}/")
-  else
-    path == prefix || path.start_with?("#{prefix}/")
-  end
-end
-
-def source_target?(path, exclude_patterns)
-  return false unless File.file?(path)
-  return false if File.basename(path).start_with?(".")
-  return false if excluded_path?(path, exclude_patterns)
-
-  TREE_SITTER_EXTS.include?(File.extname(path).downcase)
 end
 
 OptionParser.new do |opts|
@@ -127,17 +87,12 @@ if ARGV.empty?
 end
 
 # Resolve input files
-targets = []
-exclude_patterns = DEFAULT_EXCLUDE_PATTERNS + options[:exclude]
-ARGV.each do |arg|
-  if File.directory?(arg)
-    targets.concat(Dir.glob(File.join(arg, "**", "*")).select { |path| source_target?(path, exclude_patterns) })
-  elsif File.file?(arg)
-    targets << arg if source_target?(arg, exclude_patterns)
-  end
-end
-
-targets.uniq!
+targets = Decomplex::SourceFilter.collect(
+  ARGV,
+  parser: "tree_sitter",
+  root: Dir.pwd,
+  exclude: options[:exclude]
+)
 
 if targets.empty?
   puts "No supported source files found."

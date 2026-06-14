@@ -2,8 +2,10 @@
 # frozen_string_literal: true
 
 begin
+  require "decomplex/source_filter"
   require "decomplex/syntax"
 rescue LoadError
+  require_relative "../../../decomplex/lib/decomplex/source_filter"
   require_relative "../../../decomplex/lib/decomplex/syntax"
 end
 
@@ -136,7 +138,11 @@ module NilKill
       exts = Decomplex::Syntax.supported_exts(parser: "tree_sitter")
       target_dirs.flat_map do |target|
         if File.directory?(target)
-          Dir.glob(File.join(target, "**", "*")).select { |path| source_file?(path, exts) }
+          Decomplex::SourceFilter.collect(
+            [target],
+            parser: "tree_sitter",
+            root: @root
+          ).select { |path| source_file?(path, exts) }
         elsif source_file?(target, exts)
           [target]
         else
@@ -149,6 +155,7 @@ module NilKill
       File.file?(path) &&
         !File.basename(path).start_with?(".") &&
         exts.include?(File.extname(path).downcase) &&
+        Decomplex::SourceFilter.source_file?(path, parser: "tree_sitter", root: @root) &&
         !NilKill.target_excluded?(path)
     end
 

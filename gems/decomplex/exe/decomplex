@@ -8,18 +8,39 @@ def tree_sitter_parser?
 end
 
 def supported_exts
-  tree_sitter_parser? ? %w[.rb .py .js .jsx .mjs .cjs .ts .tsx .go .rs .zig] : %w[.rb]
+  Decomplex::Syntax.supported_exts(parser: tree_sitter_parser? ? "tree_sitter" : "rubyvm")
 end
 
 def no_files_message
   tree_sitter_parser? ? "no supported source files" : "no .rb files"
 end
 
+def split_excludes(args)
+  excludes = []
+  files = []
+  queue = Array(args).dup
+  until queue.empty?
+    arg = queue.shift
+    case arg
+    when /\A--exclude=(.+)\z/
+      excludes << Regexp.last_match(1)
+    when "--exclude"
+      excludes << queue.shift.to_s unless queue.empty?
+    else
+      files << arg
+    end
+  end
+  [files, excludes]
+end
+
 def collect_files(args)
-  exts = supported_exts
-  args.flat_map do |a|
-    File.directory?(a) ? Dir.glob(File.join(a, "**", "*")) : [a]
-  end.select { |f| File.file?(f) && exts.include?(File.extname(f).downcase) }
+  targets, excludes = split_excludes(args)
+  Decomplex::SourceFilter.collect(
+    targets,
+    parser: tree_sitter_parser? ? "tree_sitter" : "rubyvm",
+    root: Dir.pwd,
+    exclude: excludes
+  )
 end
 
 # decomplex delta BASELINE.json FILE_OR_DIR...
@@ -207,10 +228,10 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
     decomplex -- decision-level duplication + neglected-condition detector
 
       decomplex FILE_OR_DIR [FILE_OR_DIR ...]
-      decomplex report [--output=FILE] [--emit-json=FILE] FILE_OR_DIR ...
-      decomplex state-mesh [--output=FILE] FILE_OR_DIR ...
-      decomplex state-branches [--output=FILE] FILE_OR_DIR ...
-      decomplex temporal-ordering [--output=FILE] FILE_OR_DIR ...
+      decomplex report [--output=FILE] [--emit-json=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex state-mesh [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex state-branches [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex temporal-ordering [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex delta BASELINE.json FILE_OR_DIR ...
 
     Reports:
@@ -238,6 +259,11 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
       dormant-locals
                    Alias for locality-drag
       delta        Before/after diff against a baseline snapshot
+
+    Common options:
+      --exclude PATTERN
+                   Exclude a path/glob from directory scans. May be repeated.
+                   Defaults already skip Zig caches, node_modules, and all-tests.zig.
 
     v0 mines exact-match case/when dispatch + && conjunction only.
   USAGE

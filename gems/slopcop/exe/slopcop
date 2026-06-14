@@ -10,7 +10,7 @@ def usage
       slopcop report [--repo=.] [--coverage=coverage/.resultset.json] \\
                    [--output=report.md] [--files=a.rb,b.rb] \\
                    [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
-                   [--top=N]
+                   [--top=N] [--mutation=mutant-facts.json] [--exclude=GLOB ...]
 
     --coverage
              SimpleCov .resultset.json, kcov output directory,
@@ -23,6 +23,12 @@ def usage
     --diagnostic
              project methods that report/raise invalid-input diagnostics
              and should not be treated as ordinary reachable work
+    --mutation
+             mutant-facts/v1 JSON with file/method kill-rate and gate
+             status; used to rank weakly verified complex/churned gaps
+    --exclude
+             exclude a path/glob from source scans. May be repeated;
+             defaults already skip Zig caches, node_modules, and all-tests.zig.
   U
   exit 1
 end
@@ -42,9 +48,47 @@ def default_file_globs
   roots.product(exts).map { |root, ext| "#{root}/**/*.#{ext}" }
 end
 
+def selected_parser
+  tree_sitter_parser? ? "tree_sitter" : "rubyvm"
+end
+
+def repo_relative(path, repo)
+  root = File.expand_path(repo).tr("\\", "/").chomp("/")
+  expanded = File.expand_path(path.to_s.start_with?("/") ? path : File.join(repo, path)).tr("\\", "/")
+  prefix = "#{root}/"
+  expanded.start_with?(prefix) ? expanded[prefix.length..] : path.to_s
+end
+
+def default_files(repo, exclude)
+  if Boobytrap::DecomplexRisk.load_decomplex_source_filter
+    roots = %w[app lib src].map { |root| File.join(repo, root) }
+    return Decomplex::SourceFilter.collect(
+      roots,
+      parser: selected_parser,
+      root: repo,
+      exclude: exclude
+    ).map { |path| repo_relative(path, repo) }.uniq.sort
+  end
+
+  default_file_globs.flat_map { |g| Dir.chdir(repo) { Dir[g] } }.uniq.sort
+end
+
+def filter_files(files, repo, exclude)
+  Array(files).select do |file|
+    Boobytrap::DecomplexRisk.source_file?(
+      file,
+      root: repo,
+      parser: selected_parser,
+      exclude: exclude
+    )
+  end.map { |file| repo_relative(file, repo) }.uniq.sort
+end
+
 opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
-         top: 50, ffi: [], diagnostic: [], files: nil }
-ARGV[1..].each do |a|
+         top: 50, ffi: [], diagnostic: [], files: nil, mutation: nil, exclude: [] }
+args = ARGV[1..].dup
+until args.empty?
+  a = args.shift
   case a
   when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
   when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
@@ -53,16 +97,25 @@ ARGV[1..].each do |a|
   when /\A--ffi=(.+)/      then opts[:ffi] = Regexp.last_match(1).split(",")
   when /\A--diagnostic=(.+)/ then opts[:diagnostic] = Regexp.last_match(1).split(",")
   when /\A--top=(\d+)/     then opts[:top] = Regexp.last_match(1).to_i
+  when /\A--mutation=(.+)/ then opts[:mutation] = Regexp.last_match(1)
+  when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
+  when "--exclude"         then opts[:exclude] << args.shift.to_s
   else usage
   end
 end
 
-opts[:files] ||= default_file_globs.flat_map { |g| Dir.chdir(opts[:repo]) { Dir[g] } }.uniq.sort
+opts[:files] = if opts[:files]
+                 filter_files(opts[:files], opts[:repo], opts[:exclude])
+               else
+                 default_files(opts[:repo], opts[:exclude])
+               end
 
 md = SlopCop::Report.new(
   files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
   ffi_boundary: opts[:ffi], diagnostic_mids: opts[:diagnostic],
   top: opts[:top],
+  mutation: opts[:mutation],
+  exclude: opts[:exclude],
   # links must resolve from wherever the report is written.
   link_base: (opts[:output] ? File.dirname(opts[:output]) : nil)
 ).to_markdown
