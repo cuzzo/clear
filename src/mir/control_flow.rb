@@ -1642,7 +1642,7 @@ module LoopFrameAnalysis
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
     if sig && !sig.mutates_receiver?
       return true if MIR::Placement.frame?(sig.return_alloc)
-      return true if sig.emits_allocating? && MIR::Placement.frame?(sig.intrinsic_alloc(:alloc))
+      return true if sig.emits_allocating? && MIR::Placement.frame?(sig.intrinsic_alloc(IntrinsicAllocationKind::Alloc))
     end
 
     storage = node.respond_to?(:storage) ? T.unsafe(node).storage : nil

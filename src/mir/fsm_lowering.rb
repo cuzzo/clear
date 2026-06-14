@@ -474,7 +474,7 @@ module FsmLowering
     T.bind(self, MIRLowering) rescue nil
     line = with_node.token&.line.to_s
     case clause.action
-    when :raise
+    when AST::ErrorActionKind::Raise
       FsmLockErrorArmSplit.new(
         body_stmts: lock_error_done_stmts(
           ctx_id,
@@ -484,7 +484,7 @@ module FsmLowering
         ),
         exit_kind: :done,
       )
-    when :exit
+    when AST::ErrorActionKind::Exit
       message_mir = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
         lower(T.must(clause.message))
       end
@@ -498,9 +498,9 @@ module FsmLowering
         ),
         exit_kind: :done,
       )
-    when :pass
+    when AST::ErrorActionKind::Pass
       FsmLockErrorArmSplit.new(body_stmts: [], exit_kind: :goto_post)
-    when :block
+    when AST::ErrorActionKind::Block
       prev_bg_ptr_caps = capture_state.current_bg_pointer_captures
       prev_fiber_pending = function_state.pending_stmts
       block_mir = begin

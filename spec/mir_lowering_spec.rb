@@ -1164,7 +1164,7 @@ RSpec.describe MIRLowering do
       expect(result.map_kind).to eq(:string_map)
       expect(result.key_type).to be_nil
       expect(result.value_type).to be_nil
-      expect(result.template_kind).to eq(:zig)
+      expect(result.template_kind).to eq(IntrinsicTemplateKind::Zig)
       expect(result.target_var).to eq("m")
       expect(result.has_alloc_metadata?).to eq(true)
       expect(result.mutating_receiver_allocator_op?).to eq(true)
@@ -1205,7 +1205,7 @@ RSpec.describe MIRLowering do
       expect(result.shard_key).to be_a(MIR::Ident)
       expect(result.shard_idx.name).to eq("__sh.idx")
       expect(result.shard_key.name).to eq("__sh.key")
-      expect(result.template_kind).to eq(:shard_direct_zig)
+      expect(result.template_kind).to eq(IntrinsicTemplateKind::ShardDirectZig)
     end
 
     it "keeps list writes on the indexed template path with target metadata" do
@@ -2264,7 +2264,7 @@ RSpec.describe MIRLowering do
         { capability: :EXCLUSIVE, var_node: a, alias: "left", resolved_type: Type.new(:Counter) },
         { capability: :write_locked_read, var_node: b, alias: "right", resolved_type: Type.new(:Counter) }
       ]
-      clause = AST::ErrorClause.new(selectors: [], action: :pass, retries: 3, token: nil)
+      clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Pass, retries: 3, token: nil)
       clause.matched_types = [:LockTimeout]
       clause.bubble_types = [:Deadlock]
       with_node = AST::WithBlock.new(tok, caps, [], nil)

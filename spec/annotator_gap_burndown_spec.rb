@@ -544,8 +544,8 @@ RSpec.describe "annotator branch gap burndown" do
     message = AST::Literal.new(token(:STRING, "timeout"), :STRING, "timeout", :heap)
     body_stmt = AST::PassStmt.new(token(:PASS, "PASS"))
     policy = AST::SyncPolicyDecl.new(token(:SYNC, "SYNC"), [
-      AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: token, message: message),
-      AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: token, body: [body_stmt]),
+      AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: token, message: message),
+      AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Block, retries: nil, token: token, body: [body_stmt]),
     ])
 
     ann.send(:visit_SyncPolicyDecl, policy)
@@ -2667,7 +2667,7 @@ RSpec.describe "annotator branch gap burndown" do
     clause = AST::ErrorClause.new(
       token: token(:ON, "ON"),
       retries: 1,
-      action: :raise,
+      action: AST::ErrorActionKind::Raise,
       selectors: [
         AST::ErrorSelector.new(form: :kind, name: :Transient, token: token(:TYPE_ID, "Transient")),
         AST::ErrorSelector.new(form: :kind, name: :Transint, token: token(:TYPE_ID, "Transint")),
@@ -2759,7 +2759,7 @@ RSpec.describe "annotator branch gap burndown" do
     visited = []
     policy_msg = AST::Literal.new(token(:STRING, "\"policy\""), :STRING, "policy", :rodata)
     ann.define_singleton_method(:synthesize_clause_from_policy) do |name|
-      name == :MvccConflict ? AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: nil, message: policy_msg) : nil
+      name == :MvccConflict ? AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: nil, message: policy_msg) : nil
     end
     ann.define_singleton_method(:visit) do |node|
       visited << node
@@ -2771,14 +2771,14 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     node.arms = [
       { family: :VERSIONED, lock_error_clauses: [], body: [] },
-      { family: :ATOMIC, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :raise, retries: nil, token: nil)], body: [] },
-      { family: :LOCKED, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: nil, body: block_body)], body: [] },
-      { family: :OTHER, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: nil, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata))], body: [] },
+      { family: :ATOMIC, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: nil)], body: [] },
+      { family: :LOCKED, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Block, retries: nil, token: nil, body: block_body)], body: [] },
+      { family: :OTHER, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: nil, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata))], body: [] },
     ]
 
     ann.send(:validate_snapshot_match_arms!, node)
 
-    expect(node.arms.first[:lock_error_clauses].first.action).to eq(:exit)
+    expect(node.arms.first[:lock_error_clauses].first.action).to eq(AST::ErrorActionKind::Exit)
     expect(visited).to include(node.arms.first[:lock_error_clauses].first.message, block_body.first, node.arms.last[:lock_error_clauses].first.message)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_ATOMIC_FORBIDS_HANDLER)
 
@@ -2974,7 +2974,7 @@ RSpec.describe "annotator branch gap burndown" do
     ], [])
     attach_capability_plan!(self_loop_node)
     self_loop_node.lock_error_clause = AST::ErrorClause.new(
-      action: :raise,
+      action: AST::ErrorActionKind::Raise,
       retries: nil,
       token: nil,
       selectors: [
@@ -3004,7 +3004,7 @@ RSpec.describe "annotator branch gap burndown" do
     ], [])
     attach_capability_plan!(lock_node)
     lock_node.lock_error_clause = AST::ErrorClause.new(
-      action: :raise,
+      action: AST::ErrorActionKind::Raise,
       retries: nil,
       token: nil,
       selectors: [
@@ -3030,7 +3030,7 @@ RSpec.describe "annotator branch gap burndown" do
     attach_capability_plan!(atomic_node)
     atomic_node.snapshot_mode = :transaction
     atomic_node.lock_error_clause = AST::ErrorClause.new(
-      action: :raise,
+      action: AST::ErrorActionKind::Raise,
       retries: nil,
       token: nil,
       selectors: [
@@ -3049,7 +3049,7 @@ RSpec.describe "annotator branch gap burndown" do
     attach_capability_plan!(versioned_node)
     versioned_node.snapshot_mode = :transaction
     versioned_node.lock_error_clause = AST::ErrorClause.new(
-      action: :raise,
+      action: AST::ErrorActionKind::Raise,
       retries: nil,
       token: nil,
       selectors: [

@@ -549,7 +549,7 @@ RSpec.describe "AST coverage burndown" do
         parser_for("ON , RETURN 1").send(:parse_error_selectors)
       }.to raise_error(ParserError, /Expected error selector/)
 
-      expect(parser_for("PASS").send(:parse_lock_action).action).to eq(:pass)
+      expect(parser_for("PASS").send(:parse_lock_action).action).to eq(AST::ErrorActionKind::Pass)
 
       expect {
         ClearParser.new([

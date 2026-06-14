@@ -432,7 +432,7 @@ module Annotator
         clause = node.lock_error_clause
         return false unless clause
 
-        %i[raise exit].include?(clause.action) || !clause.bubble_types.empty?
+        [AST::ErrorActionKind::Raise, AST::ErrorActionKind::Exit].include?(clause.action) || !clause.bubble_types.empty?
       end
 
       sig { params(declarations: DeclarationIndex, program: AST::Program).void }

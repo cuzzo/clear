@@ -94,7 +94,7 @@ RSpec.describe LockHelper do
   end
 
   def error_clause(*selectors)
-    action = AST::ErrorAction.new(action: :return, token: token, value: nil, message: nil, body: [])
+    action = AST::ErrorAction.new(action: AST::ErrorActionKind::Return, token: token, value: nil, message: nil, body: [])
     AST::ErrorClause.from_action(selectors: selectors, retries: nil, action: action)
   end
 

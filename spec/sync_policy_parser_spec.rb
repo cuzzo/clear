@@ -54,14 +54,14 @@ RSpec.describe "True-Sync-Polymorphism parser (step 1)" do
 
       expect(first.selectors.first.name).to eq(:LockTimeout)
       expect(first.retries).to eq(3)
-      expect(first.action).to eq(:raise)
+      expect(first.action).to eq(AST::ErrorActionKind::Raise)
 
       expect(second.selectors.first.name).to eq(:MvccConflict)
       expect(second.retries).to be_nil
-      expect(second.action).to eq(:raise)
+      expect(second.action).to eq(AST::ErrorActionKind::Raise)
 
       expect(third.selectors.first.name).to eq(:AtomicConflict)
-      expect(third.action).to eq(:raise)
+      expect(third.action).to eq(AST::ErrorActionKind::Raise)
     end
 
     it "accepts a single handler" do

@@ -65,7 +65,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
     it "parses ON MvccConflict RETRY(3) THEN PASS" do
       node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RETRY(3) THEN PASS")
       expect(node.lock_error_clause.retries).to eq(3)
-      expect(node.lock_error_clause.action).to eq(:pass)
+      expect(node.lock_error_clause.action).to eq(AST::ErrorActionKind::Pass)
     end
 
     it "parses ON MvccConflict with -> { ... } block action" do
@@ -74,7 +74,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
           ON MvccConflict -> { y = 0; }
       CLEAR
       expect(node.lock_error_clause).not_to be_nil
-      expect(node.lock_error_clause.action).to eq(:block)
+      expect(node.lock_error_clause.action).to eq(AST::ErrorActionKind::Block)
     end
 
     it "RETRY(0) is rejected (RETRY(N) requires N > 0)" do

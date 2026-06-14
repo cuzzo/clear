@@ -1173,7 +1173,7 @@ RSpec.describe MIREmitter do
         Type.new(:String),
         Type.new(:Int64),
         MIR::InlineAllocMetadata.new(alloc: :frame),
-        :shard_direct_zig,
+        IntrinsicTemplateKind::ShardDirectZig,
       )
 
       expect(e.emit(node)).to eq("map.direct(idx, shard_key, key, val, []const u8, i64, rt.frameAlloc())")
@@ -1191,7 +1191,7 @@ RSpec.describe MIREmitter do
         nil,
         nil,
         MIR::InlineAllocMetadata.new,
-        :shard_direct_zig,
+        IntrinsicTemplateKind::ShardDirectZig,
       )
 
       expect { e.emit(node) }.to raise_error(/ShardedMap: op has no :shard_direct_zig template/)
@@ -1573,7 +1573,7 @@ RSpec.describe MIREmitter do
         index: MIR::Ident.new("key"),
         value: MIR::Ident.new("value"),
         entry: intrinsic_sig(zig: "try {target}.put({index}, {value}, {alloc})"),
-        template_kind: :zig,
+        template_kind: IntrinsicTemplateKind::Zig,
         map_kind: :string_map,
         allocs: MIR::InlineAllocMetadata.new(alloc: :frame),
         key_type: Type.new(:String),

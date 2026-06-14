@@ -3557,21 +3557,21 @@ class ClearParser
   sig { returns(T.nilable(AST::ErrorAction)) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
-      AST::ErrorAction.new(action: :raise, token: previous)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Raise, token: previous)
     elsif match!(:KEYWORD, 'PASS')
-      AST::ErrorAction.new(action: :pass, token: previous)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Pass, token: previous)
     elsif match!(:KEYWORD, 'RETURN')
       tok = previous
       value = parse_expression
-      AST::ErrorAction.new(action: :return, value: value, token: tok)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Return, value: value, token: tok)
     elsif match!(:KEYWORD, 'EXIT')
       tok = previous
       msg = parse_expression
-      AST::ErrorAction.new(action: :exit, message: msg, token: tok)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Exit, message: msg, token: tok)
     elsif match?(:ARROW, '->')
       tok = consume(:ARROW, '->')
       body = parse_brace_block
-      AST::ErrorAction.new(action: :block, body: T.cast(body, T::Array[AST::Node]), token: tok)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Block, body: T.cast(body, T::Array[AST::Node]), token: tok)
     else
       error!(current, :EXPECTED_AFTER_ERROR_CLAUSE)
     end

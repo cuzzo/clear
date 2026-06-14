@@ -67,9 +67,9 @@ RSpec.describe IntrinsicRegistry do
 
     expect(contract).to be_a(IntrinsicContract)
     expect(fs.intrinsic_pattern).to eq("try {0}.append({alloc}, {1})")
-    expect(fs.required_intrinsic_template(:zig)).to eq("try {0}.append({alloc}, {1})")
+    expect(fs.required_intrinsic_template(IntrinsicTemplateKind::Zig)).to eq("try {0}.append({alloc}, {1})")
     expect(fs.emits_allocating?).to be(true)
-    expect(fs.intrinsic_alloc(:alloc)).to eq(:receiver_storage)
+    expect(fs.intrinsic_alloc(IntrinsicAllocationKind::Alloc)).to eq(:receiver_storage)
     expect(fs.mutates_receiver?).to be(true)
     expect(fs.takes_ownership?).to be(true)
     expect(T.must(contract).ownership.takes_indices).to include(1)
@@ -165,21 +165,21 @@ RSpec.describe IntrinsicRegistry do
 
     expect(original.intrinsic_pattern).not_to eq("custom({0})")
     expect(overridden.intrinsic_pattern).to eq("custom({0})")
-    expect(overridden.intrinsic_alloc(:alloc)).to eq(:sharded_receiver_storage)
+    expect(overridden.intrinsic_alloc(IntrinsicAllocationKind::Alloc)).to eq(:sharded_receiver_storage)
   end
 
   it "applies intrinsic overrides to empty signatures and rejects missing required templates" do
     signature = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
 
     expect(signature.intrinsic_pattern).to be_nil
-    expect { signature.required_intrinsic_template(:zig) }
+    expect { signature.required_intrinsic_template(IntrinsicTemplateKind::Zig) }
       .to raise_error(/registry template missing :zig/)
 
     overridden = signature.with_intrinsic_override(pattern: :identity)
 
     expect(signature.emit).to be_nil
     expect(overridden.intrinsic_pattern).to eq(:identity)
-    expect(overridden.intrinsic_alloc(:alloc)).to be_nil
+    expect(overridden.intrinsic_alloc(IntrinsicAllocationKind::Alloc)).to be_nil
   end
 
   it "classifies registry-backed collection ownership predicates from typed contracts" do
@@ -271,21 +271,21 @@ RSpec.describe IntrinsicRegistry do
       sharded_alloc: :sharded_heap,
     )
 
-    expect(template.pattern_for(:zig)).to eq("zig")
-    expect(template.pattern_for(:numeric_zig)).to eq("num")
-    expect(template.pattern_for(:sharded_zig)).to eq("sharded")
-    expect(template.pattern_for(:shard_direct_zig)).to eq("direct")
-    expect(template.pattern_for(:missing)).to be_nil
+    expect(template.pattern_for(IntrinsicTemplateKind::Zig)).to eq("zig")
+    expect(template.pattern_for(IntrinsicTemplateKind::NumericZig)).to eq("num")
+    expect(template.pattern_for(IntrinsicTemplateKind::ShardedZig)).to eq("sharded")
+    expect(template.pattern_for(IntrinsicTemplateKind::ShardDirectZig)).to eq("direct")
+    expect(IntrinsicTemplateContract.new.pattern_for(IntrinsicTemplateKind::Zig)).to be_nil
     expect(template.bc_op_or(:fallback)).to eq(:custom_bc)
     expect(IntrinsicTemplateContract.new.bc_op_or(:fallback)).to eq(:fallback)
 
-    expect(allocation.placeholder(:alloc)).to eq(:heap)
-    expect(allocation.placeholder(:return_alloc)).to eq(:frame)
-    expect(allocation.placeholder(:val_alloc)).to eq(:value_heap)
-    expect(allocation.placeholder(:key_alloc)).to eq(:key_heap)
-    expect(allocation.placeholder(:shard_alloc)).to eq(:shard_heap)
-    expect(allocation.placeholder(:sharded_alloc)).to eq(:sharded_heap)
-    expect(allocation.placeholder(:missing)).to be_nil
+    expect(allocation.placeholder(IntrinsicAllocationKind::Alloc)).to eq(:heap)
+    expect(allocation.placeholder(IntrinsicAllocationKind::ReturnAlloc)).to eq(:frame)
+    expect(allocation.placeholder(IntrinsicAllocationKind::ValAlloc)).to eq(:value_heap)
+    expect(allocation.placeholder(IntrinsicAllocationKind::KeyAlloc)).to eq(:key_heap)
+    expect(allocation.placeholder(IntrinsicAllocationKind::ShardAlloc)).to eq(:shard_heap)
+    expect(allocation.placeholder(IntrinsicAllocationKind::ShardedAlloc)).to eq(:sharded_heap)
+    expect(IntrinsicAllocationContract.new.placeholder(IntrinsicAllocationKind::Alloc)).to be_nil
   end
 
   it "covers intrinsic empty defaults and ownership normalization branches" do

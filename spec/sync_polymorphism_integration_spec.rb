@@ -55,7 +55,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       with_node = find_with(ast)
       # Synthesized from baked-in default.
       expect(with_node.lock_error_clause.retries).to be_nil
-      expect(with_node.lock_error_clause.action).to eq(:raise)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Raise)
     end
 
     it "user SYNC POLICY (no inline) → user's RETRY(2) THEN RAISE" do
@@ -75,7 +75,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       CLEAR
       with_node = find_with(ast)
       expect(with_node.lock_error_clause.retries).to eq(2)
-      expect(with_node.lock_error_clause.action).to eq(:raise)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Raise)
     end
 
     it "inline ON wins over user SYNC POLICY" do
@@ -96,7 +96,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       with_node = find_with(ast)
       # Inline wins (RETRY(7) THEN PASS).
       expect(with_node.lock_error_clause.retries).to eq(7)
-      expect(with_node.lock_error_clause.action).to eq(:pass)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Pass)
     end
 
     it "inline ON wins over baked-in default" do
@@ -110,7 +110,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       CLEAR
       with_node = find_with(ast)
       expect(with_node.lock_error_clause.retries).to eq(5)
-      expect(with_node.lock_error_clause.action).to eq(:pass)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Pass)
     end
   end
 
@@ -128,7 +128,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       with_node = find_with(ast)
       expect(with_node.lock_error_clause).not_to be_nil
       expect(with_node.lock_error_clause.selectors.first.name).to eq(:AtomicConflict)
-      expect(with_node.lock_error_clause.action).to eq(:raise)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Raise)
     end
 
     it "user SYNC POLICY's AtomicConflict RETRY(3) THEN RAISE applies when no inline" do

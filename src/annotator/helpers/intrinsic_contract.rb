@@ -2,6 +2,26 @@
 require "sorbet-runtime"
 require_relative "intrinsic_emit"
 
+class IntrinsicTemplateKind < T::Enum
+  enums do
+    Zig = new("zig")
+    NumericZig = new("numeric_zig")
+    ShardedZig = new("sharded_zig")
+    ShardDirectZig = new("shard_direct_zig")
+  end
+end
+
+class IntrinsicAllocationKind < T::Enum
+  enums do
+    Alloc = new("alloc")
+    ReturnAlloc = new("return_alloc")
+    ValAlloc = new("val_alloc")
+    KeyAlloc = new("key_alloc")
+    ShardAlloc = new("shard_alloc")
+    ShardedAlloc = new("sharded_alloc")
+  end
+end
+
 class IntrinsicTemplateContract < T::Struct
   extend T::Sig
 
@@ -14,14 +34,13 @@ class IntrinsicTemplateContract < T::Struct
   const :bc, T::Boolean, default: false
   const :bc_op, T.nilable(Symbol), default: nil
 
-  sig { params(kind: Symbol).returns(T.nilable(TemplateValue)) }
+  sig { params(kind: IntrinsicTemplateKind).returns(T.nilable(TemplateValue)) }
   def pattern_for(kind)
     case kind
-    when :zig then zig
-    when :numeric_zig then numeric_zig
-    when :sharded_zig then sharded_zig
-    when :shard_direct_zig then shard_direct_zig
-    else nil
+    when IntrinsicTemplateKind::Zig then zig
+    when IntrinsicTemplateKind::NumericZig then numeric_zig
+    when IntrinsicTemplateKind::ShardedZig then sharded_zig
+    when IntrinsicTemplateKind::ShardDirectZig then shard_direct_zig
     end
   end
 
@@ -42,16 +61,15 @@ class IntrinsicAllocationContract < T::Struct
   const :shard_alloc, T.nilable(Symbol), default: nil
   const :sharded_alloc, T.nilable(Symbol), default: nil
 
-  sig { params(kind: Symbol).returns(T.nilable(Symbol)) }
+  sig { params(kind: IntrinsicAllocationKind).returns(T.nilable(Symbol)) }
   def placeholder(kind)
     case kind
-    when :alloc then alloc
-    when :return_alloc then return_alloc
-    when :val_alloc then val_alloc
-    when :key_alloc then key_alloc
-    when :shard_alloc then shard_alloc
-    when :sharded_alloc then sharded_alloc
-    else nil
+    when IntrinsicAllocationKind::Alloc then alloc
+    when IntrinsicAllocationKind::ReturnAlloc then return_alloc
+    when IntrinsicAllocationKind::ValAlloc then val_alloc
+    when IntrinsicAllocationKind::KeyAlloc then key_alloc
+    when IntrinsicAllocationKind::ShardAlloc then shard_alloc
+    when IntrinsicAllocationKind::ShardedAlloc then sharded_alloc
     end
   end
 end

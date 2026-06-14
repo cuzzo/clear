@@ -320,7 +320,7 @@ RSpec.describe "WITH GUARD clauses" do
     CLEAR
 
     clause = ast.statements.last.body[1].lock_error_clause
-    expect(clause.action).to eq(:return)
+    expect(clause.action).to eq(AST::ErrorActionKind::Return)
     expect(clause.value).to be_a(AST::Literal)
   end
 

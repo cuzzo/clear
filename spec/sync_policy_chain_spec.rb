@@ -48,7 +48,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
       with_node = find_with(ast)
       expect(with_node.lock_error_clause).not_to be_nil
       expect(with_node.lock_error_clause.selectors.first.name).to eq(:MvccConflict)
-      expect(with_node.lock_error_clause.action).to eq(:raise)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Raise)
       # The baked-in default for MvccConflict is `RAISE` (no retry).
       expect(with_node.lock_error_clause.retries).to be_nil
     end
@@ -109,7 +109,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
 
       with_node = find_with(ast)
       expect(with_node.lock_error_clause.retries).to eq(2)
-      expect(with_node.lock_error_clause.action).to eq(:raise)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Raise)
     end
   end
 
@@ -126,7 +126,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
 
       with_node = find_with(ast)
       expect(with_node.lock_error_clause.retries).to eq(5)
-      expect(with_node.lock_error_clause.action).to eq(:pass)
+      expect(with_node.lock_error_clause.action).to eq(AST::ErrorActionKind::Pass)
     end
   end
 end

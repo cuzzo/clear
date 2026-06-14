@@ -10,7 +10,7 @@ module MIRLoweringVariables
   class IndexedAssignmentDispatch < T::Struct
     const :target_var, T.nilable(String)
     const :shard_direct, T::Boolean
-    const :template_kind, Symbol
+    const :template_kind, IntrinsicTemplateKind
     const :key_type, T.nilable(Type)
     const :value_type, T.nilable(Type)
     const :resolved_allocs, MIR::InlineAllocMetadata
@@ -1166,13 +1166,13 @@ module MIRLoweringVariables
 
     target_var = indexed_assignment_target_var(target_node)
     shard = shard_context
-    shard_direct = !!(shard && target_var == shard[:map] && op.intrinsic_template(:shard_direct_zig))
+    shard_direct = !!(shard && target_var == shard[:map] && op.intrinsic_template(IntrinsicTemplateKind::ShardDirectZig))
     template_kind = if shard_direct
-      :shard_direct_zig
-    elsif (receiver_type.sharded? || receiver_type.striped?) && op.intrinsic_template(:sharded_zig)
-      :sharded_zig
+      IntrinsicTemplateKind::ShardDirectZig
+    elsif (receiver_type.sharded? || receiver_type.striped?) && op.intrinsic_template(IntrinsicTemplateKind::ShardedZig)
+      IntrinsicTemplateKind::ShardedZig
     else
-      :zig
+      IntrinsicTemplateKind::Zig
     end
     resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
     receiver_alloc = T.unsafe(self).send(:placement_for_node, target_node)
@@ -1203,14 +1203,14 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
 
     MIR::InlineAllocMetadata.new(
-      alloc: indexed_assignment_resolved_alloc(op, :alloc, target_node, assignment),
-      key_alloc: indexed_assignment_resolved_alloc(op, :key_alloc, target_node, assignment),
-      val_alloc: indexed_assignment_resolved_alloc(op, :val_alloc, target_node, assignment),
-      shard_alloc: indexed_assignment_resolved_alloc(op, :shard_alloc, target_node, assignment),
+      alloc: indexed_assignment_resolved_alloc(op, IntrinsicAllocationKind::Alloc, target_node, assignment),
+      key_alloc: indexed_assignment_resolved_alloc(op, IntrinsicAllocationKind::KeyAlloc, target_node, assignment),
+      val_alloc: indexed_assignment_resolved_alloc(op, IntrinsicAllocationKind::ValAlloc, target_node, assignment),
+      shard_alloc: indexed_assignment_resolved_alloc(op, IntrinsicAllocationKind::ShardAlloc, target_node, assignment),
     )
   end
 
-  sig { params(op: FunctionSignature, alloc_key: Symbol, target_node: AST::Node, assignment: AST::Assignment).returns(T.nilable(Symbol)) }
+  sig { params(op: FunctionSignature, alloc_key: IntrinsicAllocationKind, target_node: AST::Node, assignment: AST::Assignment).returns(T.nilable(Symbol)) }
   def indexed_assignment_resolved_alloc(op, alloc_key, target_node, assignment)
     T.bind(self, MIRLowering) rescue nil
 
@@ -1220,7 +1220,7 @@ module MIRLoweringVariables
     resolve_alloc_sym(registry_alloc, target_node, assignment)
   end
 
-  sig { params(op: FunctionSignature, alloc_key: Symbol).returns(T.nilable(Symbol)) }
+  sig { params(op: FunctionSignature, alloc_key: IntrinsicAllocationKind).returns(T.nilable(Symbol)) }
   def indexed_assignment_registry_alloc(op, alloc_key)
     op.intrinsic_alloc(alloc_key)
   end

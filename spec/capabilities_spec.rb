@@ -1318,7 +1318,7 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause.action).to eq(:raise)
+      expect(clause.action).to eq(AST::ErrorActionKind::Raise)
       expect(clause.selectors.map { |s| [s.form, s.name, s.token] }).to eq([[:kind, :Transient, clause.selectors.first.token]])
       expect(clause.retries).to be_nil
     end
@@ -1330,7 +1330,7 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout, LockCycle PASS
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause.action).to eq(:pass)
+      expect(clause.action).to eq(AST::ErrorActionKind::Pass)
       expect(clause.selectors.map { |s| [s.form, s.name] }).to eq([[:type, :LockTimeout], [:type, :LockCycle]])
     end
 
@@ -1341,7 +1341,7 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient EXIT "stuck"
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause.action).to eq(:exit)
+      expect(clause.action).to eq(AST::ErrorActionKind::Exit)
       expect(clause.message).not_to be_nil
     end
 
@@ -1352,7 +1352,7 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient -> { c.v = 0; }
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause.action).to eq(:block)
+      expect(clause.action).to eq(AST::ErrorActionKind::Block)
       expect(clause.body).to be_an(Array)
     end
 
@@ -1363,7 +1363,7 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } RETRY(3) THEN RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause.action).to eq(:raise)
+      expect(clause.action).to eq(AST::ErrorActionKind::Raise)
       expect(clause.retries).to eq(3)
       expect(clause.selectors.first.name).to eq(:Transient)
     end

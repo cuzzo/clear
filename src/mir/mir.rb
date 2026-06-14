@@ -4444,7 +4444,7 @@ module MIR
     const :index, Emittable
     const :value, Emittable
     const :entry, FunctionSignature
-    const :template_kind, Symbol
+    const :template_kind, IntrinsicTemplateKind
     const :map_kind, Symbol
     const :ownership_contract, OwnershipContract, default: OwnershipContract.empty
     const :allocs, InlineAllocMetadata, default: InlineAllocMetadata.new
@@ -4711,7 +4711,7 @@ module MIR
   #   symbol (:heap | :frame). The lowering pre-resolves :receiver_storage /
   #   :node_storage to a concrete kind based on the receiver/target context,
   #   so the emitter only needs to map symbol -> Zig string.
-  # template_kind: :zig | :sharded_zig | :shard_direct_zig -- which
+  # template_kind: IntrinsicTemplateKind -- which
   #   INDEX_OPS template the lowering chose. The emitter uses this to
   #   pick the same template without re-running the lowering's
   #   shard-context inspection.
@@ -4720,7 +4720,7 @@ module MIR
                               :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol, target_var: T.nilable(String)).void }
+	    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: IntrinsicTemplateKind, target_var: T.nilable(String)).void }
     def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
       super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
         resolved_allocs, template_kind, target_var)
@@ -4762,7 +4762,7 @@ module MIR
                               :resolved_allocs, :template_kind) do
     extend T::Sig
     include Expr
-    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol).void }
+    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: IntrinsicTemplateKind).void }
     def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
       super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
         resolved_allocs, template_kind)

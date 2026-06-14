@@ -38,7 +38,7 @@ module MIRLoweringCapabilities
   class FallibleClauseFact < T::Struct
     const :var_name, String
     const :alias_name, String
-    const :action_kind, Symbol
+    const :action_kind, AST::ErrorActionKind
     const :retries, T.nilable(Integer)
     const :matched_types, T::Array[Symbol]
     const :bubble_types, T::Array[Symbol]
@@ -505,7 +505,7 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock, clause: T.nilable(AST::ErrorClause)).returns(T.nilable(String)) }
   def with_block_control_label(node, clause)
-    return nil unless clause && (clause.action == :pass || clause.action == :block)
+    return nil unless clause && (clause.action == AST::ErrorActionKind::Pass || clause.action == AST::ErrorActionKind::Block)
 
     "__with_#{node.object_id.abs}"
   end
@@ -664,9 +664,9 @@ module MIRLoweringCapabilities
     action_mir = T.let([], T::Array[MIR::Emittable])
     exit_msg_mir = T.let(nil, T.nilable(MIR::Emittable))
     case clause.action
-    when :block
+    when AST::ErrorActionKind::Block
       action_mir = lower_body(clause.body)
-    when :exit
+    when AST::ErrorActionKind::Exit
       exit_msg_mir = lower(T.must(clause.message))
     end
     FallibleClauseFact.new(
@@ -795,9 +795,9 @@ module MIRLoweringCapabilities
     line = node.token&.line.to_s
     result = T.let([], T::Array[MIR::Emittable])
     case clause.action
-    when :return
+    when AST::ErrorActionKind::Return
       result << MIR::ReturnStmt.new(lower(T.must(clause.value)))
-    when :raise
+    when AST::ErrorActionKind::Raise
       result << MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
         MIR::EnumTag.new(variant: "Transient"),
         MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "GuardFail")),
@@ -805,7 +805,7 @@ module MIRLoweringCapabilities
         MIR::Lit.new(line),
       ], false, MIR::CallableContract.no_ownership(4)), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
-    when :exit
+    when AST::ErrorActionKind::Exit
       msg_mir = lower(T.must(clause.message))
       result << MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
         MIR::EnumTag.new(variant: "Transient"),
@@ -814,7 +814,7 @@ module MIRLoweringCapabilities
         MIR::Lit.new(line),
       ], false, MIR::CallableContract.no_ownership(4)), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
-    when :block
+    when AST::ErrorActionKind::Block
       result.concat(lower_body(clause.body))
     else
       result
@@ -927,7 +927,7 @@ module MIRLoweringCapabilities
     err_name = error_type.to_s
     kind = AST.kind_of_type(error_type) || :Transient
     case clause.action
-    when :raise
+    when AST::ErrorActionKind::Raise
       [
         MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
           MIR::EnumTag.new(variant: kind.to_s),
@@ -937,7 +937,7 @@ module MIRLoweringCapabilities
         ], false, MIR::CallableContract.no_ownership(4)), false),
         MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError")),
       ]
-    when :exit
+    when AST::ErrorActionKind::Exit
       msg_mir = lower(T.must(clause.message))
       [
         MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
@@ -948,11 +948,11 @@ module MIRLoweringCapabilities
         ], false, MIR::CallableContract.no_ownership(4)), false),
         MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError")),
       ]
-    when :pass
+    when AST::ErrorActionKind::Pass
       [MIR::BreakStmt.new(T.must(with_label), nil)]
-    when :return
+    when AST::ErrorActionKind::Return
       [MIR::ReturnStmt.new(lower(T.must(clause.value)))]
-    when :block
+    when AST::ErrorActionKind::Block
       lower_body(clause.body) + [MIR::BreakStmt.new(T.must(with_label), nil)]
     else
       raise "Internal: unknown lock action #{clause.action}"
@@ -1062,16 +1062,16 @@ module MIRLoweringCapabilities
   sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(MIR::FailureAction) }
   def failure_action_from_clause(clause, with_label, with_node, error_type, default_msg)
     T.bind(self, MIRLowering) rescue nil
-    kind = failure_action_kind(clause.action)
+    kind = clause_failure_action_kind(clause.action)
     message_mir = T.let(nil, T.nilable(MIR::Emittable))
     return_mir = T.let(nil, T.nilable(MIR::Emittable))
     body_mir = T.let([], T::Array[MIR::Emittable])
     case clause.action
-    when :exit
+    when AST::ErrorActionKind::Exit
       message_mir = T.cast(lower(T.must(clause.message)), MIR::Emittable)
-    when :return
+    when AST::ErrorActionKind::Return
       return_mir = T.cast(lower(T.must(clause.value)), MIR::Emittable)
-    when :block
+    when AST::ErrorActionKind::Block
       body_mir = lower_body(clause.body)
     end
     MIR::FailureAction.new(
@@ -1088,18 +1088,18 @@ module MIRLoweringCapabilities
     )
   end
 
-  sig { params(action: Symbol).returns(MIR::FailureActionKind) }
-  def failure_action_kind(action)
+  sig { params(action: AST::ErrorActionKind).returns(MIR::FailureActionKind) }
+  def clause_failure_action_kind(action)
     case action
-    when :raise
+    when AST::ErrorActionKind::Raise
       MIR::FailureActionKind::Raise
-    when :exit
+    when AST::ErrorActionKind::Exit
       MIR::FailureActionKind::Exit
-    when :pass
+    when AST::ErrorActionKind::Pass
       MIR::FailureActionKind::Pass
-    when :return
+    when AST::ErrorActionKind::Return
       MIR::FailureActionKind::Return
-    when :block
+    when AST::ErrorActionKind::Block
       MIR::FailureActionKind::Block
     else
       Kernel.raise "Internal: unknown lock action #{action}"
@@ -1182,7 +1182,7 @@ module MIRLoweringCapabilities
   private :exclusive_capability_binding
   private :exclusive_lock_expr
   private :exclusive_lock_sync
-  private :failure_action_kind
+  private :clause_failure_action_kind
   private :guard_fail_flow_body
   private :lower_polymorphic_universal
   private :lower_with_match_block
