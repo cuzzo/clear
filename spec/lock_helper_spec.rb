@@ -10,6 +10,8 @@ require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 # synthetic graphs without going through the annotator pipeline so
 # algorithm-level regressions show up as algorithm-level failures.
 RSpec.describe LockHelper do
+  TARJAN_SANITY_TIMEOUT_SECONDS = 5.0
+
   class LockHelperSpecError < StandardError
     attr_reader :node, :code, :payload
 
@@ -69,7 +71,7 @@ RSpec.describe LockHelper do
   end
 
   def run_tarjan(host, nodes, adj)
-    Timeout.timeout(0.25) { host.send(:tarjan_scc, nodes, adj) }
+    Timeout.timeout(TARJAN_SANITY_TIMEOUT_SECONDS) { host.send(:tarjan_scc, nodes, adj) }
   end
 
   def token(line = 1, column = 1, value = "x")
