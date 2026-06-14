@@ -15,6 +15,31 @@ This tracker focuses on CLEAR's memory-safety mutation coverage. The P1 goal was
 
 - `BorrowChecker` did not treat `WITH BORROWED b.user` as an active borrow of root owner `b`, so moving `b` inside the borrow could slip through. This is fixed and covered.
 
+## Current P2 Status
+
+P2 is the targeted safety wall: compiler patch mutants that deliberately break one memory-safety invariant and prove the relevant fuzz/transpile surface catches it. The fuzz side is now the stronger P2 gate because it runs matrix templates instead of one hand-picked `.cht` file.
+
+| Area | Gate strategy | Current result | Status |
+| :--- | :--- | :--- | :--- |
+| Fuzz safety mutants | 21 targeted compiler patch mutants | 21/21 killed; every baseline matrix clean | Complete for current P2 scope |
+| Fuzz coverage registry | Registered/documented template coverage | 64/64 templates documented; no coverage gaps | Clean |
+| MIR negative matrix | Direct malformed MIR cells | 45/45 baseline cells reject with expected diagnostics | Strengthened |
+| Transpile patch mutants | 5 targeted `.cht` fixtures | 5/5 killed on the existing gate | Useful smoke, not the primary P2 wall |
+
+New P2 mutants added:
+
+- `or_rescue_catch_allocator_identity`: breaks OR/catch fallback allocator placement. `catch_allocator_matrix` kills it with a new failure.
+- `escape_identifier_heap_placement`: disables the central escape-sink identifier heap-placement walker. `escape_mechanism_matrix` kills it with MIR errors.
+- `ownership_surface_finalization`: disables MIRChecker enforcement that side-channel ownership metadata is finalized into `Owned*` facts. A new `mir_checker_negative_matrix` cell kills it with an unexpected pass.
+
+The full fuzz mutant validation was:
+
+```sh
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p2-fuzz-mutants-all
+```
+
+Result: all 21 mutants killed.
+
 ## Design Notes
 
 Broad `Type`, `CleanupClassifier`, and `EscapeAnalysis` mutation subjects are still advisory. That is intentional for now:
@@ -23,4 +48,4 @@ Broad `Type`, `CleanupClassifier`, and `EscapeAnalysis` mutation subjects are st
 - `CleanupClassifier` broad runs are expensive and noisy. The hard gates now cover cleanup facts, field pre-cleanup stamping, moved-source guard walking, and the existing plan classifier.
 - `EscapeAnalysis` broad recursive walking remains advisory, but the major public entry points and heap-placement path for TAKES/heap-backed args are hard-gated.
 
-Future work should add exact hard gates for newly discovered safety predicates rather than raising broad facade gates unless the subject is split into smaller cohesive units.
+Future work should add exact hard gates for newly discovered safety predicates rather than raising broad facade gates unless the subject is split into smaller cohesive units. Native CLEAR-source mutation for every `.cht` transpile-test is still separate from P2 patch mutants; patch mutants prove compiler invariants are load-bearing, while source mutants would prove individual corpus assertions are load-bearing.

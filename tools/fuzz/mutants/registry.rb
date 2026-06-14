@@ -185,6 +185,35 @@ module FuzzMutants
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(
+      name: :or_rescue_catch_allocator_identity,
+      description: 'Skip destination allocator placement for OR/catch fallback ' \
+                   'values. Success and fallback branches must preserve one ' \
+                   'allocator identity for the resulting binding.',
+      invariant: :error_path_allocator_identity,
+      patch: File.join(PATCH_DIR, 'or_rescue_skip_catch_placement.patch'),
+      templates: [:catch_allocator_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :escape_identifier_heap_placement,
+      description: 'Disable the central identifier heap-placement walker for ' \
+                   'escape sinks. Returning, storing, yielding, or capturing ' \
+                   'owned frame values must still be caught.',
+      invariant: :declaration_provenance_escape_stamping,
+      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      templates: [:escape_mechanism_matrix],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :ownership_surface_finalization,
+      description: 'Disable MIRChecker enforcement that ownership side-channel ' \
+                   'metadata is finalized into Owned* facts before checking.',
+      invariant: :ownership_surface_finalization,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_ownership_surface_finalized.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :union_match_drops_payload_capture,
       description: 'Render union match arms without payload captures. The union ' \
                    'cleanup/match matrix must fail if payload values are not bound.',

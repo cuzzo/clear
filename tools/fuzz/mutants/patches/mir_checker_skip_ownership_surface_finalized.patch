@@ -1,0 +1,11 @@
+diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+--- a/src/mir/mir_checker.rb
++++ b/src/mir/mir_checker.rb
+@@ -2410,6 +2410,7 @@
+   # unrelated protocols and memory bugs can slip through opaque code.
+   sig { params(nodes: T::Array[MIR::Node], facts: T::Array[MIR::Node]).void }
+   def verify_ownership_surfaces_finalized!(nodes, facts)
++    return # MUTANT: MIR ownership side channels no longer require finalized Owned* facts.
+     facts_seen = !facts.empty?
+     fact_sources = T.let(Set.new, T::Set[String])
+     facts.each do |fact|

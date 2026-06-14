@@ -50,6 +50,7 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :unhoisted_return_concat, error_code: :UNHOISTED_ALLOC },
   { case_name: :unhoisted_exprstmt_deepcopy, error_code: :UNHOISTED_ALLOC },
   { case_name: :unhoisted_call_arg_makelist, error_code: :UNHOISTED_ALLOC },
+  { case_name: :registry_ownership_surface_without_fact, error_code: :OWNERSHIP_FACT_REQUIRED },
 ].map { |cell| cell.merge(expected: :compile_error) }.freeze
 
 def mir_checker_negative_case(case_name)
@@ -387,6 +388,18 @@ def mir_checker_negative_case(case_name)
     <<~RUBY
       [
         MIR::ExprStmt.new(MIR::Call.new("use", [MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap)], false, false, MIR::CallableContract.no_ownership(1)), false),
+      ]
+    RUBY
+  when :registry_ownership_surface_without_fact
+    <<~RUBY
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("child", Type.new(:String), "fuzz"),
+      ])
+      call = registry_call(nil, "items", ownership_contract: contract)
+      [
+        alloc_mark("child", :heap),
+        MIR::TransferMark.new("child", :owned_sink, :heap),
+        MIR::ExprStmt.new(call, false),
       ]
     RUBY
   end

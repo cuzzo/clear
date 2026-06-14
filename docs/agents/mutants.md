@@ -97,11 +97,13 @@ patches. Each one disables one compiler safety rule, runs the relevant fuzz
 template before and after the mutation, and requires the mutated compiler to
 produce the configured failure delta while the baseline remains clean.
 
-This is now A- quality for the current compiler phase: it covers parser/
-annotator policy, escape analysis, MIR ownership verification, lifetime facts,
-lowering order, FSM suspension, union payload binding, and runtime/codegen move
-guard emission. It is still not A+ because it is a curated invariant registry,
-not native language-level mutation over every `.cht` program.
+This is now A-level for targeted compiler-invariant patch mutants in the
+current compiler phase: it covers parser/annotator policy, escape analysis, MIR
+ownership verification, lifetime facts, error-path allocator identity, lowering
+order, FSM suspension, union payload binding, ownership-surface finalization,
+and runtime/codegen move guard emission. It is still not A+ because it is a
+curated invariant registry, not native language-level mutation over every
+`.cht` program.
 
 Active mutants:
 
@@ -123,17 +125,21 @@ Active mutants:
 | `move_mark_emission` | `call_ownership_contract_matrix`, `takes_move_modality`, `cleanup_control_matrix` | fail |
 | `capture_promise_handle_by_value` | `promise_handle_capture` | mir-error |
 | `bg_lifetime_all_captures_independent` | `lifetimed_return` | unexpected pass |
+| `or_rescue_catch_allocator_identity` | `catch_allocator_matrix` | fail |
+| `escape_identifier_heap_placement` | `escape_mechanism_matrix` | mir-error |
+| `ownership_surface_finalization` | `mir_checker_negative_matrix` | unexpected pass |
 | `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |
 | `fsm_suspend_returns_done` | `fsm_suspension_matrix` | fail |
 
 Current local validation:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/clear-fuzz-mutants-a-level-4
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p2-fuzz-mutants-all
 ```
 
-Result: all eighteen mutants were killed. Every baseline fuzz run reported zero
-failures, leaks, MIR errors, and unexpected passes.
+Result: all 21 mutants were killed. Every baseline fuzz run reported zero
+failures, leaks, MIR errors, and unexpected passes. The shared
+`mir_checker_negative_matrix` now has 45 baseline cells.
 
 ## Transpile Tests To A-Level
 
