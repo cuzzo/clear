@@ -5424,17 +5424,26 @@ fn line_detail_rows(annotation: &UiLineAnnotation) -> Vec<String> {
         rows.push(format!("effects: {}", effect_labels.join(", ")));
     }
     for finding in &annotation.findings {
-        rows.push(format!(
-            "SARIF {} {}: {}{}",
-            finding.tool,
-            finding.rule_id,
-            finding.message,
-            if finding.source.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", finding.source)
-            }
-        ));
+        if is_decomplex_finding(finding) {
+            rows.push(format!(
+                "SARIF {} {}: {}",
+                finding.tool,
+                finding.rule_id,
+                decomplex_display_message(finding)
+            ));
+        } else {
+            rows.push(format!(
+                "SARIF {} {}: {}{}",
+                finding.tool,
+                finding.rule_id,
+                finding.message,
+                if finding.source.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", finding.source)
+                }
+            ));
+        }
     }
     if let Some(value) = annotation.line_coverage {
         rows.push(format!("unit line coverage {:.1}%", value));
@@ -5560,15 +5569,48 @@ fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
         out.push_str(&html_escape(&finding.rule_id));
         out.push_str("</a>");
         out.push_str(": ");
-        out.push_str(&html_escape(&finding.message));
-        if !finding.source.is_empty() {
-            out.push_str(" (");
-            out.push_str(&html_escape(&finding.source));
-            out.push(')');
-        }
+        out.push_str(&html_escape(&decomplex_display_message(finding)));
         out.push_str("</p>");
     }
     out.push_str("</div>");
+    out
+}
+
+fn decomplex_display_message(finding: &UiFinding) -> String {
+    let mut message = finding.message.trim().to_string();
+    if let Some(title) = decomplex_rule_title(&finding.rule_id) {
+        let prefix = format!("{title}:");
+        if message
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+        {
+            message = message[prefix.len()..].trim_start().to_string();
+        }
+    }
+    message
+}
+
+fn decomplex_rule_title(rule_id: &str) -> Option<String> {
+    let slug = rule_id.rsplit('.').next()?.trim();
+    if slug.is_empty() {
+        return None;
+    }
+    let words = slug
+        .split('-')
+        .filter(|word| !word.is_empty())
+        .map(title_case_ascii)
+        .collect::<Vec<_>>();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+fn title_case_ascii(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.push(first.to_ascii_uppercase());
+    out.extend(chars.map(|character| character.to_ascii_lowercase()));
     out
 }
 
@@ -7097,11 +7139,11 @@ mod tests {
                 effect_spans: Vec::new(),
                 findings: vec![
                     UiFinding {
-                        source: "first-party".to_string(),
+                        source: "decomplex".to_string(),
                         tool: "Decomplex".to_string(),
                         rule_id: "decomplex.false-simplicity".to_string(),
                         level: "warning".to_string(),
-                        message: "false simplicity".to_string(),
+                        message: "False Simplicity: recursive_cleanup_shape?".to_string(),
                         category: "complexity".to_string(),
                         tier: Some(2),
                         span: None,
@@ -7207,6 +7249,9 @@ mod tests {
             "Decomplex findings should be ordered by tier"
         );
         assert!(html.contains("decomplex.decision-pressure</a>: decision pressure"));
+        assert!(html.contains("decomplex.false-simplicity</a>: recursive_cleanup_shape?"));
+        assert!(!html.contains("False Simplicity: recursive_cleanup_shape?"));
+        assert!(!html.contains("recursive_cleanup_shape? (decomplex)"));
         assert!(!html.contains("decomplex.decision-pressure</a> warning ["));
         assert!(html.contains("gems/decomplex/docs/false-simplicity.md"));
         assert!(html.contains("tests by type: fuzz (2), integration (1), unit (6) - 9 total"));
