@@ -7,7 +7,7 @@ require_relative "../lib/decomplex/report"
 
 # Self-tested discipline (design.md principle 5): every sub-detector
 # has a positive, and an explicit no-false-positive case asserting the
-# exclusion column in docs/false-simplicity.md actually holds.
+# exclusion column in docs/agents/false-simplicity.md actually holds.
 class FalseSimplicityTest < Minitest::Test
   def scan(ruby)
     @tmp = []

@@ -6,7 +6,8 @@ implicit, shared, mutable, duplicated, or poorly bounded. See
 for more details.
 
 Decomplex does not try to prove that code is wrong. It ranks candidates.
-The point is to show where a human should look first.
+The point is to show where a human (or an LLM) should look first and
+**why**.
 
 Below is a list of metrics with links to details for more info about
 what it is and how to interpret it.
@@ -15,37 +16,37 @@ what it is and how to interpret it.
 
 ### Tier 1
 
-- [Decision Pressure](#decision-pressure)
-- [Redundant Nil Guards](#redundant-nil-guards)
-- [State Heatmap](#state-heatmap)
-- [State-Based Branch Density](#state-based-branch-density)
-- [Temporal Ordering Pressure](#temporal-ordering-pressure)
-- [Missing Abstractions](#missing-abstractions)
-- [Reification Misses](#reification-misses)
-- [Semantic Predicate Aliases](#semantic-predicate-aliases)
-- [Exact Predicate Aliases](#exact-predicate-aliases)
+- [Decision Pressure (Tier 1)](#decision-pressure-tier-1)
+- [Redundant Nil Guards (Tier 1)](#redundant-nil-guards-tier-1)
+- [State Heatmap (Tier 1)](#state-heatmap-tier-1)
+- [State-Based Branch Density (Tier 1)](#state-based-branch-density-tier-1)
+- [Temporal Ordering Pressure (Tier 1)](#temporal-ordering-pressure-tier-1)
+- [Missing Abstractions (Tier 1)](#missing-abstractions-tier-1)
+- [Reification Misses (Tier 1)](#reification-misses-tier-1)
+- [Semantic Predicate Aliases (Tier 1)](#semantic-predicate-aliases-tier-1)
+- [Exact Predicate Aliases (Tier 1)](#exact-predicate-aliases-tier-1)
 
 ### Tier 2
 
-- [Inconsistent Rename Clones](#inconsistent-rename-clones)
-- [Structural Similarity (Type-2/3)](#structural-similarity-type-23)
-- [Neglected Updates](#neglected-updates)
-- [Derived-State Staleness](#derived-state-staleness)
-- [Neglected Conditions](#neglected-conditions)
-- [Implicit Control Flow](#implicit-control-flow)
-- [Weighted Inlined Cognitive Complexity](#weighted-inlined-cognitive-complexity)
-- [Locality Drag](#locality-drag)
-- [Operational Discontinuity (high confidence)](#operational-discontinuity)
+- [Inconsistent Rename Clones (Tier 2)](#inconsistent-rename-clones-tier-2)
+- [Structural Similarity (Type-2/3) (Tier 2)](#structural-similarity-type-23-tier-2)
+- [Neglected Updates (Tier 2)](#neglected-updates-tier-2)
+- [Derived-State Staleness (Tier 2)](#derived-state-staleness-tier-2)
+- [Neglected Conditions (Tier 2)](#neglected-conditions-tier-2)
+- [Implicit Control Flow (Tier 2)](#implicit-control-flow-tier-2)
+- [Weighted Inlined Cognitive Complexity (Tier 2)](#weighted-inlined-cognitive-complexity-tier-2)
+- [Locality Drag (Tier 2)](#locality-drag-tier-2)
+- [Operational Discontinuity (Tier 2/3)](#operational-discontinuity-tier-23)
 
 ### Tier 3
 
-- [Neglected Path Conditions](#neglected-path-conditions)
-- [Oversized Predicates](#oversized-predicates)
-- [Broken Protocols](#broken-protocols)
-- [Function LCOM](#function-lcom)
-- [Operational Discontinuity](#operational-discontinuity)
-- [False Simplicity](#false-simplicity)
-- [Fat Unions](#fat-unions)
+- [Neglected Path Conditions (Tier 3)](#neglected-path-conditions-tier-3)
+- [Oversized Predicates (Tier 3)](#oversized-predicates-tier-3)
+- [Broken Protocols (Tier 3)](#broken-protocols-tier-3)
+- [Function LCOM (Tier 3)](#function-lcom-tier-3)
+- [Operational Discontinuity (Tier 2/3)](#operational-discontinuity-tier-23)
+- [False Simplicity (Tier 3)](#false-simplicity-tier-3)
+- [Fat Unions (Tier 3)](#fat-unions-tier-3)
 
 ## Running Example
 
@@ -114,23 +115,9 @@ END
 The metrics below are different ways of asking: "Where did state and
 control flow escape their boundary?"
 
-## How To Read The Report
-
-Start with convergence and root-cause clusters, then inspect the
-highest-tier metric rows.
-
-- **Convergence** means independent detectors point at the same method.
-  i.e. function `foo()` has Temporal Ordering Pressure and Implicit
-  Control Flow.
-- **Root-cause clusters** mean independent detectors name the same state,
-  predicate, method, or protocol.
-
-A large count is not automatically bad. A large count on hot, mutable,
-state-based code is where the return on review is highest.
-
 ## State Metrics
 
-### State Heatmap
+### State Heatmap (Tier 1)
 
 Question: which state has the most read/write scatter?
 
@@ -147,7 +134,7 @@ shared mutable lifecycle. If a field is written in one method and read
 in many others, the reviewer should ask whether those readers are
 protected by an explicit API or are relying on call order.
 
-### Temporal Ordering Pressure
+### Temporal Ordering Pressure (Tier 1)
 
 Question: does this owner expose a public mutable lifecycle?
 
@@ -164,7 +151,22 @@ that read/write the same fields has made callers responsible for order.
 The usual fix is to hide the lifecycle behind one method such as
 `checkout(user, cart)`.
 
-### Implicit Control Flow
+### State-Based Branch Density (Tier 1)
+
+Question: how much branching depends on mutable/object state?
+
+In `BillingService`:
+
+```ruby
+IF @user_valid && @cart.total > 100 THEN ...
+IF @cart != nil && @user_valid THEN ...
+```
+
+are state-based branches. Cyclomatic complexity alone treats these like
+any other branch. Decomplex treats them as more important because the
+branch outcome depends on prior mutation and method order.
+
+### Implicit Control Flow (Tier 2)
 
 Question: do internal calls have an order that matters because of state?
 
@@ -200,22 +202,7 @@ reversal. If two pure helpers are often called in one order, Decomplex
 ignores them. It also keeps `if`/`case` alternatives separate, so a
 dispatcher does not become a fake `branchA -> branchB` protocol.
 
-### State-Based Branch Density
-
-Question: how much branching depends on mutable/object state?
-
-In `BillingService`:
-
-```ruby
-IF @user_valid && @cart.total > 100 THEN ...
-IF @cart != nil && @user_valid THEN ...
-```
-
-are state-based branches. Cyclomatic complexity alone treats these like
-any other branch. Decomplex treats them as more important because the
-branch outcome depends on prior mutation and method order.
-
-### Neglected Updates
+### Neglected Updates (Tier 2)
 
 Question: are two pieces of state usually written together, but one site
 writes only one of them?
@@ -233,7 +220,7 @@ END
 then a later method that writes only `@discount` may be a stale-state bug.
 This is the "co-written state drifted" metric.
 
-### Derived-State Staleness
+### Derived-State Staleness (Tier 2)
 
 Question: did we compute state from another value, mutate the source,
 and keep using the old derived value?
@@ -271,7 +258,7 @@ CLASS CheckoutPolicy
 END
 ```
 
-### Missing Abstractions
+### Missing Abstractions (Tier 1)
 
 Question: is the same guard tuple recomputed in several places?
 
@@ -285,46 +272,7 @@ there is probably a missing predicate such as `discountable_cart?`.
 The problem is not the branch count. The problem is duplicated business
 meaning.
 
-### Neglected Conditions
-
-Question: does one site use a high-support condition set minus one atom?
-
-If most discount checks include:
-
-```text
-user.active? && cart.total > 100 && !cart.locked?
-```
-
-but `expressCheckout` checks only:
-
-```text
-user.active? && cart.total > 100
-```
-
-Decomplex reports the missing `!cart.locked?`. This is a candidate bug,
-not a verdict; sometimes the shorter condition is intentional.
-
-### Neglected Path Conditions
-
-Question: does the same missing-condition pattern appear through nested
-control flow rather than one `&&` expression?
-
-These two shapes are semantically close:
-
-```ruby
-IF user.active? THEN
-  IF cart.total > 100 THEN
-    IF !cart.locked? THEN ...
-```
-
-```ruby
-IF user.active? && cart.total > 100 && !cart.locked? THEN ...
-```
-
-Path-condition mining tries to compare the guard set, not just the
-surface syntax.
-
-### Decision Pressure
+### Decision Pressure (Tier 1)
 
 Question: are repeated loose-contract guards adding avoidable control
 flow?
@@ -340,7 +288,7 @@ IF cart.is_a?(Cart) THEN ...
 If these checks scatter everywhere, the real fix may be a tighter type
 or API contract, not another helper method.
 
-### Redundant Nil Guards
+### Redundant Nil Guards (Tier 1)
 
 Question: is a nil check dominated by an earlier proof?
 
@@ -352,7 +300,7 @@ IF user != nil THEN processPayment(user, cart) END
 The second guard is redundant. It is small locally, but repeated
 redundant guards are a sign that contracts are not carrying invariants.
 
-### Reification Misses
+### Reification Misses (Tier 1)
 
 Question: did code reinvent an existing predicate inline?
 
@@ -365,7 +313,7 @@ IF user.active? && cart.total > 100 && !cart.locked? THEN ...
 is a reification miss. The code should call the named predicate so the
 decision has one owner.
 
-### Exact Predicate Aliases
+### Exact Predicate Aliases (Tier 1)
 
 Question: do multiple predicates have the same body text?
 
@@ -382,7 +330,7 @@ END
 Exact aliases have identical bodies. They are low-noise evidence that
 one decision has two names.
 
-### Semantic Predicate Aliases
+### Semantic Predicate Aliases (Tier 1)
 
 Question: do multiple predicates mean the same thing after light
 normalization?
@@ -403,7 +351,46 @@ The bodies are not byte-identical, but they are the same decision after
 receiver/polarity normalization. Either exact or semantic aliases
 increase maintenance cost because one concept now has multiple names.
 
-### Oversized Predicates
+### Neglected Conditions (Tier 2)
+
+Question: does one site use a high-support condition set minus one atom?
+
+If most discount checks include:
+
+```text
+user.active? && cart.total > 100 && !cart.locked?
+```
+
+but `expressCheckout` checks only:
+
+```text
+user.active? && cart.total > 100
+```
+
+Decomplex reports the missing `!cart.locked?`. This is a candidate bug,
+not a verdict; sometimes the shorter condition is intentional.
+
+### Neglected Path Conditions (Tier 3)
+
+Question: does the same missing-condition pattern appear through nested
+control flow rather than one `&&` expression?
+
+These two shapes are semantically close:
+
+```ruby
+IF user.active? THEN
+  IF cart.total > 100 THEN
+    IF !cart.locked? THEN ...
+```
+
+```ruby
+IF user.active? && cart.total > 100 && !cart.locked? THEN ...
+```
+
+Path-condition mining tries to compare the guard set, not just the
+surface syntax.
+
+### Oversized Predicates (Tier 3)
 
 Question: is one predicate doing too many independent checks?
 
@@ -417,7 +404,21 @@ name. Oversized predicates are often missing vocabulary.
 
 ## Sequence And Clone Metrics
 
-### Broken Protocols
+### Inconsistent Rename Clones (Tier 2)
+
+Question: did a pasted block rename most identifiers but miss one?
+
+This catches the classic copy/paste bug where `cart` became
+`trial_cart` everywhere except one stale reference.
+
+### Structural Similarity (Type-2/3) (Tier 2)
+
+Question: are there large structural clones?
+
+Tree-sitter structural similarity is a broad clone signal. Decomplex
+uses it as supporting evidence; it is not by itself a bug report.
+
+### Broken Protocols (Tier 3)
 
 Question: are two actions usually paired, but one site does only one?
 
@@ -431,23 +432,9 @@ but one path only calls `processPayment`, Decomplex reports the broken
 protocol. Unlike Implicit Control Flow, this detector is about
 co-occurrence, not state-dependent order.
 
-### Inconsistent Rename Clones
-
-Question: did a pasted block rename most identifiers but miss one?
-
-This catches the classic copy/paste bug where `cart` became
-`trial_cart` everywhere except one stale reference.
-
-### Structural Similarity (Type-2/3)
-
-Question: are there large structural clones?
-
-Tree-sitter structural similarity is a broad clone signal. Decomplex
-uses it as supporting evidence; it is not by itself a bug report.
-
 ## Shape Metrics
 
-### Weighted Inlined Cognitive Complexity
+### Weighted Inlined Cognitive Complexity (Tier 2)
 
 Question: did a method look simple only because the complex work was
 moved into same-owner helpers?
@@ -532,7 +519,7 @@ helper has a good name and a clear concern. The metric says: "review this
 as if the helper bodies were inline, because that is the cognitive cost
 the reader is paying."
 
-### Locality Drag
+### Locality Drag (Tier 2)
 
 Question: did a complex function initialize a local far away from the
 place that first uses it?
@@ -596,7 +583,53 @@ Operational Discontinuity. Alone, it often says "move this declaration
 closer." Combined with those metrics, it can say "this public function
 has trapped private phases."
 
-### Function LCOM
+### Operational Discontinuity (Tier 2/3)
+
+Question: did the function author visibly separate phases while keeping
+them inside one scope?
+
+This metric looks for a structural boundary plus a local lifecycle reset:
+
+```ruby
+CLASS Importer
+  FN run(input)
+    raw = input.fetch(:raw)
+    normalized = raw.strip()
+    valid = normalized != ""
+
+    # load side table
+    path = "/tmp/table"
+    bytes = read(path)
+    checksum = hash(bytes)
+    RETURN checksum
+  END
+END
+```
+
+The blank/comment boundary is not enough by itself. Decomplex also
+requires the locals from the first phase to go dead and a new set of
+locals to start after the boundary:
+
+```text
+dead: raw | normalized | valid
+new:  path | bytes | checksum
+```
+
+That is a likely implicit sub-function boundary. Sometimes this is fine
+setup code. Sometimes it is validation, calculation, IO, and logging
+sharing one method because extraction was never done.
+
+Decomplex splits the report by confidence:
+
+- tier 2: repeated resets, explicit `Phase`/`Step`/numbered comments, or
+  a high reset score.
+- tier 3: the remaining review-only resets.
+
+Parser-shaped `parse_*` methods stay review-only unless they have an
+explicit phase marker, because grammar alternatives often look like
+phase resets without being extraction-worthy design problems.
+
+### Function LCOM (Tier 3)
 
 Question: does one function contain multiple independent local data
 pipelines?
@@ -643,53 +676,7 @@ Decomplex builds an undirected graph from local interactions:
 The metric is high-recall and tier 3. A finding means "inspect for mixed
 concerns", not "extract immediately."
 
-### Operational Discontinuity
-
-Question: did the function author visibly separate phases while keeping
-them inside one scope?
-
-This metric looks for a structural boundary plus a local lifecycle reset:
-
-```ruby
-CLASS Importer
-  FN run(input)
-    raw = input.fetch(:raw)
-    normalized = raw.strip()
-    valid = normalized != ""
-
-    # load side table
-    path = "/tmp/table"
-    bytes = read(path)
-    checksum = hash(bytes)
-    RETURN checksum
-  END
-END
-```
-
-The blank/comment boundary is not enough by itself. Decomplex also
-requires the locals from the first phase to go dead and a new set of
-locals to start after the boundary:
-
-```text
-dead: raw | normalized | valid
-new:  path | bytes | checksum
-```
-
-That is a likely implicit sub-function boundary. Sometimes this is fine
-setup code. Sometimes it is validation, calculation, IO, and logging
-sharing one method because extraction was never done.
-
-Decomplex splits the report by confidence:
-
-- tier 2: repeated resets, explicit `Phase`/`Step`/numbered comments, or
-  a high reset score.
-- tier 3: the remaining review-only resets.
-
-Parser-shaped `parse_*` methods stay review-only unless they have an
-explicit phase marker, because grammar alternatives often look like
-phase resets without being extraction-worthy design problems.
-
-### False Simplicity
+### False Simplicity (Tier 3)
 
 Question: does the local code look simple while hiding non-local work?
 
@@ -698,7 +685,7 @@ hidden mutation, hidden IO, and dynamic dispatch. In billing code,
 `processPayment` may look like one call while actually performing
 network IO, state mutation, callbacks, and retries.
 
-### Fat Unions
+### Fat Unions (Tier 3)
 
 Question: is a `case` over variants repeatedly reading the same common
 members?
@@ -706,6 +693,24 @@ members?
 If every billing method switches over `CardPayment | BankPayment |
 WalletPayment` and each arm reads `amount`, `currency`, and `user`, the
 common core probably wants a product type plus a smaller variant.
+
+## How To Read The Report
+
+See [report.md](../../report.md) for a generated example over CLEAR.
+CLEAR uses [Lineage](../../../lineage/README.md), an experimental local
+UI, to review code at scale.
+
+Start with convergence and root-cause clusters, then inspect the
+highest-tier metric rows.
+
+- **Convergence** means independent detectors point at the same method.
+  i.e. function `foo()` has Temporal Ordering Pressure and Implicit
+  Control Flow.
+- **Root-cause clusters** mean independent detectors name the same state,
+  predicate, method, or protocol.
+
+A large count is not automatically bad. A large count on hot, mutable,
+state-based code is where the return on review is highest.
 
 ## Practical Triage
 

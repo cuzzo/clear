@@ -6,11 +6,11 @@ Decomplex is a set of metrics that help identify complex code and ways
 to mitigate it. It is used in the development of the CLEAR compiler and
 runtime to have LLMs write quality code at scale with high velocity.
 
-See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
-for a deeper understanding of what complexity is, and how Decomplex
-identifies it and helps triage and prioritize your problems. See
-[Metrics Expo](docs/agents/metrics-expo.md) for concrete examples of
-what Decomplex measures.
+- See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
+  for a deeper understanding of what complexity is, and how Decomplex
+  helps you identify and eliminate it.
+- See [Metrics Expo](docs/agents/metrics-expo.md) for concrete examples
+  of what Decomplex measures.
 
 ## Getting Started
 
@@ -122,12 +122,6 @@ dogfood coverage today, while other languages are still experimental.
 - [ ] Rust: experimentally supported.
 - [ ] Zig: experimentally supported.
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for Decomplex-specific notes, and
-the repository-level [../../CONTRIBUTING.md](../../CONTRIBUTING.md) for
-the broader CLEAR contribution rules.
-
 ## Boundaries
 
 Decomplex does not:
@@ -141,10 +135,13 @@ Decomplex does not:
 It ranks likely review targets. A good finding should make a human say:
 "this is where the design pressure is coming from."
 
+Decomplex does not detect lint issues or code smells, as packages for
+that already exist in every language.
+
 ## Links
 
 - [Metrics expo](docs/agents/metrics-expo.md)
 - [Design notes](docs/agents/design.md)
 - [Cross-language notes](docs/agents/cross-language.md)
-- [False simplicity](docs/false-simplicity.md)
+- [False simplicity](docs/agents/false-simplicity.md)
 - [Generated CLEAR report](report.md)

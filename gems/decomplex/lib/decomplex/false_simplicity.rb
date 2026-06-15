@@ -19,7 +19,7 @@ module Decomplex
   # Language lexicons are provider data: Ruby's was mined from
   # RuboCop/Reek/stdlib, while other languages use their own effectful
   # runtime surfaces instead of inheriting Ruby's.
-  # See docs/false-simplicity.md.
+  # See docs/agents/false-simplicity.md.
   class FalseSimplicity
     Hit = Struct.new(:kind, :detail, :file, :defn, :line, :span,
                      keyword_init: true)
