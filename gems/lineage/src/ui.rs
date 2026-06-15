@@ -2614,6 +2614,9 @@ fn render_code_line(
 
 fn render_line_details(annotation: &UiLineAnnotation) -> String {
     let mut rows = Vec::new();
+    if annotation.covered && annotation.line_hits.is_none() && annotation.line_coverage.is_none() {
+        rows.push("covered as part of a multi-line statement; exact line-hit metadata is unavailable".to_string());
+    }
     if !annotation.test_types.is_empty() {
         rows.push(format!("tests: {}", annotation.test_types.join(", ")));
     }
@@ -3950,6 +3953,14 @@ flags:
                 .unwrap()
                 .line_hits,
             None
+        );
+        let line_two = annotations
+            .iter()
+            .find(|annotation| annotation.line == 2)
+            .unwrap();
+        assert!(
+            render_line_details(line_two)
+                .contains("covered as part of a multi-line statement")
         );
     }
 
