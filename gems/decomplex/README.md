@@ -2,45 +2,14 @@
 
 ![Decomplex](docs/assets/decomplex.png)
 
-Decomplex finds places where code repeats, hides, or half-applies
-decisions. It is a static-analysis tool for ranking complexity review:
-the output is a candidate list, not a verdict.
+Decomplex is a set of metrics that help identify complex code and ways
+to mitigate it. It is used in the development of the CLEAR compiler and
+runtime to have LLMs write quality code at scale with high velocity.
 
-It was built inside the CLEAR compiler project to keep a large,
-LLM-assisted compiler codebase reviewable. The gem can run outside CLEAR,
-but the core design goal is still pragmatic: show the files and methods
-where a human review is most likely to pay off.
-
-## What It Finds
-
-Decomplex looks for complexity that ordinary cyclomatic metrics usually
-miss:
-
-- repeated guard tuples that should be named once;
-- predicates reinvented inline instead of calling the named predicate;
-- co-written state where one path writes only half of the pair;
-- state-dependent internal call order;
-- mutable lifecycle APIs that force callers to know call order;
-- helper chains that hide cognitive load behind a small public method;
-- locals initialized far before their first meaningful use;
-- visible phase breaks inside one function;
-- structural Type-2/Type-3 clone pressure;
-- code that looks locally simple while hiding IO, mutation, reflection,
-  callbacks, dynamic dispatch, or global context.
-
-Start with [docs/agents/metrics-expo.md](docs/agents/metrics-expo.md)
-for concrete examples of the metrics.
-
-## Supported Languages
-
-Decomplex now uses a normalized Tree-sitter syntax facade. Ruby has the
-most mature profile because it is the original dogfood target. Python,
-JavaScript, TypeScript, Go, Rust, and Zig are supported through language
-profiles when their Tree-sitter grammars are available.
-
-Parser support is not the same thing as equal signal quality. The
-language-neutral metrics work broadly, while language-specific lexicons
-and idioms mature per language.
+For the model behind the metrics, see
+[What even is complexity anyway?](../../docs/retrospective/what-even-is-complexity-anyway.md).
+For concrete examples of what Decomplex finds, see the
+[Metrics Expo](docs/agents/metrics-expo.md).
 
 ## Quick Start
 
@@ -119,6 +88,20 @@ The current CI-ready path is:
 GitHub Actions SARIF upload is planned after SARIF generation lands.
 Until then, Decomplex is best used as an artifact plus review comment or
 ratchet input.
+
+## Supported Languages Roadmap
+
+Decomplex uses a normalized Tree-sitter syntax facade. Parser support is
+not the same thing as equal metric quality: Ruby has the strongest
+dogfood coverage today, while other languages are still experimental.
+
+- [x] Ruby: fully supported.
+- [ ] Python: experimentally supported.
+- [ ] JavaScript: experimentally supported.
+- [ ] TypeScript: experimentally supported.
+- [ ] Go: experimentally supported.
+- [ ] Rust: experimentally supported.
+- [ ] Zig: experimentally supported.
 
 ## Metrics
 
