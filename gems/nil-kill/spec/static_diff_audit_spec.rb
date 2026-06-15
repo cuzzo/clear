@@ -77,6 +77,21 @@ RSpec.describe NilKill::StaticDiffAudit do
     expect(findings).not_to include(a_hash_including("kind" => "missing_sig", "line" => 7))
   end
 
+  it "does not treat inline signatures as hash records" do
+    findings, = audit_for("src/static_diff_inline_sig.rb", <<~RUBY, [4])
+      class StaticDiffInlineSig
+        extend T::Sig
+
+        sig { params(value: String).returns(String) }
+        def signed(value)
+          value
+        end
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 4))
+  end
+
   it "accepts long multiline signatures on added methods" do
     findings, = audit_for("src/static_diff_long_multiline_sig.rb", <<~RUBY, [17])
       class StaticDiffLongMultilineSig
