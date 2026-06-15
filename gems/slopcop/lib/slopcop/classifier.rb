@@ -201,14 +201,16 @@ module SlopCop
     def load_decomplex_syntax
       return true if defined?(Decomplex::Syntax)
 
+      sibling = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      if File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
       require "decomplex/syntax"
       true
     rescue LoadError
-      sibling = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
-      return false unless File.file?("#{sibling}.rb")
-
-      require sibling
-      true
+      false
     end
   end
 end

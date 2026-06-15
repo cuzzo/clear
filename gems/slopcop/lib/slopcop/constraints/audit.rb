@@ -40,15 +40,7 @@ module SlopCop
       end
 
       def to_json(*args)
-        JSON.pretty_generate(
-          {
-            "format" => "slopcop.constraints",
-            "base" => base,
-            "head" => head,
-            "findings" => findings.map(&:to_h)
-          },
-          *args
-        )
+        JSON.pretty_generate(JSON.parse(to_sarif), *args)
       end
 
       def to_sarif

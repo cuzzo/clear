@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require_relative "bugspots"
 require_relative "coverage_data"
 require_relative "coverage_gap"
@@ -9,6 +10,12 @@ require_relative "lineage_risk"
 require_relative "method_gap"
 require_relative "mutation_facts"
 require_relative "test_exposure_facts"
+sibling_sarif = ::File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
+if ::File.file?("#{sibling_sarif}.rb")
+  require sibling_sarif
+else
+  require "decomplex/sarif"
+end
 
 module Boobytrap
   # Single markdown report, structured like decomplex / nil-kill: TOC,
@@ -367,6 +374,186 @@ module Boobytrap
            "fix history, mutation verification, and named-test exposure when supplied " \
            "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
+    end
+
+    def to_json(*_args)
+      to_sarif
+    end
+
+    def to_sarif
+      JSON.pretty_generate(to_sarif_hash)
+    end
+
+    def to_sarif_hash
+      Decomplex::Sarif.document(
+        tool_name: "Boobytrap",
+        information_uri: "https://github.com/codeforreno/litedb",
+        rules: sarif_rules,
+        results: sarif_results,
+        properties: {
+          "format" => "boobytrap.report.sarif.v1",
+          "summary" => sarif_summary
+        }
+      )
+    end
+
+    def sarif_rules
+      [
+        Decomplex::Sarif.rule(
+          id: "boobytrap.file-hotspot",
+          name: "File Hotspot",
+          short_description: "Time-decayed fix churn overlaps with branch coverage gap"
+        ),
+        Decomplex::Sarif.rule(
+          id: "boobytrap.dark-method",
+          name: "Mostly Uncovered Method",
+          short_description: "Non-trivial method has very low executable line coverage"
+        ),
+        Decomplex::Sarif.rule(
+          id: "boobytrap.state-branch-hotspot",
+          name: "State Branch Hotspot",
+          short_description: "State-based branch density overlaps with fix history or coverage gaps"
+        ),
+        Decomplex::Sarif.rule(
+          id: "boobytrap.fix-blast-radius",
+          name: "Fix Blast Radius",
+          short_description: "File repeatedly participates in multi-file bug fixes",
+          default_level: "note"
+        ),
+        Decomplex::Sarif.rule(
+          id: "boobytrap.lineage-unit-risk",
+          name: "Lineage Unit Risk",
+          short_description: "Logical unit has decayed semantic change/fix risk",
+          default_level: "note"
+        ),
+        Decomplex::Sarif.rule(
+          id: "boobytrap.fixed-unmeasured",
+          name: "Fixed But Unmeasured",
+          short_description: "Historically fixed source file has no branch coverage data"
+        )
+      ]
+    end
+
+    def sarif_results
+      hotspot_results + dark_method_results + state_branch_results +
+        blast_radius_results + lineage_results + unmeasured_results
+    end
+
+    def hotspot_results
+      @ranked.first(@top).map do |row|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.file-hotspot",
+          level: row.hotspot.to_f.positive? ? "warning" : "note",
+          message: "file hotspot: #{row.file} hotspot=#{row.hotspot} branch_gap=#{row.gap}",
+          path: row.file,
+          line: 1,
+          properties: row.to_h.merge("source_format" => "boobytrap.report.v1")
+        )
+      end
+    end
+
+    def dark_method_results
+      dark_methods.first(@top).map do |row|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.dark-method",
+          level: "warning",
+          message: "mostly uncovered method: #{row.file}:#{row.first_line} #{row.name} risk=#{row.risk.round(2)}",
+          path: row.file,
+          line: row.first_line,
+          end_line: row.last_line,
+          properties: row_to_hash(row).merge(
+            "dark_arm" => row.uncovered_branches.to_i.positive?,
+            "source_format" => "boobytrap.report.v1"
+          )
+        )
+      end
+    end
+
+    def state_branch_results
+      @state_branch_hotspots.first(@top).map do |row|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.state-branch-hotspot",
+          level: "warning",
+          message: "state branch hotspot: #{row[:file]} #{row[:method]} risk=#{row[:risk].round(2)}",
+          path: row[:file],
+          line: state_branch_line(row),
+          properties: stringify_hash(row).merge("source_format" => "boobytrap.report.v1")
+        )
+      end
+    end
+
+    def blast_radius_results
+      @blast_radius.first(@top).map do |row|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.fix-blast-radius",
+          level: "note",
+          message: "fix blast radius: #{row.file} score=#{row.score}",
+          path: row.file,
+          line: 1,
+          properties: row_to_hash(row).merge("source_format" => "boobytrap.report.v1")
+        )
+      end
+    end
+
+    def lineage_results
+      return [] unless @lineage[:status] == :ok
+
+      @lineage[:units].first(@top).map do |unit|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.lineage-unit-risk",
+          level: "note",
+          message: "lineage unit risk: #{unit.file} #{unit.name} risk=#{unit.risk_score.round(1)}",
+          path: unit.file,
+          line: 1,
+          properties: row_to_hash(unit).merge("source_format" => "boobytrap.report.v1")
+        )
+      end
+    end
+
+    def unmeasured_results
+      @unmeasured.first(@top).map do |row|
+        Decomplex::Sarif.result(
+          rule_id: "boobytrap.fixed-unmeasured",
+          level: "warning",
+          message: "fixed but unmeasured: #{row[:file]} fix_norm=#{row[:fix_norm]}",
+          path: row[:file],
+          line: 1,
+          properties: stringify_hash(row).merge("source_format" => "boobytrap.report.v1")
+        )
+      end
+    end
+
+    def sarif_summary
+      {
+        "repo" => @repo,
+        "scope" => @only,
+        "fix_commits" => @fix_commits,
+        "files_ranked" => @ranked.size,
+        "fixed_but_unmeasured" => @unmeasured.size,
+        "state_branch_hotspots" => @state_branch_hotspots.size,
+        "coverage_mode" => @have_cov ? @coverage_mode : "absent",
+        "mutation_facts" => @mutation_facts.active? ? @mutation_facts.label : nil,
+        "test_exposure_facts" => test_exposure_label,
+        "lineage" => @lineage[:status] == :ok ? @lineage[:label] : nil
+      }
+    end
+
+    def row_to_hash(row)
+      stringify_hash(row.respond_to?(:to_h) ? row.to_h : row)
+    end
+
+    def stringify_hash(hash)
+      hash.to_h.transform_keys(&:to_s).transform_values do |value|
+        case value
+        when Symbol then value.to_s
+        else value
+        end
+      end
+    end
+
+    def state_branch_line(row)
+      parsed = row[:at].to_s.split(":").last
+      parsed.to_i.positive? ? parsed.to_i : 1
     end
 
     def empirical_columns?

@@ -2,10 +2,11 @@
 
 require "set"
 
-begin
+sibling_syntax = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+if File.file?("#{sibling_syntax}.rb")
+  require sibling_syntax
+else
   require "decomplex/syntax"
-rescue LoadError
-  require_relative "../../../decomplex/lib/decomplex/syntax"
 end
 
 module Espalier

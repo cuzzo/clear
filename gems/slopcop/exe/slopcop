@@ -14,14 +14,14 @@ def usage
                    [--top=N] [--mutation=mutant-facts.json] [--exclude=GLOB ...]
 
       slopcop dark-arms [--repo=.] [--coverage=coverage/.resultset.json] \\
-                   [--json=dark-arms.json] [--files=a.rb,b.rb] \\
+                   [--json=dark-arms.sarif] [--files=a.rb,b.rb] \\
                    [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
                    [--exclude=GLOB ...]
 
       slopcop constraints [--repo=.] --base=origin/master [--head=HEAD] \\
                    [--coverage=loom:zig/zig-out/coverage-loom/merged/kcov-merged/cobertura.xml] \\
                    [--coverage=vopr:zig/zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml] \\
-                   [--sarif=slopcop-constraints.sarif] [--json=constraints.json] \\
+                   [--sarif=slopcop-constraints.sarif] [--json=constraints.sarif] \\
                    [--markdown=constraints.md] [--strict]
 
     report --coverage
@@ -32,7 +32,7 @@ def usage
              typed coverage input. Currently supported: loom:PATH and vopr:PATH.
              Findings are advisory warnings unless --strict is supplied.
     dark-arms
-             Lineage-ready JSON overlay containing all classified dark arms.
+             Lineage-ready SARIF JSON overlay containing all classified dark arms.
   U
   exit 1
 end

@@ -1,6 +1,13 @@
 # typed: false
 # frozen_string_literal: true
 
+sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
+if File.file?("#{sibling_sarif}.rb")
+  require sibling_sarif
+else
+  require "decomplex/sarif"
+end
+
 module NilKill
   class Report
     FALLIBILITY_DISPLAY_SCORE = 10
@@ -11,13 +18,23 @@ module NilKill
       @with_links = @argv.delete("--with-links")
       @full = @argv.delete("--full")
       @hygiene_only = @argv.delete("--hygiene")
+      @format = parse_format(@argv)
       @evidence_path = parse_evidence_path(@argv)
-      @report_path = parse_output_path(@argv) || REPORT_PATH
+      @report_path = parse_sarif_output_path(@argv) ||
+                     parse_output_path(@argv) ||
+                     default_report_path
     end
 
     def run
       evidence = @evidence_override || read_evidence
       @evidence = evidence
+      if sarif_format?
+        report = to_sarif(evidence)
+        FileUtils.mkdir_p(File.dirname(@report_path))
+        File.write(@report_path, report)
+        puts report
+        return
+      end
       if Schema::EvidenceBundle.v2?(evidence)
         report = Reporting::MultiLanguageReport.new(evidence).lines.map { |line| format_report_line(line) }.join("\n") + "\n"
         FileUtils.mkdir_p(File.dirname(@report_path))
@@ -59,6 +76,23 @@ module NilKill
       report = lines.join("\n") + "\n"
       File.write(@report_path, report)
       puts report
+    end
+
+    def to_sarif(evidence = @evidence)
+      JSON.pretty_generate(to_sarif_hash(evidence))
+    end
+
+    def to_sarif_hash(evidence = @evidence)
+      Decomplex::Sarif.document(
+        tool_name: "Nil-Kill",
+        information_uri: "https://github.com/codeforreno/litedb",
+        rules: sarif_rules(evidence),
+        results: sarif_results(evidence),
+        properties: {
+          "format" => "nil-kill.report.sarif.v1",
+          "summary" => sarif_summary(evidence)
+        }
+      )
     end
 
     def build_header(evidence)
@@ -108,7 +142,44 @@ module NilKill
       return nil unless value
 
       path = File.expand_path(value, ROOT)
-      output_directory_path?(path) ? File.join(path, "report.md") : path
+      output_directory_path?(path) ? File.join(path, report_filename) : path
+    end
+
+    def parse_format(argv)
+      value = nil
+      if (idx = argv.index("--format"))
+        value = argv[idx + 1] || abort("--format requires markdown, sarif, or json")
+        argv.slice!(idx, 2)
+      elsif (arg = argv.find { |item| item.start_with?("--format=") })
+        value = arg.split("=", 2).last
+        argv.delete(arg)
+      end
+      value = value.to_s.downcase
+      return :markdown if value.empty? || value == "markdown"
+      return :sarif if %w[sarif json].include?(value)
+
+      abort("--format must be markdown, sarif, or json")
+    end
+
+    def parse_sarif_output_path(argv)
+      value = nil
+      if (idx = argv.index("--sarif"))
+        value = argv[idx + 1] || abort("--sarif requires a path")
+        argv.slice!(idx, 2)
+      elsif (arg = argv.find { |item| item.start_with?("--sarif=") })
+        value = arg.split("=", 2).last
+        argv.delete(arg)
+      elsif (idx = argv.index("--json"))
+        value = argv[idx + 1] || abort("--json requires a path")
+        argv.slice!(idx, 2)
+      elsif (arg = argv.find { |item| item.start_with?("--json=") })
+        value = arg.split("=", 2).last
+        argv.delete(arg)
+      end
+      return nil unless value
+
+      @format = :sarif
+      File.expand_path(value, ROOT)
     end
 
     def parse_evidence_path(argv)
@@ -131,6 +202,145 @@ module NilKill
 
     def output_directory_path?(path)
       File.directory?(path) || File.extname(path).empty?
+    end
+
+    def sarif_format?
+      @format == :sarif
+    end
+
+    def report_filename
+      sarif_format? ? "report.sarif" : "report.md"
+    end
+
+    def default_report_path
+      sarif_format? ? REPORT_PATH.sub(/\.md\z/, ".sarif") : REPORT_PATH
+    end
+
+    def sarif_rules(evidence)
+      action_kinds = sarif_actions(evidence).map { |action| action["kind"].to_s }.reject(&:empty?).uniq
+      diagnostic_codes = sarif_diagnostics(evidence).map { |diagnostic| diagnostic_code(diagnostic) }.uniq
+      action_rules = action_kinds.map do |kind|
+        Decomplex::Sarif.rule(
+          id: "nil-kill.action.#{Decomplex::Sarif.slug(kind)}",
+          name: "Action: #{kind}",
+          short_description: "Nil-Kill inferred action"
+        )
+      end
+      diagnostic_rules = diagnostic_codes.map do |code|
+        Decomplex::Sarif.rule(
+          id: "nil-kill.diagnostic.#{Decomplex::Sarif.slug(code)}",
+          name: "Diagnostic: #{code}",
+          short_description: "Nil-Kill diagnostic"
+        )
+      end
+      action_rules + diagnostic_rules
+    end
+
+    def sarif_results(evidence)
+      sarif_actions(evidence).map { |action| sarif_action_result(action, evidence) } +
+        sarif_diagnostics(evidence).map { |diagnostic| sarif_diagnostic_result(diagnostic) }
+    end
+
+    def sarif_actions(evidence)
+      Array(evidence["actions"])
+    end
+
+    def sarif_diagnostics(evidence)
+      diagnostics = evidence["diagnostics"]
+      return diagnostics if diagnostics.is_a?(Array)
+      diagnostics = {} unless diagnostics.is_a?(Hash)
+
+      diagnostics.to_h.flat_map do |kind, rows|
+        Array(rows).map do |row|
+          row.is_a?(Hash) ? row.merge("code" => row["code"] || kind.to_s) : { "code" => kind.to_s, "message" => row.to_s }
+        end
+      end
+    end
+
+    def sarif_action_result(action, evidence)
+      kind = action["kind"].to_s.empty? ? "action" : action["kind"].to_s
+      Decomplex::Sarif.result(
+        rule_id: "nil-kill.action.#{Decomplex::Sarif.slug(kind)}",
+        level: sarif_action_level(action),
+        message: "#{kind} [#{action["confidence"] || "unknown"}]: #{action["message"]}",
+        path: action_path(action),
+        line: action_line(action),
+        properties: Decomplex::Sarif.json_safe_value(action).merge(
+          "source_format" => Schema::EvidenceBundle.v2?(evidence) ? "nil-kill.evidence.v2" : "nil-kill.evidence.v1"
+        )
+      )
+    end
+
+    def sarif_diagnostic_result(diagnostic)
+      code = diagnostic_code(diagnostic)
+      Decomplex::Sarif.result(
+        rule_id: "nil-kill.diagnostic.#{Decomplex::Sarif.slug(code)}",
+        level: diagnostic["severity"] || "warning",
+        message: diagnostic["message"] || diagnostic.to_s,
+        path: diagnostic_path(diagnostic),
+        line: diagnostic_line(diagnostic),
+        properties: Decomplex::Sarif.json_safe_value(diagnostic).merge(
+          "source_format" => "nil-kill.diagnostics"
+        )
+      )
+    end
+
+    def sarif_action_level(action)
+      case action["confidence"].to_s
+      when HIGH then "warning"
+      when GAP then "note"
+      else "note"
+      end
+    end
+
+    def action_path(action)
+      action.dig("target", "path") || action["path"] || action.dig("data", "path") ||
+        action.dig("data", "file") || parse_location(action["location"])[:path]
+    end
+
+    def action_line(action)
+      action.dig("target", "line") || action["line"] || action.dig("data", "line") ||
+        parse_location(action["location"])[:line] || 1
+    end
+
+    def diagnostic_code(diagnostic)
+      diagnostic["code"].to_s.empty? ? "diagnostic" : diagnostic["code"].to_s
+    end
+
+    def diagnostic_path(diagnostic)
+      diagnostic["path"] || diagnostic["file"] || parse_location(diagnostic["location"] || diagnostic["message"])[:path]
+    end
+
+    def diagnostic_line(diagnostic)
+      diagnostic["line"] || parse_location(diagnostic["location"] || diagnostic["message"])[:line] || 1
+    end
+
+    def parse_location(text)
+      match = text.to_s.match(%r{\b(?<path>(?:src|gems|tools|test|spec|lib|zig|transpile-tests)/[^:\s]+):(?<line>\d+)})
+      return {} unless match
+
+      { path: match[:path], line: match[:line].to_i }
+    end
+
+    def sarif_summary(evidence)
+      if Schema::EvidenceBundle.v2?(evidence)
+        {
+          "schema_version" => evidence["schema_version"],
+          "languages" => Array(evidence["languages"]),
+          "static_files" => Array(evidence.dig("static", "files")).size,
+          "static_methods" => Array(evidence.dig("static", "methods")).size,
+          "actions" => sarif_actions(evidence).size,
+          "diagnostics" => sarif_diagnostics(evidence).size
+        }
+      else
+        {
+          "target_dirs" => Array(evidence["target_dirs"]),
+          "methods" => Array(evidence["methods"]).size,
+          "runtime_observed_methods" => Array(evidence["methods"]).count { |m| m["calls"].to_i.positive? },
+          "actions" => sarif_actions(evidence).size,
+          "diagnostics" => sarif_diagnostics(evidence).size
+        }
+      end
     end
 
     def format_report_line(line)

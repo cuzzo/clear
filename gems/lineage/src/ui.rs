@@ -2215,6 +2215,14 @@ fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
             }
         }
         Value::Object(map) => {
+            if is_sarif_document(value) {
+                collect_sarif_document(value, overlays);
+                return;
+            }
+            if value.get("locations").is_some() {
+                collect_sarif_result(value, overlays);
+                return;
+            }
             if let (Some(path), Some(line), Some(label)) = (
                 string_field(value, &["path", "file", "filename"]),
                 u32_field(value, &["line", "arm_line", "start_line"]),
@@ -2239,8 +2247,66 @@ fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
     }
 }
 
+fn is_sarif_document(value: &Value) -> bool {
+    value.get("version").and_then(Value::as_str) == Some("2.1.0")
+        && value.get("runs").and_then(Value::as_array).is_some()
+}
+
+fn collect_sarif_document(value: &Value, overlays: &mut UiOverlays) {
+    let Some(runs) = value.get("runs").and_then(Value::as_array) else {
+        return;
+    };
+    for run in runs {
+        let Some(results) = run.get("results").and_then(Value::as_array) else {
+            continue;
+        };
+        for result in results {
+            collect_sarif_result(result, overlays);
+        }
+    }
+}
+
+fn collect_sarif_result(value: &Value, overlays: &mut UiOverlays) {
+    let Some(locations) = value.get("locations").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(label) = sarif_overlay_label(value) else {
+        return;
+    };
+
+    for location in locations {
+        let physical = location.get("physicalLocation").unwrap_or(location);
+        let path = physical
+            .get("artifactLocation")
+            .and_then(|artifact| artifact.get("uri"))
+            .and_then(Value::as_str);
+        let Some(path) = path else {
+            continue;
+        };
+        let null_region = Value::Null;
+        let region = physical.get("region").unwrap_or(&null_region);
+        let Some(line) = u32_field(region, &["startLine"]) else {
+            continue;
+        };
+        overlays
+            .dark_arms
+            .entry(path.trim_start_matches("./").to_string())
+            .or_default()
+            .entry(line)
+            .or_default()
+            .push(UiDarkArm {
+                label: label.clone(),
+                span: sarif_region_span(region),
+            });
+    }
+}
+
 fn overlay_label(value: &Value) -> Option<String> {
     let label = string_field(value, &["category", "kind", "rule_id", "ruleId", "message", "finding"])?;
+    overlay_label_text(label)
+}
+
+fn overlay_label_text(label: &str) -> Option<String> {
     let normalized = label.to_ascii_lowercase();
     if ["dark", "gap", "branch", "genuine"]
         .iter()
@@ -2250,6 +2316,37 @@ fn overlay_label(value: &Value) -> Option<String> {
     } else {
         None
     }
+}
+
+fn sarif_overlay_label(value: &Value) -> Option<String> {
+    let null_properties = Value::Null;
+    let properties = value.get("properties").unwrap_or(&null_properties);
+    if properties
+        .get("dark_arm")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Some(
+            string_field(properties, &["category", "arm_category", "kind"])
+                .or_else(|| string_field(value, &["ruleId"]))
+                .unwrap_or("dark arm")
+                .to_string(),
+        );
+    }
+
+    let message_text = value
+        .get("message")
+        .and_then(|message| message.get("text"))
+        .and_then(Value::as_str);
+    let result = [
+        string_field(value, &["ruleId"]),
+        message_text,
+        string_field(properties, &["category", "arm_category", "kind", "rule_id", "ruleId"]),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(overlay_label_text);
+    result
 }
 
 fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -2276,6 +2373,18 @@ fn span_field(value: &Value, keys: &[&str]) -> Option<[u32; 4]> {
                 .ok()?;
             values.try_into().ok()
         })
+}
+
+fn sarif_region_span(region: &Value) -> Option<[u32; 4]> {
+    let start_line = u32_field(region, &["startLine"])?;
+    let start_column = u32_field(region, &["startColumn"]).map(|column| column.saturating_sub(1));
+    let end_line = u32_field(region, &["endLine"]).unwrap_or(start_line);
+    let end_column = u32_field(region, &["endColumn"]).map(|column| column.saturating_sub(1));
+    if start_column.is_none() && end_column.is_none() && end_line == start_line {
+        return None;
+    }
+    let start = start_column.unwrap_or(0);
+    Some([start_line, start, end_line, end_column.unwrap_or(start)])
 }
 
 fn profile_enabled() -> bool {
@@ -4132,6 +4241,72 @@ mod tests {
         let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
 
         assert_eq!(line.dark_arms, vec!["genuine gap"]);
+    }
+
+    #[test]
+    fn source_payload_can_overlay_dark_arm_sarif() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  else\nend\n").unwrap();
+        let overlay = dir.path().join("overlay.sarif");
+        fs::write(
+            &overlay,
+            r#"{
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"SlopCop","rules":[]}},
+                "results":[{
+                  "ruleId":"slopcop.dark-arm.genuine",
+                  "message":{"text":"dark arm: genuine"},
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"src/demo.rb"},
+                      "region":{"startLine":2,"startColumn":3,"endLine":2,"endColumn":7}
+                    }
+                  }],
+                  "properties":{
+                    "dark_arm":true,
+                    "category":"dark arm: genuine",
+                    "file":"src/demo.rb",
+                    "line":2
+                  }
+                }],
+                "properties":{
+                  "slopcop.dark_arms":{
+                    "format":"slopcop.dark-arms.v1",
+                    "dark_arms":[{
+                      "file":"src/demo.rb",
+                      "line":2,
+                      "category":"dark arm: genuine"
+                    }]
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\nelse\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        let overlays = UiOverlays::load(&[overlay]).unwrap();
+
+        let payload =
+            source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &overlays)
+                .unwrap();
+        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+
+        assert_eq!(line.dark_arms, vec!["dark arm: genuine"]);
+        assert_eq!(line.dark_arms.len(), 1);
+        assert_eq!(line.dark_arm_spans[0].span, Some([2, 2, 2, 6]));
     }
 
     #[test]

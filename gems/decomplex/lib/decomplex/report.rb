@@ -361,6 +361,10 @@ module Decomplex
       JSON.pretty_generate(to_sarif_hash)
     end
 
+    def to_json(*_args)
+      to_sarif
+    end
+
     private
 
     def sarif_rules

@@ -61,6 +61,18 @@ class ReportTest < Minitest::Test
     end
   end
 
+  def test_json_report_is_sarif
+    Dir.mktmpdir do |dir|
+      build_repo(dir)
+      sarif = JSON.parse(Boobytrap::Report.new(repo: dir, resultset: resultset(dir)).to_json)
+      assert_equal "2.1.0", sarif.fetch("version")
+      run = sarif.fetch("runs").first
+      assert_equal "Boobytrap", run.dig("tool", "driver", "name")
+      assert run.fetch("results").any? { |result| result.fetch("ruleId") == "boobytrap.file-hotspot" }
+      assert_equal "boobytrap.report.sarif.v1", run.dig("properties", "format")
+    end
+  end
+
   def test_missing_resultset_degrades_to_fix_only
     Dir.mktmpdir do |dir|
       build_repo(dir)

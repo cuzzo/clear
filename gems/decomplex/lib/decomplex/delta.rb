@@ -58,6 +58,11 @@ module Decomplex
         "total" => findings.values.sum }
     end
 
+    def load_snapshot(path)
+      data = JSON.parse(File.read(path))
+      data.dig("runs", 0, "properties", "decomplex.snapshot") || data
+    end
+
     def fingerprint(detector, finding)
       ents = RootCause.entities(finding)
                       .map { |k, t| "#{k}:#{t}" }.sort.join(",")

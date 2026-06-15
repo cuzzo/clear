@@ -3,8 +3,9 @@
 require "json"
 
 module Decomplex
-  # Small SARIF 2.1.0 builder for Decomplex report findings. It keeps the
-  # output format focused on SARIF concerns while Report owns detector data.
+  # Small SARIF 2.1.0 builder shared by the generalized gems. It keeps
+  # report producers consistent without each gem hand-rolling subtly
+  # different JSON.
   module Sarif
     module_function
 

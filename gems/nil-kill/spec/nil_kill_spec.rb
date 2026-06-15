@@ -209,6 +209,34 @@ RSpec.describe NilKill do
       expect(line).not_to include(NilKill::ROOT)
     end
 
+    it "renders report JSON as SARIF" do
+      evidence = {
+        "target_dirs" => ["src"],
+        "methods" => [],
+        "actions" => [
+          {
+            "kind" => "nil_param_observed",
+            "confidence" => "high",
+            "message" => "param observed nil",
+            "path" => "src/demo.rb",
+            "line" => 7,
+          },
+        ],
+        "diagnostics" => {
+          "sorbet_errors" => ["src/demo.rb:8: type error"],
+        },
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      run = sarif.fetch("runs").first
+      expect(sarif.fetch("version")).to eq("2.1.0")
+      expect(run.dig("tool", "driver", "name")).to eq("Nil-Kill")
+      expect(run.fetch("results").map { |result| result.fetch("ruleId") }).to include(
+        "nil-kill.action.nil-param-observed",
+        "nil-kill.diagnostic.sorbet-errors",
+      )
+    end
+
     it "--hygiene emits only the slot summary and action counts, skipping heavy sections" do
       Dir.mktmpdir("nil-kill-hygiene-report", NilKill::ROOT) do |dir|
         report = described_class.new(["--hygiene"])

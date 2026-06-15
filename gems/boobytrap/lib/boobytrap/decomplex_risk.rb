@@ -54,40 +54,46 @@ module Boobytrap
     def load_decomplex
       return true if defined?(Decomplex::Report) && defined?(Decomplex::Convergence)
 
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/report", __dir__)
+      if ::File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
       require "decomplex/report"
       true
     rescue LoadError
-      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/report", __dir__)
-      return false unless ::File.file?("#{sibling}.rb")
-
-      require sibling
-      true
+      false
     end
 
     def load_decomplex_syntax
       return true if defined?(Decomplex::Syntax)
 
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      if ::File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
       require "decomplex/syntax"
       true
     rescue LoadError
-      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
-      return false unless ::File.file?("#{sibling}.rb")
-
-      require sibling
-      true
+      false
     end
 
     def load_decomplex_source_filter
       return true if defined?(Decomplex::SourceFilter)
 
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/source_filter", __dir__)
+      if ::File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
       require "decomplex/source_filter"
       true
     rescue LoadError
-      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/source_filter", __dir__)
-      return false unless ::File.file?("#{sibling}.rb")
-
-      require sibling
-      true
+      false
     end
 
     def tree_sitter?

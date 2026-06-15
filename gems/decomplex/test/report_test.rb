@@ -44,6 +44,10 @@ class ReportTest < Minitest::Test
     assert run.fetch("results").all? { |result| result.fetch("ruleId").start_with?("decomplex.") }
   end
 
+  def test_json_report_is_sarif_alias
+    assert_equal JSON.parse(report.to_sarif), JSON.parse(report.to_json)
+  end
+
   def test_sarif_result_locations_use_report_finding_locations
     sarif = JSON.parse(report.to_sarif)
     result = sarif.fetch("runs").first.fetch("results").find do |entry|

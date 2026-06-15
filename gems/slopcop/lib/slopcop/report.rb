@@ -4,6 +4,12 @@ require_relative "rollup"
 require_relative "sarif"
 require "json"
 require "pathname"
+sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
+if File.file?("#{sibling_sarif}.rb")
+  require sibling_sarif
+else
+  require "decomplex/sarif"
+end
 
 module SlopCop
   # Markdown report. Leads with the actionable artifact: the top true
@@ -176,7 +182,24 @@ module SlopCop
     end
 
     def to_json(*_args)
-      JSON.pretty_generate(to_h)
+      to_sarif
+    end
+
+    def to_sarif
+      JSON.pretty_generate(to_sarif_hash)
+    end
+
+    def to_sarif_hash
+      Decomplex::Sarif.document(
+        tool_name: "SlopCop",
+        information_uri: "https://github.com/codeforreno/litedb",
+        rules: sarif_rules,
+        results: sarif_results,
+        properties: {
+          "format" => "slopcop.report.sarif.v1",
+          "slopcop.report" => to_h
+        }
+      )
     end
 
     def to_sarif
@@ -184,6 +207,63 @@ module SlopCop
     end
 
     private
+
+    def sarif_rules
+      [
+        Decomplex::Sarif.rule(
+          id: "slopcop.genuine-gap",
+          name: "Genuine Coverage Gap",
+          short_description: Rollup::ACTION[:genuine]
+        )
+      ] + Rollup::ACTION.map do |category, description|
+        Decomplex::Sarif.rule(
+          id: "slopcop.dark-arm.#{category}",
+          name: "Dark Arm: #{category}",
+          short_description: description,
+          default_level: category == :genuine ? "warning" : "note",
+          properties: { "category" => category }
+        )
+      end
+    end
+
+    def sarif_results
+      top_gap_results + dark_arm_results
+    end
+
+    def top_gap_results
+      @r[:top_gaps].map do |gap|
+        Decomplex::Sarif.result(
+          rule_id: "slopcop.genuine-gap",
+          level: "warning",
+          message: "genuine gap: #{gap[:file]}:#{gap[:line]} #{gap[:method]}",
+          path: gap[:file],
+          line: gap[:line],
+          properties: stringify_keys(gap).merge(
+            "dark_arm" => true,
+            "category" => "genuine",
+            "source_format" => "slopcop.report.v1"
+          )
+        )
+      end
+    end
+
+    def dark_arm_results
+      @r[:dark_arms].map do |arm|
+        category = arm[:category].to_s
+        Decomplex::Sarif.result(
+          rule_id: "slopcop.dark-arm.#{category}",
+          level: category == "genuine" ? "warning" : "note",
+          message: arm[:message] || "dark arm: #{category}",
+          path: arm[:file],
+          line: arm[:line],
+          properties: stringify_keys(arm).merge(
+            "dark_arm" => true,
+            "category" => "dark arm: #{category}",
+            "source_format" => "slopcop.report.v1"
+          )
+        )
+      end
+    end
 
     def stringify_counts(counts)
       counts.to_h.transform_keys(&:to_s)
