@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       base_sha:
-        description: "Base SHA for Ruby --since filtering; leave blank for full subject selection"
+        description: "Base SHA for Ruby --since filtering; leave blank to use the associated PR base SHA when available"
         required: false
         type: string
       head_repository:
@@ -45,11 +45,14 @@ jobs:
     name: Resolve mutant target ref
     runs-on: ubuntu-latest
     outputs:
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
       head_repository: ${{ steps.resolve.outputs.head_repository }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
     steps:
       - id: resolve
         env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
           INPUT_REF: ${{ inputs.sha }}
           INPUT_REPOSITORY: ${{ inputs.head_repository }}
         run: |
@@ -80,7 +83,18 @@ jobs:
             resolved="$(git -C "${work}" rev-parse FETCH_HEAD^{commit})"
           fi
 
+          base_sha="${INPUT_BASE_SHA}"
+          if [ -z "${base_sha}" ] && [ "${repo}" = "${GITHUB_REPOSITORY}" ]; then
+            base_sha="$(
+              gh api \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${GITHUB_REPOSITORY}/commits/${resolved}/pulls" \
+                --jq '.[0].base.sha // ""'
+            )"
+          fi
+
           {
+            echo "base_sha=${base_sha}"
             echo "head_repository=${repo}"
             echo "head_sha=${resolved}"
           } >> "${GITHUB_OUTPUT}"
@@ -153,7 +167,7 @@ jobs:
           bundler-cache: true
       - name: Run Ruby spec mutants
         env:
-          BASE_SHA: ${{ inputs.base_sha }}
+          BASE_SHA: ${{ needs.resolve_ref.outputs.base_sha }}
         run: |
           args=(--shard "${{ matrix.shard }}/${{ matrix.count }}" --out "/tmp/clear-ruby-mutants-${{ matrix.shard }}")
           if [ -n "${BASE_SHA}" ]; then
