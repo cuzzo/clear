@@ -878,17 +878,31 @@ fn line_coverage_by_file(
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope(storage, "", &CoverageScope::all())
+    dashboard_summary_for_directory_with_scope_and_repo(storage, "", &CoverageScope::all(), None)
 }
 
 pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope(storage, directory, &CoverageScope::all())
+    dashboard_summary_for_directory_with_scope_and_repo(
+        storage,
+        directory,
+        &CoverageScope::all(),
+        None,
+    )
 }
 
 pub fn dashboard_summary_for_directory_with_scope(
     storage: &Storage,
     directory: &str,
     scope: &CoverageScope,
+) -> Result<UiDashboard> {
+    dashboard_summary_for_directory_with_scope_and_repo(storage, directory, scope, None)
+}
+
+fn dashboard_summary_for_directory_with_scope_and_repo(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
 ) -> Result<UiDashboard> {
     let total_start = Instant::now();
     let directory = normalize_directory(directory);
@@ -937,7 +951,7 @@ pub fn dashboard_summary_for_directory_with_scope(
     let warnings = warnings_for_directory(storage, &directory, scope)?;
     profile_log("dashboard.warnings", warning_start);
     let unit_start = Instant::now();
-    let top_units = top_unit_hotspots(storage, &directory, scope)?;
+    let top_units = top_unit_hotspots(storage, &directory, scope, repo)?;
     profile_log("dashboard.top_units", unit_start);
 
     let files_with_coverage = files
@@ -1259,6 +1273,7 @@ fn top_unit_hotspots(
     storage: &Storage,
     directory: &str,
     scope: &CoverageScope,
+    repo: Option<&Path>,
 ) -> Result<Vec<UiUnitHotspot>> {
     let prefixes = if directory.is_empty() {
         Vec::new()
@@ -1275,11 +1290,23 @@ fn top_unit_hotspots(
         .into_iter()
         .map(|span| (span.id, span.start_line))
         .collect::<HashMap<_, _>>();
+    let current_spans = repo
+        .map(|repo| current_source_start_lines(repo, &summaries))
+        .unwrap_or_default();
     let mut units = summaries
         .into_iter()
         .map(|summary| {
             let signal = signals.get(&summary.id).cloned().unwrap_or_default();
-            let start_line = spans.get(&summary.id).copied().unwrap_or(1);
+            let key = (
+                summary.current_path.clone(),
+                summary.name.clone(),
+                summary.kind.clone(),
+            );
+            let start_line = current_spans
+                .get(&key)
+                .copied()
+                .or_else(|| spans.get(&summary.id).copied())
+                .unwrap_or(1);
             let score = unit_hotspot_score(&summary, &signal);
             UiUnitHotspot {
                 path: summary.current_path,
@@ -1311,6 +1338,30 @@ fn top_unit_hotspots(
     });
     units.truncate(12);
     Ok(units)
+}
+
+fn current_source_start_lines(
+    repo: &Path,
+    summaries: &[crate::storage::UnitSummary],
+) -> HashMap<(String, String, String), u32> {
+    let paths = summaries
+        .iter()
+        .map(|summary| summary.current_path.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut spans = HashMap::new();
+    for path in paths {
+        let Ok(file) = read_source(repo, path, None) else {
+            continue;
+        };
+        for symbol in source_symbols_from_current_file(&file) {
+            let key = (path.to_string(), symbol.name, symbol.kind);
+            spans
+                .entry(key)
+                .and_modify(|line: &mut u32| *line = (*line).min(symbol.start_line))
+                .or_insert(symbol.start_line);
+        }
+    }
+    spans
 }
 
 fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCounts>> {
@@ -1872,7 +1923,12 @@ async fn api_dashboard_handler(
     };
     let scope = CoverageScope::from_repo(state.repo.as_ref());
     let directory = query.dir.as_deref().unwrap_or_default();
-    match dashboard_summary_for_directory_with_scope(&storage, directory, &scope) {
+    match dashboard_summary_for_directory_with_scope_and_repo(
+        &storage,
+        directory,
+        &scope,
+        Some(state.repo.as_ref()),
+    ) {
         Ok(dashboard) => Json(dashboard).into_response(),
         Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
@@ -3753,7 +3809,12 @@ fn render_index_page(
         .as_deref()
         .map(parent_directory)
         .unwrap_or(requested_directory);
-    let dashboard = dashboard_summary_for_directory_with_scope(storage, &current_directory, scope)?;
+    let dashboard = dashboard_summary_for_directory_with_scope_and_repo(
+        storage,
+        &current_directory,
+        scope,
+        Some(repo),
+    )?;
     let child_directories = directory_index(&files, &current_directory);
     let child_files = files_in_directory(&files, &current_directory);
     let table_files = sorted_table_files(&files, filter, &current_directory, sort);
@@ -6420,6 +6481,22 @@ mod tests {
         let outline = render_source_outline(&payload);
         assert!(outline.contains("href=\"#L8\""));
         assert!(outline.contains("href=\"#L13\""));
+
+        let hotspots =
+            top_unit_hotspots(&storage, "src", &CoverageScope::all(), Some(dir.path())).unwrap();
+        let closest_hotspot = hotspots
+            .iter()
+            .find(|unit| unit.name == "closest_name")
+            .unwrap();
+        let levenshtein_hotspot = hotspots
+            .iter()
+            .find(|unit| unit.name == "levenshtein")
+            .unwrap();
+        assert_eq!(closest_hotspot.start_line, 8);
+        assert_eq!(levenshtein_hotspot.start_line, 13);
+        let links = render_unit_hotspots(&hotspots, "");
+        assert!(links.contains("src%2Fannotator%2Fhelpers%2Ffixable_helpers.rb#L8"));
+        assert!(links.contains("src%2Fannotator%2Fhelpers%2Ffixable_helpers.rb#L13"));
     }
 
     #[test]
