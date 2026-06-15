@@ -321,9 +321,9 @@ IF user.active? && cart.total > 100 && !cart.locked? THEN ...
 is a reification miss. The code should call the named predicate so the
 decision has one owner.
 
-### Exact And Semantic Predicate Aliases
+### Exact Predicate Aliases
 
-Question: do multiple predicates mean the same thing?
+Question: do multiple predicates have the same body text?
 
 ```ruby
 FN canDiscount(user, cart)
@@ -335,9 +335,29 @@ FN eligibleForPromo(user, cart)
 END
 ```
 
-Exact aliases have identical bodies. Semantic aliases try to see through
-small definitional differences. Either way, two names for one decision
-increase maintenance cost.
+Exact aliases have identical bodies. They are low-noise evidence that
+one decision has two names.
+
+### Semantic Predicate Aliases
+
+Question: do multiple predicates mean the same thing after light
+normalization?
+
+Semantic aliases try to see through small definitional differences:
+
+```ruby
+FN frame()
+  RETURN @provenance == :frame
+END
+
+FN isFrame()
+  RETURN provenance == :frame
+END
+```
+
+The bodies are not byte-identical, but they are the same decision after
+receiver/polarity normalization. Either exact or semantic aliases
+increase maintenance cost because one concept now has multiple names.
 
 ### Oversized Predicates
 
@@ -374,7 +394,7 @@ Question: did a pasted block rename most identifiers but miss one?
 This catches the classic copy/paste bug where `cart` became
 `trial_cart` everywhere except one stale reference.
 
-### Structural Similarity
+### Structural Similarity (Type-2/3)
 
 Question: are there large structural clones?
 

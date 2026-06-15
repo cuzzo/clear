@@ -53,6 +53,29 @@ CLEAR automatically inserts cooperative yields into generated code (like Go), to
 
 See [Getting Started](README.md#building--testing).
 
+## Gems And Analysis Tools (`gems/`)
+
+The directories under `gems/` are not only conventional RubyGems. They
+are compiler-quality subprojects developed inside CLEAR to keep a large
+compiler/runtime codebase understandable at scale.
+
+Some of them are packaged like Ruby gems because Ruby gives us a simple
+CLI/library boundary. Others may contain Rust, Zig, TypeScript, or
+language-neutral tooling. Treat each `gems/<name>/` directory as its own
+small project with its own README, tests, docs, and contribution notes.
+
+When contributing to a gem:
+
+ * Read the gem's local `README.md` and `CONTRIBUTING.md`, if present.
+ * Keep public output formats stable unless the change is intentionally
+   a format migration.
+ * Add tests for new metrics, parsers, report sections, or converters.
+ * Prefer language-neutral parser/provider boundaries over Ruby-only
+   shortcuts unless the gem is explicitly Ruby-only.
+ * Do not add rewrite/autofix behavior to an analyzer gem unless that
+   gem owns rewriting by design.
+ * Document whether a feature is current, experimental, or planned.
+
 ## The Test Trinity
 
 ### 1. Ruby Specs (`rspec`)
@@ -144,4 +167,3 @@ Other items include:
 
  * Please reach out *before* adding any major feature.
  * I likely have a doc that lays out how it is supposed to be designed.
-
