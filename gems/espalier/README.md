@@ -1,0 +1,172 @@
+# Espalier
+
+Espalier is an architecture-level static analyzer that helps you find
+where your codebase is leaking implementation detail, accumulating
+mutable lifecycle state, or forcing classes to know too much about each
+other.
+
+Decomplex finds function-level complexity. Nil-kill finds type pressure.
+Boobytrap and SlopCop find empirical risk and test gaps. Espalier pulls
+those signals up to the class/module layer so a human or LLM can review
+architecture directly: state ownership, public API surface area,
+delegation meshes, and privatization opportunities.
+
+It is used by the CLEAR compiler to minimize architectural complexity
+while moving quickly with LLM-assisted development.
+
+- See [DESIGN.md](DESIGN.md) for the architecture model and extraction
+  pipeline.
+- See [report.md](report.md) for a generated example over CLEAR.
+
+## Getting Started
+
+If you want to contribute, start with the repository-level
+[CONTRIBUTING.md](../../CONTRIBUTING.md), then read [DESIGN.md](DESIGN.md)
+for Espalier-specific architecture.
+
+### Prerequisites
+
+- Ruby 3.x
+- Bundler
+- Tree-sitter grammars for any language you want to analyze
+- Optional Decomplex, Nil-kill, Boobytrap, or SlopCop evidence
+
+From this repository:
+
+```bash
+bundle exec gems/espalier/exe/espalier \
+  --format report \
+  --nil-kill=tmp/nil-kill/espalier-evidence.json \
+  --output=gems/espalier/report.md \
+  src/
+```
+
+For a narrower run:
+
+```bash
+bundle exec gems/espalier/exe/espalier \
+  --format report \
+  --output=/tmp/espalier.md \
+  src/annotator src/ast/type.rb
+```
+
+Generate a reusable manifest first, then render the report:
+
+```bash
+bundle exec gems/espalier/exe/espalier \
+  --format yaml \
+  --output=/tmp/architecture.yml \
+  src/
+
+bundle exec gems/espalier/exe/espalier \
+  --manifest=/tmp/architecture.yml \
+  --format report \
+  --output=/tmp/espalier-report.md
+```
+
+## Outputs
+
+Espalier can output a compact architecture manifest for tools and LLMs,
+or a Markdown report for human architectural review.
+
+### Architecture Report
+
+```bash
+bundle exec gems/espalier/exe/espalier src \
+  --format report \
+  --output=report.md
+```
+
+The report opens with project prioritization, then ranks state owner
+pressure, encapsulation pressure, owner state cohesion, collaboration
+meshes, mediator/reification candidates, coordinator/mutator collisions,
+conditional delegation hubs, state lifecycle pressure, privatization
+candidates, and cross-tool overlap.
+
+### YAML Manifest
+
+```bash
+bundle exec gems/espalier/exe/espalier src \
+  --format yaml \
+  --output=architecture.yml
+```
+
+The manifest records class/module ownership, state slots, function
+signatures, visibility, reads/writes, internal call graph facts, and
+delegations. It is intentionally more compact than full source so it can
+be consumed by review tools and LLMs.
+
+### Markdown Manifest
+
+```bash
+bundle exec gems/espalier/exe/espalier src \
+  --format markdown \
+  --output=/tmp/architecture.md
+```
+
+The Markdown manifest is the direct human-readable rendering of the
+architecture manifest. Use `--format report` when you want ranked
+findings instead of a module-by-module inventory.
+
+## Evidence Inputs
+
+Espalier can run from source alone, but its best findings come from
+combining structural facts with sibling-gem evidence:
+
+- `--nil-kill FILE`: concrete signatures, type pressure, and fast
+  architecture evidence from Nil-kill.
+- `--decomplex FILE`: function-level complexity and protocol pressure.
+- `--risk FILE`: Boobytrap/SlopCop churn, coverage, and risk evidence.
+- `--manifest FILE`: a previously generated Espalier YAML manifest.
+
+Nil-kill evidence is the most important external input today because it
+helps Espalier distinguish broad untyped surfaces from intentional typed
+interfaces.
+
+## Supported Languages Roadmap
+
+Espalier uses [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)
+through Decomplex's normalized syntax facade. Ruby support has been
+battle tested to review the CLEAR compiler. Other languages are
+experimental and depend on the maturity of their Tree-sitter structural
+facts.
+
+- [x] Ruby: used for CLEAR compiler architecture review.
+- [ ] Python: experimentally supported.
+- [ ] JavaScript: experimentally supported.
+- [ ] TypeScript: experimentally supported.
+- [ ] Go: experimentally supported.
+- [ ] Rust: experimentally supported.
+- [ ] Zig: experimentally supported.
+
+## Boundaries
+
+Espalier does not:
+
+- rewrite code;
+- prove that a class should be split;
+- prove that a method should be private;
+- perform whole-program dynamic dispatch resolution;
+- replace Decomplex, Nil-kill, Boobytrap, SlopCop, Lineage, mutation,
+  fuzzing, coverage, or type checks.
+
+It ranks likely architectural review targets. A good finding should make
+a human say: "this is where public API, mutable state, or collaboration
+pressure is probably forcing the rest of the system to know too much."
+
+Espalier does not detect lint issues or code smells, as packages for
+that already exist in every language.
+
+## Links
+
+- [CLEAR compiler](../../README.md)
+- [Decomplex](../decomplex/README.md): identifies complex state and
+  control-flow pressure.
+- [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
+  to its source.
+- [Boobytrap](../boobytrap/README.md): ranks latent bug risk from
+  semantic churn and under-tested code.
+- [SlopCop](../slopcop/README.md): categorizes uncovered branches and
+  ranks the true test gaps.
+- [Lineage](../lineage/README.md): renders history and verification
+  evidence next to source.

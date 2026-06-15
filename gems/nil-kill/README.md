@@ -58,7 +58,7 @@ In short, Nil-kill has 6 analyzer uses, but the 4 major ones are:
  4. `nil-kill espalier-evidence`: generates fast static evidence for architecture tooling.
 
 > [!NOTE]
-> [Espalier](../espalier/DESIGN.md) is a tool CLEAR uses to minimize
+> [Espalier](../espalier/README.md) is a tool CLEAR uses to minimize
 > architectural complexity. It consumes Nil-kill data.
 
 [Auto-Type](../auto-type/README.md) uses Nil-kill output to
