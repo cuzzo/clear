@@ -7,7 +7,7 @@
     },
     {
       "source": "zig/lib/atomic.zig",
-      "test_command": "cd zig && zig build test-tsan -Dtest-file=atomic-test.zig -j1 && zig build test-hammer -Dtest-file=atomic-hammer-test.zig -j1",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=atomic-test.zig -j1 && zig build test-hammer -Dtest-file=atomic-hammer-test.zig -j1 && zig build test-loom-vopr -Dtest-file=observable-loom-test.zig -j1",
       "timeout_seconds": 60
     },
     {
@@ -17,7 +17,7 @@
     },
     {
       "source": "zig/lib/observable.zig",
-      "test_command": "cd zig && zig build test-tsan -Dtest-file=observable-test.zig -j1",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=observable-test.zig -j1 && zig build test-loom-vopr -Dtest-file=observable-loom-test.zig -j1",
       "timeout_seconds": 60
     },
     {

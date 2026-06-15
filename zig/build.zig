@@ -209,8 +209,10 @@ pub fn build(b: *std.Build) void {
         .{ .path = "fsm-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "fsm-lock-safety-test.zig", .tsan = true },
         .{ .path = "fsm-lock-test.zig", .tsan = true },
+        // fsm-loom-test built as executable (see fsm_loom_exe). Building via
+        // b.addTest puts the test_runner at module root, hiding SimAtomic and
+        // silently disabling the loom seam.
         // fsm-lock-vopr-test built as executable (see vopr_exes).
-        .{ .path = "fsm-loom-test.zig", .loom_vopr = true },
         .{ .path = "fsm-race-test.zig", .tsan = true },
         .{ .path = "fsm-rwlock-test.zig", .tsan = true },
         .{ .path = "fsm-scheduler-test.zig", .tsan = true },
@@ -874,6 +876,134 @@ pub fn build(b: *std.Build) void {
     }
     if (matchesTestFile("vopr-loom-runner.zig", test_file_filter)) {
         loom_step.dependOn(&run_loom.step);
+    }
+
+    // fsm-loom-test — built as an executable so `@import("root")` from
+    // inside runtime/fsm.zig resolves to the entry file. Building this with
+    // b.addTest puts Zig's test runner at module root, hiding SimAtomic and
+    // silently disabling the loom seam.
+    const fsm_loom_exe = b.addExecutable(.{
+        .name = "fsm-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("fsm-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage or coverage_loom) true else null,
+    });
+    fsm_loom_exe.root_module.addImport("build_options", build_options_mod);
+    fsm_loom_exe.root_module.addAssemblyFile(switch_s);
+    fsm_loom_exe.root_module.addAssemblyFile(onroot_s);
+    fsm_loom_exe.root_module.link_libc = true;
+    const run_fsm_loom = b.addRunArtifact(fsm_loom_exe);
+    run_fsm_loom.has_side_effects = true;
+    run_fsm_loom.stdio = .inherit;
+    const include_fsm_loom = matchesTestFile("fsm-loom-test.zig", test_file_filter);
+    if (coverage and include_fsm_loom and shard_index == 0) {
+        const fsm_loom_kcov_dir = "zig-out/coverage/fsm-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", fsm_loom_kcov_dir });
+        const run_fsm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            fsm_loom_kcov_dir,
+        });
+        run_fsm_loom_kcov.addArtifactArg(fsm_loom_exe);
+        run_fsm_loom_kcov.stdio = .inherit;
+        run_fsm_loom_kcov.setCwd(b.path("."));
+        run_fsm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_fsm_loom_kcov.step);
+        merge_cmd.?.addArg(fsm_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_fsm_loom_kcov.step);
+    } else if (!coverage and include_fsm_loom and shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_fsm_loom.step);
+    }
+    if (coverage_loom and include_fsm_loom and shard_index == 0) {
+        const fsm_loom_kcov_dir = "zig-out/coverage-loom/fsm-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", fsm_loom_kcov_dir });
+        const run_fsm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            fsm_loom_kcov_dir,
+        });
+        run_fsm_loom_kcov.addArtifactArg(fsm_loom_exe);
+        run_fsm_loom_kcov.stdio = .inherit;
+        run_fsm_loom_kcov.setCwd(b.path("."));
+        run_fsm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_fsm_loom_kcov.step);
+        merge_cmd_loom.?.addArg(fsm_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_fsm_loom_kcov.step);
+    }
+    if (include_fsm_loom) {
+        loom_step.dependOn(&run_fsm_loom.step);
+    }
+
+    // observable-loom-test — standalone for the same SimAtomic root-seam
+    // reason as fsm-loom and parking-lot-loom.
+    const observable_loom_exe = b.addExecutable(.{
+        .name = "observable-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("observable-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage or coverage_loom) true else null,
+    });
+    observable_loom_exe.root_module.addImport("build_options", build_options_mod);
+    observable_loom_exe.root_module.addAssemblyFile(switch_s);
+    observable_loom_exe.root_module.addAssemblyFile(onroot_s);
+    observable_loom_exe.root_module.link_libc = true;
+    const run_observable_loom = b.addRunArtifact(observable_loom_exe);
+    run_observable_loom.has_side_effects = true;
+    run_observable_loom.stdio = .inherit;
+    const include_observable_loom = matchesTestFile("observable-loom-test.zig", test_file_filter);
+    if (coverage and include_observable_loom and shard_index == 0) {
+        const observable_loom_kcov_dir = "zig-out/coverage/observable-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", observable_loom_kcov_dir });
+        const run_observable_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            observable_loom_kcov_dir,
+        });
+        run_observable_loom_kcov.addArtifactArg(observable_loom_exe);
+        run_observable_loom_kcov.stdio = .inherit;
+        run_observable_loom_kcov.setCwd(b.path("."));
+        run_observable_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_observable_loom_kcov.step);
+        merge_cmd.?.addArg(observable_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_observable_loom_kcov.step);
+    } else if (!coverage and include_observable_loom and shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_observable_loom.step);
+    }
+    if (coverage_loom and include_observable_loom and shard_index == 0) {
+        const observable_loom_kcov_dir = "zig-out/coverage-loom/observable-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", observable_loom_kcov_dir });
+        const run_observable_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            observable_loom_kcov_dir,
+        });
+        run_observable_loom_kcov.addArtifactArg(observable_loom_exe);
+        run_observable_loom_kcov.stdio = .inherit;
+        run_observable_loom_kcov.setCwd(b.path("."));
+        run_observable_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_observable_loom_kcov.step);
+        merge_cmd_loom.?.addArg(observable_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_observable_loom_kcov.step);
+    }
+    if (include_observable_loom) {
+        loom_step.dependOn(&run_observable_loom.step);
     }
 
     // parking-lot-loom — built as an executable so `@import("root")` from

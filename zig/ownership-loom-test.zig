@@ -238,13 +238,13 @@ const Scenario = struct {
 // register as sim-instrumented.
 // ─────────────────────────────────────────────────────────────────────
 fn entryInspectArc() callconv(.c) void {
-    _ = g_arc_x.refCount();    // line 192
-    _ = g_arc_x.weakCount();   // line 198
-    var w_clone = WeakI64.fromArc(g_arc_x);  // line 271
-    var w2 = w_clone.clone();  // line 280
-    _ = w2.isAlive();          // line 321
-    _ = w2.strongCount();      // line 326
-    _ = w2.weakCount();        // line 331
+    _ = g_arc_x.refCount(); // line 192
+    _ = g_arc_x.weakCount(); // line 198
+    var w_clone = WeakI64.fromArc(g_arc_x); // line 271
+    var w2 = w_clone.clone(); // line 280
+    _ = w2.isAlive(); // line 321
+    _ = w2.strongCount(); // line 326
+    _ = w2.weakCount(); // line 331
     w2.deinit();
     w_clone.deinit();
     harness.slots[0].done = true;
@@ -365,4 +365,6 @@ pub fn main() !void {
         .{ total_failures, ops_total, va.sim_unique_site_count },
     );
     if (total_failures > 0) std.process.exit(1);
+    if (ops_total == 0) return error.SimAtomicDidNotFire;
+    if (va.sim_unique_site_count < 30) return error.OwnershipLoomCoverageRegressed;
 }

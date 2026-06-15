@@ -14,6 +14,11 @@
 
 const std = @import("std");
 
+pub const AtomicValue = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 /// Generic integer atomic. Cache-line aligned. The 64-bit aliases
 /// `AtomicInt64` / `AtomicUint64` (declared below) match Go's
 /// `atomic.Int64`/`atomic.Uint64` surface.
@@ -22,7 +27,7 @@ pub fn AtomicInt(comptime T: type) type {
     if (ti != .int and ti != .comptime_int)
         @compileError("AtomicInt: T must be an integer type");
     return struct {
-        value: std.atomic.Value(T) align(64) = .{ .raw = 0 },
+        value: AtomicValue(T) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -98,7 +103,7 @@ pub fn AtomicFloat(comptime T: type) type {
         else => @compileError("AtomicFloat: only 32- and 64-bit floats supported"),
     };
     return struct {
-        value: std.atomic.Value(Backing) align(64) = .{ .raw = 0 },
+        value: AtomicValue(Backing) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -196,7 +201,7 @@ pub fn Atomic(comptime T: type) type {
 /// Atomic Bool. Backed by u8; load/store/exchange/CAS. No
 /// arithmetic — booleans don't have +/- semantics.
 pub const AtomicBool = struct {
-    value: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+    value: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
     const Self = @This();
 

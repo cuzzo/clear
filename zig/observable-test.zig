@@ -3,7 +3,8 @@
 //! the `view()` snapshot read for SUM / COUNT / MAX / MIN / ANY /
 //! ALL on the relevant numeric / boolean types.
 //!
-//! Concurrency stress and Loom coverage land in Phase T2.
+//! Concurrency stress lives here; deterministic interleaving coverage lives in
+//! observable-loom-test.zig so root.SimAtomic remains visible.
 
 const std = @import("std");
 const builtin = @import("builtin");
