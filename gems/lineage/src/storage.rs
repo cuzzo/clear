@@ -1905,10 +1905,96 @@ fn configure_connection(conn: &Connection) -> Result<()> {
 fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSummary>) -> Result<()> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT unit_id, event_type, timestamp
-        FROM events
-        WHERE semantic_change = 1
-          AND event_type IN ('FIX', 'CHANGE')
+        WITH fix_commit_raw AS (
+          SELECT commit_hash,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN unit_id END) AS code_units,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN path END) AS code_files,
+                 COALESCE(SUM(CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN ABS(lines_added) + ABS(lines_removed) ELSE 0 END), 0) AS code_lines
+          FROM events
+          WHERE event_type = 'FIX'
+            AND semantic_change = 1
+          GROUP BY commit_hash
+        ),
+        fix_commit_profiles AS (
+          SELECT commit_hash,
+                 CASE
+                   WHEN code_units BETWEEN 1 AND 3
+                    AND code_files BETWEEN 1 AND 3
+                    AND code_lines <= 80
+                   THEN 1.0
+                   WHEN code_units BETWEEN 1 AND 8
+                    AND code_files BETWEEN 1 AND 5
+                    AND code_lines <= 200
+                   THEN 0.65
+                   WHEN code_units BETWEEN 1 AND 20
+                    AND code_files BETWEEN 1 AND 10
+                    AND code_lines <= 500
+                   THEN 0.30
+                   ELSE 0.10
+                 END AS target_factor
+          FROM fix_commit_raw
+        )
+        SELECT e.unit_id,
+               e.event_type,
+               e.timestamp,
+               CASE WHEN e.event_type = 'FIX'
+                    THEN COALESCE(fp.target_factor, 0.10)
+                    ELSE 1.0
+               END AS target_factor,
+               CASE
+                 WHEN e.event_type = 'FIX'
+                  AND COALESCE(fp.target_factor, 0.10) >= 0.65
+                  AND EXISTS (
+                    SELECT 1
+                    FROM test_exposure_events t
+                    WHERE t.unit_id = e.unit_id
+                      AND t.timestamp > e.timestamp
+                      AND t.is_mutation_killed = 1
+                    LIMIT 1
+                  )
+                 THEN 0.25
+                 ELSE 1.0
+               END AS mutation_hardening_factor
+        FROM events e
+        LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
+        WHERE e.semantic_change = 1
+          AND e.event_type IN ('FIX', 'CHANGE')
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1916,6 +2002,8 @@ fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSum
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, i64>(2)?,
+            row.get::<_, f64>(3)?,
+            row.get::<_, f64>(4)?,
         ))
     })?;
     let events = rows.collect::<Result<Vec<_>, _>>()?;
@@ -1923,10 +2011,18 @@ fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSum
         return Ok(());
     }
 
-    let first = events.iter().map(|(_, _, timestamp)| *timestamp).min().unwrap_or(0);
-    let last = events.iter().map(|(_, _, timestamp)| *timestamp).max().unwrap_or(first);
+    let first = events
+        .iter()
+        .map(|(_, _, timestamp, _, _)| *timestamp)
+        .min()
+        .unwrap_or(0);
+    let last = events
+        .iter()
+        .map(|(_, _, timestamp, _, _)| *timestamp)
+        .max()
+        .unwrap_or(first);
     let span = (last - first) as f64;
-    for (unit_id, event_type, timestamp) in events {
+    for (unit_id, event_type, timestamp, target_factor, mutation_hardening_factor) in events {
         if let Some(summary) = summaries.get_mut(&unit_id) {
             let t = if span == 0.0 {
                 1.0
@@ -1934,7 +2030,11 @@ fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSum
                 (timestamp - first) as f64 / span
             };
             let weight = 1.0 / (1.0 + ((-12.0 * t) + 12.0).exp());
-            let multiplier = if event_type == "FIX" { 4.0 } else { 1.0 };
+            let multiplier = if event_type == "FIX" {
+                4.0 * target_factor * mutation_hardening_factor
+            } else {
+                1.0
+            };
             summary.risk_score += multiplier * weight;
         }
     }

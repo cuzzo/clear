@@ -175,7 +175,7 @@ pub struct UiFinding {
     pub span: Option<[u32; 4]>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiSourceSymbol {
     pub kind: String,
     pub name: String,
@@ -184,6 +184,14 @@ pub struct UiSourceSymbol {
     pub effect_known: bool,
     pub impure: bool,
     pub effect_summary: Vec<String>,
+    pub hotspot_score: f64,
+    pub hotspot_level: String,
+    pub sarif_findings: i64,
+    pub dark_arms: i64,
+    pub hazards: i64,
+    pub unverified_hazards: i64,
+    pub bug_weight: f64,
+    pub semantic_churn: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -237,6 +245,23 @@ pub struct UiLineAnnotation {
     pub semantic_churn_events: i64,
     pub bug_weight: f64,
     pub bug_events: Vec<UiBugEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiUnitHotspot {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub start_line: u32,
+    pub score: f64,
+    pub risk_score: f64,
+    pub sarif_findings: i64,
+    pub dark_arms: i64,
+    pub hazards: i64,
+    pub fixes: i64,
+    pub changes: i64,
+    pub mutant_killed_tests: i64,
+    pub distinct_tests: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +319,7 @@ pub struct UiDashboard {
     pub multi_type_covered_percent: f64,
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
+    pub top_units: Vec<UiUnitHotspot>,
     pub warnings: Vec<UiWarning>,
 }
 
@@ -444,6 +470,7 @@ fn ui_router(state: UiServerState) -> Router {
         .route("/api/dashboard", get(api_dashboard_handler))
         .route("/api/source", get(api_source_handler))
         .route("/assets/*path", get(asset_handler))
+        .route("/favicon.ico", get(favicon_handler))
         .with_state(state)
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CACHE_CONTROL,
@@ -908,6 +935,9 @@ pub fn dashboard_summary_for_directory_with_scope(
     let warning_start = Instant::now();
     let warnings = warnings_for_directory(storage, &directory, scope)?;
     profile_log("dashboard.warnings", warning_start);
+    let unit_start = Instant::now();
+    let top_units = top_unit_hotspots(storage, &directory, scope)?;
+    profile_log("dashboard.top_units", unit_start);
 
     let files_with_coverage = files
         .iter()
@@ -962,6 +992,7 @@ pub fn dashboard_summary_for_directory_with_scope(
         multi_type_covered_percent: percent(line_counts.multi_type, line_counts.covered),
         files_with_coverage,
         top_hazard_files,
+        top_units,
         warnings,
     };
     profile_log("dashboard.total", total_start);
@@ -1214,6 +1245,125 @@ fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
         });
     }
     warnings
+}
+
+#[derive(Clone, Default)]
+struct UnitSignalCounts {
+    sarif_findings: i64,
+    dark_arms: i64,
+    hazards: i64,
+}
+
+fn top_unit_hotspots(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiUnitHotspot>> {
+    let prefixes = if directory.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("{}/", normalize_directory(directory))]
+    };
+    let mut summaries = storage.top_units(2_000, &prefixes)?;
+    summaries.retain(|summary| {
+        scope.allows(&summary.current_path) && path_in_directory(&summary.current_path, directory)
+    });
+    let signals = unit_signal_counts(storage)?;
+    let spans = storage
+        .current_unit_spans()?
+        .into_iter()
+        .map(|span| (span.id, span.start_line))
+        .collect::<HashMap<_, _>>();
+    let mut units = summaries
+        .into_iter()
+        .map(|summary| {
+            let signal = signals.get(&summary.id).cloned().unwrap_or_default();
+            let start_line = spans.get(&summary.id).copied().unwrap_or(1);
+            let score = unit_hotspot_score(&summary, &signal);
+            UiUnitHotspot {
+                path: summary.current_path,
+                name: summary.name,
+                kind: summary.kind,
+                start_line,
+                score,
+                risk_score: summary.risk_score,
+                sarif_findings: signal.sarif_findings,
+                dark_arms: signal.dark_arms,
+                hazards: signal.hazards,
+                fixes: summary.fixes,
+                changes: summary.changes,
+                mutant_killed_tests: summary.current_mutant_killed_tests,
+                distinct_tests: summary.current_distinct_tests,
+            }
+        })
+        .filter(|unit| unit.score > 0.0)
+        .collect::<Vec<_>>();
+    units.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.hazards.cmp(&left.hazards))
+            .then_with(|| right.sarif_findings.cmp(&left.sarif_findings))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    units.truncate(12);
+    Ok(units)
+}
+
+fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCounts>> {
+    let mut counts = HashMap::<String, UnitSignalCounts>::new();
+    {
+        let mut stmt = storage.connection().prepare(
+            r#"
+            SELECT unit_id,
+                   COUNT(*) AS sarif_findings,
+                   SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
+            FROM sarif_findings
+            WHERE unit_id IS NOT NULL
+            GROUP BY unit_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (unit_id, sarif_findings, dark_arms) = row?;
+            let entry = counts.entry(unit_id).or_default();
+            entry.sarif_findings = sarif_findings;
+            entry.dark_arms = dark_arms;
+        }
+    }
+    {
+        let mut stmt = storage.connection().prepare(
+            r#"
+            SELECT unit_id, COUNT(*) AS hazards
+            FROM unit_hazards
+            WHERE is_active = 1
+            GROUP BY unit_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (unit_id, hazards) = row?;
+            counts.entry(unit_id).or_default().hazards = hazards;
+        }
+    }
+    Ok(counts)
+}
+
+fn unit_hotspot_score(summary: &crate::storage::UnitSummary, signal: &UnitSignalCounts) -> f64 {
+    summary.risk_score
+        + signal.sarif_findings as f64 * 0.35
+        + signal.dark_arms as f64 * 1.2
+        + signal.hazards as f64 * 2.0
 }
 
 fn dashboard_line_counts_from_files(files: &[UiFile], directory: &str) -> DashboardLineCounts {
@@ -1629,6 +1779,7 @@ pub fn source_payload_with_overlays(
     let effects = espalier_function_effects(storage, path)?;
     apply_espalier_symbol_effects(&mut symbols, &effects);
     apply_espalier_effect_spans(&lines, &mut annotations, &effects);
+    apply_symbol_hotspots(&mut symbols, &annotations);
     profile_log("source.espalier_effects", effects_start);
     let blame_start = Instant::now();
     let blame = source_blame(repo, path, commit, lines.len()).unwrap_or_default();
@@ -1759,15 +1910,28 @@ async fn api_source_handler(
 
 async fn asset_handler(AxumPath(path): AxumPath<String>) -> Response<Body> {
     let path = path.trim_start_matches('/');
-    let Some(asset) = EmbeddedUi::get(path) else {
+    let embedded_path = embedded_asset_path(path);
+    let Some(asset) = EmbeddedUi::get(&embedded_path) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, asset_content_type(path))
+        .header(header::CONTENT_TYPE, asset_content_type(&embedded_path))
         .header(header::CACHE_CONTROL, "public, max-age=3600")
         .body(Body::from(asset.data.into_owned()))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn embedded_asset_path(path: &str) -> String {
+    format!("assets/{}", path.trim_start_matches('/'))
+}
+
+async fn favicon_handler() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .body(Body::empty())
+        .unwrap_or_else(|_| StatusCode::NO_CONTENT.into_response())
 }
 
 fn asset_content_type(path: &str) -> &'static str {
@@ -1869,16 +2033,33 @@ fn source_symbols_from_current_file(file: &BlobFile) -> Vec<UiSourceSymbol> {
     extractor
         .extract_units(file)
         .into_iter()
-        .map(|unit| UiSourceSymbol {
-            kind: unit.kind.as_str().to_string(),
-            name: unit.name,
-            start_line: unit.start_line,
-            end_line: unit.end_line,
-            effect_known: false,
-            impure: false,
-            effect_summary: Vec::new(),
-        })
+        .map(|unit| empty_source_symbol(unit.kind.as_str(), unit.name, unit.start_line, unit.end_line))
         .collect()
+}
+
+fn empty_source_symbol(
+    kind: impl Into<String>,
+    name: impl Into<String>,
+    start_line: u32,
+    end_line: u32,
+) -> UiSourceSymbol {
+    UiSourceSymbol {
+        kind: kind.into(),
+        name: name.into(),
+        start_line,
+        end_line,
+        effect_known: false,
+        impure: false,
+        effect_summary: Vec::new(),
+        hotspot_score: 0.0,
+        hotspot_level: "green".to_string(),
+        sarif_findings: 0,
+        dark_arms: 0,
+        hazards: 0,
+        unverified_hazards: 0,
+        bug_weight: 0.0,
+        semantic_churn: 0.0,
+    }
 }
 
 fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourceSymbol>> {
@@ -1906,15 +2087,12 @@ fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourc
         "#,
     )?;
     let rows = stmt.query_map(params![path], |row| {
-        Ok(UiSourceSymbol {
-            kind: row.get(0)?,
-            name: row.get(1)?,
-            start_line: row.get(2)?,
-            end_line: row.get(3)?,
-            effect_known: false,
-            impure: false,
-            effect_summary: Vec::new(),
-        })
+        Ok(empty_source_symbol(
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, u32>(2)?,
+            row.get::<_, u32>(3)?,
+        ))
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
@@ -2164,6 +2342,64 @@ fn apply_espalier_symbol_effects(
         symbol.effect_known = effect.effect_known();
         symbol.impure = effect.impure();
         symbol.effect_summary = effect.summary();
+    }
+}
+
+fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAnnotation]) {
+    for symbol in symbols {
+        let end_line = symbol.end_line.max(symbol.start_line);
+        let mut sarif_findings = 0_i64;
+        let mut dark_arms = 0_i64;
+        let mut hazards = 0_i64;
+        let mut unverified_hazards = 0_i64;
+        let mut bug_weight = 0.0_f64;
+        let mut semantic_churn = 0.0_f64;
+
+        for annotation in annotations
+            .iter()
+            .filter(|annotation| annotation.line >= symbol.start_line && annotation.line <= end_line)
+        {
+            sarif_findings += annotation.findings.len() as i64;
+            dark_arms += annotation.dark_arms.len().max(annotation.dark_arm_spans.len()) as i64;
+            hazards += annotation.hazards.len() as i64;
+            unverified_hazards += annotation
+                .hazards
+                .iter()
+                .filter(|hazard| !hazard.verified)
+                .count() as i64;
+            bug_weight += annotation.bug_weight;
+            semantic_churn += annotation.semantic_churn;
+        }
+
+        let line_count = (end_line.saturating_sub(symbol.start_line) + 1).max(1) as f64;
+        let density = (sarif_findings as f64 * 0.45
+            + dark_arms as f64 * 1.2
+            + hazards as f64 * 1.6
+            + unverified_hazards as f64 * 1.5)
+            / line_count.sqrt();
+        let history = bug_weight * 3.0 + semantic_churn.min(line_count) / line_count.max(1.0);
+        let score = density + history;
+
+        symbol.sarif_findings = sarif_findings;
+        symbol.dark_arms = dark_arms;
+        symbol.hazards = hazards;
+        symbol.unverified_hazards = unverified_hazards;
+        symbol.bug_weight = bug_weight.min(1.0);
+        symbol.semantic_churn = semantic_churn.min(1.0);
+        symbol.hotspot_score = score;
+        symbol.hotspot_level = hotspot_level(score).to_string();
+    }
+}
+
+fn hotspot_level(score: f64) -> &'static str {
+    if score >= 5.0 {
+        "red"
+    } else if score >= 2.5 {
+        "orange"
+    } else if score >= 0.25 {
+        "yellow"
+    } else {
+        "green"
     }
 }
 
@@ -2739,7 +2975,72 @@ fn apply_semantic_churn(
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
         r#"
-        WITH latest_events AS (
+        WITH fix_commit_raw AS (
+          SELECT commit_hash,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN unit_id END) AS code_units,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN path END) AS code_files,
+                 COALESCE(SUM(CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN ABS(lines_added) + ABS(lines_removed) ELSE 0 END), 0) AS code_lines
+          FROM events
+          WHERE event_type = 'FIX'
+            AND semantic_change = 1
+          GROUP BY commit_hash
+        ),
+        fix_commit_profiles AS (
+          SELECT commit_hash,
+                 CASE
+                   WHEN code_units BETWEEN 1 AND 3
+                    AND code_files BETWEEN 1 AND 3
+                    AND code_lines <= 80
+                   THEN 1.0
+                   WHEN code_units BETWEEN 1 AND 8
+                    AND code_files BETWEEN 1 AND 5
+                    AND code_lines <= 200
+                   THEN 0.65
+                   WHEN code_units BETWEEN 1 AND 20
+                    AND code_files BETWEEN 1 AND 10
+                    AND code_lines <= 500
+                   THEN 0.30
+                   ELSE 0.10
+                 END AS target_factor
+          FROM fix_commit_raw
+        ),
+        latest_events AS (
           SELECT e.*
           FROM events e
           WHERE e.id = (
@@ -2785,11 +3086,30 @@ fn apply_semantic_churn(
                      AND q.metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
                  ), 1.0)
                  ELSE 1.0
-               END AS protection_factor
+               END AS protection_factor,
+               CASE WHEN e.event_type = 'FIX'
+                    THEN COALESCE(fp.target_factor, 0.10)
+                    ELSE 1.0
+               END AS target_factor,
+               CASE
+                 WHEN e.event_type = 'FIX'
+                  AND COALESCE(fp.target_factor, 0.10) >= 0.65
+                  AND EXISTS (
+                    SELECT 1
+                    FROM test_exposure_events t
+                    WHERE t.unit_id = e.unit_id
+                      AND t.timestamp > e.timestamp
+                      AND t.is_mutation_killed = 1
+                    LIMIT 1
+                  )
+                 THEN 0.25
+                 ELSE 1.0
+               END AS mutation_hardening_factor
         FROM logical_units u
         LEFT JOIN latest_events le ON le.unit_id = u.id
         JOIN events e ON e.unit_id = u.id
         LEFT JOIN metadata m ON m.commit_hash = e.commit_hash
+        LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
         WHERE COALESCE(le.path, u.original_path) = ?1
           AND e.semantic_change = 1
           AND e.event_type IN ('CHANGE', 'FIX')
@@ -2814,6 +3134,8 @@ fn apply_semantic_churn(
             row.get::<_, String>(8)?,
             row.get::<_, String>(9)?,
             row.get::<_, f64>(10)?,
+            row.get::<_, f64>(11)?,
+            row.get::<_, f64>(12)?,
         ))
     })?;
 
@@ -2830,10 +3152,15 @@ fn apply_semantic_churn(
             name,
             message,
             protection_factor,
+            target_factor,
+            mutation_hardening_factor,
         ) = row?;
         let churn_weight = fix_cache_decay(timestamp, first_timestamp, last_timestamp);
         let fix_weight = if event_type == "FIX" {
-            fix_cache_decay(timestamp, fix_first_timestamp, fix_last_timestamp) * protection_factor
+            fix_cache_decay(timestamp, fix_first_timestamp, fix_last_timestamp)
+                * protection_factor
+                * target_factor
+                * mutation_hardening_factor
         } else {
             churn_weight
         };
@@ -3679,20 +4006,45 @@ fn render_source_outline(payload: &UiSourcePayload) -> String {
         } else {
             out.push_str("unknown-symbol");
         }
-        out.push_str("\"><span class=\"outline-kind\">");
-        out.push_str(&html_escape(&symbol.kind));
-        out.push_str("</span><span class=\"outline-effect\">");
+        out.push_str(" hotspot-");
+        out.push_str(&html_escape(&symbol.hotspot_level));
+        out.push_str("\"><span class=\"outline-rail\"><span class=\"outline-impure\" aria-label=\"");
+        out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
+        out.push_str("\">");
         if symbol.impure {
             out.push_str("<i class=\"fa-solid fa-triangle-exclamation\" aria-hidden=\"true\"></i>");
         }
+        out.push_str("</span><span class=\"outline-hotspot\" title=\"");
+        out.push_str(&html_escape(&outline_hotspot_title(symbol)));
+        out.push_str("\"></span></span><span class=\"outline-kind\">");
+        out.push_str(&html_escape(&outline_kind_label(symbol)));
         out.push_str("</span><span class=\"outline-name\">");
         out.push_str(&html_escape(&symbol.name));
-        out.push_str("</span><span class=\"outline-line\">");
-        out.push_str(&symbol.start_line.to_string());
         out.push_str("</span></a>");
     }
     out.push_str("</nav>");
     out
+}
+
+fn outline_kind_label(symbol: &UiSourceSymbol) -> String {
+    unit_kind_label(&symbol.kind, &symbol.name)
+}
+
+fn is_class_method_name(name: &str) -> bool {
+    name.contains('.') || name.contains("::") || name.starts_with("self.")
+}
+
+fn outline_hotspot_title(symbol: &UiSourceSymbol) -> String {
+    format!(
+        "hotspot {:.2}: {} SARIF, {} partial, {} hazards ({} unverified), bug {:.2}, churn {:.2}",
+        symbol.hotspot_score,
+        symbol.sarif_findings,
+        symbol.dark_arms,
+        symbol.hazards,
+        symbol.unverified_hazards,
+        symbol.bug_weight,
+        symbol.semantic_churn
+    )
 }
 
 fn outline_effect_title(symbol: &UiSourceSymbol) -> String {
@@ -3946,6 +4298,10 @@ fn render_dashboard(
     ));
     out.push_str("</div>");
     out.push_str(&render_warning_banner(&dashboard.warnings));
+
+    out.push_str("<section class=\"dashboard-section\"><h2>Highest Risk Units</h2>");
+    out.push_str(&render_unit_hotspots(&dashboard.top_units, filter));
+    out.push_str("</section>");
 
     out.push_str("<section class=\"dashboard-section\"><h2>Code tree</h2>");
     out.push_str(&render_code_tree_table(
@@ -4231,6 +4587,52 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         file.mutant_killed_covered_lines,
         file.line_coverage,
     )
+}
+
+fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
+    if units.is_empty() {
+        return "<p class=\"empty-inline\">No function or class hotspots to show.</p>".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str("<div class=\"unit-hotspots\">");
+    for unit in units {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(&page_href(&unit.path, None, filter)));
+        out.push_str("#L");
+        out.push_str(&unit.start_line.to_string());
+        out.push_str("\"><span class=\"unit-hotspot-kind\">");
+        out.push_str(&html_escape(&unit_kind_label(&unit.kind, &unit.name)));
+        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
+        out.push_str(&html_escape(&unit.name));
+        out.push_str("</strong><small>");
+        out.push_str(&html_escape(&unit.path));
+        out.push_str("</small><small>");
+        out.push_str(&format!(
+            "{} SARIF, {} partial, {} hazards, {} fixes, {} tests, {} killed",
+            unit.sarif_findings,
+            unit.dark_arms,
+            unit.hazards,
+            unit.fixes,
+            unit.distinct_tests,
+            unit.mutant_killed_tests
+        ));
+        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
+        out.push_str(&format!("{:.1}", unit.score));
+        out.push_str("</strong></a>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn unit_kind_label(kind: &str, name: &str) -> String {
+    match kind {
+        "module" => "mod".to_string(),
+        "class" => "class".to_string(),
+        "function" if is_class_method_name(name) => "meth".to_string(),
+        "function" => "func".to_string(),
+        other => other.chars().take(5).collect(),
+    }
 }
 
 fn render_coverage_table_row(
@@ -6496,15 +6898,7 @@ mod tests {
             commit: None,
             lines: vec!["def run".into(), "  maybe_work".into(), "end".into()],
             versions: Vec::new(),
-            symbols: vec![UiSourceSymbol {
-                kind: "function".into(),
-                name: "run".into(),
-                start_line: 1,
-                end_line: 3,
-                effect_known: false,
-                impure: false,
-                effect_summary: Vec::new(),
-            }],
+            symbols: vec![empty_source_symbol("function", "run", 1, 3)],
             blame: vec![UiLineBlame {
                 line: 2,
                 commit_hash: "1234567890abcdef".to_string(),
@@ -6773,9 +7167,18 @@ mod tests {
         assert!(html.contains("<option value=\"src/demo.rb\"></option>"));
         assert!(html.contains("<nav class=\"outline\""));
         assert!(html.contains("href=\"#L1\""));
-        assert!(html.contains("<span class=\"outline-kind\">function</span>"));
+        assert!(html.contains("<span class=\"outline-kind\">func</span>"));
+        assert!(html.contains("class=\"outline-hotspot\""));
         assert!(html.contains("<span class=\"outline-name\">run</span>"));
         assert!(html.contains("class=\"coverage-bar\""));
+    }
+
+    #[test]
+    fn embedded_asset_paths_resolve_css_and_js() {
+        assert_eq!(embedded_asset_path("app.css"), "assets/app.css");
+        assert_eq!(embedded_asset_path("/app.js"), "assets/app.js");
+        assert!(EmbeddedUi::get(&embedded_asset_path("app.css")).is_some());
+        assert!(EmbeddedUi::get(&embedded_asset_path("app.js")).is_some());
     }
 
     #[test]
