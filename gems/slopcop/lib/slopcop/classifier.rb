@@ -29,7 +29,7 @@ module SlopCop
     # project supplies its external/boundary method names via
     # `ffi_boundary:` (CLEAR passes its set from the CLI). Empty here
     # by design.
-    Arm = Struct.new(:file, :defn, :line, :category, :source, keyword_init: true)
+    Arm = Struct.new(:file, :defn, :line, :span, :decision_span, :category, :source, keyword_init: true)
 
     module_function
 
@@ -91,6 +91,7 @@ module SlopCop
         next if cat.nil?
 
         Arm.new(file: abspath, defn: arm.function, line: arm.line,
+                span: arm.span, decision_span: arm.decision_span,
                 category: cat, source: :tree_sitter_static)
       end
     rescue LoadError, StandardError
@@ -128,6 +129,7 @@ module SlopCop
         next if cat.nil?
 
         Arm.new(file: abspath, defn: arm.function, line: arm.line,
+                span: arm.span, decision_span: arm.decision_span,
                 category: cat, source: arm_cov.source)
       end
     rescue LoadError, StandardError

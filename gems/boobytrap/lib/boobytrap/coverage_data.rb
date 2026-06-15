@@ -238,23 +238,45 @@ module Boobytrap
     end
 
     def matching_branch_arms(branch_arms, parent, tuple)
-      candidates = branch_arms.select { |arm| same_span?(arm.span, tuple[:span]) }
+      parent_arms = branch_arms_for_parent(branch_arms, parent)
+      candidates = parent_arms
+      candidates = candidates.select { |arm| same_span?(arm.span, tuple[:span]) }
       if candidates.empty?
-        candidates = branch_arms.select { |arm| span_contains?(arm.span, tuple[:span]) }
+        candidates = parent_arms.select { |arm| span_contains?(arm.span, tuple[:span]) }
       end
       if candidates.empty?
-        candidates = branch_arms.select do |arm|
+        candidates = parent_arms.select do |arm|
           arm.line.to_i == tuple[:span][0] && arm.member.to_s == tuple[:kind].to_s
         end
       end
-      if parent && candidates.size > 1
-        decision_span = parent[:span]
-        narrowed = candidates.select do |arm|
-          same_span?(arm.decision_span, decision_span) || arm.decision_line.to_i == decision_span[0]
-        end
-        candidates = narrowed unless narrowed.empty?
-      end
+      candidates = candidates.select { |arm| branch_parent_matches_decision?(arm, parent) } if parent
       candidates
+    end
+
+    def branch_arms_for_parent(branch_arms, parent)
+      return branch_arms unless parent
+
+      branch_arms.select { |arm| branch_kind_compatible?(arm.kind, parent[:kind]) }
+    end
+
+    def branch_kind_compatible?(arm_kind, parent_kind)
+      arm_kind = arm_kind.to_s
+      parent_kind = parent_kind.to_s
+      case arm_kind
+      when "if"
+        %w[if unless].include?(parent_kind)
+      when "case"
+        parent_kind == "case"
+      when "loop"
+        %w[while until for].include?(parent_kind)
+      else
+        arm_kind == parent_kind
+      end
+    end
+
+    def branch_parent_matches_decision?(arm, parent)
+      decision_span = parent[:span]
+      same_span?(arm.decision_span, decision_span)
     end
 
     def coverage_tuple(value)

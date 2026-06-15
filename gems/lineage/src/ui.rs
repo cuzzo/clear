@@ -88,6 +88,12 @@ pub struct UiWarning {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiDarkArm {
+    pub label: String,
+    pub span: Option<[u32; 4]>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiLineAnnotation {
     pub line: u32,
@@ -101,6 +107,7 @@ pub struct UiLineAnnotation {
     pub line_coverage: Option<f64>,
     pub mutant_coverage: Option<f64>,
     pub dark_arms: Vec<String>,
+    pub dark_arm_spans: Vec<UiDarkArm>,
     pub hazards: Vec<UiHazard>,
 }
 
@@ -163,7 +170,7 @@ struct WarningUnit {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct UiOverlays {
-    dark_arms: HashMap<String, BTreeMap<u32, Vec<String>>>,
+    dark_arms: HashMap<String, BTreeMap<u32, Vec<UiDarkArm>>>,
 }
 
 #[derive(Default)]
@@ -178,6 +185,7 @@ struct AnnotationBuilder {
     line_coverage: Option<f64>,
     mutant_coverage: Option<f64>,
     dark_arms: Vec<String>,
+    dark_arm_spans: Vec<UiDarkArm>,
     hazards: Vec<UiHazard>,
 }
 
@@ -1497,6 +1505,7 @@ pub fn line_annotations(
             line_coverage: builder.line_coverage,
             mutant_coverage: builder.mutant_coverage,
             dark_arms: builder.dark_arms,
+            dark_arm_spans: builder.dark_arm_spans,
             hazards: builder.hazards,
         })
         .collect();
@@ -1567,6 +1576,7 @@ fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
         line_coverage: None,
         mutant_coverage: None,
         dark_arms: Vec::new(),
+        dark_arm_spans: Vec::new(),
         hazards: Vec::new(),
     }
 }
@@ -1875,8 +1885,20 @@ fn apply_overlays(
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
 ) {
     if let Some(by_line) = overlays.dark_arms.get(path) {
-        for (line, labels) in by_line {
-            lines.entry(*line).or_default().dark_arms.extend(labels.clone());
+        for (line, arms) in by_line {
+            for arm in arms {
+                let (first_line, last_line) = arm
+                    .span
+                    .map(|span| (span[0], span[2].max(span[0])))
+                    .unwrap_or((*line, *line));
+                for target_line in first_line..=last_line {
+                    let entry = lines.entry(target_line).or_default();
+                    if target_line == *line {
+                        entry.dark_arms.push(arm.label.clone());
+                    }
+                    entry.dark_arm_spans.push(arm.clone());
+                }
+            }
         }
     }
 }
@@ -1900,7 +1922,10 @@ fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
                     .or_default()
                     .entry(line)
                     .or_default()
-                    .push(label);
+                    .push(UiDarkArm {
+                        label,
+                        span: span_field(value, &["arm_span", "span"]),
+                    });
             }
             for child in map.values() {
                 collect_overlay_value(child, overlays);
@@ -1931,6 +1956,22 @@ fn u32_field(value: &Value, keys: &[&str]) -> Option<u32> {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(Value::as_u64))
         .and_then(|number| u32::try_from(number).ok())
+}
+
+fn span_field(value: &Value, keys: &[&str]) -> Option<[u32; 4]> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_array))
+        .and_then(|items| {
+            let values = items
+                .iter()
+                .map(Value::as_u64)
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .map(u32::try_from)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .ok()?;
+            values.try_into().ok()
+        })
 }
 
 fn profile_enabled() -> bool {
@@ -2559,7 +2600,7 @@ fn render_code_line(
     if annotation.map(|a| a.mutant_tested).unwrap_or(false) {
         classes.push("mutant");
     }
-    if annotation.map(|a| !a.dark_arms.is_empty()).unwrap_or(false) {
+    if annotation.map(annotation_has_dark_arms).unwrap_or(false) {
         classes.push("dark-arm");
     }
     if let Some(annotation) = annotation {
@@ -2607,7 +2648,9 @@ fn render_code_line(
     out.push_str("</span><span class=\"ln\">");
     out.push_str(&line_no.to_string());
     out.push_str("</span><pre>");
-    out.push_str(&highlight_source_line(path, source));
+    out.push_str(&highlight_source_line_with_dark_arms(
+        path, line_no, source, annotation,
+    ));
     out.push_str("</pre></div>");
     out
 }
@@ -2629,8 +2672,9 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     if let Some(hits) = annotation.line_hits {
         rows.push(format!("line hits {hits}"));
     }
-    if !annotation.dark_arms.is_empty() {
-        rows.push(format!("dark arms: {}", annotation.dark_arms.join(", ")));
+    let dark_arm_labels = dark_arm_labels(annotation);
+    if !dark_arm_labels.is_empty() {
+        rows.push(format!("dark arms: {}", dark_arm_labels.join(", ")));
     }
     if let Some(value) = annotation.line_coverage {
         rows.push(format!("unit line coverage {:.1}%", value));
@@ -2654,9 +2698,22 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || annotation.mutant_tested
         || !annotation.test_types.is_empty()
         || !annotation.dark_arms.is_empty()
+        || !annotation.dark_arm_spans.is_empty()
         || annotation.line_hits.is_some()
         || annotation.line_coverage.is_some()
         || annotation.mutant_coverage.is_some()
+}
+
+fn annotation_has_dark_arms(annotation: &UiLineAnnotation) -> bool {
+    !annotation.dark_arms.is_empty() || !annotation.dark_arm_spans.is_empty()
+}
+
+fn dark_arm_labels(annotation: &UiLineAnnotation) -> Vec<String> {
+    let mut labels = annotation.dark_arms.clone();
+    labels.extend(annotation.dark_arm_spans.iter().map(|arm| arm.label.clone()));
+    labels.sort();
+    labels.dedup();
+    labels
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2671,6 +2728,111 @@ enum SyntaxLanguage {
     Zig,
     C,
     Plain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InlineDarkArmRange {
+    start: usize,
+    end: usize,
+    labels: Vec<String>,
+}
+
+fn highlight_source_line_with_dark_arms(
+    path: &str,
+    line_no: u32,
+    source: &str,
+    annotation: Option<&UiLineAnnotation>,
+) -> String {
+    let Some(annotation) = annotation else {
+        return highlight_source_line(path, source);
+    };
+    let ranges = inline_dark_arm_ranges(line_no, source, annotation);
+    if ranges.is_empty() {
+        return highlight_source_line(path, source);
+    }
+
+    let mut out = String::new();
+    let mut cursor = 0;
+    for range in ranges {
+        if range.start > cursor {
+            out.push_str(&highlight_source_line(path, &source[cursor..range.start]));
+        }
+        out.push_str("<span class=\"dark-arm-span\" title=\"");
+        out.push_str(&html_escape(&range.labels.join("\n")));
+        out.push_str("\">");
+        out.push_str(&highlight_source_line(path, &source[range.start..range.end]));
+        out.push_str("</span>");
+        cursor = range.end;
+    }
+    if cursor < source.len() {
+        out.push_str(&highlight_source_line(path, &source[cursor..]));
+    }
+    out
+}
+
+fn inline_dark_arm_ranges(
+    line_no: u32,
+    source: &str,
+    annotation: &UiLineAnnotation,
+) -> Vec<InlineDarkArmRange> {
+    let mut ranges = annotation
+        .dark_arm_spans
+        .iter()
+        .filter_map(|arm| {
+            let span = arm.span?;
+            dark_arm_line_range(line_no, source, span).map(|(start, end)| InlineDarkArmRange {
+                start,
+                end,
+                labels: vec![arm.label.clone()],
+            })
+        })
+        .collect::<Vec<_>>();
+    if ranges.is_empty() {
+        return ranges;
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged = Vec::<InlineDarkArmRange>::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut() {
+            if range.start <= last.end {
+                last.end = last.end.max(range.end);
+                last.labels.extend(range.labels);
+                last.labels.sort();
+                last.labels.dedup();
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    merged
+}
+
+fn dark_arm_line_range(line_no: u32, source: &str, span: [u32; 4]) -> Option<(usize, usize)> {
+    let [start_line, start_col, end_line, end_col] = span;
+    if line_no < start_line || line_no > end_line {
+        return None;
+    }
+    let start = if line_no == start_line {
+        start_col as usize
+    } else {
+        0
+    };
+    let end = if line_no == end_line {
+        end_col as usize
+    } else {
+        source.len()
+    };
+    let start = clamp_to_char_boundary(source, start.min(source.len()));
+    let end = clamp_to_char_boundary(source, end.min(source.len()));
+    (end > start).then_some((start, end))
+}
+
+fn clamp_to_char_boundary(source: &str, mut index: usize) -> usize {
+    while index > 0 && !source.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn highlight_source_line(path: &str, source: &str) -> String {
@@ -3033,6 +3195,8 @@ const STYLE: &str = r#"
     --covered: rgba(34, 197, 94, 0.08);
     --mutant: rgba(22, 101, 52, 0.24);
     --hazard: #b42318;
+    --dark-arm: #374151;
+    --dark-arm-bg: rgba(31, 41, 55, 0.22);
   }
   * { box-sizing: border-box; }
   body {
@@ -3240,7 +3404,6 @@ const STYLE: &str = r#"
   }
   .row.covered { background: var(--covered); }
   .row.mutant { background: var(--mutant); }
-  .row.dark-arm { background: rgba(245, 158, 11, 0.10); }
   .row.hazard-open { border-left-color: var(--hazard); }
   .row.hazard-verified { border-left-color: #8b95a5; }
   .ln { color: #8b95a5; text-align: right; padding-right: 10px; user-select: none; }
@@ -3259,6 +3422,15 @@ const STYLE: &str = r#"
     color: var(--muted);
     display: inline;
     font-size: 11px;
+  }
+  .row.dark-arm .line-meta summary {
+    color: var(--dark-arm);
+    font-weight: 700;
+  }
+  .dark-arm-span {
+    background: var(--dark-arm-bg);
+    box-shadow: inset 0 -1px 0 rgba(31, 41, 55, 0.48);
+    border-radius: 2px;
   }
   .line-meta div {
     position: absolute;
@@ -3928,6 +4100,7 @@ flags:
             line_coverage: None,
             mutant_coverage: None,
             dark_arms: Vec::new(),
+            dark_arm_spans: Vec::new(),
             hazards: Vec::new(),
         }];
         let lines = vec![
@@ -3970,6 +4143,57 @@ flags:
 
         assert!(html.contains("<span class=\"tok-keyword\">def</span>"));
         assert!(html.contains("<span class=\"tok-comment\"># hello</span>"));
+    }
+
+    #[test]
+    fn dark_arm_highlighter_wraps_only_the_arm_span() {
+        let annotation = UiLineAnnotation {
+            line: 1,
+            covered: true,
+            mutant_tested: false,
+            test_types: Vec::new(),
+            distinct_tests: 0,
+            mutant_verified_tests: 0,
+            mutant_killed_tests: 0,
+            line_hits: Some(1),
+            line_coverage: None,
+            mutant_coverage: None,
+            dark_arms: vec!["dark arm: else".to_string()],
+            dark_arm_spans: vec![UiDarkArm {
+                label: "dark arm: else".to_string(),
+                span: Some([1, 4, 1, 8]),
+            }],
+            hazards: Vec::new(),
+        };
+
+        let html =
+            highlight_source_line_with_dark_arms("src/demo.rb", 1, "    else", Some(&annotation));
+
+        assert!(html.starts_with("    <span class=\"dark-arm-span\""));
+        assert!(html.contains("<span class=\"tok-keyword\">else</span>"));
+        assert_eq!(html.matches("dark-arm-span").count(), 1);
+    }
+
+    #[test]
+    fn overlay_attaches_multiline_dark_arm_spans_to_each_covered_line() {
+        let mut overlays = UiOverlays::default();
+        collect_overlay_value(
+            &serde_json::json!({
+                "path": "src/demo.rb",
+                "line": 1,
+                "category": "dark arm: else",
+                "arm_span": [1, 4, 2, 3]
+            }),
+            &mut overlays,
+        );
+        let mut lines = BTreeMap::new();
+
+        apply_overlays("src/demo.rb", &overlays, &mut lines);
+
+        assert_eq!(lines.get(&1).unwrap().dark_arms, vec!["dark arm: else"]);
+        assert_eq!(lines.get(&1).unwrap().dark_arm_spans.len(), 1);
+        assert!(lines.get(&2).unwrap().dark_arms.is_empty());
+        assert_eq!(lines.get(&2).unwrap().dark_arm_spans.len(), 1);
     }
 
     #[test]

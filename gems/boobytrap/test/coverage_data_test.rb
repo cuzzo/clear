@@ -52,6 +52,53 @@ class CoverageDataTest < Minitest::Test
     end
   end
 
+  def test_simplecov_nested_branch_does_not_mark_enclosing_arm_dark
+    arm = Struct.new(:kind, :member, :line, :span, :decision_line, :decision_span, keyword_init: true)
+    coverage = Boobytrap::CoverageData::FileCoverage.new(
+      file: "/repo/src/a.rb",
+      source_path: "src/a.rb",
+      language: "ruby",
+      lines: [1, 25, 25],
+      branches: {
+        "[:if, 1, 1, 0, 4, 3]" => {
+          "[:then, 2, 1, 4, 1, 10]" => 4,
+          "[:else, 3, 2, 2, 3, 12]" => 25
+        },
+        "[:if, 4, 2, 20, 2, 38]" => {
+          "[:then, 5, 2, 20, 2, 30]" => 25,
+          "[:else, 6, 2, 33, 2, 38]" => 0
+        }
+      },
+      branch_arms: [],
+      format: :simplecov
+    )
+    branch_arms = [
+      arm.new(
+        kind: :if,
+        member: "then",
+        line: 1,
+        span: [1, 4, 1, 10],
+        decision_line: 1,
+        decision_span: [1, 0, 4, 3]
+      ),
+      arm.new(
+        kind: :if,
+        member: "else",
+        line: 2,
+        span: [2, 2, 3, 12],
+        decision_line: 1,
+        decision_span: [1, 0, 4, 3]
+      )
+    ]
+
+    covered = Boobytrap::CoverageData.branch_arm_coverage(coverage, branch_arms)
+    else_coverage = covered.select { |arm_cov| arm_cov.arm.member == "else" }
+
+    assert_equal 1, else_coverage.size
+    assert_equal true, else_coverage.first.covered
+    assert_equal 25, else_coverage.first.hits
+  end
+
   def test_loads_kcov_cobertura_from_directory
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")

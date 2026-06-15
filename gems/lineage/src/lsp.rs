@@ -523,6 +523,7 @@ mod tests {
             line_coverage: None,
             mutant_coverage: None,
             dark_arms: vec!["else".to_string()],
+            dark_arm_spans: Vec::new(),
             hazards: vec![UiHazard {
                 hazard_type: "zig_loom_atomic".to_string(),
                 required_evidence: "loom".to_string(),

@@ -46,11 +46,18 @@ module SlopCop
         "file" => rel,
         "path" => rel,
         "line" => arm.line,
+        "arm_span" => span_array(arm.span),
+        "decision_span" => span_array(arm.decision_span),
         "method" => arm.defn,
         "category" => "dark arm: #{category}",
         "arm_category" => category,
         "source" => arm.source.to_s
       }
+    end
+
+    def span_array(span)
+      values = Array(span).map(&:to_i)
+      values.size == 4 ? values : nil
     end
 
     def repo_relative(path, repo)
