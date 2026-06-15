@@ -172,6 +172,7 @@ pub struct UiFinding {
     pub level: String,
     pub message: String,
     pub category: String,
+    pub tier: Option<i64>,
     pub span: Option<[u32; 4]>,
 }
 
@@ -3437,6 +3438,7 @@ fn apply_sarif_findings(
             level: finding.level.clone(),
             message: finding.message.clone(),
             category: finding.category.clone(),
+            tier: sarif_finding_tier(&finding.properties_json),
             span,
         };
         lines
@@ -3488,6 +3490,19 @@ fn sarif_finding_label(rule_id: &str, category: &str, message: &str) -> String {
     } else {
         message.to_string()
     }
+}
+
+fn sarif_finding_tier(properties_json: &str) -> Option<i64> {
+    let properties = serde_json::from_str::<Value>(properties_json).ok()?;
+    properties
+        .get("tier")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            properties
+                .get("decomplex_finding")
+                .and_then(|finding| finding.get("tier"))
+                .and_then(Value::as_i64)
+        })
 }
 
 fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
@@ -5472,7 +5487,13 @@ fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
     let mut out = String::new();
     out.push_str("<div class=\"line-panel decomplex-panel\">");
     for finding in findings {
-        out.push_str("<p><a href=\"");
+        out.push_str("<p>");
+        if let Some(tier) = finding.tier {
+            out.push_str("<span class=\"decomplex-tier\">tier ");
+            out.push_str(&tier.to_string());
+            out.push_str("</span> ");
+        }
+        out.push_str("<a href=\"");
         out.push_str(&html_escape(&decomplex_doc_url(finding)));
         out.push_str("\" target=\"_blank\" rel=\"noopener\">");
         out.push_str(&html_escape(&finding.rule_id));
@@ -5500,11 +5521,19 @@ fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
 }
 
 fn decomplex_findings(annotation: &UiLineAnnotation) -> Vec<&UiFinding> {
-    annotation
+    let mut findings = annotation
         .findings
         .iter()
         .filter(|finding| is_decomplex_finding(finding))
-        .collect()
+        .collect::<Vec<_>>();
+    findings.sort_by(|left, right| {
+        left.tier
+            .unwrap_or(i64::MAX)
+            .cmp(&right.tier.unwrap_or(i64::MAX))
+            .then_with(|| left.rule_id.cmp(&right.rule_id))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    findings
 }
 
 fn is_decomplex_finding(finding: &UiFinding) -> bool {
@@ -6998,15 +7027,28 @@ mod tests {
                 dark_arms: Vec::new(),
                 dark_arm_spans: Vec::new(),
                 effect_spans: Vec::new(),
-                findings: vec![UiFinding {
-                    source: "first-party".to_string(),
-                    tool: "Decomplex".to_string(),
-                    rule_id: "decomplex.false-simplicity".to_string(),
-                    level: "warning".to_string(),
-                    message: "false simplicity".to_string(),
-                    category: "complexity".to_string(),
-                    span: None,
-                }],
+                findings: vec![
+                    UiFinding {
+                        source: "first-party".to_string(),
+                        tool: "Decomplex".to_string(),
+                        rule_id: "decomplex.false-simplicity".to_string(),
+                        level: "warning".to_string(),
+                        message: "false simplicity".to_string(),
+                        category: "complexity".to_string(),
+                        tier: Some(2),
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "first-party".to_string(),
+                        tool: "Decomplex".to_string(),
+                        rule_id: "decomplex.decision-pressure".to_string(),
+                        level: "warning".to_string(),
+                        message: "decision pressure".to_string(),
+                        category: "complexity".to_string(),
+                        tier: Some(1),
+                        span: None,
+                    },
+                ],
                 hazards: vec![UiHazard {
                     hazard_type: "zig_loom_atomic".to_string(),
                     required_evidence: "loom".to_string(),
@@ -7090,6 +7132,12 @@ mod tests {
         assert!(html.contains("class=\"decomplex-finding line-icon\""));
         assert!(html.contains("class=\"line-panel decomplex-panel\""));
         assert!(html.contains("Decomplex SARIF signals"));
+        assert!(html.contains("tier 1"));
+        assert!(html.contains("tier 2"));
+        assert!(
+            html.find("tier 1").unwrap() < html.find("tier 2").unwrap(),
+            "Decomplex findings should be ordered by tier"
+        );
         assert!(html.contains("gems/decomplex/docs/false-simplicity.md"));
         assert!(html.contains("tests by type: fuzz (2), integration (1), unit (6) - 9 total"));
         let newer_fix = "fedcba987654 1970-01-02 weight 0.25: new noisy commit body";
@@ -7124,6 +7172,8 @@ mod tests {
         assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
         assert!(STYLE.contains(".row.decomplex-open .decomplex-panel"));
         assert!(STYLE.contains(".decomplex-finding { color: var(--muted); }"));
+        assert!(STYLE.contains(".decomplex-panel p"));
+        assert!(STYLE.contains("white-space: normal;"));
         assert!(STYLE.contains(".row:target"));
         assert!(STYLE.contains(".history-drawer[open]"));
         assert!(!html.contains("&#128027;"));
