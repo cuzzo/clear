@@ -2561,7 +2561,7 @@ RSpec.describe NilKill do
             "common_keys" => %w[name value],
             "optional_keys" => [],
             "fields" => [{ "name" => "name", "type" => "String" }, { "name" => "value", "type" => "MIR::StructInit" }],
-            "producers" => [{ "path" => path, "line" => 4, "code" => "{ name: node.variant_name.to_s, value: inner }" }],
+            "producers" => [{ "path" => path, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }],
             "collection_slots" => 2,
           }
           heterogeneous = coherent.merge(
