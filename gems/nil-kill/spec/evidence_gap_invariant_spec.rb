@@ -13,33 +13,35 @@ require_relative "spec_helper"
 RSpec.describe "evidence-gap invariant" do
   corpus = File.join(__dir__, "fixtures", "zero_gap_corpus")
 
-  def run_corpus(corpus, instrument:)
-    Dir.mktmpdir("nk-inv", NilKill::ROOT) do |dir|
-      Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, dir) }
-      yield full_collect(dir, File.read(File.join(corpus, "workload.rb")), instrument: instrument)
-    end
+  before(:context) do
+    @positive_dir = Dir.mktmpdir("nk-inv", NilKill::ROOT)
+    Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, @positive_dir) }
+    @positive_corpus = full_collect(@positive_dir, File.read(File.join(corpus, "workload.rb")), instrument: true)
+  end
+
+  after(:context) do
+    FileUtils.remove_entry(@positive_dir) if @positive_dir && File.directory?(@positive_dir)
   end
 
   it "INVARIANT: interior-covered sampled methods all have a record (0 exceptions)" do
-    run_corpus(corpus, instrument: true) do |r|
-      # The report's own predicate: untyped_evidence_gaps RAISES if any
-      # method ran-without-a-record (collect_ran_untraced) or there is
-      # no collect coverage (never_run). On the in-place corpus it must
-      # NOT raise, and the hard reasons must be absent from gaps.
-      gaps = nil
-      expect { gaps = r[:report].send(:untyped_evidence_gaps, r[:evidence]) }.not_to raise_error
-      expect(gaps.keys & %w[collect_ran_untraced never_run]).to eq([])
-      # Independent contrapositive cross-check, computed from raw
-      # evidence (not the report): every method the workload called has
-      # a runtime record. If a load path bypassed in-place recording
-      # this fails even if the report classifier were buggy.
-      recorded = r[:methods].select { |m| m["calls"].to_i.positive? }
-                            .map { |m| [m["class"], m["method"]] }.to_set
-      %w[PlainReq:transform AbsReq:walk AbsReq:run SubProc:in_child
-         EnsurePunt:guarded StructColl:build KernelLoad:handle].each do |sig|
-        cls, meth = sig.split(":")
-        expect(recorded).to include([cls, meth]), "missing record for #{cls}##{meth}"
-      end
+    r = @positive_corpus
+    # The report's own predicate: untyped_evidence_gaps RAISES if any
+    # method ran-without-a-record (collect_ran_untraced) or there is
+    # no collect coverage (never_run). On the in-place corpus it must
+    # NOT raise, and the hard reasons must be absent from gaps.
+    gaps = nil
+    expect { gaps = r[:report].send(:untyped_evidence_gaps, r[:evidence]) }.not_to raise_error
+    expect(gaps.keys & %w[collect_ran_untraced never_run]).to eq([])
+    # Independent contrapositive cross-check, computed from raw
+    # evidence (not the report): every method the workload called has
+    # a runtime record. If a load path bypassed in-place recording
+    # this fails even if the report classifier were buggy.
+    recorded = r[:methods].select { |m| m["calls"].to_i.positive? }
+                          .map { |m| [m["class"], m["method"]] }.to_set
+    %w[PlainReq:transform AbsReq:walk AbsReq:run SubProc:in_child
+       EnsurePunt:guarded StructColl:build KernelLoad:handle].each do |sig|
+      cls, meth = sig.split(":")
+      expect(recorded).to include([cls, meth]), "missing record for #{cls}##{meth}"
     end
   end
 
@@ -53,15 +55,14 @@ RSpec.describe "evidence-gap invariant" do
   end
 
   it "INVARIANT: the rendered table has no forbidden column on the real corpus" do
-    run_corpus(corpus, instrument: true) do |r|
-      lines = []
-      r[:report].send(:append_untyped_evidence_gaps, lines, r[:evidence])
-      header = lines.find { |l| l.start_with?("|  |") }
-      next unless header
-      expect(header).not_to include("collect ran untraced")
-      expect(header).not_to include("untraced covered")
-      expect(header).not_to include("never run")
-    end
+    r = @positive_corpus
+    lines = []
+    r[:report].send(:append_untyped_evidence_gaps, lines, r[:evidence])
+    header = lines.find { |l| l.start_with?("|  |") }
+    next unless header
+    expect(header).not_to include("collect ran untraced")
+    expect(header).not_to include("untraced covered")
+    expect(header).not_to include("never run")
   end
 
   it "NEGATIVE CONTROL: an uninstrumented collect makes infer/report RAISE (not silently zero)" do

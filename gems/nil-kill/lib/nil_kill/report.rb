@@ -855,7 +855,9 @@ module NilKill
     def return_usage_by_name(evidence)
       names = Array(evidence.dig("facts", "existing_sigs")).filter_map { |method| method["method"].to_s }.to_set
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
-      NilKill.target_files.each do |path|
+      return usage if names.empty?
+
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage(parsed.value, :statement, names, usage)
@@ -863,6 +865,21 @@ module NilKill
         next
       end
       usage
+    end
+
+    def evidence_target_files(evidence)
+      return [] unless evidence.is_a?(Hash) && evidence.key?("target_dirs")
+
+      dirs = Array(evidence["target_dirs"]).map(&:to_s).reject(&:empty?)
+      return [] if dirs.empty?
+
+      excludes = Array(evidence["target_exclude_dirs"]).map { |dir| File.expand_path(dir.to_s, ROOT) }
+      dirs.flat_map do |dir|
+        abs = File.expand_path(dir, ROOT)
+        File.directory?(abs) ? Dir.glob(File.join(abs, "**", "*.rb")) : [abs]
+      end.select do |path|
+        File.file?(path) && excludes.none? { |dir| path == dir || path.start_with?(dir + File::SEPARATOR) }
+      end.sort
     end
 
     def mark_return_usage(node, context, names, usage)
@@ -1028,7 +1045,9 @@ module NilKill
       method_return_types = unambiguous_method_return_types(evidence)
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      NilKill.target_files.each do |path|
+      return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges } if candidate_names.empty?
+
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
@@ -3052,7 +3071,7 @@ module NilKill
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      NilKill.target_files.each do |path|
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
