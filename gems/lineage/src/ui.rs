@@ -1917,7 +1917,7 @@ async fn asset_handler(AxumPath(path): AxumPath<String>) -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, asset_content_type(&embedded_path))
-        .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(asset.data.into_owned()))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
@@ -4755,15 +4755,22 @@ fn render_warning_banner(warnings: &[UiWarning]) -> String {
 
     let mut out = String::new();
     out.push_str("<section class=\"warning-banner\" aria-label=\"verification warnings\">");
-    for warning in warnings {
+    for (index, warning) in warnings.iter().enumerate() {
         let key = warning_dismiss_key(warning);
-        out.push_str("<article class=\"warning ");
+        let input_id = format!("warning-dismiss-{index}-{}", stable_slug(&key));
+        out.push_str("<input class=\"warning-dismiss-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&html_escape(&input_id));
+        out.push_str("\" data-dismiss-key=\"");
+        out.push_str(&html_escape(&key));
+        out.push_str("\"><article class=\"warning ");
         out.push_str(&html_escape(&warning.level));
         out.push_str("\" data-dismiss-key=\"");
         out.push_str(&html_escape(&key));
-        out.push_str("\"><button class=\"warning-dismiss\" type=\"button\" data-dismiss-key=\"");
+        out.push_str("\"><label class=\"warning-dismiss\" for=\"");
+        out.push_str(&html_escape(&input_id));
+        out.push_str("\" data-dismiss-key=\"");
         out.push_str(&html_escape(&key));
-        out.push_str("\" aria-label=\"Dismiss warning\">x</button><strong>");
+        out.push_str("\" aria-label=\"Dismiss warning\">x</label><strong>");
         out.push_str(&html_escape(&warning.label));
         out.push_str("</strong><p>");
         out.push_str(&html_escape(&warning.detail));
@@ -7115,6 +7122,8 @@ mod tests {
         assert!(STYLE.contains(".bug-toggle:checked ~ .bug-panel"));
         assert!(STYLE.contains(".meta-toggle:checked ~ .meta-panel"));
         assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
+        assert!(STYLE.contains(".row.decomplex-open .decomplex-panel"));
+        assert!(STYLE.contains(".decomplex-finding { color: var(--muted); }"));
         assert!(STYLE.contains(".row:target"));
         assert!(STYLE.contains(".history-drawer[open]"));
         assert!(!html.contains("&#128027;"));
@@ -7186,11 +7195,16 @@ mod tests {
         let js = include_str!("../ui/assets/app.js");
 
         assert!(html.contains("data-dismiss-key=\"lineage.warning."));
+        assert!(html.contains("class=\"warning-dismiss-toggle\""));
         assert!(html.contains("class=\"warning-dismiss\""));
         assert!(html.contains("Dismiss warning"));
+        assert!(STYLE.contains(".warning-dismiss-toggle:checked + .warning"));
         assert!(js.contains("warning-dismiss"));
-        assert!(js.contains("button.closest(\".warning\")"));
+        assert!(js.contains("control.closest(\".warning\")"));
+        assert!(js.contains("input.checked = true"));
         assert!(js.contains("bindLayerLabel"));
+        assert!(js.contains("bindLineToggleLabel"));
+        assert!(js.contains("decomplex-open"));
         assert!(js.contains("sourceView.classList.toggle(`${input.id}-on`, input.checked)"));
         assert!(js.contains("write(key, \"true\")"));
         assert!(js.contains("comment-fold-expanded"));

@@ -445,6 +445,8 @@
   }
   .warning strong { display: block; font-size: 12px; }
   .warning p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .warning-dismiss-toggle { display: none; }
+  .warning-dismiss-toggle:checked + .warning { display: none; }
   .warning-dismiss {
     position: absolute;
     inset-block-start: 6px;
@@ -784,7 +786,9 @@
     font-size: 13px;
     line-height: 18px;
   }
-  .decomplex-finding { color: #7c3aed; }
+  .decomplex-finding { color: var(--muted); }
+  .decomplex-finding:hover,
+  .decomplex-finding:focus-visible { color: var(--text); }
   .bomb i,
   .line-meta i,
   .bug-history i,
@@ -805,7 +809,10 @@
   }
   .bug-toggle:checked ~ .bug-panel,
   .meta-toggle:checked ~ .meta-panel,
-  .decomplex-toggle:checked ~ .decomplex-panel { display: block; }
+  .decomplex-toggle:checked ~ .decomplex-panel,
+  .row.bug-open .bug-panel,
+  .row.meta-open .meta-panel,
+  .row.decomplex-open .decomplex-panel { display: block; }
   .line-panel p {
     margin: 0 0 4px;
     overflow: hidden;
@@ -818,11 +825,11 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   .decomplex-panel {
-    color: #312e81;
+    color: #334155;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   .decomplex-panel a {
-    color: #6d28d9;
+    color: #334155;
     font-weight: 700;
     text-decoration: none;
   }

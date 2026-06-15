@@ -61,6 +61,34 @@
     });
   };
 
+  const linePanelClass = (input) => {
+    if (input.classList.contains("bug-toggle")) return "bug-open";
+    if (input.classList.contains("meta-toggle")) return "meta-open";
+    if (input.classList.contains("decomplex-toggle")) return "decomplex-open";
+    return null;
+  };
+
+  const syncLinePanelState = (input) => {
+    const row = input.closest(".row");
+    const klass = linePanelClass(input);
+    if (row && klass) row.classList.toggle(klass, input.checked);
+  };
+
+  const bindLineToggle = (input) => {
+    syncLinePanelState(input);
+    input.addEventListener("change", () => syncLinePanelState(input));
+  };
+
+  const bindLineToggleLabel = (label) => {
+    label.addEventListener("click", (event) => {
+      const input = document.getElementById(label.htmlFor);
+      if (!input || !input.classList.contains("line-toggle")) return;
+      event.preventDefault();
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+
   const setFoldRows = (input) => {
     const foldId = input.dataset.foldId;
     const sourceView = input.closest(".source-view");
@@ -81,14 +109,21 @@
     input.addEventListener("change", () => setFoldRows(input));
   };
 
-  const restoreWarningDismissal = (button) => {
-    const key = button.dataset.dismissKey;
-    const warning = button.closest(".warning");
+  const restoreWarningDismissal = (control) => {
+    const key = control.dataset.dismissKey;
+    const warning = control.closest(".warning");
+    const input = control.htmlFor ? document.getElementById(control.htmlFor) : null;
     if (!key || !warning) return;
-    if (read(key) === "true") warning.hidden = true;
-    button.addEventListener("click", () => {
-      write(key, "true");
+    if (read(key) === "true") {
+      if (input) input.checked = true;
       warning.hidden = true;
+    }
+    control.addEventListener("click", () => {
+      write(key, "true");
+      setTimeout(() => {
+        if (input) input.checked = true;
+        warning.hidden = true;
+      }, 0);
     });
   };
 
@@ -99,5 +134,7 @@
     document.querySelectorAll(".comment-fold-toggle[data-persist-key]").forEach(restoreCommentFold);
     document.querySelectorAll(".warning-dismiss[data-dismiss-key]").forEach(restoreWarningDismissal);
     document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
+    document.querySelectorAll(".line-toggle").forEach(bindLineToggle);
+    document.querySelectorAll(".gutter .line-icon[for]").forEach(bindLineToggleLabel);
   });
 })();
