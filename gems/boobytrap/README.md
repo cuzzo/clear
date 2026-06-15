@@ -1,8 +1,8 @@
 # Boobytrap
 
 Boobytrap helps you find the most likely parts of your codebase to have
-**latent** bugs. This helps you proactively direct your attention to
-testing. Boobytrap highlights the parts of the codebase with the most
+**latent** bugs. This helps prioritize your testing efforts. Boobytrap
+highlights the parts of the codebase with the most
 **semantic churn**, the lowest test coverage, and the highest complexity.
 
 In plain terms: Boobytrap tells you where to look first. Decomplex,

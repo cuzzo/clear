@@ -4,10 +4,13 @@
 
 Typical Code Coverage UIs only show you that a line was hit. That means
 little, as only parts of a line may have been hit or tested. SlopCop
-gives you two unique insights:
+gives you three unique insights:
 
 1. Is a line fully covered or only partially covered?
 2. Is it part of a historically buggy line or method?
+3. For unsafe systems languages: does this line contain a concurrency
+   hazard, memory safety hazard, memory-ordering hazard, or similar
+   runtime-sensitive risk, and if so is it *sufficiently* tested?
 
 It is used by the CLEAR compiler to help focus attention on fixing the
 buggiest parts of the codebase and putting the most care into review for
@@ -123,7 +126,7 @@ bundle exec gems/slopcop/exe/slopcop dark-arms \
 
 This is the format Lineage uses for gutter and source overlays.
 
-### Constraint Reports
+## Concurrency Hazard Detection / Constraint Reports
 
 `constraints` checks changed files against named coverage constraints,
 currently used by CLEAR for Loom and VOPR hazard coverage:
