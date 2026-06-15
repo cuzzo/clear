@@ -3,7 +3,8 @@
 ![Nil-kill](docs/assets/nil-kill.png)
 
  * Nil-kill helps you eliminate `nil`s and strongly type your codebase by showing where the pressure originates.
- * It combines *static analysis* with *runtime observations*.
+ * It combines *static analysis* with *runtime observations*. It has
+   cross-language support via [Tree-Sitter](https://github.com/tree-sitter/tree-sitter).
  * Nil-kill emits evidence and action plans. Source rewriting lives in [Auto-type](../auto-type/README.md).
 
 ## What is *pressure*?
@@ -12,22 +13,40 @@ You can often times resolve one `nil` or type ambiguity and remove hundreds nil 
 
 Nil-kill helps you prioritize your efforts by *pressure*.
 
+### Nil-kill's Four Types of Pressure
+
+1. Nil pressure: where `nil` originates and how many nil guards it
+   causes.
+2. Union type pressure: when code occasionally assigns a symbol to a
+   string, an int to a float, or otherwise mixes unrelated value shapes.
+3. Enum pressure: when code uses a symbol, string, or integer as an
+   ad hoc enum.
+4. Primitive pressure: when code uses a hashmap as an ad hoc struct or
+   an array as an ad hoc tuple.
+
 ## How well does it work?
 
-CLEAR's codebase was only ~50k dense lines of Ruby (production code, not including test code).
+Nil-kill was introduced when the CLEAR compiler was ~50k lines of Ruby
+(production code, not counting test code). It helped automatically type
+most of the Ruby code in preparation for self-hosting / translating to
+CLEAR.
 
  * ~50% of T.nilable() removed, ~50% of `&.` and `.present?` removed.
- * ~80% of signature parameters could be inferred automatically combining runtime and static analysis.
- * ~90% of signature returns could be inferred automatically.
+ * ~70% of signature parameters could be inferred automatically combining runtime and static analysis.
+ * ~80% of signature returns could be inferred automatically.
 
-Nil-kill starts by giving you an overall report of your codebase, so you can figure out how well it *might* help you before you invest much in trying it out.
+Nil-kill generates an overall report of your codebase. The top of the
+report lists the metrics you need to determine how well it *might* help
+you before you invest more into using it fully.
 
 ### The long tail problem
 
-There's still thousands of issues that need to be resolved semi-manually. Nil-kill prioritizes those by which will have the biggest impact.
+After hundreds of prioritized triage commits, thousands of untyped slots
+still remain in the Ruby compiler for CLEAR. Nil-kill keeps these
+outstanding items prioritized by highest impact.
 
  * If you resolve the type for `x[:name]` -> that will unlock N signature param slots, M signature returns, L class/struct fields, K hashmap/array types.
- * LLMs can typically work well with data like this.
+ * LLMs have responded well to this input to type the codebase slowly in the background.
 
 ## How do I use it?
 
@@ -38,7 +57,16 @@ In short, Nil-kill has 6 analyzer uses, but the 4 major ones are:
  3. `nil-kill report`: generates a report of action items by priority. You can use this to prioritize efforts manually, or - like CLEAR - feed this to an LLM to do it for you.
  4. `nil-kill espalier-evidence`: generates fast static evidence for architecture tooling.
 
-For automated fixes, use `auto-type`. It consumes Nil-kill evidence/actions and currently supports Ruby/Sorbet rewrites. Its provider interface is designed so other language rewriters can be added without changing Nil-kill's analyzer.
+> [!NOTE]
+> [Espalier](../espalier/DESIGN.md) is a tool CLEAR uses to minimize
+> architectural complexity. It consumes Nil-kill data.
+
+[Auto-Type](../auto-type/README.md) uses Nil-kill output to
+automatically type Ruby codebases. Like Nil-kill, it's designed to be
+cross-language, but only Python support is preliminary. It consumes
+Nil-kill evidence/actions and currently supports Ruby/Sorbet rewrites.
+Its provider interface is designed so other language rewriters can be
+added without changing Nil-kill's analyzer.
 
 > [!WARNING]
 > `nil-kill collect -- <command>` runs `<command>` roughly **5-10x
