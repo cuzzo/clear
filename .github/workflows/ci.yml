@@ -20,27 +20,59 @@ env:
   COVERAGE: "0"
 
 jobs:
+  changes:
+    name: CI change scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_gems: ${{ steps.scope.outputs.run_gems || steps.full.outputs.run_gems }}
+      run_src: ${{ steps.scope.outputs.run_src || steps.full.outputs.run_src }}
+      run_zig: ${{ steps.scope.outputs.run_zig || steps.full.outputs.run_zig }}
+    steps:
+      - id: full
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "run_gems=true" >> "$GITHUB_OUTPUT"
+          echo "run_src=true" >> "$GITHUB_OUTPUT"
+          echo "run_zig=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: scope
+        if: github.event_name == 'pull_request'
+        run: ruby tools/ci_change_scopes.rb --base "${{ github.event.pull_request.base.sha }}"
+
   mutants-manual-pending:
     name: mutants/manual pending
+    needs: changes
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       statuses: write
     steps:
-      - name: Mark manual mutant gate pending
+      - name: Mark manual mutant gate status
         env:
           GH_TOKEN: ${{ github.token }}
+          NEEDS_MUTANTS: ${{ needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true' }}
           SHA: ${{ github.event.pull_request.head.sha }}
           TARGET_URL: https://github.com/${{ github.repository }}/actions/workflows/mutants-manual.yml
         run: |
+          state=success
+          description='No mutant gate needed for markdown-only changes'
+          if [ "${NEEDS_MUTANTS}" = "true" ]; then
+            state=pending
+            description='Run Manual mutants before merge'
+          fi
           gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
-            -f state=pending \
+            -f state="${state}" \
             -f context='mutants/manual' \
-            -f description='Run Manual mutants before merge' \
+            -f description="${description}" \
             -f target_url="${TARGET_URL}"
 
   ruby-unit:
     name: Ruby unit specs (parallel, no integration)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     env:
       COVERAGE: "1"  # SimpleCov writes coverage/coverage.xml for Codecov upload below
@@ -71,6 +103,8 @@ jobs:
 
   nil-kill-unit:
     name: nil-kill gem specs
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     env:
       COVERAGE: "0"
@@ -89,6 +123,8 @@ jobs:
 
   sorbet:
     name: Sorbet type-check (typed:true files only)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,6 +144,8 @@ jobs:
 
   rubocop-signatures:
     name: Rubocop Sorbet/EnforceSignatures
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +157,8 @@ jobs:
 
   ruby-integration:
     name: Ruby integration specs (builds binaries via clear)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     env:
       COVERAGE: "1"  # Picked up by spec_helper + clear-CLI's coverage_bootstrap;
@@ -169,6 +209,8 @@ jobs:
 
   transpile-tests:
     name: transpile-tests/ coverage (.cht via gen.rb)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-22.04
     env:
       COVERAGE: "1"
@@ -230,6 +272,8 @@ jobs:
 
   examples-benchmarks-corpus:
     name: examples/benchmarks buildable corpus
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -245,6 +289,8 @@ jobs:
 
   examples-benchmarks-coverage-shard:
     name: examples/benchmarks coverage shard ${{ matrix.shard }}/5
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     strategy:
@@ -308,6 +354,8 @@ jobs:
 
   tools-fuzz-shard:
     name: tools/fuzz coverage shard ${{ matrix.shard }}/5
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     strategy:
@@ -375,8 +423,10 @@ jobs:
   tools-fuzz:
     name: tools/fuzz full matrix (gate)
     runs-on: ubuntu-latest
-    needs: tools-fuzz-shard
-    if: ${{ always() }}
+    needs:
+      - changes
+      - tools-fuzz-shard
+    if: ${{ always() && needs.changes.outputs.run_src == 'true' }}
     steps:
       - name: Require every fuzz shard
         run: |
@@ -388,6 +438,8 @@ jobs:
 
   tools-fuzz-quarantined:
     name: tools/fuzz quarantined shard ${{ matrix.shard }}/5
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -420,6 +472,8 @@ jobs:
 
   bc-lower-coverage-shard:
     name: bc-lowering coverage shard ${{ matrix.shard }}/5
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -456,8 +510,10 @@ jobs:
   bc-lower-coverage:
     name: bc-lowering coverage (@target==:bc arms)
     runs-on: ubuntu-latest
-    needs: bc-lower-coverage-shard
-    if: ${{ always() }}
+    needs:
+      - changes
+      - bc-lower-coverage-shard
+    if: ${{ always() && needs.changes.outputs.run_src == 'true' }}
     steps:
       - name: Require every bc-lowering coverage shard
         run: |
@@ -531,6 +587,8 @@ jobs:
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -549,6 +607,8 @@ jobs:
 
   ffi-integration:
     name: transpile-tests/ffi-integration (zig build test)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -571,6 +631,8 @@ jobs:
     # catches benchmark-only leaks and debug-mode runtime wiring issues
     # that unit/transpile tests do not exercise.
     name: Benchmark leak checks (shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -663,6 +725,8 @@ jobs:
 
   zig-unit:
     name: Zig unit tests (fast non-TSan)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -699,6 +763,8 @@ jobs:
     # GitHub runner can starve/wedge progress and has hung shard 3/5 in
     # `spsc-scheduler-test` while the same binary passes repeatedly alone.
     name: Zig TSan (shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -725,6 +791,8 @@ jobs:
     # build.zig: `hammer_step_idx % shard_count`). Same fail-fast:
     # false so one flaky shard doesn't mask the rest.
     name: Zig hammer TSan (shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -753,6 +821,8 @@ jobs:
     # counter in build.zig: `loom_vopr_step_idx % shard_count`).
     # parking-lot-loom is wired to shard 0 only (single ~40s exe).
     name: Zig Loom/VOPR (shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -775,6 +845,8 @@ jobs:
     # subset of tests; Codecov merges them server-side via the
     # shared `flags: zig` tag (union of covered lines per file).
     name: Zig coverage (kcov, shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     # Pin to jammy (22.04). noble (24.04 -- the current ubuntu-latest)
     # dropped kcov from its repos entirely; even with universe enabled
     # `apt-get install kcov` returns "Unable to locate package kcov".
@@ -815,6 +887,8 @@ jobs:
 
   zig-special-coverage:
     name: Zig ${{ matrix.suite }} coverage (kcov, shard ${{ matrix.shard }}/5)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_zig == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     strategy:
@@ -849,8 +923,9 @@ jobs:
     name: Zig constraint coverage SARIF
     runs-on: ubuntu-latest
     needs:
+      - changes
       - zig-special-coverage
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_zig == 'true' && needs.zig-special-coverage.result == 'success' }}
     permissions:
       contents: read
       security-events: write
@@ -902,6 +977,7 @@ jobs:
     name: Diff coverage bucket PR comment
     runs-on: ubuntu-latest
     needs:
+      - changes
       - ruby-unit
       - ruby-integration
       - transpile-tests
@@ -909,7 +985,20 @@ jobs:
       - tools-fuzz-shard
       - bc-lower-coverage-shard
       - zig-coverage
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        needs.changes.outputs.run_src == 'true' &&
+        needs.ruby-unit.result == 'success' &&
+        needs.ruby-integration.result == 'success' &&
+        needs.transpile-tests.result == 'success' &&
+        needs.examples-benchmarks-coverage-shard.result == 'success' &&
+        needs.tools-fuzz-shard.result == 'success' &&
+        needs.bc-lower-coverage-shard.result == 'success' &&
+        (needs.changes.outputs.run_zig != 'true' || needs.zig-coverage.result == 'success')
+      }}
     permissions:
       contents: read
       issues: write
