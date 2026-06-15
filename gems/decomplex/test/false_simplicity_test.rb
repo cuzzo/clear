@@ -30,6 +30,24 @@ class FalseSimplicityTest < Minitest::Test
     Decomplex::FalseSimplicity.scan(paths)
   end
 
+  def ast(type, children = [], line: 1)
+    Decomplex::Ast::Node.new(
+      type: type,
+      children: children,
+      first_lineno: line,
+      first_column: 0,
+      last_lineno: line,
+      last_column: 1,
+      text: ""
+    )
+  end
+
+  def scan_ast(root, language:)
+    detector = Decomplex::FalseSimplicity.new("inline", [], language: language)
+    detector.walk(root, [], [])
+    Decomplex::FalseSimplicity::Report.new(detector.hits, detector.classrecs)
+  end
+
   def has(r, kind, detail = nil)
     r.hits.any? { |h| h.kind == kind && (detail.nil? || h.detail == detail) }
   end
@@ -39,6 +57,29 @@ class FalseSimplicityTest < Minitest::Test
   end
 
   # ---- 1. hidden dynamic dispatch -------------------------------------
+
+  def test_non_ruby_languages_do_not_inherit_ruby_lexicon
+    root = ast(:ROOT, [
+      ast(:CALL, [ast(:LVAR, ["obj"]), :send, nil]),
+      ast(:CALL, [ast(:CONST, [:File]), :read, nil]),
+      ast(:FCALL, [:getattr, nil]),
+      ast(:FCALL, [:eval, nil])
+    ])
+
+    ruby = scan_ast(root, language: :ruby)
+    assert has(ruby, :dynamic_dispatch, "send")
+    assert has(ruby, :hidden_io, "File.read")
+
+    python = scan_ast(root, language: :python)
+    refute has(python, :dynamic_dispatch, "send")
+    refute has(python, :hidden_io, "File.read")
+    assert has(python, :dynamic_dispatch, "getattr")
+
+    zig = scan_ast(root, language: :zig)
+    refute has(zig, :dynamic_dispatch, "send")
+    refute has(zig, :hidden_io, "File.read")
+    assert has(zig, :metaprogramming, "eval")
+  end
 
   def test_dynamic_dispatch_positive
     r = scan(<<~RB)

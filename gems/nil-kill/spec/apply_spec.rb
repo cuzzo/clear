@@ -496,7 +496,7 @@ RSpec.describe NilKill::Apply do
     expect(source).to match(/module Locatable\n\s+end\n\s+class BindingRecord < T::Struct/)
   end
 
-  it "rewrites hash-record signatures through Prism CST ranges for multiline sigs" do
+  it "rewrites hash-record signatures through parser node ranges for multiline sigs" do
     _path, rel = repo_tmp_file("apply_hash_record_cluster_multiline_sig.rb", <<~RUBY)
       class Example
         extend T::Sig

@@ -20,26 +20,37 @@ method names and domain diagnostic helpers are caller-supplied via
 
 | category | meaning |
 |---|---|
-| `type_norm` | type/nil guard — likely dead if the contract were strictly typed |
+| `type_norm` | type/null guard — likely dead if the contract were strictly typed |
 | `dead` | decision never executes in coverage — audit as missing test, or dead code only if static reachability agrees |
 | `defensive` | inert / invariant-pinned — accept, exclude from denominator |
 | `spurious` | decomplex: redundant/cloned/re-derived decision — refactor or delete, not a test target |
 | `ffi` | a caller-declared external/boundary call — needs an integration test |
-| `diagnostic` | error/raise path, including caller-declared diagnostic helpers — reachable only by invalid input |
+| `diagnostic` | language diagnostic/error path, including caller-declared diagnostic helpers — reachable only by invalid input |
 | `genuine` | the real reachable gap — **test it** (ranked by churn × decomplex structural deviance) |
 
 ## Usage
 
 ```
 slopcop report --repo=. --coverage=coverage/.resultset.json \
-             --output=report.md \
+             --output=report.md --json=report.json \
              --files=src/a.rb,src/b.rb \
              --ffi=my_extern_call,my_boundary_method \
              --diagnostic=report_invalid_input!,emit_error!
 ```
 
-Needs `coverage/.resultset.json` (SimpleCov `enable_coverage :branch`)
-and a git repo (for the boobytrap churn overlay). See
+For Lineage gutters/source overlays, emit the line-level dark-arm
+artifact without the ranked report pass:
+
+```
+slopcop dark-arms --repo=. --coverage=coverage/.resultset.json \
+             --json=slopcop-dark-arms.json \
+             --files=src/a.rb,src/b.rb
+```
+
+Accepts Boobytrap-normalized coverage inputs: SimpleCov resultsets,
+kcov output/Cobertura/codecov JSON, coverage.py JSON, and Nil-Kill
+branch coverage JSON. It also needs a git repo for the boobytrap
+churn overlay. See
 [report.md](report.md) for a demo.
 
 ## Boundary
@@ -71,9 +82,9 @@ with dark arms.
 ## Not a verdict
 
 Categories are ranked candidates (Engler discipline). `type_norm` is
-general type/nil guard pressure (`is_a?`, `nil?`, `respond_to?`,
-safe navigation), not a project type-system verdict. `diagnostic` is
-general invalid-input reporting: Ruby `raise/fail/abort` plus any
+general type/null guard pressure from the Decomplex language lexicon,
+not a project type-system verdict. `diagnostic` is general
+invalid-input reporting from that same language lexicon plus any
 caller-declared diagnostic helpers. v0 precision caveats are
 documented in [docs/agents/design.md](docs/agents/design.md). The
 Top-True-Gaps ranking is the sound, validated part.

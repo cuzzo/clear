@@ -11,6 +11,8 @@ module NilKill
       @argv = argv.dup
       @output = DEFAULT_OUTPUT
       @stdout = false
+      @parser = "auto"
+      @targets = []
     end
 
     def run
@@ -25,14 +27,16 @@ module NilKill
         File.write(@output, body)
         puts "nil-kill: wrote Espalier static evidence to #{NilKill.rel(@output)} " \
           "(methods=#{evidence.dig("summary", "methods")}, " \
-          "ivar_protocols=#{evidence.dig("summary", "ivar_protocols")}, " \
-          "ivar_param_origins=#{evidence.dig("summary", "ivar_param_origins")})"
+          "state_protocols=#{evidence.dig("summary", "state_protocols") || evidence.dig("summary", "ivar_protocols")}, " \
+          "state_param_origins=#{evidence.dig("summary", "state_param_origins") || evidence.dig("summary", "ivar_param_origins")})"
       end
 
       evidence
     end
 
     def build
+      return StaticEvidence.build(@targets, root: NilKill::ROOT) if tree_sitter_static?
+
       infer = Infer.new(["--no-sorbet"])
       infer.index_sources
       full = infer.store.to_h
@@ -76,9 +80,39 @@ module NilKill
         opts.on("--stdout", "Print evidence JSON to stdout instead of writing a file") do
           @stdout = true
         end
+
+        opts.on("--parser PARSER", "Evidence parser: auto, ruby, tree_sitter") do |parser_name|
+          @parser = parser_name.to_s.tr("-", "_")
+        end
+
+        opts.on("--tree-sitter", "Use Tree-sitter static evidence for all supported source languages") do
+          @parser = "tree_sitter"
+        end
       end
       parser.parse!(@argv)
-      abort "unexpected arguments: #{@argv.join(" ")}" unless @argv.empty?
+      @targets = @argv.dup
+    end
+
+    def tree_sitter_static?
+      return true if %w[tree_sitter treesitter].include?(@parser)
+      return false if %w[ruby].include?(@parser)
+      return true if ENV.fetch("DECOMPLEX_PARSER", "").to_s.tr("-", "_") == "tree_sitter"
+      return true if @targets.any? { |target| non_ruby_target?(target) }
+      return true if ENV.key?("NIL_KILL_TARGETS") && NilKill.target_dirs.any? { |target| non_ruby_target?(target) }
+
+      false
+    end
+
+    def non_ruby_target?(target)
+      path = File.expand_path(target, NilKill::ROOT)
+      exts = Decomplex::Syntax.supported_exts(parser: "tree_sitter") - [".rb"]
+      if File.directory?(path)
+        Dir.glob(File.join(path, "**", "*")).any? { |file| File.file?(file) && exts.include?(File.extname(file).downcase) }
+      else
+        exts.include?(File.extname(path).downcase)
+      end
+    rescue StandardError
+      false
     end
 
     def compact_methods(methods)

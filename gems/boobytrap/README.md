@@ -38,6 +38,14 @@ third direction, with no static analysis.
 boobytrap report --repo=. --coverage=coverage/.resultset.json \
                  --output=report.md
 
+# Add optional logical-unit history from the Lineage SQLite DB:
+boobytrap report --repo=. --coverage=coverage/.resultset.json \
+                 --lineage-db=lineage.sqlite --output=report.md
+
+# Add optional named-test exposure facts:
+boobytrap report --repo=. --coverage=coverage/.resultset.json \
+                 --test-exposure=test-exposure.json --output=report.md
+
 # Restrict ranking to part of the codebase (repeatable). The
 # committed report.md is generated with --only=src/ -- the fix
 # time-decay baseline still spans the WHOLE history; only which
@@ -65,6 +73,14 @@ over CLEAR's compiler.
   many are within 50% of it (triage those first).
 - **Hotspots** -- ranked table: file, hotspot, fix_norm, branch gap,
   uncovered/total arms.
+- **Lineage Unit Risk** -- optional logical-unit history from
+  `gems/lineage`. Semantic `FIX`/`CHANGE` events add risk; pure moves
+  are shown separately and do not add risk.
+- **Named-Test Exposure** -- optional `test-exposure/v1` facts that
+  count distinct tests hitting functions, lines, and branch arms,
+  including test type and mutation-killed status. When `--lineage-db`
+  contains `test_exposure_events`, Boobytrap can consume the same signal
+  from Lineage history without a separate side-input file.
 - **Fixed But Unmeasured** -- files with recurring fixes but *no*
   branch-coverage data. Recurring-fix code the corpus does not measure
   at all is itself a risk; it is surfaced, not dropped.
@@ -75,8 +91,13 @@ over CLEAR's compiler.
    top-down; the code may be fine.
  * **No complexity axis (v0).** Scoped to fix-churn x coverage.
    Complexity (Flog) is the documented optional third axis.
- * **File granularity (v0).** Method-level attribution (git blame x
-   per-method branch gap) is the planned refinement.
+ * **Lineage is optional.** Without `--lineage-db`, Boobytrap still
+   works from fix history, coverage, Decomplex, and mutation facts.
+ * **Per-test exposure is optional.** Without `--test-exposure`,
+   Boobytrap falls back to aggregate coverage and mutation summaries,
+   or to Lineage-backed exposure history when `--lineage-db` supplies it.
+   Direct `--test-exposure` wins when both are supplied to avoid
+   double-counting the same current test run.
  * **Not duplication or type analysis.** That is decomplex (what
    decision is duplicated) and nil-kill (which nils/types pollute).
    boobytrap only says *where* to look; the other two say *what* is

@@ -2,14 +2,15 @@
 
 ## Scope of this document
 
-decomplex parses Ruby (`RubyVM::AbstractSyntaxTree`); it analyzes the
-Ruby *source of a compiler*, not Rust/Go/C. This doc is NOT "decomplex
-runs on those languages." It answers a sharper question: **of the
-defect CLASSES decomplex's detectors target, which survive into a
-statically typed language, and which does a particular type system
-structurally remove?** It is the argument for why decomplex's thesis
-is not made redundant by "just use a better-typed language," and a map
-of where the residual risk moves when you do.
+This document started as a portability argument before decomplex had
+its normalized Tree-sitter parser. The implementation now runs on the
+supported Tree-sitter languages, but the document's sharper question
+is still useful: **of the defect CLASSES decomplex's detectors target,
+which survive into a statically typed language, and which does a
+particular type system structurally remove?** It is the argument for
+why decomplex's thesis is not made redundant by "just use a
+better-typed language," and a map of where the residual risk moves
+when you do.
 
 ## Thesis
 
@@ -146,5 +147,8 @@ fat-union analysis). Type systems vary in how much they *mitigate*
 - **Effects are universal.** None of Rust/C/Go track IO/global/effect
   in types; the hidden-effect slice of False Simplicity is identical
   across all of them (only Haskell-class effect typing removes it).
-- **decomplex is not ported.** This is a defect-class portability map,
-  not a feature claim. The detectors run on Ruby AST today.
+- **Parser support is separate from semantic strength.** decomplex now
+  runs through a normalized Tree-sitter AST for supported languages,
+  but some detectors still have richer profiles in dynamic languages
+  and weaker profiles where a language does not expose the same
+  runtime surface.

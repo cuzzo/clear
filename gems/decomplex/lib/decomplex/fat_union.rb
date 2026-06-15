@@ -89,9 +89,8 @@ module Decomplex
     end
 
     # disc-members read in the enclosing method but NOT inside this
-    # case. Pruned by the case's LINE SPAN, not object identity:
-    # RubyVM::AST::Node#children returns fresh objects each call, so
-    # identity comparison across two traversals is unreliable. Empty
+    # case. Pruned by the case's LINE SPAN, not object identity; adapters
+    # are free to materialize fresh wrapper nodes per traversal. Empty
     # for a top-level case (no enclosing method) -- documented limit.
     def outside_members(defn_node, case_node, disc_txt)
       return [] unless Ast.node?(defn_node)

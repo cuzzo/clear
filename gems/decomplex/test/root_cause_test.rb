@@ -98,7 +98,7 @@ class RootCauseTest < Minitest::Test
     assert_match(/reify ONE named/,
                  RC.fix_shape(["Missing Abstractions"], :name))
     assert_match(/converging structural debt/,
-                 RC.fix_shape(["Flay Similarity (Type-2/3)"], :name))
+                 RC.fix_shape(["Structural Similarity (Type-2/3)"], :name))
   end
 
   # ---- #2 precursor: fat-union label --------------------------------

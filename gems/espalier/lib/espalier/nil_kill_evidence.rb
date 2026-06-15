@@ -1,0 +1,120 @@
+# frozen_string_literal: true
+
+require "json"
+
+module Espalier
+  # Normalizes Nil-Kill Espalier evidence across legacy Ruby ivar facts and the
+  # Tree-sitter static schema v2.
+  class NilKillEvidence
+    attr_reader :method_signatures, :state_types, :state_param_origins, :state_protocols
+
+    def self.load(path)
+      return empty unless path && File.exist?(path)
+
+      new(JSON.parse(File.read(path)))
+    rescue StandardError
+      empty
+    end
+
+    def self.empty
+      new({})
+    end
+
+    def initialize(data)
+      @data = data || {}
+      @method_signatures = {}
+      @state_types = nested_state_map(facts["state_types"] || {})
+      @state_param_origins = nested_state_map(facts["state_param_origins"] || facts["ivar_param_origins"] || {})
+      @state_protocols = nested_state_map(facts["state_protocols"] || facts["ivar_protocols"] || {})
+      load_methods!
+      load_legacy_runtime_types!
+    end
+
+    def apply!(modules)
+      Array(modules).each do |mod|
+        owner = mod[:name].to_s
+        mod[:ivar_types] ||= {}
+        mod[:ivar_properties] ||= {}
+
+        state_types.fetch(owner, {}).each do |state, type|
+          mod[:ivar_types][state] = type
+        end
+
+        Array(mod[:states]).each do |state|
+          props = []
+          if (origins = state_param_origins.dig(owner, state.to_s))
+            props << "loaded from param: #{origins.join(', ')}"
+          end
+          if (protocols = state_protocols.dig(owner, state.to_s))
+            props << "protocol interfaces: #{protocols.join(', ')}"
+          end
+          mod[:ivar_properties][state.to_s] = props unless props.empty?
+        end
+      end
+      modules
+    end
+
+    private
+
+    attr_reader :data
+
+    def facts
+      data["facts"] || {}
+    end
+
+    def load_methods!
+      Array(data["methods"]).each do |entry|
+        signature = entry.dig("source", "sig").to_s
+        signature = entry["signature"].to_s if signature.empty?
+        next if signature.empty?
+
+        if entry["owner"] && entry["name"]
+          @method_signatures["#{entry["owner"]}##{entry["name"]}"] = signature
+          next
+        end
+
+        key_parts = entry["key"]
+        next unless key_parts && key_parts.size >= 3
+
+        class_name = key_parts[0]
+        method_name = key_parts[1]
+        kind = key_parts[2]
+        full_method_name = kind == "class" ? "self.#{method_name}" : method_name
+        @method_signatures["#{class_name}##{full_method_name}"] = signature
+      end
+    end
+
+    def load_legacy_runtime_types!
+      Array(facts["ivar_runtime"]).each do |entry|
+        owner = entry["class"]
+        state = entry["name"]
+        classes = Array(entry["classes"])
+        next unless owner && state && !classes.empty?
+
+        @state_types[owner] ||= {}
+        @state_types[owner][state] = sorbet_type(classes)
+      end
+    end
+
+    def nested_state_map(map)
+      Hash(map).each_with_object({}) do |(key, value), out|
+        owner, state = key.to_s.split("\u0000", 2)
+        next if owner.to_s.empty? || state.to_s.empty?
+
+        out[owner] ||= {}
+        out[owner][state] = value.is_a?(Array) ? value.map(&:to_s).sort.uniq : value.to_s
+      end
+    end
+
+    def sorbet_type(classes)
+      if classes.size == 1
+        classes.first
+      elsif classes.include?("NilClass")
+        non_nil = classes - ["NilClass"]
+        non_nil.size == 1 ? "T.nilable(#{non_nil.first})" : "T.nilable(T.any(#{non_nil.join(', ')}))"
+      else
+        "T.any(#{classes.join(', ')})"
+      end
+    end
+  end
+end

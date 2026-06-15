@@ -2,7 +2,7 @@
 
 require "set"
 require_relative "ast"
-require_relative "ruby_topology"
+require_relative "structural_topology"
 
 module Decomplex
   # Scores the reader burden of a method after conservatively inlining
@@ -41,7 +41,7 @@ module Decomplex
 
     def scan
       parsed = parse_files
-      topology = RubyTopology.scan(@files)
+      topology = StructuralTopology.scan(@files)
       bodies = parsed.flat_map do |file, (root, lines)|
         MethodBodyCollector.new(file, lines).scan(root)
       end
@@ -147,7 +147,7 @@ module Decomplex
       end
 
       def visibility_call?(node)
-        node.type == :FCALL && RubyTopology::VISIBILITY_MIDS.include?(node.children[0])
+        node.type == :FCALL && StructuralTopology::VISIBILITY_MIDS.include?(node.children[0])
       end
 
       def method_name(node)

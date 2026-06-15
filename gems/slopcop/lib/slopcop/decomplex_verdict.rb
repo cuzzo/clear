@@ -48,7 +48,9 @@ module SlopCop
       return blank(:absent) unless defined?(Decomplex::Report)
       return blank(:absent) if abs_files.empty?
 
-      sections = Decomplex::Report.new(abs_files).sections_data
+      sections = with_tree_sitter do
+        Decomplex::Report.new(abs_files).sections_data
+      end
       span_recs = Hash.new { |h, k| h[k] = [] }      # file => [rec...]
       m_all  = Hash.new { |h, k| h[k] = {} }         # [f,m] => {title=>1}
       m_spur = Hash.new(false)                       # [f,m] => Bool
@@ -81,11 +83,19 @@ module SlopCop
 
       { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw,
         status: :ok }
-    rescue StandardError
+    rescue SyntaxError, StandardError
       # decomplex IS present but its run errored (e.g. the span
       # contract assertion fired). Distinct from :absent so the report
       # can say "errored", not just "not installed".
       blank(:error)
+    end
+
+    def with_tree_sitter
+      previous = ENV["DECOMPLEX_PARSER"]
+      ENV["DECOMPLEX_PARSER"] = "tree_sitter"
+      yield
+    ensure
+      previous.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous
     end
 
     # Span-containment FIRST (precise: the arm's line is INSIDE a

@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative "ast"
+require_relative "syntax"
+
 module Decomplex
   # Predicate-alias clustering (cf. predicate abstraction in SLAM/BLAST,
   # and pre-mining canonicalization in spec miners).
@@ -19,9 +22,8 @@ module Decomplex
     def self.scan(files)
       preds = []
       files.each do |f|
-        src = File.read(f)
-        root = RubyVM::AbstractSyntaxTree.parse(src, keep_script_lines: true)
-        new(f, src.lines).tap { |p| p.walk(root) }.preds.each { |p| preds << p }
+        root, lines = Ast.parse(f)
+        new(f, lines).tap { |p| p.walk(root) }.preds.each { |p| preds << p }
       end
       Report.new(preds)
     end
@@ -35,7 +37,7 @@ module Decomplex
     end
 
     def walk(node)
-      return unless node.is_a?(RubyVM::AbstractSyntaxTree::Node)
+      return unless Ast.node?(node)
 
       record_def(node) if node.type == :DEFN
       node.children.each { |c| walk(c) }
@@ -48,33 +50,19 @@ module Decomplex
     def record_def(node)
       name = node.children[0].to_s
       scope = node.children[1]
-      return unless scope.is_a?(RubyVM::AbstractSyntaxTree::Node) && scope.type == :SCOPE
+      return unless Ast.node?(scope) && scope.type == :SCOPE
 
       body = scope.children[2]
-      return unless body.is_a?(RubyVM::AbstractSyntaxTree::Node)
+      return unless Ast.node?(body)
       return if body.type == :BLOCK # multi-statement => not a pure predicate
 
-      txt = slice(body)
+      txt = Ast.slice(body, @lines)
       return if txt.empty? || txt.length > 200
 
       @preds << Pred.new(name: name, body: txt, file: @file,
                          defn: name, line: node.first_lineno,
                          span: [node.first_lineno, node.first_column,
                                 node.last_lineno, node.last_column])
-    end
-
-    def slice(node)
-      sl = node.first_lineno
-      el = node.last_lineno
-      t =
-        if sl == el
-          @lines[sl - 1][node.first_column...node.last_column]
-        else
-          ([@lines[sl - 1][node.first_column..]] +
-            @lines[sl...(el - 1)] +
-            [@lines[el - 1][0...node.last_column]]).join
-        end
-      t.to_s.strip.gsub(/\s+/, " ")
     end
 
     class Report

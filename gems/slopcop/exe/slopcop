@@ -1,60 +1,214 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+require "fileutils"
 require_relative "../lib/slopcop"
 
 def usage
   warn <<~U
-    slopcop -- top true coverage gaps, ranked by fix-churn
+    slopcop -- coverage and constraint-gap synthesis
 
       slopcop report [--repo=.] [--coverage=coverage/.resultset.json] \\
-                   [--output=report.md] [--files=a.rb,b.rb] \\
+                   [--output=report.md] [--json=report.json] [--files=a.rb,b.rb] \\
                    [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
-                   [--top=N]
+                   [--top=N] [--mutation=mutant-facts.json] [--exclude=GLOB ...]
 
-    --files  repo-relative .rb to triage (default: app/lib/src Ruby files)
-    --ffi    project external-boundary method names (the per-project
-             lexicon; the gem ships none -- it is general)
-    --diagnostic
-             project methods that report/raise invalid-input diagnostics
-             and should not be treated as ordinary reachable work
+      slopcop dark-arms [--repo=.] [--coverage=coverage/.resultset.json] \\
+                   [--json=dark-arms.json] [--files=a.rb,b.rb] \\
+                   [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
+                   [--exclude=GLOB ...]
+
+      slopcop constraints [--repo=.] --base=origin/master [--head=HEAD] \\
+                   [--coverage=loom:zig/zig-out/coverage-loom/merged/kcov-merged/cobertura.xml] \\
+                   [--coverage=vopr:zig/zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml] \\
+                   [--sarif=slopcop-constraints.sarif] [--json=constraints.json] \\
+                   [--markdown=constraints.md] [--strict]
+
+    report --coverage
+             SimpleCov .resultset.json, kcov output directory,
+             kcov Cobertura XML, kcov codecov JSON, coverage.py JSON,
+             or Nil-Kill branch coverage JSON
+    constraints --coverage
+             typed coverage input. Currently supported: loom:PATH and vopr:PATH.
+             Findings are advisory warnings unless --strict is supplied.
+    dark-arms
+             Lineage-ready JSON overlay containing all classified dark arms.
   U
   exit 1
 end
 
-usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
-usage unless ARGV[0] == "report"
+TREE_SITTER_EXTS = %w[rb py pyi js jsx mjs cjs ts tsx go rs zig].freeze
 
-DEFAULT_FILE_GLOBS = %w[app/**/*.rb lib/**/*.rb src/**/*.rb].freeze
-
-opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
-         top: 50, ffi: [], diagnostic: [], files: nil }
-ARGV[1..].each do |a|
-  case a
-  when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
-  when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
-  when /\A--output=(.+)/   then opts[:output] = Regexp.last_match(1)
-  when /\A--files=(.+)/    then opts[:files] = Regexp.last_match(1).split(",")
-  when /\A--ffi=(.+)/      then opts[:ffi] = Regexp.last_match(1).split(",")
-  when /\A--diagnostic=(.+)/ then opts[:diagnostic] = Regexp.last_match(1).split(",")
-  when /\A--top=(\d+)/     then opts[:top] = Regexp.last_match(1).to_i
-  else usage
-  end
+def default_file_globs
+  roots = %w[app lib src]
+  roots.product(TREE_SITTER_EXTS).map { |root, ext| "#{root}/**/*.#{ext}" }
 end
 
-opts[:files] ||= DEFAULT_FILE_GLOBS.flat_map { |g| Dir.chdir(opts[:repo]) { Dir[g] } }.uniq.sort
+def selected_parser
+  "tree_sitter"
+end
 
-md = SlopCop::Report.new(
-  files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
-  ffi_boundary: opts[:ffi], diagnostic_mids: opts[:diagnostic],
-  top: opts[:top],
-  # links must resolve from wherever the report is written.
-  link_base: (opts[:output] ? File.dirname(opts[:output]) : nil)
-).to_markdown
+def repo_relative(path, repo)
+  root = File.expand_path(repo).tr("\\", "/").chomp("/")
+  expanded = File.expand_path(path.to_s.start_with?("/") ? path : File.join(repo, path)).tr("\\", "/")
+  prefix = "#{root}/"
+  expanded.start_with?(prefix) ? expanded[prefix.length..] : path.to_s
+end
 
-if opts[:output]
-  File.write(opts[:output], md)
-  warn "wrote #{opts[:output]}"
-else
-  puts md
+def default_files(repo, exclude)
+  if Boobytrap::DecomplexRisk.load_decomplex_source_filter
+    roots = %w[app lib src].map { |root| File.join(repo, root) }
+    return Decomplex::SourceFilter.collect(
+      roots,
+      parser: selected_parser,
+      root: repo,
+      exclude: exclude
+    ).map { |path| repo_relative(path, repo) }.uniq.sort
+  end
+
+  default_file_globs.flat_map { |g| Dir.chdir(repo) { Dir[g] } }.uniq.sort
+end
+
+def filter_files(files, repo, exclude)
+  Array(files).select do |file|
+    Boobytrap::DecomplexRisk.source_file?(
+      file,
+      root: repo,
+      parser: selected_parser,
+      exclude: exclude
+    )
+  end.map { |file| repo_relative(file, repo) }.uniq.sort
+end
+
+def write_output(path, body)
+  FileUtils.mkdir_p(File.dirname(path)) unless File.dirname(path) == "."
+  File.write(path, body)
+  warn "wrote #{path}"
+end
+
+def run_report(args)
+  opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
+           json: nil, top: 50, ffi: [], diagnostic: [], files: nil, mutation: nil, exclude: [] }
+  until args.empty?
+    a = args.shift
+    case a
+    when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
+    when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
+    when /\A--output=(.+)/   then opts[:output] = Regexp.last_match(1)
+    when /\A--json=(.+)/     then opts[:json] = Regexp.last_match(1)
+    when /\A--files=(.+)/    then opts[:files] = Regexp.last_match(1).split(",")
+    when /\A--ffi=(.+)/      then opts[:ffi] = Regexp.last_match(1).split(",")
+    when /\A--diagnostic=(.+)/ then opts[:diagnostic] = Regexp.last_match(1).split(",")
+    when /\A--top=(\d+)/     then opts[:top] = Regexp.last_match(1).to_i
+    when /\A--mutation=(.+)/ then opts[:mutation] = Regexp.last_match(1)
+    when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
+    when "--exclude"         then opts[:exclude] << args.shift.to_s
+    else usage
+    end
+  end
+
+  opts[:files] = if opts[:files]
+                   filter_files(opts[:files], opts[:repo], opts[:exclude])
+                 else
+                   default_files(opts[:repo], opts[:exclude])
+                 end
+
+  report = SlopCop::Report.new(
+    files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
+    ffi_boundary: opts[:ffi], diagnostic_mids: opts[:diagnostic],
+    top: opts[:top],
+    mutation: opts[:mutation],
+    exclude: opts[:exclude],
+    link_base: (opts[:output] ? File.dirname(opts[:output]) : nil)
+  )
+
+  write_output(opts[:json], report.to_json) if opts[:json]
+  md = report.to_markdown
+  opts[:output] ? write_output(opts[:output], md) : puts(md)
+end
+
+def run_dark_arms(args)
+  opts = { repo: ".", coverage: "coverage/.resultset.json", json: nil,
+           ffi: [], diagnostic: [], files: nil, exclude: [] }
+  until args.empty?
+    a = args.shift
+    case a
+    when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
+    when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
+    when /\A--json=(.+)/     then opts[:json] = Regexp.last_match(1)
+    when /\A--files=(.+)/    then opts[:files] = Regexp.last_match(1).split(",")
+    when /\A--ffi=(.+)/      then opts[:ffi] = Regexp.last_match(1).split(",")
+    when /\A--diagnostic=(.+)/ then opts[:diagnostic] = Regexp.last_match(1).split(",")
+    when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
+    when "--exclude"         then opts[:exclude] << args.shift.to_s
+    else usage
+    end
+  end
+
+  opts[:files] = if opts[:files]
+                   filter_files(opts[:files], opts[:repo], opts[:exclude])
+                 else
+                   default_files(opts[:repo], opts[:exclude])
+                 end
+  json = SlopCop::DarkArmOverlay.to_json(
+    files: opts[:files],
+    repo: opts[:repo],
+    resultset: opts[:coverage],
+    ffi_boundary: opts[:ffi],
+    diagnostic_mids: opts[:diagnostic]
+  )
+  opts[:json] ? write_output(opts[:json], json) : puts(json)
+end
+
+def run_constraints(args)
+  opts = {
+    repo: ".",
+    base: nil,
+    head: "HEAD",
+    coverage: [],
+    sarif: nil,
+    json: nil,
+    markdown: nil,
+    strict: false
+  }
+  until args.empty?
+    a = args.shift
+    case a
+    when /\A--repo=(.+)/ then opts[:repo] = Regexp.last_match(1)
+    when /\A--base=(.+)/ then opts[:base] = Regexp.last_match(1)
+    when "--base" then opts[:base] = args.shift
+    when /\A--head=(.+)/ then opts[:head] = Regexp.last_match(1)
+    when /\A--coverage=(.+)/ then opts[:coverage] << Regexp.last_match(1)
+    when "--coverage" then opts[:coverage] << args.shift.to_s
+    when /\A--sarif=(.+)/ then opts[:sarif] = Regexp.last_match(1)
+    when /\A--json=(.+)/ then opts[:json] = Regexp.last_match(1)
+    when /\A--markdown=(.+)/ then opts[:markdown] = Regexp.last_match(1)
+    when "--strict" then opts[:strict] = true
+    else usage
+    end
+  end
+  usage unless opts[:base]
+
+  audit = SlopCop::Constraints::Audit.new(
+    repo: opts[:repo],
+    base: opts[:base],
+    head: opts[:head],
+    coverage_specs: opts[:coverage]
+  )
+
+  write_output(opts[:sarif], audit.to_sarif) if opts[:sarif]
+  write_output(opts[:json], audit.to_json) if opts[:json]
+  md = audit.to_markdown
+  opts[:markdown] ? write_output(opts[:markdown], md) : puts(md)
+  exit 1 if opts[:strict] && audit.findings.any?
+end
+
+usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
+
+command = ARGV.shift
+case command
+when "report" then run_report(ARGV)
+when "dark-arms" then run_dark_arms(ARGV)
+when "constraints" then run_constraints(ARGV)
+else usage
 end

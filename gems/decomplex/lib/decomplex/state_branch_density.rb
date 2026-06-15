@@ -2,6 +2,7 @@
 
 require "set"
 require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # StateBranchDensity -- branches whose predicate reads mutable or
@@ -15,30 +16,27 @@ module Decomplex
 
     def self.scan(files)
       decisions = []
-      parsed_files = files.map do |file|
-        root, lines = Ast.parse(file)
-        [file, root, lines]
-      end
+      parsed = files.to_h { |file| [file, Ast.parse(file)] }
       global_immutable_readers = Hash.new { |h, k| h[k] = Set.new }
       global_immutable_reader_types = Hash.new { |h, k| h[k] = {} }
       global_type_aliases = {}
-      parsed_files.each do |file, _root, lines|
-        scanner = new(file, lines)
-        scanner.send(:immutable_struct_readers, lines).each do |name, readers|
+      parsed.each_value do |_root, lines|
+        scanner = new(nil, lines)
+        scanner.immutable_struct_readers(lines).each do |name, readers|
           global_immutable_readers[name].merge(readers)
         end
-        scanner.send(:immutable_struct_reader_types, lines).each do |name, readers|
+        scanner.immutable_struct_reader_types(lines).each do |name, readers|
           global_immutable_reader_types[name].merge!(readers)
         end
-        global_type_aliases.merge!(scanner.send(:type_aliases, lines))
+        global_type_aliases.merge!(scanner.type_aliases(lines))
       end
-      parsed_files.each do |file, root, lines|
+      parsed.each do |file, (root, lines)|
         scanner = new(
           file,
           lines,
           immutable_readers: global_immutable_readers,
           immutable_reader_types: global_immutable_reader_types,
-          type_aliases: global_type_aliases,
+          type_aliases: global_type_aliases
         )
         scanner.walk(root, [])
         decisions.concat(scanner.decisions)

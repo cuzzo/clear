@@ -518,11 +518,11 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
-  it "infers static return origins through Prism control-flow and local expression nodes" do
-    Dir.mktmpdir("nil-kill-prism-return-gaps") do |dir|
-      path = File.join(dir, "prism_return_gaps.rb")
+  it "infers static return origins through parser control-flow and local expression nodes" do
+    Dir.mktmpdir("nil-kill-parser-return-gaps") do |dir|
+      path = File.join(dir, "parser_return_gaps.rb")
       File.write(path, <<~RUBY)
-        class PrismReturnGaps
+        class ParserReturnGaps
           extend T::Sig
 
           sig { params(flag: T::Boolean).returns(T.untyped) }

@@ -24,126 +24,7 @@ module NilKill
     end
 
     def load_runtime
-      Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          key = [obs["class"], obs["method"], obs["kind"], obs["path"], obs["line"]]
-          rec = @store.method_record(key)
-          rec["calls"] += obs["calls"].to_i
-          rec["ok_calls"] += obs["ok_calls"].to_i
-          rec["raised_calls"] += obs["raised_calls"].to_i
-          %w[returns return_elem raised].each { |k| rec[k] = (rec[k] + Array(obs[k])).uniq.sort }
-          merge_hash_sets(rec["params_by_name"], obs["params_by_name"])
-          merge_hash_sets(rec["params_ok"], obs["params_ok"])
-          merge_hash_sets(rec["params_raised"], obs["params_raised"])
-          merge_hash_counts(rec["param_sites"], obs["param_sites"])
-          merge_hash_counts(rec["param_sites_ok"], obs["param_sites_ok"])
-          merge_hash_counts(rec["param_sites_raised"], obs["param_sites_raised"])
-          merge_hash_counts(rec["param_traces"], obs["param_traces"])
-          merge_hash_counts(rec["param_traces_ok"], obs["param_traces_ok"])
-          merge_hash_counts(rec["param_traces_raised"], obs["param_traces_raised"])
-          merge_hash_sets(rec["param_elem"], obs["param_elem"])
-          merge_hash_kv(rec["param_kv"], obs["param_kv"])
-          merge_hash_shapes(rec["param_elem_shapes"], obs["param_elem_shapes"])
-          merge_hash_kv_shapes(rec["param_kv_shapes"], obs["param_kv_shapes"])
-          merge_kv(rec["return_kv"], obs["return_kv"])
-          merge_shapes(rec["return_elem_shapes"], obs["return_elem_shapes"])
-          merge_kv_shapes(rec["return_kv_shapes"], obs["return_kv_shapes"])
-        end
-      end
-      runtime_edges = {}
-      Dir.glob(File.join(RUNTIME_DIR, "method-edges-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          caller = runtime_edge_endpoint(obs["caller"])
-          callee = runtime_edge_endpoint(obs["callee"])
-          next unless caller && callee
-          next unless NilKill.target_path?(caller["path"]) && NilKill.target_path?(callee["path"])
-
-          key = [caller, callee]
-          rec = (runtime_edges[key] ||= {
-            "caller" => caller,
-            "callee" => callee,
-            "calls" => 0,
-            "ok_calls" => 0,
-            "raised_calls" => 0,
-          })
-          rec["calls"] += obs["calls"].to_i
-          rec["ok_calls"] += obs["ok_calls"].to_i
-          rec["raised_calls"] += obs["raised_calls"].to_i
-        end
-      end
-      @store.facts["runtime_call_edges"] = runtime_edges.values.sort_by do |edge|
-        caller = edge.fetch("caller")
-        callee = edge.fetch("callee")
-        [caller["path"], caller["line"].to_i, caller["class"], caller["kind"], caller["method"],
-         callee["path"], callee["line"].to_i, callee["class"], callee["kind"], callee["method"]]
-      end
-      Dir.glob(File.join(RUNTIME_DIR, "tlets-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          key = "#{obs["path"]}:#{obs["line"]}"
-          rec = (@store.tlets[key] ||= { "path" => obs["path"], "line" => obs["line"], "calls" => 0, "classes" => [] })
-          rec["calls"] += obs["calls"].to_i
-          rec["classes"] = (rec["classes"] + Array(obs["classes"])).uniq.sort
-        end
-      end
-      Dir.glob(File.join(RUNTIME_DIR, "structs-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          @store.facts["struct_field_runtime"] ||= []
-          @store.facts["struct_field_runtime"] << obs
-        end
-      end
-      Dir.glob(File.join(RUNTIME_DIR, "ivars-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          @store.facts["ivar_runtime"] ||= []
-          @store.facts["ivar_runtime"] << obs
-        end
-      end
-      cov = Hash.new { |h, k| h[k] = [] }
-      Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          cov[NilKill.rel(obs["path"])].concat(Array(obs["lines"]))
-        end
-      end
-      @store.facts["collect_coverage"] = cov.transform_values { |ls| ls.uniq.sort } unless cov.empty?
-      Dir.glob(File.join(RUNTIME_DIR, "tuples-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          @store.facts["tuple_runtime"] ||= []
-          @store.facts["tuple_runtime"] << obs
-        end
-      end
-      Dir.glob(File.join(RUNTIME_DIR, "collections-*.jsonl")).each do |file|
-        File.foreach(file) do |line|
-          obs = JSON.parse(line)
-          next unless NilKill.target_path?(obs["path"])
-          @store.facts["collection_runtime"] ||= []
-          @store.facts["collection_runtime"] << obs
-        end
-      end
-    end
-
-    def runtime_edge_endpoint(endpoint)
-      return nil unless endpoint.is_a?(Hash)
-      path = endpoint["path"] || endpoint[:path]
-      return nil if path.to_s.empty?
-
-      {
-        "class" => (endpoint["class"] || endpoint[:class]).to_s,
-        "method" => (endpoint["method"] || endpoint[:method]).to_s,
-        "kind" => (endpoint["kind"] || endpoint[:kind]).to_s,
-        "path" => File.expand_path(path, ROOT),
-        "line" => (endpoint["line"] || endpoint[:line]).to_i,
-      }
+      Runtime::Normalizer.new(root: ROOT).load_legacy_ruby!(@store, runtime_dir: RUNTIME_DIR)
     end
 
     def index_sources
@@ -846,7 +727,7 @@ module NilKill
 
     def parsed_hash_record_source(abs)
       @parsed_hash_record_sources ||= {}
-      @parsed_hash_record_sources[abs] ||= Prism.parse(File.read(abs))
+      @parsed_hash_record_sources[abs] ||= Syntax.parse(File.read(abs))
     end
 
     def hash_record_value_escapes?(root, hash_node)
@@ -864,15 +745,15 @@ module NilKill
     # `recv[k] = x`.
     def value_in_collection_append_or_index_write?(root, target)
       each_node(root) do |node|
-        if node.is_a?(Prism::CallNode) && COLLECTION_APPEND_METHODS.include?(node.name.to_s)
+        if node.is_a?(Syntax::CallNode) && COLLECTION_APPEND_METHODS.include?(node.name.to_s)
           args = node.arguments&.arguments || []
           return true if args.any? { |a| a.equal?(target) }
         end
-        if node.is_a?(Prism::IndexOperatorWriteNode) || node.is_a?(Prism::IndexAndWriteNode) ||
-            node.is_a?(Prism::IndexOrWriteNode)
+        if node.is_a?(Syntax::IndexOperatorWriteNode) || node.is_a?(Syntax::IndexAndWriteNode) ||
+            node.is_a?(Syntax::IndexOrWriteNode)
           return true if node.respond_to?(:value) && node.value.equal?(target)
         end
-        if node.is_a?(Prism::CallNode) && node.name.to_s == "[]=" && node.arguments
+        if node.is_a?(Syntax::CallNode) && node.name.to_s == "[]=" && node.arguments
           last = node.arguments.arguments.last
           return true if last && last.equal?(target)
         end
@@ -883,7 +764,7 @@ module NilKill
     def enclosing_local_write_for(root, target)
       found = nil
       each_node(root) do |node|
-        if node.is_a?(Prism::LocalVariableWriteNode) && node.value.equal?(target)
+        if node.is_a?(Syntax::LocalVariableWriteNode) && node.value.equal?(target)
           found = node
         end
       end
@@ -896,9 +777,9 @@ module NilKill
     # by the callee).
     def escape_uses_of_local?(root, name, origin_hash)
       each_node(root) do |node|
-        next unless node.is_a?(Prism::CallNode)
+        next unless node.is_a?(Syntax::CallNode)
         args = node.arguments&.arguments || []
-        reads = args.select { |a| a.is_a?(Prism::LocalVariableReadNode) && a.name.to_s == name }
+        reads = args.select { |a| a.is_a?(Syntax::LocalVariableReadNode) && a.name.to_s == name }
         next if reads.empty?
         # `local[:k]` / `local.fetch(:k)` style reads have the local as
         # the RECEIVER, not an argument -- those are safe accessors and
@@ -907,8 +788,8 @@ module NilKill
       end
       # element of an array literal: `arr = [local]` / `[ local ]`
       each_node(root) do |node|
-        next unless node.is_a?(Prism::ArrayNode)
-        return true if node.elements.any? { |e| e.is_a?(Prism::LocalVariableReadNode) && e.name.to_s == name }
+        next unless node.is_a?(Syntax::ArrayNode)
+        return true if node.elements.any? { |e| e.is_a?(Syntax::LocalVariableReadNode) && e.name.to_s == name }
       end
       false
     end
@@ -928,7 +809,7 @@ module NilKill
       until stack.empty?
         node = stack.pop
         next unless node
-        if node.is_a?(Prism::HashNode) &&
+        if node.is_a?(Syntax::HashNode) &&
             node.location.start_line == line &&
             node.slice.strip == code
           return node
@@ -940,14 +821,14 @@ module NilKill
 
     # True if `target` (a HashNode) sits in an array-element position:
     # its nearest enclosing container before the statement is an
-    # ArrayNode. Parent links aren't available in Prism, so search from
+    # ArrayNode. Parent links are intentionally not used, so search from
     # the root for an ArrayNode that (transitively) contains the target.
     def hash_literal_in_array_literal?(root, target)
       stack = [root]
       until stack.empty?
         node = stack.pop
         next unless node
-        if node.is_a?(Prism::ArrayNode) && node_contains?(node, target)
+        if node.is_a?(Syntax::ArrayNode) && node_contains?(node, target)
           return true
         end
         stack.concat(node.child_nodes.compact) if node.respond_to?(:child_nodes)
@@ -1116,25 +997,25 @@ module NilKill
     def mark_return_usage_graph(node, context, current_method, candidate_names, method_return_types, used, return_edges)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           child_context = idx == body.length - 1 ? context : :statement
           mark_return_usage_graph(child, child_context, current_method, candidate_names, method_return_types, used, return_edges)
         end
-      when Prism::ReturnNode
+      when Syntax::ReturnNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, :return, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::ArgumentsNode
+      when Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, context, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage_graph(node.predicate, :value, current_method, candidate_names, method_return_types, used, return_edges) if node.respond_to?(:predicate)
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
         mark_return_usage_graph(node.subsequent, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::CallNode
+      when Syntax::CallNode
         if candidate_names.include?(node.name)
           if context == :return && current_method && candidate_names.include?(current_method)
             if typed_value_return?(method_return_types[current_method])
@@ -2173,53 +2054,6 @@ module NilKill
 
     def base_action(kind, conf, path, line, message, data)
       { "kind" => kind, "confidence" => conf, "path" => path, "line" => line, "message" => message, "data" => data }
-    end
-
-    def merge_hash_sets(target, source)
-      (source || {}).each { |name, vals| target[name] = (Array(target[name]) + Array(vals)).uniq.sort }
-    end
-
-    def merge_hash_kv(target, source)
-      (source || {}).each { |name, kv| merge_kv((target[name] ||= [[], []]), kv) }
-    end
-
-    def merge_hash_shapes(target, source)
-      (source || {}).each { |name, shapes| merge_shapes((target[name] ||= []), shapes) }
-    end
-
-    def merge_hash_kv_shapes(target, source)
-      (source || {}).each { |name, kv| merge_kv_shapes((target[name] ||= [[], []]), kv) }
-    end
-
-    def merge_hash_counts(target, source)
-      (source || {}).each do |name, sites|
-        bucket = (target[name] ||= {})
-        (sites || {}).each { |site, count| bucket[site] = bucket.fetch(site, 0) + count.to_i }
-      end
-    end
-
-    def merge_kv(target, source)
-      return unless source
-      target[0] = (Array(target[0]) + Array(source[0])).uniq.sort
-      target[1] = (Array(target[1]) + Array(source[1])).uniq.sort
-    end
-
-    def merge_shapes(target, source)
-      seen = target.map { |shape| JSON.generate(shape) }.to_set
-      Array(source).each do |shape|
-        parsed = NilKill.parse_shape(shape)
-        key = JSON.generate(parsed)
-        next if seen.include?(key)
-        target << parsed
-        seen << key
-      end
-      target.sort_by! { |shape| JSON.generate(shape) }
-    end
-
-    def merge_kv_shapes(target, source)
-      return unless source
-      merge_shapes(target[0], Array(source)[0])
-      merge_shapes(target[1], Array(source)[1])
     end
 
     def parse_sorbet_errors(output)

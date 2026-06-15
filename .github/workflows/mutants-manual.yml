@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Exact PR head SHA to mutant test"
+        description: "PR head ref to mutant test: full SHA, short SHA, branch, or tag"
         required: true
         type: string
       base_sha:
-        description: "Base SHA for Ruby --since filtering; leave blank for full subject selection"
+        description: "Base SHA for Ruby --since filtering; leave blank to use the associated PR base SHA when available"
         required: false
         type: string
       head_repository:
@@ -41,16 +41,75 @@ env:
   COVERAGE: "0"
 
 jobs:
+  resolve_ref:
+    name: Resolve mutant target ref
+    runs-on: ubuntu-latest
+    outputs:
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      head_repository: ${{ steps.resolve.outputs.head_repository }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+          INPUT_REF: ${{ inputs.sha }}
+          INPUT_REPOSITORY: ${{ inputs.head_repository }}
+        run: |
+          set -euo pipefail
+
+          repo="${INPUT_REPOSITORY:-${GITHUB_REPOSITORY}}"
+          ref="${INPUT_REF}"
+          work="$(mktemp -d)"
+
+          git -C "${work}" init -q
+          git -C "${work}" remote add origin "https://github.com/${repo}.git"
+
+          if [[ "${ref}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            git -C "${work}" fetch --no-tags --depth=1 origin "${ref}"
+            resolved="$(git -C "${work}" rev-parse FETCH_HEAD^{commit})"
+          elif [[ "${ref}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
+            git -C "${work}" fetch --filter=blob:none --no-tags --prune origin \
+              '+refs/heads/*:refs/remotes/origin/*' \
+              '+refs/tags/*:refs/tags/*'
+            mapfile -t matches < <(git -C "${work}" rev-list --all | grep -i "^${ref}")
+            if [ "${#matches[@]}" -ne 1 ]; then
+              printf 'Expected short SHA %s to resolve to exactly one commit, found %s\n' "${ref}" "${#matches[@]}" >&2
+              exit 1
+            fi
+            resolved="${matches[0]}"
+          else
+            git -C "${work}" fetch --no-tags --depth=1 origin "${ref}"
+            resolved="$(git -C "${work}" rev-parse FETCH_HEAD^{commit})"
+          fi
+
+          base_sha="${INPUT_BASE_SHA}"
+          if [ -z "${base_sha}" ] && [ "${repo}" = "${GITHUB_REPOSITORY}" ]; then
+            base_sha="$(
+              gh api \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${GITHUB_REPOSITORY}/commits/${resolved}/pulls" \
+                --jq '.[0].base.sha // ""'
+            )"
+          fi
+
+          {
+            echo "base_sha=${base_sha}"
+            echo "head_repository=${repo}"
+            echo "head_sha=${resolved}"
+          } >> "${GITHUB_OUTPUT}"
+
   mark-pending:
     name: Mark mutants/manual pending
     runs-on: ubuntu-latest
+    needs: resolve_ref
     permissions:
       statuses: write
     steps:
       - name: Set pending status
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
+          SHA: ${{ needs.resolve_ref.outputs.head_sha }}
           TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
@@ -91,7 +150,7 @@ jobs:
   ruby-spec-mutants:
     name: Ruby spec mutants shard ${{ matrix.shard }}/${{ matrix.count }}
     runs-on: ubuntu-latest
-    needs: plan
+    needs: [resolve_ref, plan]
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -99,8 +158,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
-          ref: ${{ inputs.sha }}
+          repository: ${{ needs.resolve_ref.outputs.head_repository }}
+          ref: ${{ needs.resolve_ref.outputs.head_sha }}
           fetch-depth: 0
       - uses: ruby/setup-ruby@v1
         with:
@@ -108,7 +167,7 @@ jobs:
           bundler-cache: true
       - name: Run Ruby spec mutants
         env:
-          BASE_SHA: ${{ inputs.base_sha }}
+          BASE_SHA: ${{ needs.resolve_ref.outputs.base_sha }}
         run: |
           args=(--shard "${{ matrix.shard }}/${{ matrix.count }}" --out "/tmp/clear-ruby-mutants-${{ matrix.shard }}")
           if [ -n "${BASE_SHA}" ]; then
@@ -117,11 +176,20 @@ jobs:
             args+=(--since "${BASE_SHA}")
           fi
           MUTANT_JOBS="$(nproc)" bundle exec ruby tools/mutants/ruby_specs.rb "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ruby-mutant-facts-${{ matrix.shard }}
+          path: |
+            /tmp/clear-ruby-mutants-${{ matrix.shard }}/mutant-facts.json
+            /tmp/clear-ruby-mutants-${{ matrix.shard }}/*.log
+          if-no-files-found: warn
+          retention-days: 14
 
   fuzz-mutants:
     name: Fuzz mutants shard ${{ matrix.shard }}/${{ matrix.count }}
     runs-on: ubuntu-latest
-    needs: plan
+    needs: [resolve_ref, plan]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -129,8 +197,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
-          ref: ${{ inputs.sha }}
+          repository: ${{ needs.resolve_ref.outputs.head_repository }}
+          ref: ${{ needs.resolve_ref.outputs.head_sha }}
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -143,7 +211,7 @@ jobs:
   transpile-mutants:
     name: Transpile mutants shard ${{ matrix.shard }}/${{ matrix.count }}
     runs-on: ubuntu-latest
-    needs: plan
+    needs: [resolve_ref, plan]
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -151,8 +219,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.head_repository != '' && inputs.head_repository || github.repository }}
-          ref: ${{ inputs.sha }}
+          repository: ${{ needs.resolve_ref.outputs.head_repository }}
+          ref: ${{ needs.resolve_ref.outputs.head_sha }}
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -165,7 +233,7 @@ jobs:
   complete:
     name: mutants/manual
     runs-on: ubuntu-latest
-    needs: [mark-pending, ruby-spec-mutants, fuzz-mutants, transpile-mutants]
+    needs: [resolve_ref, mark-pending, ruby-spec-mutants, fuzz-mutants, transpile-mutants]
     if: always()
     permissions:
       statuses: write
@@ -173,7 +241,7 @@ jobs:
       - name: Set final status
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
+          SHA: ${{ needs.resolve_ref.outputs.head_sha }}
           TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUBY_RESULT: ${{ needs.ruby-spec-mutants.result }}
           FUZZ_RESULT: ${{ needs.fuzz-mutants.result }}

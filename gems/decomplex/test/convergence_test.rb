@@ -85,7 +85,7 @@ class ConvergenceTest < Minitest::Test
       ["False Simplicity", 3, [{ at: "f.rb:two_t3:2" }]],
       ["Neglected Conditions", 2, [{ at: "f.rb:three:1" }]],
       ["Derived-State Staleness", 2, [{ at: "f.rb:three:2" }]],
-      ["Flay Similarity (Type-2/3)", 2, [{ at: "f.rb:three:3" }]]
+      ["Structural Similarity (Type-2/3)", 2, [{ at: "f.rb:three:3" }]]
     ]
     r = C.rollup(sections)
     # 3-detector unit ranks first (most agreement).

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rollup"
+require "json"
 require "pathname"
 
 module SlopCop
@@ -12,13 +13,16 @@ module SlopCop
     # link ../../src/x.rb, not src/x.rb). Defaults to repo root
     # (correct for stdout / a root-level report).
     def initialize(files:, repo:, resultset:, ffi_boundary: [],
-                   diagnostic_mids: [], top: 50, link_base: nil)
+                   diagnostic_mids: [], top: 50, link_base: nil, mutation: nil,
+                   exclude: [])
       @repo = File.realpath(repo)
       @top = top
       @link_root = Pathname.new(File.expand_path(link_base || @repo))
       @r = Rollup.run(files: files, repo: repo, resultset: resultset,
                       ffi_boundary: ffi_boundary,
-                      diagnostic_mids: diagnostic_mids)
+                      diagnostic_mids: diagnostic_mids,
+                      mutation: mutation,
+                      exclude: exclude)
     end
 
     # href from the report's directory to a repo-relative source file.
@@ -54,7 +58,8 @@ module SlopCop
       o << "> Top true coverage gaps, ranked by fix-churn x structural\n" \
            "> deviance. Every dark arm is categorized; only GENUINE\n" \
            "> reachable ones are gaps. Apex = uncovered AND historically\n" \
-           "> churned (boobytrap) AND structurally deviant (decomplex).\n" \
+           "> churned (boobytrap), structurally deviant (decomplex),\n" \
+           "> and weakly verified when mutation facts are supplied.\n" \
            "> Owns categorization; consumes boobytrap (churn) and\n" \
            "> optional decomplex (spurious filter + deviance rank).\n\n"
 
@@ -64,8 +69,13 @@ module SlopCop
       if gaps.empty?
         o << "None.\n\n"
       else
-        o << "| # | gap | method | churn | decomplex deviance |\n" \
-             "|---|---|---|---|---|\n"
+        if @r[:mutation_label]
+          o << "| # | gap | method | churn | decomplex deviance | verification | profile |\n" \
+               "|---|---|---|---|---|---|---|\n"
+        else
+          o << "| # | gap | method | churn | decomplex deviance |\n" \
+               "|---|---|---|---|---|\n"
+        end
         gaps.first(@top).each_with_index do |x, i|
           link = "[`#{x[:file]}:#{x[:line]}`](#{href(x[:file])}#L#{x[:line]})"
           dets = x[:detectors].to_a
@@ -83,8 +93,12 @@ module SlopCop
                   "**#{x[:deviance]}**#{mark} (#{dets.first(3).join(', ')}" \
                   "#{dets.size > 3 ? ", +#{dets.size - 3}" : ''})"
                 end
-          o << "| #{i + 1} | #{link} | `#{x[:method]}` | " \
-               "#{x[:churn]} | #{dev} |\n"
+          row = "| #{i + 1} | #{link} | `#{x[:method]}` | " \
+                "#{x[:churn]} | #{dev} "
+          if @r[:mutation_label]
+            row << "| #{x[:verification]} | #{x[:risk_profile]} "
+          end
+          o << "#{row}|\n"
         end
         o << "\n- ...(+#{gaps.size - @top} more genuine gaps)\n" if gaps.size > @top
         o << "\n"
@@ -116,6 +130,12 @@ module SlopCop
       o << "- Repo: `#{@repo}`\n"
       o << "- Files: #{@r[:per_file].size}; dark arms: #{g}; " \
            "genuine gaps: #{gaps.size}\n"
+      o << "- Coverage input: #{@r[:coverage_label]}\n" if @r[:coverage_label]
+      o << "- Mutation facts: #{@r[:mutation_label] || 'not supplied'}\n"
+      unless @r[:sources].to_h.empty?
+        source_bits = @r[:sources].sort.map { |source, count| "#{source}=#{count}" }.join(", ")
+        o << "- Branch source: #{source_bits}\n"
+      end
       o << "- General engine: categorizes uncovered branches, ranks " \
            "genuine gaps by consumed boobytrap churn x optional " \
            "decomplex structural deviance. Project lexicons " \
@@ -126,6 +146,48 @@ module SlopCop
            "(file, method) fallback when no flagged span contained the " \
            "arm. A ranked candidate, not a verdict (Engler discipline).\n"
       o
+    end
+
+    def to_h
+      {
+        "format" => "slopcop.report.v1",
+        "summary" => {
+          "repo" => @repo,
+          "files" => @r[:per_file].size,
+          "dark_arms" => @r[:grand],
+          "genuine_gaps" => @r[:top_gaps].size,
+          "coverage_input" => @r[:coverage_label],
+          "mutation_facts" => @r[:mutation_label],
+          "decomplex_status" => @r[:decomplex_status].to_s,
+          "branch_sources" => stringify_counts(@r[:sources])
+        },
+        "totals" => stringify_counts(@r[:totals]),
+        "per_file" => @r[:per_file].transform_values do |file|
+          {
+            "total" => file[:total],
+            "counts" => stringify_counts(file[:counts]),
+            "churn" => file[:churn]
+          }
+        end,
+        "top_gaps" => @r[:top_gaps].map { |gap| stringify_keys(gap) },
+        "dark_arms" => @r[:dark_arms].map { |arm| stringify_keys(arm) }
+      }
+    end
+
+    def to_json(*_args)
+      JSON.pretty_generate(to_h)
+    end
+
+    private
+
+    def stringify_counts(counts)
+      counts.to_h.transform_keys(&:to_s)
+    end
+
+    def stringify_keys(hash)
+      hash.to_h.transform_keys(&:to_s).transform_values do |value|
+        value.is_a?(Symbol) ? value.to_s : value
+      end
     end
   end
 end

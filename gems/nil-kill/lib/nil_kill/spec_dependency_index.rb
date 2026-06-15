@@ -78,7 +78,7 @@ module NilKill
     end
 
     def extract_requires(path)
-      parsed = Prism.parse_file(path)
+      parsed = Syntax.parse_file(path)
       return [] unless parsed.success?
       targets = []
       walk(parsed.value, File.dirname(path), targets)
@@ -87,9 +87,9 @@ module NilKill
 
     def walk(node, source_dir, out)
       return unless node
-      if node.is_a?(Prism::CallNode) && node.name == :require_relative
+      if node.is_a?(Syntax::CallNode) && node.name == :require_relative
         arg = node.arguments&.arguments&.first
-        if arg.is_a?(Prism::StringNode)
+        if arg.is_a?(Syntax::StringNode)
           raw = arg.unescaped.to_s
           unless raw.empty?
             resolved = File.expand_path(raw, source_dir)

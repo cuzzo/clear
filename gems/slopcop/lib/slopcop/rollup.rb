@@ -19,44 +19,60 @@ module SlopCop
     # testing-strategy-neutral; the consuming project decides what a
     # "negative test" / "integration test" concretely is.
     ACTION = {
-      type_norm:  "type/nil guard -- likely dead if runtime contracts were stricter",
+      type_norm:  "type/null guard -- likely dead if runtime contracts were stricter",
       dead:       "decision never executes in coverage -- audit as missing test or statically-dead code",
       defensive:  "inert / invariant-pinned -- accept, exclude from denominator",
       spurious:   "span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?)",
       ffi:        "external/boundary call -- needs an integration test",
-      diagnostic: "error/raise/diagnostic path -- reachable only by invalid input (negative test)",
+      diagnostic: "language diagnostic/error path -- reachable only by invalid input (negative test)",
       genuine:    "real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance"
     }.freeze
     CATS = ACTION.keys.freeze
 
     module_function
 
-    # files: repo-relative .rb paths. repo: absolute root. resultset:
-    # SimpleCov json. ffi_boundary and diagnostic_mids are
-    # caller-supplied lexicons (the gem ships none beyond general Ruby
-    # raise/fail/abort -- consuming projects provide their own).
-    def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [])
+    # files: repo-relative source paths. repo: absolute root. resultset:
+    # any Boobytrap-normalized coverage input. ffi_boundary and
+    # diagnostic_mids are caller-supplied project lexicons; language
+    # defaults come from Decomplex::Syntax.
+    def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [],
+            mutation: nil, exclude: [])
       repo = File.realpath(repo)
       churn = begin
         Boobytrap::Bugspots.from_git(repo)
       rescue StandardError
         {}
       end
+      coverage = if resultset
+                   Classifier.coverage_dataset(resultset, root: repo)
+                 end
       mx = churn.values.max
       mx = 1.0 if mx.nil? || mx.zero?
 
       abs_for = {}
-      files.each do |rel|
-        a = File.join(repo, rel)
+      files.each do |file|
+        next unless Boobytrap::DecomplexRisk.source_file?(
+          file,
+          root: repo,
+          parser: "tree_sitter",
+          exclude: exclude
+        )
+
+        a = file.to_s.start_with?("/") ? file.to_s : File.join(repo, file.to_s)
+        rel = repo_relative(a, repo)
         abs_for[rel] = a if File.exist?(a)
       end
       # decomplex verdict, keyed [abs, method]. {} if decomplex absent.
       dv = DecomplexVerdict.index(abs_for.values)
+      mutation_facts = Boobytrap::MutationFacts.load(mutation, root: repo)
 
       per_file = {}
       gaps = []
+      dark_arms = []
+      sources = Hash.new(0)
       abs_for.each do |rel, abs|
         arms = Classifier.classify_file(resultset, abs,
+                                        root: repo,
                                         ffi_boundary: ffi_boundary,
                                         diagnostic_mids: diagnostic_mids)
         next if arms.empty?
@@ -81,13 +97,24 @@ module SlopCop
                   a.category
                 end
           counts[cat] += 1
+          sources[a.source || :coverage] += 1
+          dark_arms << {
+            file: rel,
+            line: a.line,
+            method: a.defn,
+            category: cat,
+            arm_category: cat,
+            source: a.source || :coverage,
+            message: "dark arm: #{cat}"
+          }
           next unless cat == :genuine
 
           gaps << { file: rel, line: a.line, method: a.defn, churn: cn,
                     deviance: (v ? v[:deviance] : 0),
                     detectors: (v ? v[:detectors] : []),
                     precise: (v ? v[:precise] : nil),
-                    coarse_dup: (v ? v[:coarse_dup] : false) }
+                    coarse_dup: (v ? v[:coarse_dup] : false),
+                    verification_fact: mutation_facts.status_for(rel, a.defn) }
         end
         per_file[rel] = { total: arms.size, counts: counts, churn: cn }
       end
@@ -100,7 +127,31 @@ module SlopCop
       maxd = gaps.map { |x| x[:deviance] }.max.to_i
       maxd = 1 if maxd.zero?
       gaps.each do |x|
-        x[:priority] = (x[:churn] + x[:deviance].to_f / maxd).round(4)
+        structural = x[:deviance].to_f / maxd
+        priority = x[:churn] + structural
+        if mutation_facts.active?
+          fact = x[:verification_fact]
+          x[:verification] = fact.summary
+          x[:mutation_kill_rate] = fact.kill_rate
+          x[:mutation_gate_status] = fact.gate_status
+          x[:risk_profile] = Boobytrap::MutationFacts.profile(
+            fact,
+            active: true,
+            complexity: x[:deviance],
+            history: x[:churn],
+            coverage_gap: 1.0
+          )
+          x[:verification_multiplier] = Boobytrap::MutationFacts.risk_multiplier(
+            fact,
+            active: true,
+            complexity: x[:deviance],
+            history: x[:churn],
+            coverage_gap: 1.0
+          )
+          priority *= x[:verification_multiplier]
+        end
+        x.delete(:verification_fact)
+        x[:priority] = priority.round(4)
       end
 
       totals = Hash.new(0)
@@ -117,8 +168,21 @@ module SlopCop
         # deviance, then -churn / file / line for stable order.
         top_gaps: gaps.sort_by do |g|
           [-g[:priority], -g[:churn], g[:file], g[:line]]
-        end
+        end,
+        dark_arms: dark_arms.sort_by do |arm|
+          [arm[:file], arm[:line], arm[:method].to_s, arm[:category].to_s]
+        end,
+        coverage_label: coverage && !coverage.empty? ? coverage.label : nil,
+        mutation_label: mutation_facts.active? ? mutation_facts.label : nil,
+        sources: sources
       }
+    end
+
+    def repo_relative(path, repo)
+      root = File.expand_path(repo).tr("\\", "/").chomp("/")
+      expanded = File.expand_path(path).tr("\\", "/")
+      prefix = "#{root}/"
+      expanded.start_with?(prefix) ? expanded[prefix.length..] : path.to_s
     end
   end
 end

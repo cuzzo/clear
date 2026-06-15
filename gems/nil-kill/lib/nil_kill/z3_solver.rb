@@ -21,7 +21,6 @@
 #   observed nil). Retires the nil-kill-skip.json workaround for these cases.
 
 require 'open3'
-require 'prism'
 
 module NilKill
   class Z3Solver
@@ -210,7 +209,7 @@ module NilKill
       arrays = []
       walk = lambda do |node|
         return unless node
-        if node.is_a?(Prism::ReturnNode)
+        if node.is_a?(Syntax::ReturnNode)
           Array(node.arguments&.arguments).each { |arg| arrays << arg if tuple_like_array_node?(arg) }
         elsif tuple_like_array_node?(node) && node.location&.start_line == def_node.location&.end_line.to_i - 1
           arrays << node
@@ -222,7 +221,7 @@ module NilKill
     end
 
     def tuple_like_array_node?(node)
-      return false unless node.is_a?(Prism::ArrayNode)
+      return false unless node.is_a?(Syntax::ArrayNode)
       element_types = node.elements.map { |elem| literal_type(elem) || static_constant_type(elem) }.compact.uniq
       node.elements.size > 1 && element_types.size != 1
     end
@@ -245,8 +244,8 @@ module NilKill
       hashes = []
       walk = lambda do |node|
         return unless node
-        if node.is_a?(Prism::ReturnNode)
-          Array(node.arguments&.arguments).each { |arg| hashes << arg if arg.is_a?(Prism::HashNode) }
+        if node.is_a?(Syntax::ReturnNode)
+          Array(node.arguments&.arguments).each { |arg| hashes << arg if arg.is_a?(Syntax::HashNode) }
         end
         node.child_nodes.compact.each { |child| walk.call(child) } if node.respond_to?(:child_nodes)
       end
@@ -256,7 +255,7 @@ module NilKill
 
     def heterogeneous_hash_literal?(node)
       value_types = node.elements.filter_map do |assoc|
-        next unless assoc.is_a?(Prism::AssocNode)
+        next unless assoc.is_a?(Syntax::AssocNode)
         literal_type(assoc.value) || static_constant_type(assoc.value)
       end.uniq
       value_types.size > 1
@@ -266,9 +265,9 @@ module NilKill
       keys = Set.new
       walk = lambda do |node|
         return unless node
-        if node.is_a?(Prism::CallNode) && node.name == :[] && node.receiver&.slice == receiver_name
+        if node.is_a?(Syntax::CallNode) && node.name == :[] && node.receiver&.slice == receiver_name
           arg = node.arguments&.arguments&.first
-          keys << arg.value.to_s if arg.is_a?(Prism::SymbolNode)
+          keys << arg.value.to_s if arg.is_a?(Syntax::SymbolNode)
         end
         node.child_nodes.compact.each { |child| walk.call(child) } if node.respond_to?(:child_nodes)
       end
@@ -302,11 +301,11 @@ module NilKill
       calls = Set.new
       walk = lambda do |node|
         return unless node
-        if node.is_a?(Prism::CallNode)
+        if node.is_a?(Syntax::CallNode)
           receiver = node.receiver
           if receiver&.slice == receiver_name
             calls << node.name.to_s
-          elsif receiver.is_a?(Prism::CallNode) && receiver.name == :class && receiver.receiver&.slice == receiver_name
+          elsif receiver.is_a?(Syntax::CallNode) && receiver.name == :class && receiver.receiver&.slice == receiver_name
             calls << "class.#{node.name}"
           end
         end
@@ -328,7 +327,7 @@ module NilKill
     def action_def_node(action)
       path = File.join(ROOT, action["path"].to_s)
       return nil unless File.file?(path)
-      parsed = Prism.parse_file(path)
+      parsed = Syntax.parse_file(path)
       return nil unless parsed.success?
       target_line = action["line"].to_i
       find_def_node(parsed.value, target_line)
@@ -336,7 +335,7 @@ module NilKill
 
     def find_def_node(node, target_line)
       return nil unless node
-      if node.is_a?(Prism::DefNode)
+      if node.is_a?(Syntax::DefNode)
         start_line = node.location.start_line
         end_line = node.location.end_line
         return node if target_line >= start_line && target_line <= end_line
@@ -346,7 +345,7 @@ module NilKill
     end
 
     def static_constant_type(node)
-      return nil unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+      return nil unless node.is_a?(Syntax::ConstantReadNode) || node.is_a?(Syntax::ConstantPathNode)
       "T.class_of(#{node.slice})"
     end
 
@@ -476,7 +475,7 @@ module NilKill
       @call_graph   = Hash.new { |h, k| h[k] = [] }
       @param_sources = Hash.new { |h, k| h[k] = { keyword: Hash.new([]), positional: Hash.new([]) } }
       @source_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = Syntax.parse_file(path)
         next unless parsed.success?
         walk_node(parsed.value, nil)
       rescue StandardError
@@ -487,11 +486,11 @@ module NilKill
     def walk_node(node, enclosing)
       return unless node
 
-      if node.is_a?(Prism::DefNode)
+      if node.is_a?(Syntax::DefNode)
         enclosing = node.name.to_s
       end
 
-      if node.is_a?(Prism::CallNode) && enclosing
+      if node.is_a?(Syntax::CallNode) && enclosing
         record_call_edges(node, enclosing)
       end
 
@@ -504,13 +503,13 @@ module NilKill
       args = call_node.arguments&.arguments || []
 
       args.each_with_index do |arg, pos|
-        if arg.is_a?(Prism::KeywordHashNode)
+        if arg.is_a?(Syntax::KeywordHashNode)
           arg.elements.each do |assoc|
-            next unless assoc.is_a?(Prism::AssocNode)
-            key = assoc.key.is_a?(Prism::SymbolNode) ? assoc.key.value.to_s : nil
+            next unless assoc.is_a?(Syntax::AssocNode)
+            key = assoc.key.is_a?(Syntax::SymbolNode) ? assoc.key.value.to_s : nil
             next unless key
 
-            if assoc.value.is_a?(Prism::CallNode) && !assoc.value.safe_navigation?
+            if assoc.value.is_a?(Syntax::CallNode) && !assoc.value.safe_navigation?
               @call_graph[assoc.value.name.to_s] << {
                 receiver_method: receiver_method,
                 arg_kind: :keyword,
@@ -527,7 +526,7 @@ module NilKill
             end
           end
         else
-          if arg.is_a?(Prism::CallNode) && !arg.safe_navigation?
+          if arg.is_a?(Syntax::CallNode) && !arg.safe_navigation?
             @call_graph[arg.name.to_s] << {
               receiver_method: receiver_method,
               arg_kind: :positional,
@@ -550,15 +549,15 @@ module NilKill
     # anything that requires dataflow (variables, complex calls).
     def literal_type(node)
       case node
-      when Prism::StringNode         then "String"
-      when Prism::SymbolNode         then "Symbol"
-      when Prism::IntegerNode        then "Integer"
-      when Prism::FloatNode          then "Float"
-      when Prism::TrueNode           then "TrueClass"
-      when Prism::FalseNode          then "FalseClass"
-      when Prism::NilNode            then "NilClass"
-      when Prism::ArrayNode          then "Array"
-      when Prism::HashNode           then "Hash"
+      when Syntax::StringNode         then "String"
+      when Syntax::SymbolNode         then "Symbol"
+      when Syntax::IntegerNode        then "Integer"
+      when Syntax::FloatNode          then "Float"
+      when Syntax::TrueNode           then "TrueClass"
+      when Syntax::FalseNode          then "FalseClass"
+      when Syntax::NilNode            then "NilClass"
+      when Syntax::ArrayNode          then "Array"
+      when Syntax::HashNode           then "Hash"
       end
     end
 

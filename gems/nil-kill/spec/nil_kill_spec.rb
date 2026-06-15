@@ -210,44 +210,45 @@ RSpec.describe NilKill do
     end
 
     it "--hygiene emits only the slot summary and action counts, skipping heavy sections" do
-      report = described_class.new(["--hygiene"])
-      lines = []
-      evidence = {
-        "target_dirs" => ["src"],
-        "target_exclude_dirs" => [],
-        "methods" => [],
-        "facts" => {
-          "existing_sigs" => [
-            { "path" => "src/x.rb", "line" => 1, "class" => "X", "method" => "f",
-              "sig" => "sig { params(a: String).returns(T.untyped) }" },
-          ],
-          "unsigned_methods" => [],
-          "tlet_sites" => [],
-          "struct_declarations" => [],
-        },
-        "diagnostics" => { "sorbet_errors" => [], "nil_origins" => [] },
-      }
-      actions = [
-        { "kind" => "fix_sig_return", "confidence" => "high", "path" => "src/x.rb", "line" => 1,
-          "data" => { "type" => "String", "source" => "static_return_origin" } },
-        { "kind" => "fix_sig_param", "confidence" => "review", "path" => "src/x.rb", "line" => 1,
-          "data" => { "name" => "y", "type" => "String", "source" => "static_param_backflow" } },
-      ]
+      Dir.mktmpdir("nil-kill-hygiene-report", NilKill::ROOT) do |dir|
+        report = described_class.new(["--hygiene"])
+        evidence = {
+          "target_dirs" => [dir],
+          "target_exclude_dirs" => [],
+          "methods" => [],
+          "facts" => {
+            "existing_sigs" => [
+              { "path" => "src/x.rb", "line" => 1, "class" => "X", "method" => "f",
+                "sig" => "sig { params(a: String).returns(T.untyped) }" },
+            ],
+            "unsigned_methods" => [],
+            "tlet_sites" => [],
+            "struct_declarations" => [],
+          },
+          "diagnostics" => { "sorbet_errors" => [], "nil_origins" => [] },
+        }
+        actions = [
+          { "kind" => "fix_sig_return", "confidence" => "high", "path" => "src/x.rb", "line" => 1,
+            "data" => { "type" => "String", "source" => "static_return_origin" } },
+          { "kind" => "fix_sig_param", "confidence" => "review", "path" => "src/x.rb", "line" => 1,
+            "data" => { "name" => "y", "type" => "String", "source" => "static_param_backflow" } },
+        ]
 
-      lines = report.send(:build_header, evidence)
-      report.send(:append_hygiene_overview_summary, lines, evidence, actions)
+        lines = report.send(:build_header, evidence)
+        report.send(:append_hygiene_overview_summary, lines, evidence, actions)
 
-      expect(lines.join("\n")).to include("## Hygiene Overview")
-      # The bulleted coverage subsections were consolidated into two
-      # tables; the hygiene overview now leads with those.
-      expect(lines.join("\n")).to include("### Type Soundness")
-      expect(lines.join("\n")).to include("### Untyped Cause Breakdown")
-      expect(lines.join("\n")).to include("## Auto-Fix Action Counts")
-      expect(lines.join("\n")).to include("HIGH (auto-applied): 1")
-      expect(lines.join("\n")).to include("REVIEW (manual or verified-loop): 1")
-      # Heavy sections must NOT be present
-      expect(lines.join("\n")).not_to include("### Param T.untyped Buckets")
-      expect(lines.join("\n")).not_to include("### Return Origin Pressure")
+        expect(lines.join("\n")).to include("## Hygiene Overview")
+        # The bulleted coverage subsections were consolidated into two
+        # tables; the hygiene overview now leads with those.
+        expect(lines.join("\n")).to include("### Type Soundness")
+        expect(lines.join("\n")).to include("### Untyped Cause Breakdown")
+        expect(lines.join("\n")).to include("## Auto-Fix Action Counts")
+        expect(lines.join("\n")).to include("HIGH (auto-applied): 1")
+        expect(lines.join("\n")).to include("REVIEW (manual or verified-loop): 1")
+        # Heavy sections must NOT be present
+        expect(lines.join("\n")).not_to include("### Param T.untyped Buckets")
+        expect(lines.join("\n")).not_to include("### Return Origin Pressure")
+      end
     end
 
     it "reports per-method slot contribution counts in untyped slot buckets" do

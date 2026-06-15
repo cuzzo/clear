@@ -9,20 +9,17 @@ module Espalier
     def initialize(
       decomplex_data: {},
       nil_kill_data: {},
-      risk_data: {},
-      ruby_topology: nil
+      risk_data: {}
     )
       @decomplex_data = decomplex_data
       @nil_kill_data = nil_kill_data
       @risk_data = risk_data
-      @ruby_topology = ruby_topology
     end
 
     # Aggregate extracted AST structure with auxiliary indicators
     def aggregate(modules)
-      topology = ruby_topology_for(modules)
       manifest = modules.map do |mod|
-        internal_edges = internal_edges_for(mod, topology)
+        internal_edges = internal_edges_for(mod)
         callers_by_method = internal_edges.each_with_object(Hash.new { |h, k| h[k] = [] }) do |edge, index|
           index[edge[:callee]] << edge[:caller]
         end
@@ -94,6 +91,9 @@ module Espalier
             name: m[:name],
             signature: sig,
             visibility: m[:visibility] || :public,
+            line: m[:line],
+            span: m[:span],
+            language: mod[:language],
             EFFECTS: {
               reads: m[:effects][:reads].to_a.sort,
               writes: m[:effects][:writes].to_a.sort
@@ -107,6 +107,7 @@ module Espalier
         mod_row = {
           module: mod[:name],
           file: mod[:file],
+          language: mod[:language],
           type: mod[:type],
           state: aggregated_states.empty? ? nil : aggregated_states,
           functions: aggregated_methods
@@ -119,33 +120,8 @@ module Espalier
 
     private
 
-    def ruby_topology_for(modules)
-      return @ruby_topology if @ruby_topology
-
-      files = modules.filter_map { |mod| mod[:file] }.uniq.select { |file| File.file?(file) }
-      return nil if files.empty?
-
-      @ruby_topology = Decomplex::RubyTopology.scan(files)
-    rescue ArgumentError, SyntaxError
-      nil
-    end
-
-    def internal_edges_for(mod, topology)
-      if topology && !topology.methods_for_owner(mod[:name]).empty?
-        return topology_edges_for(mod, topology)
-      end
-
+    def internal_edges_for(mod)
       legacy_internal_edges_for(mod)
-    end
-
-    def topology_edges_for(mod, topology)
-      topology.edges_for_owner(mod[:name]).map do |edge|
-        {
-          caller: edge.caller_name,
-          callee: edge.callee_name,
-          type: edge.type
-        }
-      end.uniq.sort_by { |edge| [edge[:callee], edge[:caller], edge[:type].to_s] }
     end
 
     def legacy_internal_edges_for(mod)

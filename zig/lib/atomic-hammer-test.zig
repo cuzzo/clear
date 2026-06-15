@@ -36,7 +36,8 @@ test "AtomicInt64.fetchAdd hammer: N writers, sum == N*K" {
     var threads: [N_WRITERS]std.Thread = undefined;
     for (&threads) |*t| {
         t.* = try std.Thread.spawn(.{}, addWriterI, .{AddCtxI{
-            .counter = &counter, .iters = ITERS_PER_WRITER,
+            .counter = &counter,
+            .iters = ITERS_PER_WRITER,
         }});
     }
     for (&threads) |*t| t.join();
@@ -64,7 +65,8 @@ test "AtomicUint64.fetchAdd hammer: N writers, sum == N*K" {
     var threads: [N_WRITERS]std.Thread = undefined;
     for (&threads) |*t| {
         t.* = try std.Thread.spawn(.{}, addWriterU, .{AddCtxU{
-            .counter = &counter, .iters = ITERS_PER_WRITER,
+            .counter = &counter,
+            .iters = ITERS_PER_WRITER,
         }});
     }
     for (&threads) |*t| t.join();
@@ -130,7 +132,9 @@ test "AtomicInt64.fetchMax hammer: N writers, final == max submitted" {
         const submitted_max: i64 = base + @as(i64, @intCast(ITERS_PER_WRITER)) - 1;
         if (submitted_max > max_submitted) max_submitted = submitted_max;
         t.* = try std.Thread.spawn(.{}, maxWriter, .{MaxCtx{
-            .counter = &counter, .base = base, .iters = ITERS_PER_WRITER,
+            .counter = &counter,
+            .base = base,
+            .iters = ITERS_PER_WRITER,
         }});
     }
     for (&threads) |*t| t.join();
@@ -157,7 +161,8 @@ test "AtomicFloat64.fetchAdd hammer: 4 writers, exact sum" {
     var threads: [N_WRITERS]std.Thread = undefined;
     for (&threads) |*t| {
         t.* = try std.Thread.spawn(.{}, addWriterF, .{AddCtxF{
-            .counter = &counter, .iters = ITERS_PER_WRITER,
+            .counter = &counter,
+            .iters = ITERS_PER_WRITER,
         }});
     }
     for (&threads) |*t| t.join();
@@ -190,7 +195,9 @@ test "AtomicFloat64.fetchMax hammer: N writers, final == max submitted" {
         const submitted_max: f64 = base + @as(f64, @floatFromInt(ITERS_PER_WRITER - 1));
         if (submitted_max > max_submitted) max_submitted = submitted_max;
         t.* = try std.Thread.spawn(.{}, maxWriterF, .{MaxCtxF{
-            .counter = &counter, .base = base, .iters = ITERS_PER_WRITER,
+            .counter = &counter,
+            .base = base,
+            .iters = ITERS_PER_WRITER,
         }});
     }
     for (&threads) |*t| t.join();
@@ -205,9 +212,12 @@ test "AtomicFloat64.fetchMax hammer: N writers, final == max submitted" {
 const MonoWriterCtx = struct {
     counter: *atomic.AtomicInt64,
     iters: usize,
+    reader_ready: *std.atomic.Value(u8),
     stop: *std.atomic.Value(u8),
 };
 fn monoWriter(ctx: MonoWriterCtx) void {
+    while (ctx.reader_ready.load(.acquire) == 0) std.atomic.spinLoopHint();
+
     var i: usize = 0;
     while (i < ctx.iters) : (i += 1) _ = ctx.counter.fetchAdd(1);
     ctx.stop.store(1, .release);
@@ -220,13 +230,17 @@ const MonoReaderResult = struct {
 };
 const MonoReaderCtx = struct {
     counter: *atomic.AtomicInt64,
+    reader_ready: *std.atomic.Value(u8),
     stop: *std.atomic.Value(u8),
     out: *MonoReaderResult,
 };
 fn monoReader(ctx: MonoReaderCtx) void {
-    var prev: i64 = 0;
+    var prev = ctx.counter.load();
     var dec: u32 = 0;
-    var n: usize = 0;
+    var n: usize = 1;
+
+    ctx.reader_ready.store(1, .release);
+
     while (ctx.stop.load(.acquire) == 0) : (n += 1) {
         const v = ctx.counter.load();
         if (v < prev) dec += 1;
@@ -239,14 +253,21 @@ fn monoReader(ctx: MonoReaderCtx) void {
 
 test "AtomicInt64: writer monotonic; reader never sees a decrease" {
     var counter = atomic.AtomicInt64.init(0);
+    var reader_ready = std.atomic.Value(u8).init(0);
     var stop = std.atomic.Value(u8).init(0);
     var rr = MonoReaderResult{};
 
     const reader = try std.Thread.spawn(.{}, monoReader, .{MonoReaderCtx{
-        .counter = &counter, .stop = &stop, .out = &rr,
+        .counter = &counter,
+        .reader_ready = &reader_ready,
+        .stop = &stop,
+        .out = &rr,
     }});
     const writer = try std.Thread.spawn(.{}, monoWriter, .{MonoWriterCtx{
-        .counter = &counter, .iters = 1_000_000, .stop = &stop,
+        .counter = &counter,
+        .iters = 1_000_000,
+        .reader_ready = &reader_ready,
+        .stop = &stop,
     }});
     writer.join();
     reader.join();

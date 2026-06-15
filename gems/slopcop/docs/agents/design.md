@@ -17,20 +17,24 @@ The earlier objection was correct: the first cut baked CLEAR jargon
 gem. Fixed:
 
 - **Vocabulary is generic.** Category actions are
-  testing-strategy-neutral ("error/raise path — invalid input only",
-  "external/boundary — integration test"). No project jargon.
+  testing-strategy-neutral ("diagnostic/error path — invalid input
+  only", "external/boundary — integration test"). No project jargon.
+- **Language lexicons are shared.** Type/null guards and default
+  diagnostic/error forms come from `Decomplex::Syntax` language
+  lexicons, so Ruby, Python, JavaScript/TypeScript, Go, Rust, and Zig
+  do not share one Ruby-shaped regex table.
 - **Project lexicons are caller-supplied.** `ffi_boundary:` (external
   or boundary method names) and `diagnostic_mids:` (domain helpers that
   report invalid input) default to empty in the gem; consuming projects
-  pass their own. The only built-in diagnostic methods are general Ruby
-  `raise`/`fail`/`abort`.
+  pass their own.
 
 The *engine* — categorize uncovered branches, rank genuine by churn —
-is general to any Ruby project with branch coverage + git history.
+is general to supported Tree-sitter languages with normalized coverage
+and git history.
 
 ## Boundary
 
-OWNS gap-categorization (AST-structural per-arm classifier, dead/live
+OWNS gap-categorization (parser-structural per-arm classifier, dead/live
 decision split, category rollup, the gap ranking). CONSUMES, all
 read-only / re-derives nothing: the sibling `boobytrap` gem for churn
 (require_relative); an optional nil-kill verdict for `type_norm`; and
@@ -93,12 +97,12 @@ line. Still a ranked candidate, not a verdict (same discipline as the
 
 | category | meaning | not a test target? |
 |---|---|---|
-| `type_norm` | type/nil guard (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | yes — likely dead if the code's runtime contracts were stricter |
+| `type_norm` | language-profile type/null guard | yes — likely dead if the code's runtime contracts were stricter |
 | `dead` | no sibling arm ever taken in coverage: decision never executes in the measured corpus | yes — audit as missing test; delete only if static reachability agrees |
 | `defensive` | live, inert/invariant-pinned | yes — accept |
 | `spurious` | decomplex: decision is redundant/cloned/re-derived | yes — refactor or delete; resolving the decomplex finding collapses the arm |
 | `ffi` | caller-declared external/boundary method | special — integration test |
-| `diagnostic` | arm raises or calls a caller-declared invalid-input diagnostic helper | special — invalid-input only |
+| `diagnostic` | arm uses a language diagnostic/error form or calls a caller-declared invalid-input diagnostic helper | special — invalid-input only |
 | `genuine` | live, reachable, input-determined | **NO — this is the gap; ranked by churn × decomplex structural deviance** |
 
 ## Report shape (per the user's ask)
@@ -109,20 +113,24 @@ file's normalized boobytrap churn. Then a compact category summary
 (not a per-file %-table — that was unhelpful). The actionable list
 is the headline; the rest is context.
 
-## AST-structural, never a line regex
+## Parser-structural, language lexicons for text
 
-SimpleCov parent tuple → decision kind; arm `(line,col)` span → AST
-node; the decision's *condition* (parent first child, where a
-type-guard lives) and the arm body are inspected.
+Boobytrap normalizes coverage into Tree-sitter branch arms. For
+coverage formats that only expose lines, SlopCop consumes the
+line-to-arm inference from Boobytrap; for legacy Ruby branch tuples,
+Boobytrap adapts those tuples to the same arm coverage contract. The
+decision predicate and arm body are classified with the
+`Decomplex::Syntax` language lexicon.
 
 ## Honest v0 precision caveats (Engler: ranked, refine)
 
 - `diagnostic` precision depends on the caller-provided helper list:
   include methods that report invalid input, not ordinary logging or
   warning calls.
-- `diagnostic` over-greedy: tags any arm whose subtree contains
-  `raise`/`fail`/`abort` anywhere, not "the arm IS primarily a
-  raise." Over-counts. Refine: require it to be the dominant outcome.
+- `diagnostic` over-greedy: tags any arm whose subtree contains a
+  language diagnostic/error form anywhere, not "the arm IS primarily
+  a diagnostic." Over-counts. Refine: require it to be the dominant
+  outcome.
 - `type_norm` under-counted: no intra-procedural `local =
   recv.accessor` resolution, so a guard on a local sourced from
   `.type_info` is missed unless syntactically on the accessor. Refine

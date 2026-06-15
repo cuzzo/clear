@@ -559,7 +559,7 @@ module NilKill
       grouped.sum do |path, items|
         next 0 unless allowed.include?(path) && File.file?(path)
         source = File.read(path)
-        parsed = Prism.parse(source)
+        parsed = Syntax.parse(source)
         next 0 unless parsed.success?
         edits = []
         applier = Apply.allocate
@@ -567,7 +567,7 @@ module NilKill
           replacement = item["replacement"].to_s
           next if replacement.empty?
           applier.send(:nodes_matching, parsed.value) do |node|
-            node.is_a?(Prism::CallNode) &&
+            node.is_a?(Syntax::CallNode) &&
               node.location.start_line == item["line"].to_i &&
               node.name == :cast &&
               node.receiver&.slice == "T" &&

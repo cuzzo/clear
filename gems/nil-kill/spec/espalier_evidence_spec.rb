@@ -73,4 +73,43 @@ RSpec.describe NilKill::EspalierEvidence do
       expect(evidence.dig("summary", "signatures")).to eq(1)
     end
   end
+
+  it "emits Tree-sitter static evidence for Zig targets" do
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-espalier-zig", NilKill::ROOT) do |dir|
+      source = File.join(dir, "box.zig")
+      File.write(source, <<~ZIG)
+        pub fn Box(comptime T: type) type {
+            return struct {
+                value: T,
+                count: usize = 0,
+                const Self = @This();
+                pub fn init(value: T) Self {
+                    return .{ .value = value, .count = 1 };
+                }
+                pub fn get(self: *Self) T {
+                    self.count = self.count + 1;
+                    return self.value;
+                }
+            };
+        }
+      ZIG
+
+      output = File.join(dir, "zig-evidence.json")
+
+      expect {
+        NilKill::CLI.new(["espalier-evidence", "--tree-sitter", "--output", output, dir]).run
+      }.to output(/wrote Espalier static evidence/).to_stdout
+
+      evidence = JSON.parse(File.read(output))
+      expect(evidence["schema_version"]).to eq(2)
+      expect(evidence.dig("summary", "methods")).to eq(3)
+      expect(evidence.dig("facts", "state_types", "Box\u0000value")).to eq("T")
+      expect(evidence.dig("facts", "state_param_origins", "Box\u0000value")).to eq(["value"])
+      expect(evidence["methods"].map { |method| [method["owner"], method["name"], method["language"]] })
+        .to include(["Box", "get", "zig"])
+    end
+  end
 end

@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require_relative "decomplex/ast"
+require_relative "decomplex/syntax"
+require_relative "decomplex/source_filter"
 require_relative "decomplex/local_flow"
-require_relative "decomplex/ruby_topology"
+require_relative "decomplex/structural_topology"
 require_relative "decomplex/site_extractor"
 require_relative "decomplex/miner"
 require_relative "decomplex/co_update"

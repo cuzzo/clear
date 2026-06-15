@@ -207,4 +207,216 @@ class ReportTest < Minitest::Test
       assert_includes md, "Highest multi-file fix blast radius"
     end
   end
+
+  def test_report_includes_lineage_overlay_when_supplied
+    Dir.mktmpdir do |dir|
+      build_repo(dir)
+      rs = resultset(dir)
+      lineage = "#{dir}/lineage.sqlite"
+      File.write(lineage, "placeholder")
+      cmd = "#{dir}/lineage-json"
+      File.write(cmd, <<~RUBY)
+        #!/usr/bin/env ruby
+        require "json"
+        puts JSON.dump([
+          {
+            "id" => "u1",
+            "name" => "a",
+            "kind" => "function",
+            "original_path" => "src/hot.rb",
+            "total_events" => 3,
+            "changes" => 1,
+            "moves" => 1,
+            "fixes" => 1,
+            "risk_score" => 4.0
+          }
+        ])
+      RUBY
+      File.chmod(0o755, cmd)
+
+      md = Boobytrap::Report.new(
+        repo: dir,
+        resultset: rs,
+        lineage: lineage,
+        lineage_command: cmd
+      ).to_markdown
+
+      assert_includes md, "## Lineage Unit Risk (1)"
+      assert_includes md, "`src/hot.rb` `a`"
+      assert_includes md, "Highest lineage unit risk"
+      assert_includes md, "Lineage DB: lineage.sqlite"
+    end
+  end
+
+  def test_report_includes_named_test_exposure_when_supplied
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/hot.rb"
+      File.write(file, <<~RUBY)
+        class Hot
+          def risky(x)
+            total = x.to_i
+            if x
+              total += 1
+            else
+              total -= 1
+            end
+            total *= 2
+            total + 3
+          end
+        end
+      RUBY
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Add hot", date: "2020-01-01T00:00:00")
+      File.write(file, File.read(file) + "\n# fix\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix hot regression", date: "2024-01-01T00:00:00")
+
+      lines = Array.new(12)
+      [2].each { |i| lines[i - 1] = 1 }
+      [3, 4, 5, 6, 7, 8, 9, 10].each { |i| lines[i - 1] = 0 }
+      rs = {
+        "RSpec" => { "coverage" => {
+          file => {
+            "lines" => lines,
+            "branches" => {
+              "[:if,0,3,0,7,3]" => {
+                "[:then,1,4,0,5,10]" => 0,
+                "[:else,2,6,0,7,10]" => 0
+              }
+            }
+          }
+        } }
+      }
+      coverage = "#{dir}/.resultset.json"
+      File.write(coverage, JSON.dump(rs))
+      exposure = "#{dir}/test-exposure.json"
+      File.write(exposure, JSON.dump(
+        "schema" => "test-exposure/v1",
+        "hits" => [
+          {
+            "file" => "src/hot.rb",
+            "function" => "risky",
+            "line" => 4,
+            "branch_id" => "b1",
+            "test_id" => "spec/hot_spec.rb:1",
+            "test_type" => "unit",
+            "mutation_status" => "killed"
+          },
+          {
+            "file" => "src/hot.rb",
+            "function" => "risky",
+            "line" => 6,
+            "branch_id" => "b2",
+            "test_id" => "spec/hot_spec.rb:2",
+            "test_type" => "integration",
+            "mutation_status" => "killed"
+          }
+        ]
+      ))
+
+      md = Boobytrap::Report.new(
+        repo: dir,
+        resultset: coverage,
+        test_exposure: exposure
+      ).to_markdown
+
+      assert_includes md, "tests"
+      assert_includes md, "2 tests; integration=1/unit=1; mutant killed 2/2"
+      assert_includes md, "mutation-killed exposure"
+      assert_includes md, "Test exposure facts: test-exposure.json"
+      assert_includes md, "tests=2 tests"
+    end
+  end
+
+  def test_report_consumes_lineage_test_exposure_without_side_input
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/hot.rb"
+      File.write(file, <<~RUBY)
+        class Hot
+          def risky(x)
+            total = x.to_i
+            if x
+              total += 1
+            else
+              total -= 1
+            end
+            total *= 2
+            total + 3
+          end
+        end
+      RUBY
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Add hot", date: "2020-01-01T00:00:00")
+      File.write(file, File.read(file) + "\n# fix\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix hot regression", date: "2024-01-01T00:00:00")
+
+      lines = Array.new(12)
+      [2].each { |i| lines[i - 1] = 1 }
+      [3, 4, 5, 6, 7, 8, 9, 10].each { |i| lines[i - 1] = 0 }
+      coverage = "#{dir}/.resultset.json"
+      File.write(coverage, JSON.dump(
+        "RSpec" => { "coverage" => {
+          file => {
+            "lines" => lines,
+            "branches" => {
+              "[:if,0,3,0,7,3]" => {
+                "[:then,1,4,0,5,10]" => 0,
+                "[:else,2,6,0,7,10]" => 0
+              }
+            }
+          }
+        } }
+      ))
+      lineage = "#{dir}/lineage.sqlite"
+      File.write(lineage, "placeholder")
+      cmd = "#{dir}/lineage-json"
+      File.write(cmd, <<~RUBY)
+        #!/usr/bin/env ruby
+        require "json"
+        puts JSON.dump([
+          {
+            "id" => "u1",
+            "name" => "risky",
+            "kind" => "function",
+            "original_path" => "src/hot.rb",
+            "current_path" => "src/hot.rb",
+            "total_events" => 3,
+            "changes" => 1,
+            "moves" => 0,
+            "fixes" => 1,
+            "risk_score" => 4.0,
+            "current_distinct_tests" => 2,
+            "current_test_types" => "integration,unit",
+            "current_mutant_verified_tests" => 1,
+            "current_mutant_killed_tests" => 1,
+            "last_test_exposure_at" => 20,
+            "latest_fix_at" => 10,
+            "fixes_after_test_exposure" => 0
+          }
+        ])
+      RUBY
+      File.chmod(0o755, cmd)
+
+      md = Boobytrap::Report.new(
+        repo: dir,
+        resultset: coverage,
+        lineage: lineage,
+        lineage_command: cmd
+      ).to_markdown
+
+      assert_includes md, "lineage: 2 tests; integration/unit; mutant killed 1/1"
+      assert_includes md, "hardened after latest fix"
+      assert_includes md, "mutation-killed exposure (lineage)"
+      assert_includes md, "Test exposure facts: lineage.sqlite (Lineage)"
+    end
+  end
 end

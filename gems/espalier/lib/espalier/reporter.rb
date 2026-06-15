@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "pathname"
 require "yaml"
 
 module Espalier
@@ -11,10 +12,11 @@ module Espalier
       new(YAML.load_file(path), root: root, limit: limit)
     end
 
-    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT)
+    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT, link_base: nil)
       @manifest = manifest || []
-      @root = root
+      @root = File.expand_path(root)
       @limit = limit
+      @link_base = link_base && File.expand_path(link_base)
     end
 
     def to_markdown
@@ -111,9 +113,9 @@ module Espalier
       delegation_count = all_methods.sum { |row| row[:always_calls] + row[:conditional_calls] }
       read_count = all_methods.sum { |row| row[:reads] }
       write_count = all_methods.sum { |row| row[:writes] }
-      source_bytes = ruby_source_bytes
+      source_bytes = source_bytes
       manifest_bytes = File.exist?(manifest_path) ? File.size(manifest_path) : nil
-      source_words = ruby_source_words
+      source_words = source_words
       manifest_words = File.exist?(manifest_path) ? File.read(manifest_path).split(/\s+/).size : nil
 
       lines = ["## Run Summary"]
@@ -309,10 +311,12 @@ module Espalier
     end
 
     def module_scores
-      @module_scores ||= @manifest.map do |mod|
+      @module_scores ||= @manifest.filter_map do |mod|
         method_rows = functions(mod).map { |fn| method_row(mod, fn) }
         state_count = states(mod).size
         method_count = method_rows.size
+        next if method_count.zero?
+
         state_touches = method_rows.sum { |row| row[:reads] + row[:writes] }
         delegations = method_rows.sum { |row| row[:always_calls] + row[:conditional_calls] }
         facade = cohesive_value_facade_profiles[mod[:module].to_s]
@@ -376,7 +380,7 @@ module Espalier
 
     def privatization_candidates
       @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest).map do |row|
-        row.merge(line: method_line(row[:file], row[:name]))
+        row.merge(line: row[:line])
       end
     end
 
@@ -410,7 +414,7 @@ module Espalier
         module: mod[:module],
         file: mod[:file],
         name: fn[:name],
-        line: method_line(mod[:file], fn[:name]),
+        line: fn[:line],
         reads: reads.size,
         writes: writes.size,
         always_calls: always.size,
@@ -451,27 +455,29 @@ module Espalier
     def file_link(file, line = nil)
       return "`-`" unless file
 
-      target = line ? "../../#{file}#L#{line}" : "../../#{file}"
-      "[`#{file}`](#{target})"
+      suffix = line ? "#L#{line}" : ""
+      "[`#{file}`](#{link_target(file)}#{suffix})"
     end
 
-    def method_line(file, method_name)
-      return nil unless file && method_name
+    def link_target(file)
+      return absolute_or_legacy_target(file) unless @link_base
 
-      @method_line_cache ||= {}
-      key = [file, method_name]
-      return @method_line_cache[key] if @method_line_cache.key?(key)
+      source = source_path(file)
+      Pathname.new(source).relative_path_from(Pathname.new(@link_base)).to_s
+    rescue ArgumentError
+      source
+    end
 
-      path = File.join(@root, file)
-      return @method_line_cache[key] = nil unless File.file?(path)
+    def absolute_or_legacy_target(file)
+      path = file.to_s
+      return path if Pathname.new(path).absolute?
 
-      escaped = Regexp.escape(method_name.to_s.sub(/\Aself\./, ""))
-      receiver = method_name.to_s.start_with?("self.") ? /self\./ : /(?:self\.)?/
-      regex = /^\s*def\s+#{receiver}#{escaped}(?:\s|\(|$)/
-      File.readlines(path).each_with_index do |line, idx|
-        return @method_line_cache[key] = idx + 1 if line.match?(regex)
-      end
-      @method_line_cache[key] = nil
+      "../../#{path}"
+    end
+
+    def source_path(file)
+      path = file.to_s
+      Pathname.new(path).absolute? ? path : File.expand_path(path, @root)
     end
 
     def quality_summary(row)
@@ -516,7 +522,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /`(?<file>src\/[^`]+\.rb):\d+`\s+\((?<method>[^)]+)\).*?\*\*(?<detectors>\d+) detectors\*\* \[score (?<score>\d+)/
+        next unless line =~ /`(?<file>[^`]+\.[A-Za-z0-9]+):\d+`\s+\((?<method>[^)]+)\).*?\*\*(?<detectors>\d+) detectors\*\* \[score (?<score>\d+)/
 
         index[[Regexp.last_match[:file], Regexp.last_match[:method]]] = {
           detectors: Regexp.last_match[:detectors],
@@ -530,7 +536,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*\[`(?<file>src\/[^`]+\.rb):\d+`\][^|]*\|\s*`(?<method>[^`]+)`/
+        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*\[`(?<file>[^`]+\.[A-Za-z0-9]+):\d+`\][^|]*\|\s*`(?<method>[^`]+)`/
 
         index[[Regexp.last_match[:file], Regexp.last_match[:method]]] ||= {
           rank: Regexp.last_match[:rank]
@@ -543,7 +549,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*`(?<file>src\/[^`]+\.rb)`\s*\|\s*(?<hotspot>[\d.]+)\s*\|/
+        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*`(?<file>[^`]+\.[A-Za-z0-9]+)`\s*\|\s*(?<hotspot>[\d.]+)\s*\|/
 
         index[Regexp.last_match[:file]] = {
           rank: Regexp.last_match[:rank],
@@ -726,16 +732,19 @@ module Espalier
       score
     end
 
-    def ruby_source_bytes
+    def source_bytes
       source_files.sum { |path| File.size(path) }
     end
 
-    def ruby_source_words
+    def source_words
       source_files.sum { |path| File.read(path).split(/\s+/).size }
     end
 
     def source_files
-      @source_files ||= Dir.glob(File.join(@root, "src/**/*.rb"))
+      @source_files ||= @manifest.filter_map { |mod| mod[:file] }
+                                 .uniq
+                                 .map { |file| File.expand_path(file, @root) }
+                                 .select { |path| File.file?(path) }
     end
 
     def fmt(value)

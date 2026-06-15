@@ -24,12 +24,14 @@ RSpec.describe "zero-gap end-to-end guarantee", :zero_gap_guarantee do
     %w[SubProc in_child], %w[EnsurePunt guarded], %w[StructColl build],
   ].freeze
 
-  around do |example|
-    Dir.mktmpdir("nk-zero-gap", NilKill::ROOT) do |dir|
-      Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, dir) }
-      @r = full_collect(dir, File.read(File.join(corpus, "workload.rb")))
-      example.run
-    end
+  before(:context) do
+    @zero_gap_dir = Dir.mktmpdir("nk-zero-gap", NilKill::ROOT)
+    Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, @zero_gap_dir) }
+    @r = full_collect(@zero_gap_dir, File.read(File.join(corpus, "workload.rb")))
+  end
+
+  after(:context) do
+    FileUtils.remove_entry(@zero_gap_dir) if @zero_gap_dir && File.directory?(@zero_gap_dir)
   end
 
   # Lazily classify: untyped_evidence_gaps RAISES if a collect_ran_untraced

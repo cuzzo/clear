@@ -11,12 +11,20 @@ module NilKill
       @with_links = @argv.delete("--with-links")
       @full = @argv.delete("--full")
       @hygiene_only = @argv.delete("--hygiene")
+      @evidence_path = parse_evidence_path(@argv)
       @report_path = parse_output_path(@argv) || REPORT_PATH
     end
 
     def run
-      evidence = @evidence_override || Store.read
+      evidence = @evidence_override || read_evidence
       @evidence = evidence
+      if Schema::EvidenceBundle.v2?(evidence)
+        report = Reporting::MultiLanguageReport.new(evidence).lines.map { |line| format_report_line(line) }.join("\n") + "\n"
+        FileUtils.mkdir_p(File.dirname(@report_path))
+        File.write(@report_path, report)
+        puts report
+        return
+      end
       actions = evidence["actions"]
       lines = build_header(evidence)
       if @hygiene_only
@@ -100,6 +108,24 @@ module NilKill
 
       path = File.expand_path(value, ROOT)
       output_directory_path?(path) ? File.join(path, "report.md") : path
+    end
+
+    def parse_evidence_path(argv)
+      value = nil
+      if (idx = argv.index("--evidence"))
+        value = argv[idx + 1] || abort("--evidence requires a path")
+        argv.slice!(idx, 2)
+      elsif (arg = argv.find { |item| item.start_with?("--evidence=") })
+        value = arg.split("=", 2).last
+        argv.delete(arg)
+      end
+      value && File.expand_path(value, ROOT)
+    end
+
+    def read_evidence
+      return JSON.parse(File.read(@evidence_path)) if @evidence_path
+
+      Store.read
     end
 
     def output_directory_path?(path)
@@ -829,7 +855,9 @@ module NilKill
     def return_usage_by_name(evidence)
       names = Array(evidence.dig("facts", "existing_sigs")).filter_map { |method| method["method"].to_s }.to_set
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
-      NilKill.target_files.each do |path|
+      return usage if names.empty?
+
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage(parsed.value, :statement, names, usage)
@@ -839,25 +867,40 @@ module NilKill
       usage
     end
 
+    def evidence_target_files(evidence)
+      return [] unless evidence.is_a?(Hash) && evidence.key?("target_dirs")
+
+      dirs = Array(evidence["target_dirs"]).map(&:to_s).reject(&:empty?)
+      return [] if dirs.empty?
+
+      excludes = Array(evidence["target_exclude_dirs"]).map { |dir| File.expand_path(dir.to_s, ROOT) }
+      dirs.flat_map do |dir|
+        abs = File.expand_path(dir, ROOT)
+        File.directory?(abs) ? Dir.glob(File.join(abs, "**", "*.rb")) : [abs]
+      end.select do |path|
+        File.file?(path) && excludes.none? { |dir| path == dir || path.start_with?(dir + File::SEPARATOR) }
+      end.sort
+    end
+
     def mark_return_usage(node, context, names, usage)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage(node.body, :return, names, usage)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           mark_return_usage(child, idx == body.length - 1 ? context : :statement, names, usage)
         end
-      when Prism::ReturnNode, Prism::ArgumentsNode
+      when Syntax::ReturnNode, Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage(child, :return, names, usage) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage(node.predicate, :value, names, usage) if node.respond_to?(:predicate)
         mark_return_usage(node.statements, context, names, usage)
         mark_return_usage(node.subsequent, context, names, usage)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage(node.statements, context, names, usage)
-      when Prism::CallNode
+      when Syntax::CallNode
         usage[node.name.to_s][context.to_s] += 1 if names.include?(node.name.to_s)
         node.child_nodes.compact.each { |child| mark_return_usage(child, :value, names, usage) }
       else
@@ -1002,7 +1045,9 @@ module NilKill
       method_return_types = unambiguous_method_return_types(evidence)
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      NilKill.target_files.each do |path|
+      return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges } if candidate_names.empty?
+
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
@@ -3026,7 +3071,7 @@ module NilKill
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      NilKill.target_files.each do |path|
+      evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
@@ -3062,25 +3107,25 @@ module NilKill
     def mark_return_usage_graph(node, context, current_method, candidate_names, method_return_types, used, return_edges)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           child_context = idx == body.length - 1 ? context : :statement
           mark_return_usage_graph(child, child_context, current_method, candidate_names, method_return_types, used, return_edges)
         end
-      when Prism::ReturnNode
+      when Syntax::ReturnNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, :return, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::ArgumentsNode
+      when Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, context, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage_graph(node.predicate, :value, current_method, candidate_names, method_return_types, used, return_edges) if node.respond_to?(:predicate)
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
         mark_return_usage_graph(node.subsequent, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::CallNode
+      when Syntax::CallNode
         if candidate_names.include?(node.name)
           if context == :return && current_method && candidate_names.include?(current_method)
             if typed_value_return?(method_return_types[current_method])

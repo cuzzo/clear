@@ -15,7 +15,6 @@ group :development do
   gem 'rubycritic', require: false
   gem 'reek', require: false
   gem 'flog', require: false
-  gem 'flay', require: false
   gem 'debride', require: false
   gem 'simplecov', require: false
   # Cobertura XML output for Codecov / coveralls / GitLab integration
@@ -32,6 +31,7 @@ group :development do
   gem 'tapioca', require: false
 
   # Local path while nil-kill is extracted as a standalone gem.
+  gem 'decomplex', path: 'gems/decomplex', require: false
   gem 'nil-kill', path: 'gems/nil-kill', require: false
 
   # Rubocop with the rubocop-sorbet plugin. We don't run general
