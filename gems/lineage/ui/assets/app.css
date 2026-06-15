@@ -33,6 +33,9 @@
     display: grid;
     grid-template-rows: auto auto 1fr;
   }
+  aside.source-sidebar {
+    grid-template-rows: auto 1fr;
+  }
   header { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
   h1 { margin: 0; font-size: 15px; letter-spacing: 0; }
   h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0; }
@@ -108,6 +111,11 @@
     padding: 8px;
     overflow: auto;
     max-height: 32vh;
+  }
+  .source-sidebar .outline {
+    border-top: 0;
+    max-height: none;
+    min-height: 0;
   }
   .outline-title {
     color: var(--muted);
@@ -282,10 +290,12 @@
   #layer-gutter-highlights:checked ~ .topbar .gutter-highlight-layer .switch-on,
   #layer-gutter-icons:checked ~ .topbar .gutter-icon-layer .switch-on,
   #layer-blame:checked ~ .topbar .blame-layer .switch-on,
+  .source-view.layer-blame-on .topbar .blame-layer .switch-on,
   #layer-comment-folding:checked ~ .topbar .comment-fold-layer .switch-on { display: inline-block; }
   #layer-gutter-highlights:checked ~ .topbar .gutter-highlight-layer .switch-off,
   #layer-gutter-icons:checked ~ .topbar .gutter-icon-layer .switch-off,
   #layer-blame:checked ~ .topbar .blame-layer .switch-off,
+  .source-view.layer-blame-on .topbar .blame-layer .switch-off,
   #layer-comment-folding:checked ~ .topbar .comment-fold-layer .switch-off { display: none; }
   .crumbs { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
   .crumbs a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
@@ -634,6 +644,9 @@
   #layer-blame:checked ~ .viewer .row {
     grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 320px;
   }
+  .source-view.layer-blame-on .viewer .row {
+    grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 320px;
+  }
   .row:target {
     outline: 1px solid rgba(37, 99, 235, 0.56);
     outline-offset: -1px;
@@ -817,6 +830,7 @@
     overflow: hidden;
   }
   #layer-blame:checked ~ .viewer .blame-cell { display: grid; }
+  .source-view.layer-blame-on .viewer .blame-cell { display: grid; }
   .blame-cell code,
   .blame-cell span {
     min-width: 0;
@@ -904,5 +918,6 @@
     .topbar { grid-template-columns: 1fr; }
     .row { grid-template-columns: 8px 86px 48px minmax(620px, 1fr) 0; }
     #layer-blame:checked ~ .viewer .row { grid-template-columns: 8px 86px 48px minmax(620px, 1fr) 260px; }
+    .source-view.layer-blame-on .viewer .row { grid-template-columns: 8px 86px 48px minmax(620px, 1fr) 260px; }
     .gutter { min-width: 86px; padding-right: 6px; }
   }

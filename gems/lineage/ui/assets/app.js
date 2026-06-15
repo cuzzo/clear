@@ -1,8 +1,13 @@
 (() => {
-  const storage = window.localStorage;
-  if (!storage) return;
+  let storage = null;
+  try {
+    storage = window.localStorage;
+  } catch (_error) {
+    storage = null;
+  }
 
   const read = (key) => {
+    if (!storage) return null;
     try {
       return storage.getItem(key);
     } catch (_error) {
@@ -11,6 +16,7 @@
   };
 
   const write = (key, value) => {
+    if (!storage) return;
     try {
       storage.setItem(key, value);
     } catch (_error) {
@@ -18,20 +24,41 @@
     }
   };
 
+  const syncInputState = (input) => {
+    const sourceView = input.closest(".source-view");
+    if (sourceView && input.classList.contains("layer-toggle")) {
+      sourceView.classList.toggle(`${input.id}-on`, input.checked);
+    }
+  };
+
   const restoreInput = (input) => {
     const key = input.dataset.persistKey;
-    if (!key) return;
-    const stored = read(key);
+    const stored = key ? read(key) : null;
     if (input.type === "radio") {
       if (stored === input.id) input.checked = true;
       input.addEventListener("change", () => {
-        if (input.checked) write(key, input.id);
+        if (input.checked && key) write(key, input.id);
+        syncInputState(input);
       });
     } else {
       if (stored === "true") input.checked = true;
       if (stored === "false") input.checked = false;
-      input.addEventListener("change", () => write(key, String(input.checked)));
+      input.addEventListener("change", () => {
+        if (key) write(key, String(input.checked));
+        syncInputState(input);
+      });
     }
+    syncInputState(input);
+  };
+
+  const bindLayerLabel = (label) => {
+    label.addEventListener("click", (event) => {
+      const input = document.getElementById(label.htmlFor);
+      if (!input || input.type !== "checkbox") return;
+      event.preventDefault();
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
   };
 
   const setFoldRows = (input) => {
@@ -56,7 +83,7 @@
 
   const restoreWarningDismissal = (button) => {
     const key = button.dataset.dismissKey;
-    const warning = button.closest("[data-dismiss-key]");
+    const warning = button.closest(".warning");
     if (!key || !warning) return;
     if (read(key) === "true") warning.hidden = true;
     button.addEventListener("click", () => {
@@ -71,5 +98,6 @@
       .forEach(restoreInput);
     document.querySelectorAll(".comment-fold-toggle[data-persist-key]").forEach(restoreCommentFold);
     document.querySelectorAll(".warning-dismiss[data-dismiss-key]").forEach(restoreWarningDismissal);
+    document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
   });
 })();

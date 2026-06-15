@@ -3750,55 +3750,73 @@ fn render_index_page(
         .transpose();
 
     let mut out = String::new();
-    out.push_str("<div class=\"app\"><aside>");
-    out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
-    out.push_str(&format!(
-        "{} files{} | {:.1}% covered",
-        dashboard.files,
-        directory_label_suffix(&current_directory),
-        dashboard.coverage_percent
-    ));
-    out.push_str("</div>");
-    out.push_str(&render_sidebar_navigation(&current_directory, filter));
-    out.push_str("</header>");
-    out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
-    if !current_directory.is_empty() {
-        out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
-        out.push_str(&html_escape(&current_directory));
-        out.push_str("\">");
+    out.push_str("<div class=\"app\"><aside");
+    if matches!(&payload, Ok(Some(_))) {
+        out.push_str(" class=\"source-sidebar\"");
     }
-    out.push_str("<input name=\"q\" list=\"lineage-search-options\" autocomplete=\"off\" placeholder=\"Filter files\" value=\"");
-    out.push_str(&html_escape(filter));
-    out.push_str("\"><button type=\"submit\">Filter</button>");
-    out.push_str(&render_search_options(&files, &child_directories, &current_directory));
-    out.push_str("</form>");
-    out.push_str("<nav class=\"files\">");
-    if filter.trim().is_empty() {
-        if !current_directory.is_empty() {
-            out.push_str(&render_parent_directory_link(&current_directory, filter));
+    out.push('>');
+    match &payload {
+        Ok(Some(payload)) => {
+            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
+            out.push_str(&html_escape(&payload.path));
+            out.push_str("</div>");
+            out.push_str(&render_sidebar_navigation(&current_directory, filter));
+            out.push_str("</header>");
+            let outline = render_source_outline(payload);
+            if outline.is_empty() {
+                out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div><div class=\"empty\">No functions, methods, classes, or modules found.</div></nav>");
+            } else {
+                out.push_str(&outline);
+            }
         }
-        for directory in &child_directories {
-            out.push_str(&render_directory_link(directory, false, filter));
+        _ => {
+            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
+            out.push_str(&format!(
+                "{} files{} | {:.1}% covered",
+                dashboard.files,
+                directory_label_suffix(&current_directory),
+                dashboard.coverage_percent
+            ));
+            out.push_str("</div>");
+            out.push_str(&render_sidebar_navigation(&current_directory, filter));
+            out.push_str("</header>");
+            out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
+            if !current_directory.is_empty() {
+                out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
+                out.push_str(&html_escape(&current_directory));
+                out.push_str("\">");
+            }
+            out.push_str("<input name=\"q\" list=\"lineage-search-options\" autocomplete=\"off\" placeholder=\"Filter files\" value=\"");
+            out.push_str(&html_escape(filter));
+            out.push_str("\"><button type=\"submit\">Filter</button>");
+            out.push_str(&render_search_options(&files, &child_directories, &current_directory));
+            out.push_str("</form>");
+            out.push_str("<nav class=\"files\">");
+            if filter.trim().is_empty() {
+                if !current_directory.is_empty() {
+                    out.push_str(&render_parent_directory_link(&current_directory, filter));
+                }
+                for directory in &child_directories {
+                    out.push_str(&render_directory_link(directory, false, filter));
+                }
+                for file in &child_files {
+                    let active = selected_path.as_deref() == Some(file.path.as_str());
+                    out.push_str(&render_file_link(file, active, filter));
+                }
+                if child_directories.is_empty() && child_files.is_empty() {
+                    out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
+                }
+            } else {
+                for file in &filtered {
+                    let active = selected_path.as_deref() == Some(file.path.as_str());
+                    out.push_str(&render_file_link(file, active, filter));
+                }
+                if filtered.is_empty() {
+                    out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
+                }
+            }
+            out.push_str("</nav>");
         }
-        for file in &child_files {
-            let active = selected_path.as_deref() == Some(file.path.as_str());
-            out.push_str(&render_file_link(file, active, filter));
-        }
-        if child_directories.is_empty() && child_files.is_empty() {
-            out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
-        }
-    } else {
-        for file in &filtered {
-            let active = selected_path.as_deref() == Some(file.path.as_str());
-            out.push_str(&render_file_link(file, active, filter));
-        }
-        if filtered.is_empty() {
-            out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
-        }
-    }
-    out.push_str("</nav>");
-    if let Ok(Some(payload)) = &payload {
-        out.push_str(&render_source_outline(payload));
     }
     out.push_str("</aside><main>");
     match payload {
@@ -7032,6 +7050,7 @@ mod tests {
         assert!(STYLE.contains("#layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter"));
         assert!(STYLE.contains("#layer-gutter-icons:not(:checked) ~ .viewer .line-icon"));
         assert!(STYLE.contains("#layer-blame:checked ~ .viewer .blame-cell"));
+        assert!(STYLE.contains(".source-view.layer-blame-on .viewer .blame-cell"));
         assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden"));
         assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln .comment-fold-arrow::before"));
         assert!(STYLE.contains(".row.comment-fold-expanded .comment-fold-arrow::before"));
@@ -7120,6 +7139,9 @@ mod tests {
         assert!(html.contains("class=\"warning-dismiss\""));
         assert!(html.contains("Dismiss warning"));
         assert!(js.contains("warning-dismiss"));
+        assert!(js.contains("button.closest(\".warning\")"));
+        assert!(js.contains("bindLayerLabel"));
+        assert!(js.contains("sourceView.classList.toggle(`${input.id}-on`, input.checked)"));
         assert!(js.contains("write(key, \"true\")"));
         assert!(js.contains("comment-fold-expanded"));
     }
@@ -7175,9 +7197,9 @@ mod tests {
         .unwrap();
 
         assert!(html.contains("cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"));
-        assert!(html.contains("list=\"lineage-search-options\""));
-        assert!(html.contains("<datalist id=\"lineage-search-options\">"));
-        assert!(html.contains("<option value=\"src/demo.rb\"></option>"));
+        assert!(html.contains("<aside class=\"source-sidebar\">"));
+        assert!(!html.contains("list=\"lineage-search-options\""));
+        assert!(!html.contains("<nav class=\"files\">"));
         assert!(html.contains("<nav class=\"outline\""));
         assert!(html.contains("href=\"#L1\""));
         assert!(html.contains("<span class=\"outline-kind\">func</span>"));
