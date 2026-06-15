@@ -1,20 +1,56 @@
 # Decomplex Metrics Expo
 
-This document explains Decomplex metrics from the perspective of the
-complexity model in
-[`What even is complexity anyway?`](../../../../docs/retrospective/what-even-is-complexity-anyway.md):
-software becomes hard to understand when state and control flow become
-unnecessary, implicit, shared, mutable, duplicated, or poorly bounded.
+Complexity is mostly about state and control flow becoming unnecessary,
+implicit, shared, mutable, duplicated, or poorly bounded. See
+[What Even Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
+for more details.
 
 Decomplex does not try to prove that code is wrong. It ranks candidates.
 The point is to show where a human should look first.
 
-Examples below use Ruby-like pseudocode because it is compact. The
-metrics themselves run over Decomplex's normalized Tree-sitter syntax
-facade; language maturity varies by profile, but the core metrics are
-not intended to be Ruby-only.
+Below is a list of metrics with links to details for more info about
+what it is and how to interpret it.
+
+## Metrics
+
+### Tier 1
+
+- [Decision Pressure](#decision-pressure)
+- [Redundant Nil Guards](#redundant-nil-guards)
+- [State Heatmap](#state-heatmap)
+- [State-Based Branch Density](#state-based-branch-density)
+- [Temporal Ordering Pressure](#temporal-ordering-pressure)
+- [Missing Abstractions](#missing-abstractions)
+- [Reification Misses](#reification-misses)
+- [Semantic Predicate Aliases](#semantic-predicate-aliases)
+- [Exact Predicate Aliases](#exact-predicate-aliases)
+
+### Tier 2
+
+- [Inconsistent Rename Clones](#inconsistent-rename-clones)
+- [Structural Similarity (Type-2/3)](#structural-similarity-type-23)
+- [Neglected Updates](#neglected-updates)
+- [Derived-State Staleness](#derived-state-staleness)
+- [Neglected Conditions](#neglected-conditions)
+- [Implicit Control Flow](#implicit-control-flow)
+- [Weighted Inlined Cognitive Complexity](#weighted-inlined-cognitive-complexity)
+- [Locality Drag](#locality-drag)
+- [Operational Discontinuity (high confidence)](#operational-discontinuity)
+
+### Tier 3
+
+- [Neglected Path Conditions](#neglected-path-conditions)
+- [Oversized Predicates](#oversized-predicates)
+- [Broken Protocols](#broken-protocols)
+- [Function LCOM](#function-lcom)
+- [Operational Discontinuity](#operational-discontinuity)
+- [False Simplicity](#false-simplicity)
+- [Fat Unions](#fat-unions)
 
 ## Running Example
+
+Examples below use Ruby-like pseudocode because it is compact. Decomplex
+uses Tree-Sitter to support multiple languages (not just Ruby).
 
 The bad shape is a common object lifecycle:
 
@@ -84,10 +120,13 @@ Start with convergence and root-cause clusters, then inspect the
 highest-tier metric rows.
 
 - **Convergence** means independent detectors point at the same method.
+  i.e. function `foo()` has Temporal Ordering Pressure and Implicit
+  Control Flow.
 - **Root-cause clusters** mean independent detectors name the same state,
   predicate, method, or protocol.
-- A large count is not automatically bad. A large count on hot, mutable,
-  state-based code is where the return on review is highest.
+
+A large count is not automatically bad. A large count on hot, mutable,
+state-based code is where the return on review is highest.
 
 ## State Metrics
 
