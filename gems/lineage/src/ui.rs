@@ -5045,15 +5045,22 @@ fn render_code_line(
             out.push_str(&render_line_details_control(&meta_id));
         }
     }
+    out.push_str("</span><span class=\"ln\">");
     if let (Some(input_id), Some(fold)) = (&fold_input_id, comment_fold) {
-        out.push_str("<label class=\"comment-fold-control line-icon\" for=\"");
+        out.push_str("<label class=\"comment-fold-control\" for=\"");
         out.push_str(&html_escape(input_id));
         out.push_str("\" title=\"expand/collapse ");
-        out.push_str(&format!("{}-line comment", fold.end_line.saturating_sub(fold.start_line) + 1));
+        out.push_str(&format!(
+            "{}-line comment",
+            fold.end_line.saturating_sub(fold.start_line) + 1
+        ));
         out.push_str("\"><span class=\"comment-fold-arrow\"></span></label>");
+    } else {
+        out.push_str("<span class=\"comment-fold-slot\"></span>");
     }
-    out.push_str("</span><span class=\"ln\">");
+    out.push_str("<span class=\"line-number\">");
     out.push_str(&line_no.to_string());
+    out.push_str("</span>");
     out.push_str("</span><pre class=\"source-text\">");
     if let Some(fold) = comment_fold {
         if fold.is_start {
@@ -7080,6 +7087,8 @@ mod tests {
         assert!(html.contains("class=\"comment-fold-toggle\""));
         assert!(html.contains("data-persist-key=\"lineage.comment-fold.src/demo.rb.1\""));
         assert!(html.contains("data-comment-fold-child=\"1\""));
+        assert!(html.contains("</span><span class=\"ln\"><label class=\"comment-fold-control\""));
+        assert!(!html.contains("comment-fold-control line-icon"));
         assert!(html.contains("class=\"fold-collapsed-source\""));
         assert!(html.contains("# one ..."));
 

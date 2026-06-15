@@ -627,12 +627,12 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 0;
+    grid-template-columns: 8px 100px 48px minmax(760px, 1fr) 0;
     min-height: 20px;
     scroll-margin-top: 88px;
   }
   #layer-blame:checked ~ .viewer .row {
-    grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 320px;
+    grid-template-columns: 8px 100px 48px minmax(760px, 1fr) 320px;
   }
   .row:target {
     outline: 1px solid rgba(37, 99, 235, 0.56);
@@ -646,7 +646,25 @@
   .line-toggle { display: none; }
   #mode-coverage:checked ~ .viewer .source-text { background: var(--coverage-bg, transparent); }
   #mode-churn:checked ~ .viewer .source-text { background: var(--churn-bg, transparent); }
-  .ln { color: #8b95a5; text-align: right; padding-right: 10px; user-select: none; }
+  .ln {
+    color: #8b95a5;
+    display: grid;
+    grid-template-columns: 14px 4ch;
+    gap: 2px;
+    justify-content: end;
+    padding-right: 6px;
+    user-select: none;
+  }
+  .line-number {
+    min-width: 0;
+    overflow: hidden;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .comment-fold-slot {
+    display: inline-block;
+    inline-size: 14px;
+  }
   .hazard-rail {
     min-width: 8px;
     background: transparent;
@@ -683,7 +701,12 @@
   .comment-fold-toggle { display: none; }
   .comment-fold-control {
     color: #475569;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 700;
+    inline-size: 14px;
   }
   .comment-fold-arrow::before {
     content: ">";
@@ -695,7 +718,7 @@
   #layer-comment-folding:not(:checked) ~ .viewer .comment-fold-control { display: none; }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text .fold-full-source { display: none; }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text .fold-collapsed-source { display: inline; }
-  #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:not(:checked) ~ .gutter .comment-fold-arrow::before { transform: rotate(90deg); }
+  #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:not(:checked) ~ .ln .comment-fold-arrow::before { transform: rotate(90deg); }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln,
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .gutter,
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text,
