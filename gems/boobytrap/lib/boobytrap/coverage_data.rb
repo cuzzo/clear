@@ -15,11 +15,10 @@ module Boobytrap
   # - Nil-Kill branch coverage JSON: language-neutral Tree-sitter branch
   #   arm hit counts keyed by source spans / branch arm ids.
   #
-  # kcov does not provide SimpleCov's Ruby branch tuple shape. Consumers
-  # that need branch semantics can pass Tree-sitter branch arms to
-  # branch_arm_coverage. If the input provides native arm hits, those
-  # are used directly; otherwise this layer falls back to line-hit
-  # inference.
+  # kcov does not provide source branch-arm hit counts. Line-only coverage
+  # remains useful for line gaps, but it is not treated as branch coverage.
+  # Consumers that need branch semantics must provide SimpleCov tuples,
+  # coverage.py branch arcs, or Nil-Kill's native branch coverage JSON.
   module CoverageData
     FileCoverage = Struct.new(:file, :lines, :branches, :format, :branch_arms,
                               :source_path, :language,
@@ -120,7 +119,6 @@ module Boobytrap
       case format
       when :nil_kill_branch then :native_branch
       when :coverage_py then :coverage_py
-      when :kcov_cobertura, :kcov_codecov then :kcov
       when :simplecov then :coverage
       else format
       end
@@ -199,22 +197,7 @@ module Boobytrap
         return tuple_branch_arm_coverage(file_coverage, branch_arms)
       end
 
-      return [] unless file_coverage&.line_coverage?
-
-      branch_arms.filter_map do |arm|
-        executable = executable_lines_in_span(file_coverage, arm.span)
-        executable = [arm.line] if executable.empty? && file_coverage.line_known?(arm.line)
-        next if executable.empty?
-
-        hits = executable.sum { |line| file_coverage.line_hits(line).to_i }
-        ArmCoverage.new(
-          arm: arm,
-          covered: hits.positive?,
-          hits: hits,
-          executable_lines: executable,
-          source: branch_source(file_coverage.format)
-        )
-      end
+      []
     end
 
     def tuple_branch_arm_coverage(file_coverage, branch_arms)
@@ -310,14 +293,6 @@ module Boobytrap
 
         out[arm_cov.arm.line] += 1
       end
-    end
-
-    def executable_lines_in_span(file_coverage, span)
-      first = span[0].to_i
-      last = span[2].to_i
-      return [] unless first.positive? && last >= first
-
-      (first..last).select { |line| file_coverage.line_known?(line) }
     end
 
     def native_branch_arm_coverage(file_coverage, branch_arms)

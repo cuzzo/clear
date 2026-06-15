@@ -202,10 +202,7 @@ class ClassifierTest < Minitest::Test
     f&.unlink
   end
 
-  def test_kcov_cobertura_zig_classification_uses_normalized_line_hits
-    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
-    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
-
+  def test_kcov_cobertura_zig_classification_does_not_infer_dark_arms
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
       file = "#{dir}/src/worker.zig"
@@ -243,12 +240,7 @@ class ClassifierTest < Minitest::Test
       XML
 
       with_env("DECOMPLEX_PARSER", "tree_sitter") do
-        arms = C.classify_file(coverage, file, root: dir)
-
-        refute_empty arms
-        assert arms.all? { |arm| arm.source == :kcov }
-        assert_includes arms.map(&:defn), "run"
-        assert_includes arms.map(&:category), :genuine
+        assert_empty C.classify_file(coverage, file, root: dir)
       end
     end
   end

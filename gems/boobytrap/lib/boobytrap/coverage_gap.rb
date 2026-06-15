@@ -5,9 +5,9 @@ require_relative "decomplex_risk"
 
 module Boobytrap
   # Branch-coverage gap per file from normalized coverage data.
-  # SimpleCov branch tuples are used directly. Coverage formats that
-  # only provide line hits, such as kcov, use Tree-sitter branch arms and
-  # normalized line hits to infer which arms are still dark.
+  # SimpleCov branch tuples and native branch-arm providers are used
+  # directly. Coverage formats that only provide line hits, such as kcov,
+  # do not produce branch gaps.
   module CoverageGap
     File_ = Struct.new(:total, :uncovered, :gap, keyword_init: true)
 
@@ -24,8 +24,10 @@ module Boobytrap
       dataset.files.each do |abs, coverage|
         file_gap = if coverage.branch_coverage?
                      simplecov_branch_gap(coverage.branches)
+                   elsif coverage.branch_arm_coverage?
+                     native_branch_gap(abs, coverage)
                    else
-                     tree_sitter_line_branch_gap(abs, coverage)
+                     nil
                    end
         next unless file_gap
 
@@ -48,8 +50,8 @@ module Boobytrap
       File_.new(total: total, uncovered: uncov, gap: uncov.to_f / total)
     end
 
-    def tree_sitter_line_branch_gap(abs, coverage)
-      return nil unless coverage.line_coverage? || coverage.branch_arm_coverage?
+    def native_branch_gap(abs, coverage)
+      return nil unless coverage.branch_arm_coverage?
       return nil unless Boobytrap::DecomplexRisk.load_decomplex_syntax
       return nil unless Boobytrap::DecomplexRisk.tree_sitter_supported_source?(abs)
 

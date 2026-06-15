@@ -146,7 +146,7 @@ module SlopCop
     end
 
     def tree_sitter_coverage_file?(abspath, file_coverage)
-      return false unless file_coverage&.line_coverage? || file_coverage&.branch_arm_coverage? || file_coverage&.branch_coverage?
+      return false unless file_coverage&.branch_arm_coverage? || file_coverage&.branch_coverage?
 
       tree_sitter_source?(abspath)
     end

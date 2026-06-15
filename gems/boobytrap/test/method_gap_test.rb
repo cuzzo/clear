@@ -138,10 +138,7 @@ class MethodGapTest < Minitest::Test
     end
   end
 
-  def test_kcov_cobertura_zig_method_gaps
-    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
-    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
-
+  def test_kcov_cobertura_zig_method_gaps_do_not_infer_dark_branches
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
       file = "#{dir}/src/worker.zig"
@@ -186,7 +183,7 @@ class MethodGapTest < Minitest::Test
         assert_equal "src/worker.zig", run.file
         assert_operator run.covered_lines, :>, 0
         assert_operator run.missed_lines, :>, 0
-        assert_operator run.uncovered_branches, :>=, 1
+        assert_equal 0, run.uncovered_branches
         assert_operator run.line_gap, :>, 0.0
       end
     end

@@ -23,6 +23,7 @@
 
 require "simplecov"
 require "json"
+require_relative "coverage_xml_branch_patch"
 
 resultset_path = File.expand_path("../coverage/.resultset.json", __dir__)
 resultset_paths = Dir[File.expand_path("../coverage/**/.resultset.json", __dir__)].sort
@@ -76,7 +77,14 @@ puts "Collated #{original_keys.size} entries (#{payload['coverage'].size} files)
 begin
   require "simplecov-cobertura"
   SimpleCov::Formatter::CoberturaFormatter.new.format(merged)
-  puts "Wrote #{File.expand_path('../coverage/coverage.xml', __dir__)}"
+  xml_path = File.expand_path("../coverage/coverage.xml", __dir__)
+  branch_totals = CoverageXmlBranchPatch.apply(
+    xml_path: xml_path,
+    result_payload: payload,
+    root: File.expand_path("..", __dir__)
+  )
+  puts "Wrote #{xml_path} (#{branch_totals.fetch(:branches_covered)}/" \
+       "#{branch_totals.fetch(:branches_valid)} branches)"
 rescue LoadError
   warn "simplecov-cobertura not installed; skipping XML emit"
 end
