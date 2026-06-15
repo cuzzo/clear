@@ -16,8 +16,7 @@ undertested, or historically bug-prone.
 
 ## Getting Started
 
-If you want to contribute, see the repository-level
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Prerequisites
 

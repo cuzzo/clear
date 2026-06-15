@@ -2,12 +2,6 @@
 
 ![SlopCop](docs/assets/slopcop.png)
 
-SlopCop turns branch coverage into an ordered list of the test gaps that
-actually matter. A flat "673/2732 uncovered" count is not actionable;
-SlopCop classifies every dark branch arm, filters out arms that are not
-good test targets, and ranks the remaining genuine gaps by churn and
-structural risk.
-
 Typical Code Coverage UIs only show you that a line was hit. That means
 little, as only parts of a line may have been hit or tested. SlopCop
 gives you two unique insights:
@@ -19,14 +13,9 @@ It is used by the CLEAR compiler to help focus attention on fixing the
 buggiest parts of the codebase and putting the most care into review for
 those parts as well.
 
-- See [Design Notes](docs/agents/design.md) for category definitions,
-  caveats, and boundary details.
-- See [report.md](report.md) for a generated example over CLEAR.
-
 ## Getting Started
 
-If you want to contribute, see the repository-level
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Prerequisites
 

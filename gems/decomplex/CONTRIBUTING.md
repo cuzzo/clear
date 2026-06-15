@@ -60,10 +60,3 @@ without editing Decomplex core.
 That API is not stable yet. For now, add first-party metrics directly as
 detector modules. Keep them small, tested, and report-backed so they can
 be moved behind a plugin boundary later.
-
-## Output Formats
-
-Markdown report generation and JSON baseline snapshots are current.
-SARIF output is current through `decomplex report --sarif=FILE`. When
-adding a new output format, build it from the same structured report data
-rather than re-running or re-deriving detectors.
