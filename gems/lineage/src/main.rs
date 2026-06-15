@@ -44,6 +44,11 @@ enum Command {
         #[arg(long, default_value = "text")]
         format: String,
     },
+    /// Refresh materialized UI summaries for fast dashboard and file index reads.
+    RefreshUi {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+    },
     /// Serve the local Lineage source and verification UI.
     Ui {
         #[arg(long, default_value = "lineage.db")]
@@ -205,6 +210,16 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        Command::RefreshUi { db } => {
+            let storage = Storage::open(&db)?;
+            storage.refresh_ui_summaries()?;
+            let files = storage.count_rows("ui_file_summaries")?;
+            let units = storage.count_rows("ui_warning_units")?;
+            println!(
+                "refreshed UI summaries for {} files and {} warning units",
+                files, units
+            );
         }
         Command::Ui {
             db,

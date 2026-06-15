@@ -30,12 +30,20 @@ pub struct UiFile {
     pub path: String,
     pub units: i64,
     pub hazards: i64,
+    pub evidence_covered_hazards: i64,
+    pub covered_hazards: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
     pub tracked_lines: i64,
     pub covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
+    pub mutant_killed_covered_lines: i64,
+    pub stochastic_mutant_killed_covered_lines: i64,
+    pub invariant_mutant_killed_covered_lines: i64,
+    pub multi_type_covered_lines: i64,
+    #[serde(skip)]
+    pub read_model: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -210,6 +218,10 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
 
 pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
     let total_start = Instant::now();
+    if let Some(files) = read_model_file_index_with_scope(storage, scope)? {
+        profile_log("file_index.read_model_total", total_start);
+        return Ok(files);
+    }
     let line_start = Instant::now();
     let line_stats = line_coverage_by_file(storage, scope)?;
     profile_log("file_index.line_coverage_by_file", line_start);
@@ -261,6 +273,8 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
             path,
             units: row.get(1)?,
             hazards: row.get(2)?,
+            evidence_covered_hazards: 0,
+            covered_hazards: 0,
             distinct_tests: row.get(3)?,
             mutant_killed_tests: row.get(4)?,
             tracked_lines: stats.tracked,
@@ -271,6 +285,11 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
                 fallback_line_coverage
             },
             mutant_coverage: row.get(6)?,
+            mutant_killed_covered_lines: 0,
+            stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_killed_covered_lines: 0,
+            multi_type_covered_lines: 0,
+            read_model: false,
         })
     })?;
     let files = rows
@@ -281,6 +300,64 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
     profile_log("file_index.current_units", query_start);
     profile_log("file_index.total", total_start);
     Ok(files)
+}
+
+fn read_model_file_index_with_scope(
+    storage: &Storage,
+    scope: &CoverageScope,
+) -> Result<Option<Vec<UiFile>>> {
+    let start = Instant::now();
+    if storage.count_rows("ui_file_summaries")? == 0 {
+        return Ok(None);
+    }
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path,
+               units,
+               hazards,
+               evidence_covered_hazards,
+               covered_hazards,
+               distinct_tests,
+               mutant_killed_tests,
+               tracked_lines,
+               covered_lines,
+               line_coverage,
+               mutant_coverage,
+               mutant_killed_covered_lines,
+               stochastic_mutant_killed_covered_lines,
+               invariant_mutant_killed_covered_lines,
+               multi_type_covered_lines
+        FROM ui_file_summaries
+        ORDER BY hazards DESC, mutant_killed_tests DESC, distinct_tests DESC, path
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(UiFile {
+            path: row.get(0)?,
+            units: row.get(1)?,
+            hazards: row.get(2)?,
+            evidence_covered_hazards: row.get(3)?,
+            covered_hazards: row.get(4)?,
+            distinct_tests: row.get(5)?,
+            mutant_killed_tests: row.get(6)?,
+            tracked_lines: row.get(7)?,
+            covered_lines: row.get(8)?,
+            line_coverage: row.get(9)?,
+            mutant_coverage: row.get(10)?,
+            mutant_killed_covered_lines: row.get(11)?,
+            stochastic_mutant_killed_covered_lines: row.get(12)?,
+            invariant_mutant_killed_covered_lines: row.get(13)?,
+            multi_type_covered_lines: row.get(14)?,
+            read_model: true,
+        })
+    })?;
+    let files = rows
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|file| scope.allows(&file.path))
+        .collect();
+    profile_log("file_index.read_model_query", start);
+    Ok(Some(files))
 }
 
 impl CoverageScope {
@@ -449,6 +526,7 @@ pub fn dashboard_summary_for_directory_with_scope(
     let directory = normalize_directory(directory);
     let files_start = Instant::now();
     let files = file_index_with_scope(storage, scope)?;
+    let uses_read_model = files.iter().any(|file| file.read_model);
     profile_log("dashboard.file_index", files_start);
     let mut top_hazard_files = files
         .iter()
@@ -464,20 +542,28 @@ pub fn dashboard_summary_for_directory_with_scope(
     top_hazard_files.truncate(8);
 
     let line_start = Instant::now();
-    let mut line_counts = dashboard_line_counts(storage, &directory, scope)?;
-    for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
-        line_counts.tracked += file.tracked_lines;
-        line_counts.covered += file.covered_lines;
-    }
-    if line_counts.tracked == 0 {
-        let fallback = dashboard_coverage_line_counts(storage, &directory, scope)?;
-        line_counts.tracked = fallback.tracked;
-        line_counts.covered = fallback.covered;
-    }
+    let line_counts = if uses_read_model {
+        dashboard_line_counts_from_files(&files, &directory)
+    } else {
+        let mut line_counts = dashboard_line_counts(storage, &directory, scope)?;
+        for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
+            line_counts.tracked += file.tracked_lines;
+            line_counts.covered += file.covered_lines;
+        }
+        if line_counts.tracked == 0 {
+            let fallback = dashboard_coverage_line_counts(storage, &directory, scope)?;
+            line_counts.tracked = fallback.tracked;
+            line_counts.covered = fallback.covered;
+        }
+        line_counts
+    };
     profile_log("dashboard.line_counts", line_start);
     let hazard_start = Instant::now();
-    let (active_hazards, evidence_covered_hazards, covered_hazards) =
-        dashboard_hazard_counts(storage, &directory, scope)?;
+    let (active_hazards, evidence_covered_hazards, covered_hazards) = if uses_read_model {
+        dashboard_hazard_counts_from_files(&files, &directory)
+    } else {
+        dashboard_hazard_counts(storage, &directory, scope)?
+    };
     profile_log("dashboard.hazard_counts", hazard_start);
     let warning_start = Instant::now();
     let warnings = warnings_for_directory(storage, &directory, scope)?;
@@ -546,6 +632,38 @@ fn warnings_for_path(storage: &Storage, path: &str) -> Result<Vec<UiWarning>> {
 
 fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
     let start = Instant::now();
+    if storage.count_rows("ui_warning_units")? > 0 {
+        let mut stmt = storage.connection().prepare(
+            r#"
+            SELECT current_path,
+                   current_distinct_tests,
+                   current_mutant_verified_tests,
+                   last_test_exposure_at,
+                   last_mutant_run_at,
+                   changes_after_test_exposure,
+                   semantic_changes_after_mutant_run,
+                   verification_stale_seconds,
+                   reopened_count
+            FROM ui_warning_units
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(WarningUnit {
+                current_path: row.get(0)?,
+                current_distinct_tests: row.get(1)?,
+                current_mutant_verified_tests: row.get(2)?,
+                last_test_exposure_at: row.get(3)?,
+                last_mutant_run_at: row.get(4)?,
+                changes_after_test_exposure: row.get(5)?,
+                semantic_changes_after_mutant_run: row.get(6)?,
+                verification_stale_seconds: row.get(7)?,
+                reopened_count: row.get(8)?,
+            })
+        })?;
+        let units = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        profile_log("warnings.read_model_query", start);
+        return Ok(units);
+    }
     let mut stmt = storage.connection().prepare(
         r#"
         WITH latest_events AS (
@@ -740,6 +858,32 @@ fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
     warnings
 }
 
+fn dashboard_line_counts_from_files(files: &[UiFile], directory: &str) -> DashboardLineCounts {
+    let mut counts = DashboardLineCounts::default();
+    for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
+        counts.tracked += file.tracked_lines;
+        counts.covered += file.covered_lines;
+        counts.mutant_killed += file.mutant_killed_covered_lines;
+        counts.stochastic_mutant_killed += file.stochastic_mutant_killed_covered_lines;
+        counts.invariant_mutant_killed += file.invariant_mutant_killed_covered_lines;
+        counts.multi_type += file.multi_type_covered_lines;
+    }
+    counts
+}
+
+fn dashboard_hazard_counts_from_files(files: &[UiFile], directory: &str) -> (i64, i64, i64) {
+    files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, directory))
+        .fold((0, 0, 0), |(active, evidence, verified), file| {
+            (
+                active + file.hazards,
+                evidence + file.evidence_covered_hazards,
+                verified + file.covered_hazards,
+            )
+        })
+}
+
 fn dashboard_line_counts(
     storage: &Storage,
     _directory: &str,
@@ -750,7 +894,24 @@ fn dashboard_line_counts(
     let exposure_start = Instant::now();
     let mut stmt = storage.connection().prepare(
         r#"
-        WITH ranked_exposure AS (
+        WITH latest_source_lines AS (
+          SELECT path, line, hits
+          FROM (
+            SELECT path, line, source, hits,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY path, line, source
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM coverage_line_events
+          )
+          WHERE rank = 1
+        ),
+        latest_lines AS (
+          SELECT path, line, MAX(hits) AS hits
+          FROM latest_source_lines
+          GROUP BY path, line
+        ),
+        ranked_exposure AS (
           SELECT path, line, branch_id, test_id, test_type, is_verified,
                  is_mutation_killed, mutation_kind,
                  ROW_NUMBER() OVER (
@@ -782,6 +943,8 @@ fn dashboard_line_counts(
                  THEN 1 ELSE 0
                END) AS invariant_mutant_killed
         FROM latest_exposure
+        JOIN latest_lines USING (path, line)
+        WHERE latest_lines.hits > 0
         GROUP BY path, line
         "#,
     )?;
@@ -3545,34 +3708,55 @@ mod tests {
                 path: "src/a.rb".into(),
                 units: 1,
                 hazards: 2,
+                evidence_covered_hazards: 0,
+                covered_hazards: 0,
                 distinct_tests: 3,
                 mutant_killed_tests: 4,
                 tracked_lines: 10,
                 covered_lines: 5,
                 line_coverage: 50.0,
                 mutant_coverage: 25.0,
+                mutant_killed_covered_lines: 0,
+                stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_killed_covered_lines: 0,
+                multi_type_covered_lines: 0,
+                read_model: false,
             },
             UiFile {
                 path: "src/internal/b.rb".into(),
                 units: 2,
                 hazards: 1,
+                evidence_covered_hazards: 0,
+                covered_hazards: 0,
                 distinct_tests: 5,
                 mutant_killed_tests: 6,
                 tracked_lines: 30,
                 covered_lines: 15,
                 line_coverage: 75.0,
                 mutant_coverage: 50.0,
+                mutant_killed_covered_lines: 0,
+                stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_killed_covered_lines: 0,
+                multi_type_covered_lines: 0,
+                read_model: false,
             },
             UiFile {
                 path: "zig/c.zig".into(),
                 units: 3,
                 hazards: 7,
+                evidence_covered_hazards: 0,
+                covered_hazards: 0,
                 distinct_tests: 8,
                 mutant_killed_tests: 9,
                 tracked_lines: 4,
                 covered_lines: 4,
                 line_coverage: 100.0,
                 mutant_coverage: 0.0,
+                mutant_killed_covered_lines: 0,
+                stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_killed_covered_lines: 0,
+                multi_type_covered_lines: 0,
+                read_model: false,
             },
         ];
 
@@ -3614,6 +3798,61 @@ mod tests {
         assert_eq!(src.coverage_percent, 50.0);
         assert_eq!(zig.tracked_lines, 1);
         assert_eq!(zig.covered_lines, 1);
+    }
+
+    #[test]
+    fn refreshed_ui_summaries_drive_file_index_and_dashboard() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            2,
+            "def run",
+            "def run\n  1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 1, 1)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 2, 0)
+            .unwrap();
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id,
+                commit_hash: "abc".into(),
+                timestamp: 10,
+                path: "src/a.rb".into(),
+                function: Some("run".into()),
+                line: Some(1),
+                branch_id: None,
+                test_id: "spec/a_spec.rb:1".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+
+        storage.refresh_ui_summaries().unwrap();
+
+        let files = file_index(&storage).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].read_model);
+        assert_eq!(files[0].tracked_lines, 2);
+        assert_eq!(files[0].covered_lines, 1);
+        assert_eq!(files[0].mutant_killed_covered_lines, 1);
+
+        let dashboard = dashboard_summary(&storage).unwrap();
+        assert_eq!(dashboard.tracked_lines, 2);
+        assert_eq!(dashboard.covered_lines, 1);
+        assert_eq!(dashboard.mutant_killed_covered_percent, 100.0);
     }
 
     #[test]
