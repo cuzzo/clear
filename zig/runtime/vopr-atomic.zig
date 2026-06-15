@@ -45,6 +45,7 @@ pub var sim_cmpxchg_synthetic_fault_count: usize = 0;
 /// end (or via a deferred reset helper).
 pub var inject_cas_fault: bool = false;
 pub var inject_cas_fault_rate: u32 = 0;
+pub var inject_cas_fault_count_remaining: u32 = 0;
 
 /// Swap fault injection. Off by default. When `inject_swap_busy_fault`
 /// is true, every `swap(new_val, ...)` returns `new_val` (without
@@ -81,6 +82,7 @@ pub fn seedFault(seed: u64) void {
 pub fn resetFault() void {
     inject_cas_fault = false;
     inject_cas_fault_rate = 0;
+    inject_cas_fault_count_remaining = 0;
     sim_cmpxchg_synthetic_fault_count = 0;
     inject_swap_busy_fault = false;
     inject_swap_busy_rate = 0;
@@ -90,6 +92,10 @@ pub fn resetFault() void {
 }
 
 inline fn shouldInjectFault() bool {
+    if (inject_cas_fault_count_remaining > 0) {
+        inject_cas_fault_count_remaining -= 1;
+        return true;
+    }
     if (!inject_cas_fault) return false;
     if (inject_cas_fault_rate == 0) return false;
     const roll = fault_prng.random().intRangeLessThan(u32, 0, 10_000);

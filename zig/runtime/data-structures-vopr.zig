@@ -18,6 +18,7 @@ const compat = @import("../lib/compat.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const sim_atomic = @import("vopr-atomic.zig");
+const SimClock = @import("testing/vopr-clock.zig").SimClock;
 
 // `bind` with stub deps -- lib/data-structures.zig's collection types
 // take cleanup / refcount hooks via the deps struct so user code can
@@ -158,6 +159,39 @@ pub fn testInfStreamSpinlockUnderFault() !void {
 
     const synthetic_after = sim_atomic.sim_swap_synthetic_fault_count;
     if (synthetic_after == synthetic_before) return error.NoSwapFaultInjected;
+}
+
+pub fn testBatchWindowSimClockFlush() !void {
+    const allocator = gpa.allocator();
+
+    SimClock.reset();
+
+    const BatchWindowI64 = DataStructures.BatchWindow(i64);
+    var window = BatchWindowI64.init(allocator, 0, 10_000_000);
+    defer window.deinit();
+
+    if (try window.push(1)) |batch| {
+        window.freeBatch(batch);
+        return error.BatchFlushedTooEarly;
+    }
+
+    SimClock.advanceMs(5);
+    if (try window.push(2)) |batch| {
+        window.freeBatch(batch);
+        return error.BatchFlushedTooEarly;
+    }
+
+    SimClock.advanceMs(6);
+    const batch = (try window.push(3)) orelse return error.BatchDidNotFlush;
+    defer window.freeBatch(batch);
+
+    if (batch.len != 3) return error.BatchLenWrong;
+    if (batch[0] != 1 or batch[1] != 2 or batch[2] != 3) return error.BatchContentsWrong;
+
+    if (try window.flush()) |leftover| {
+        window.freeBatch(leftover);
+        return error.BatchLeftoverAfterFlush;
+    }
 }
 
 /// Drives Stream.setError's spinlock retry body under swap fault

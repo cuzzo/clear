@@ -37,11 +37,11 @@ const Test = struct {
 };
 
 const tests = [_]Test{
-    .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",                      .func = &gate.assertGapBActive },
-    .{ .name = "compat.nanoTimestamp + Timer track SimClock virtual time",                           .func = &stv.testCompatTimerSimClock },
-    .{ .name = "Runtime.checkpoint deadline fires under SimClock advance",                           .func = &stv.testRuntimeCheckpointTimeout },
-    .{ .name = "WaitGroup/Semaphore scheduler primitives: register, wait, acquire, release",         .func = &stv.testWaitGroupSemaphoreSchedulerPrimitives },
-    .{ .name = "WaitGroup/Semaphore fiber park/resume paths",                                        .func = &stv.testWaitGroupSemaphoreFiberParkResume },
+    .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable", .func = &gate.assertGapBActive },
+    .{ .name = "compat.nanoTimestamp + Timer track SimClock virtual time", .func = &stv.testCompatTimerSimClock },
+    .{ .name = "Runtime.checkpoint deadline fires under SimClock advance", .func = &stv.testRuntimeCheckpointTimeout },
+    .{ .name = "WaitGroup/Semaphore scheduler primitives: register, wait, acquire, release", .func = &stv.testWaitGroupSemaphoreSchedulerPrimitives },
+    .{ .name = "WaitGroup/Semaphore fiber park/resume paths", .func = &stv.testWaitGroupSemaphoreFiberParkResume },
     // WaitGroup / Semaphore swap-spinlock fault scenarios dropped:
     // routing WaitGroup/Semaphore counter+lock through the comptime
     // Atomic alias destabilized stream-test's TSan SplitStream
@@ -49,23 +49,25 @@ const tests = [_]Test{
     // The migration is semantically a no-op under TSan but timing-
     // sensitive enough to amplify a pre-existing race. Reverted to
     // keep TSan stable. See V29 commit + audit doc.
-    .{ .name = "WaiterList.spinAcquire CAS retry-body fires under SimAtomic CAS fault",             .func = &stv.testWaiterListSpinlockUnderFault },
+    .{ .name = "WaiterList.spinAcquire CAS retry-body fires under SimAtomic CAS fault", .func = &stv.testWaiterListSpinlockUnderFault },
     // observable.SpinLock + profile-lock SpinLock fault scenarios were
     // removed: routing those production types through the comptime
     // Atomic alias (so SimAtomic could fault-inject) amplified TSan
     // flake rate on stream-test SplitStream pubsub hammer + parking-
     // rwlock-fiber-hammer (V31). See V31 commit + audit doc.
-    .{ .name = "SmartEventFd.consume drains via posix.read",                                        .func = &stv.testSmartEventFdConsume },
-    .{ .name = "Scheduler io_uring submit fns (read/write/accept/connect/recv/send) via SimRing",   .func = &stv.testIoSubmitFns },
-    .{ .name = "Profile files load + nanoTimestamp tracks SimClock (fiber-profile, lock-profile)",  .func = &stv.testProfileFilesLoad },
-    .{ .name = "wakeExpiredFsmSleepers (FSM sleep wake)",                                           .func = &stv.testWakeExpiredFsmSleepers },
-    .{ .name = "earliestLockWaiterDeadlineMsUntil (run-loop idle-arming math)",                     .func = &stv.testEarliestLockWaiterDeadline },
-    .{ .name = "registerLockWaiter stamps wait_start_ms and appends to lock_waiters",               .func = &stv.testRegisterLockWaiter },
-    .{ .name = "fiber harness minimal: switchTo -> yield -> switchTo -> yield",       .func = &stv.testFiberHarnessMinimal },
-    .{ .name = "Runtime.sleep end-to-end (real fiber, sleep -> wake -> resume)",      .func = &stv.testRuntimeSleepEndToEnd },
-    .{ .name = "scanLockWaiters timeout-fire under SimClock advance",                                .func = &stv.testScanLockWaitersTimeoutFire },
-    .{ .name = "wakeExpiredSleepers under SimClock advance",                                         .func = &stv.testWakeExpiredSleepers },
-    .{ .name = "scanFsmLockWaiters timeout-fire under SimClock advance",                             .func = &stv.testScanFsmLockWaitersTimeoutFire },
+    .{ .name = "WaitGroup/Semaphore real spin contention covers held-lock retry bodies", .func = &stv.testSchedulerPrimitiveSpinContentionWithThreads },
+    .{ .name = "SmartEventFd.consume drains via posix.read", .func = &stv.testSmartEventFdConsume },
+    .{ .name = "Scheduler io_uring submit fns (read/write/accept/connect/recv/send) via SimRing", .func = &stv.testIoSubmitFns },
+    .{ .name = "Profile files load + nanoTimestamp tracks SimClock (fiber-profile, lock-profile)", .func = &stv.testProfileFilesLoad },
+    .{ .name = "wakeExpiredFsmSleepers (FSM sleep wake)", .func = &stv.testWakeExpiredFsmSleepers },
+    .{ .name = "earliestLockWaiterDeadlineMsUntil (run-loop idle-arming math)", .func = &stv.testEarliestLockWaiterDeadline },
+    .{ .name = "registerLockWaiter stamps wait_start_ms and appends to lock_waiters", .func = &stv.testRegisterLockWaiter },
+    .{ .name = "FSM lock registration stamps SimClock timestamps for mutex/rwlock waiters", .func = &stv.testFsmParkingRegistrationTimestamps },
+    .{ .name = "fiber harness minimal: switchTo -> yield -> switchTo -> yield", .func = &stv.testFiberHarnessMinimal },
+    .{ .name = "Runtime.sleep end-to-end (real fiber, sleep -> wake -> resume)", .func = &stv.testRuntimeSleepEndToEnd },
+    .{ .name = "scanLockWaiters timeout-fire under SimClock advance", .func = &stv.testScanLockWaitersTimeoutFire },
+    .{ .name = "wakeExpiredSleepers under SimClock advance", .func = &stv.testWakeExpiredSleepers },
+    .{ .name = "scanFsmLockWaiters timeout-fire under SimClock advance", .func = &stv.testScanFsmLockWaitersTimeoutFire },
 };
 
 pub fn main() !void {
