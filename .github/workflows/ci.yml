@@ -925,9 +925,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - name: Install Tree-sitter Ruby grammar
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-save --package-lock=false tree-sitter-ruby@0.23.1
       - name: Download Ruby coverage artifacts
         uses: actions/download-artifact@v4
         with:
