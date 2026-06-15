@@ -51,3 +51,8 @@ flags:
       - zig/
     carryforward: false
     joined: false
+  lineage-rust:
+    paths:
+      - gems/lineage/
+    carryforward: false
+    joined: false

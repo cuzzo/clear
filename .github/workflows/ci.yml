@@ -121,6 +121,35 @@ jobs:
         run: npm install --no-save --package-lock=false tree-sitter-ruby@0.23.1
       - run: bundle exec rspec gems/nil-kill/spec
 
+  lineage-rust-coverage:
+    name: Lineage Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for Lineage
+        run: |
+          mkdir -p tmp/lineage-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/lineage/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path tmp/lineage-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/lineage-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/lineage-rust-coverage/cobertura.xml
+          flags: lineage-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   sorbet:
     name: Sorbet type-check (typed:true files only)
     needs: changes
@@ -1030,6 +1059,7 @@ jobs:
     name: Decomplex / Boobytrap / SlopCop SARIF
     runs-on: ubuntu-latest
     needs:
+      - changes
       - ruby-unit
       - ruby-integration
       - transpile-tests
@@ -1037,7 +1067,8 @@ jobs:
       - tools-fuzz-shard
       - bc-lower-coverage-shard
       - zig-coverage
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+      - lineage-rust-coverage
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read
       security-events: write
@@ -1063,19 +1094,27 @@ jobs:
             tree-sitter-rust \
             @tree-sitter-grammars/tree-sitter-zig
       - name: Download Ruby coverage artifacts
+        if: ${{ needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
           pattern: ruby-coverage-*
           path: tmp/generalized-gems-coverage
       - name: Download Zig coverage artifacts
+        if: ${{ needs['zig-coverage'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
           pattern: zig-coverage-*
           path: tmp/generalized-gems-coverage
+      - name: Download Lineage Rust coverage artifact
+        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/generalized-gems-coverage/lineage-rust-coverage
       - name: Generate ordered SARIF reports
         run: |
           git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
-          mkdir -p tmp/generalized-gems-sarif
+          mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif
           coverage_args=()
           while IFS= read -r path; do
             coverage_args+=(--coverage="${path}")

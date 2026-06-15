@@ -45,7 +45,19 @@ class ReportTest < Minitest::Test
   end
 
   def test_json_report_is_sarif_alias
-    assert_equal JSON.parse(report.to_sarif), JSON.parse(report.to_json)
+    r = report
+    assert_equal JSON.parse(r.to_sarif), JSON.parse(r.to_json)
+  end
+
+  def test_compact_sarif_omits_heavy_payloads_for_ci_uploads
+    sarif = JSON.parse(report.to_sarif(include_snapshot: false, include_finding_payload: false, max_results: 2))
+    run = sarif.fetch("runs").first
+
+    refute run.fetch("properties").key?("decomplex.snapshot")
+    assert_equal 2, run.fetch("results").size
+    result = run.fetch("results").first
+    assert result.fetch("properties").key?("tier")
+    refute result.fetch("properties").key?("decomplex_finding")
   end
 
   def test_sarif_result_locations_use_report_finding_locations

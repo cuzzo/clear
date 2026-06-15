@@ -7,6 +7,7 @@ require "open3"
 require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
+DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS", "1000"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/decomplex/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/boobytrap/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
@@ -104,7 +105,6 @@ coverage = coverage_paths.empty? ? nil : coverage_paths.join(File::PATH_SEPARATO
 
 changed = changed_files(repo, options[:base], options[:head])
 rel_files = source_files(repo, changed, options[:exclude])
-abs_files = rel_files.map { |path| File.join(repo, path) }
 
 warn "changed supported source files: #{rel_files.size}"
 rel_files.each { |path| warn "  #{path}" }
@@ -123,9 +123,18 @@ previous_parser = ENV["DECOMPLEX_PARSER"]
 ENV["DECOMPLEX_PARSER"] = "tree_sitter"
 
 begin
-  decomplex = Decomplex::Report.new(abs_files)
-  write(File.join(out_dir, "decomplex.sarif"), decomplex.to_sarif)
-  write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+  Dir.chdir(repo) do
+    decomplex = Decomplex::Report.new(rel_files)
+    write(
+      File.join(out_dir, "decomplex.sarif"),
+      decomplex.to_sarif(
+        include_snapshot: false,
+        include_finding_payload: false,
+        max_results: DECOMPLEX_SARIF_MAX_RESULTS
+      )
+    )
+    write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+  end
 
   boobytrap = Boobytrap::Report.new(
     repo: repo,
