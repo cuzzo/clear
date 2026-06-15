@@ -1,12 +1,18 @@
 # Boobytrap
 
-Boobytrap helps you find the code most likely to be the source of bugs.
-It does not ask "what is the most complex code?" Raw complexity is a weak
-bug predictor. Boobytrap asks which code keeps getting bug-fixed,
-recently and repeatedly, and whether that same code is under-tested.
+Boobytrap helps you find the most likely parts of your codebase to have
+**latent** bugs. This helps you proactively direct your attention to
+testing. Boobytrap highlights the parts of the codebase with the most
+**semantic churn**, the lowest test coverage, and the highest complexity.
 
-In plain terms: Boobytrap tells you where to look first. Decomplex and
-Nil-kill can help explain what is wrong when you get there.
+In plain terms: Boobytrap tells you where to look first. Decomplex,
+Nil-kill, lint violations, etc. help explain what *might* be wrong when
+you get there.
+
+> [!NOTE]
+> Boobytrap uses [Lineage](../lineage/README.md) to track changes to
+> lines across files over time, and to avoid penalizing non-semantic
+> changes like whitespace or comments.
 
 ## Getting Started
 
@@ -74,7 +80,8 @@ Boobytrap's core score is:
 hotspot = normalized_fix_score x branch_coverage_gap
 ```
 
-- `fix_score` is a time-decayed score from bug-fix commits.
+- `fix_score` is a time-decayed score from bug-fix commits, inspired by
+  [Google's FixCache](https://google-engtools.blogspot.com/2011/12/bug-prediction-at-google.html).
 - `branch_coverage_gap` is uncovered decision arms divided by total
   decision arms.
 - High on both means the code is historically bug-prone and weakly
@@ -188,8 +195,10 @@ It ranks likely bug sources. A good finding should make a human say:
 "this is where review and testing attention probably has the highest
 return."
 
-Boobytrap does not detect lint issues or code smells, as packages for
-that already exist in every language.
+Boobytrap does not aggregate lint issues or code smells, as those issues
+are low signal / noise to the question Boobytrap wants to answer.
+Boobytrap wants to show you the most likely parts of your codebase that
+have latent bugs. Decomplex data is most useful there.
 
 ## FAQ
 
