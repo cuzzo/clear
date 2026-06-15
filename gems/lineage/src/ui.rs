@@ -95,6 +95,17 @@ pub struct UiDarkArm {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiBugEvent {
+    pub event_type: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub path: String,
+    pub line: u32,
+    pub label: String,
+    pub weight: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiLineAnnotation {
     pub line: u32,
     pub covered: bool,
@@ -109,6 +120,10 @@ pub struct UiLineAnnotation {
     pub dark_arms: Vec<String>,
     pub dark_arm_spans: Vec<UiDarkArm>,
     pub hazards: Vec<UiHazard>,
+    pub semantic_churn: f64,
+    pub semantic_churn_events: i64,
+    pub bug_weight: f64,
+    pub bug_events: Vec<UiBugEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -187,7 +202,13 @@ struct AnnotationBuilder {
     dark_arms: Vec<String>,
     dark_arm_spans: Vec<UiDarkArm>,
     hazards: Vec<UiHazard>,
+    semantic_churn: f64,
+    semantic_churn_events: i64,
+    bug_weight: f64,
+    bug_events: Vec<UiBugEvent>,
 }
+
+const MIN_HISTORY_WEIGHT: f64 = 0.001;
 
 pub fn serve_ui(db: impl AsRef<Path>, repo: impl AsRef<Path>, host: &str, port: u16) -> Result<()> {
     serve_ui_with_overlays(db, repo, host, port, &[])
@@ -1487,6 +1508,9 @@ pub fn line_annotations(
     let hazard_start = Instant::now();
     apply_hazards(storage, path, &mut lines)?;
     profile_log("line_annotations.hazards", hazard_start);
+    let history_start = Instant::now();
+    apply_history_heat(storage, path, &mut lines)?;
+    profile_log("line_annotations.history_heat", history_start);
     let overlay_start = Instant::now();
     apply_overlays(path, overlays, &mut lines);
     profile_log("line_annotations.overlays", overlay_start);
@@ -1507,6 +1531,10 @@ pub fn line_annotations(
             dark_arms: builder.dark_arms,
             dark_arm_spans: builder.dark_arm_spans,
             hazards: builder.hazards,
+            semantic_churn: builder.semantic_churn.min(1.0),
+            semantic_churn_events: builder.semantic_churn_events,
+            bug_weight: builder.bug_weight.min(1.0),
+            bug_events: builder.bug_events,
         })
         .collect();
     profile_log("line_annotations.total", total_start);
@@ -1578,6 +1606,10 @@ fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
         dark_arms: Vec::new(),
         dark_arm_spans: Vec::new(),
         hazards: Vec::new(),
+        semantic_churn: 0.0,
+        semantic_churn_events: 0,
+        bug_weight: 0.0,
+        bug_events: Vec::new(),
     }
 }
 
@@ -1877,6 +1909,278 @@ fn apply_hazards(
         lines.entry(line).or_default().hazards.push(hazard);
     }
     Ok(())
+}
+
+fn apply_history_heat(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<()> {
+    let (first, last) = decay_bounds(storage)?;
+    apply_semantic_churn(storage, path, lines, first, last)?;
+    apply_crash_history(storage, path, lines, first, last)?;
+    Ok(())
+}
+
+fn apply_semantic_churn(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    first_timestamp: i64,
+    last_timestamp: i64,
+) -> Result<()> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_events AS (
+          SELECT e.*
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        )
+        SELECT COALESCE(le.start_line, 1) AS current_start,
+               COALESCE(le.end_line, le.start_line, 1) AS current_end,
+               e.path,
+               e.start_line,
+               e.end_line,
+               e.event_type,
+               e.commit_hash,
+               e.timestamp,
+               e.name,
+               COALESCE(m.message, '') AS message
+        FROM logical_units u
+        LEFT JOIN latest_events le ON le.unit_id = u.id
+        JOIN events e ON e.unit_id = u.id
+        LEFT JOIN metadata m ON m.commit_hash = e.commit_hash
+        WHERE COALESCE(le.path, u.original_path) = ?1
+          AND e.semantic_change = 1
+          AND e.event_type IN ('CHANGE', 'FIX')
+        ORDER BY e.timestamp DESC, e.id DESC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![path], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, u32>(3)?,
+            row.get::<_, u32>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (
+            current_start,
+            current_end,
+            event_path,
+            event_start,
+            event_end,
+            event_type,
+            commit_hash,
+            timestamp,
+            name,
+            message,
+        ) = row?;
+        let weight = fix_cache_decay(timestamp, first_timestamp, last_timestamp);
+        let Some((first_line, last_line)) = mapped_history_range(
+            path,
+            current_start,
+            current_end,
+            &event_path,
+            event_start,
+            event_end,
+        ) else {
+            continue;
+        };
+        for line in first_line..=last_line {
+            let entry = lines.entry(line).or_default();
+            entry.semantic_churn += weight;
+            entry.semantic_churn_events += 1;
+            if event_type == "FIX" && weight >= MIN_HISTORY_WEIGHT {
+                push_bug_event(
+                    entry,
+                    UiBugEvent {
+                        event_type: "fix".to_string(),
+                        commit_hash: commit_hash.clone(),
+                        timestamp,
+                        path: event_path.clone(),
+                        line,
+                        label: bug_event_label("fix", &name, &message),
+                        weight,
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_crash_history(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    first_timestamp: i64,
+    last_timestamp: i64,
+) -> Result<()> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_events AS (
+          SELECT e.*
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        )
+        SELECT COALESCE(le.start_line, 1) AS current_start,
+               COALESCE(le.end_line, le.start_line, 1) AS current_end,
+               c.path,
+               c.line,
+               c.commit_hash,
+               c.timestamp,
+               c.error_class,
+               c.provider_id,
+               c.function
+        FROM logical_units u
+        LEFT JOIN latest_events le ON le.unit_id = u.id
+        JOIN crash_events c ON c.unit_id = u.id
+        WHERE COALESCE(le.path, u.original_path) = ?1
+        ORDER BY c.timestamp DESC, c.id DESC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![path], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, u32>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (
+            current_start,
+            current_end,
+            crash_path,
+            crash_line,
+            commit_hash,
+            timestamp,
+            error_class,
+            provider_id,
+            function,
+        ) = row?;
+        let weight = fix_cache_decay(timestamp, first_timestamp, last_timestamp);
+        if weight < MIN_HISTORY_WEIGHT {
+            continue;
+        }
+        let line = if crash_path == path && crash_line >= current_start && crash_line <= current_end
+        {
+            crash_line
+        } else {
+            current_start
+        };
+        let entry = lines.entry(line).or_default();
+        push_bug_event(
+            entry,
+            UiBugEvent {
+                event_type: "crash".to_string(),
+                commit_hash,
+                timestamp,
+                path: crash_path,
+                line: crash_line,
+                label: bug_event_label(
+                    "crash",
+                    &function,
+                    &format!("{error_class} {provider_id}"),
+                ),
+                weight,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn decay_bounds(storage: &Storage) -> Result<(i64, i64)> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT COALESCE(MIN(timestamp), 0), COALESCE(MAX(timestamp), 0)
+        FROM (
+          SELECT timestamp
+          FROM events
+          WHERE semantic_change = 1
+            AND event_type IN ('CHANGE', 'FIX')
+          UNION ALL
+          SELECT timestamp
+          FROM crash_events
+        )
+        "#,
+    )?;
+    Ok(stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?)
+}
+
+fn fix_cache_decay(timestamp: i64, first_timestamp: i64, last_timestamp: i64) -> f64 {
+    let span = (last_timestamp - first_timestamp) as f64;
+    let t = if span <= 0.0 {
+        1.0
+    } else {
+        ((timestamp - first_timestamp) as f64 / span).clamp(0.0, 1.0)
+    };
+    1.0 / (1.0 + ((-12.0 * t) + 12.0).exp())
+}
+
+fn mapped_history_range(
+    current_path: &str,
+    current_start: u32,
+    current_end: u32,
+    event_path: &str,
+    event_start: u32,
+    event_end: u32,
+) -> Option<(u32, u32)> {
+    let current_end = current_end.max(current_start);
+    if event_path == current_path {
+        let first = event_start.max(current_start);
+        let last = event_end.max(event_start).min(current_end);
+        (first <= last).then_some((first, last))
+    } else {
+        Some((current_start, current_end))
+    }
+}
+
+fn push_bug_event(entry: &mut AnnotationBuilder, event: UiBugEvent) {
+    entry.bug_weight += event.weight;
+    entry.bug_events.push(event);
+}
+
+fn bug_event_label(kind: &str, name: &str, detail: &str) -> String {
+    let mut parts = Vec::new();
+    if !name.trim().is_empty() {
+        parts.push(name.trim().to_string());
+    }
+    if !detail.trim().is_empty() {
+        parts.push(detail.trim().to_string());
+    }
+    if parts.is_empty() {
+        kind.to_string()
+    } else {
+        parts.join(": ")
+    }
 }
 
 fn apply_overlays(
@@ -2527,7 +2831,11 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         .iter()
         .filter(|annotation| annotation.mutant_tested)
         .count();
-    let hazards: usize = payload.annotations.iter().map(|annotation| annotation.hazards.len()).sum();
+    let hazards: usize = payload
+        .annotations
+        .iter()
+        .map(|annotation| annotation.hazards.len())
+        .sum();
     let dark_arms: usize = payload
         .annotations
         .iter()
@@ -2535,6 +2843,13 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         .sum();
 
     let mut out = String::new();
+    out.push_str("<section class=\"source-view\">");
+    out.push_str(
+        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-coverage\" checked>",
+    );
+    out.push_str(
+        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-churn\">",
+    );
     out.push_str("<div class=\"topbar\"><div><div class=\"title\">");
     out.push_str(&html_escape(&payload.path));
     out.push_str("</div><div class=\"subtle\">");
@@ -2542,9 +2857,12 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         "{} covered lines | {} mutant lines | {} hazards | {} dark arms",
         covered, mutant, hazards, dark_arms
     ));
-    out.push_str("</div></div>");
+    out.push_str("</div></div><div class=\"source-actions\">");
+    out.push_str(
+        "<div class=\"view-toggle\" aria-label=\"line color mode\"><label for=\"mode-coverage\">Coverage Quality</label><label for=\"mode-churn\">Churn Heat</label></div>",
+    );
     out.push_str(&render_history(payload, filter));
-    out.push_str("</div>");
+    out.push_str("</div></div>");
     out.push_str(&render_warning_banner(&payload.warnings));
     out.push_str("<div class=\"viewer\"><div class=\"code\">");
     for (index, line) in payload.lines.iter().enumerate() {
@@ -2557,6 +2875,7 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         ));
     }
     out.push_str("</div></div>");
+    out.push_str("</section>");
     out
 }
 
@@ -2603,6 +2922,12 @@ fn render_code_line(
     if annotation.map(annotation_has_dark_arms).unwrap_or(false) {
         classes.push("dark-arm");
     }
+    if annotation.map(|a| a.semantic_churn > 0.0).unwrap_or(false) {
+        classes.push("has-churn");
+    }
+    if annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false) {
+        classes.push("has-bugs");
+    }
     if let Some(annotation) = annotation {
         if !annotation.hazards.is_empty() {
             if annotation.hazards.iter().all(|hazard| hazard.verified) {
@@ -2613,9 +2938,28 @@ fn render_code_line(
         }
     }
 
+    let style = annotation
+        .map(row_style)
+        .filter(|style| !style.is_empty())
+        .map(|style| format!(" style=\"{}\"", html_escape(&style)))
+        .unwrap_or_default();
+    let hazard_title = annotation
+        .map(hazard_rail_title)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" title=\"{}\"", html_escape(&title)))
+        .unwrap_or_default();
+    let gutter_title = annotation
+        .map(gutter_title)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" title=\"{}\"", html_escape(&title)))
+        .unwrap_or_default();
+
     let mut out = format!(
-        "<div class=\"{}\"><span class=\"gutter\">",
+        "<div class=\"{}\"{}><span class=\"hazard-rail\"{}></span><span class=\"gutter\"{}>",
         classes.join(" "),
+        style,
+        hazard_title,
+        gutter_title,
     );
     if let Some(annotation) = annotation {
         for hazard in &annotation.hazards {
@@ -2641,6 +2985,9 @@ fn render_code_line(
                 html_escape(&title)
             ));
         }
+        if !annotation.bug_events.is_empty() {
+            out.push_str(&render_bug_history(annotation));
+        }
         if line_has_details(annotation) {
             out.push_str(&render_line_details(annotation));
         }
@@ -2658,7 +3005,10 @@ fn render_code_line(
 fn render_line_details(annotation: &UiLineAnnotation) -> String {
     let mut rows = Vec::new();
     if annotation.covered && annotation.line_hits.is_none() && annotation.line_coverage.is_none() {
-        rows.push("covered as part of a multi-line statement; exact line-hit metadata is unavailable".to_string());
+        rows.push(
+            "covered as part of a multi-line statement; exact line-hit metadata is unavailable"
+                .to_string(),
+        );
     }
     if !annotation.test_types.is_empty() {
         rows.push(format!("tests: {}", annotation.test_types.join(", ")));
@@ -2682,8 +3032,23 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     if let Some(value) = annotation.mutant_coverage {
         rows.push(format!("unit mutant coverage {:.1}%", value));
     }
+    if annotation.semantic_churn_events > 0 {
+        rows.push(format!(
+            "{} semantic churn event(s); decayed score {:.3}",
+            annotation.semantic_churn_events,
+            annotation.semantic_churn.min(1.0)
+        ));
+    }
+    if annotation.bug_weight > 0.0 {
+        rows.push(format!(
+            "decayed bug/fix weight {:.3}",
+            annotation.bug_weight.min(1.0)
+        ));
+    }
     let mut out = String::new();
-    out.push_str("<details class=\"line-meta\"><summary title=\"line verification details\">i</summary><div>");
+    out.push_str(
+        "<details class=\"line-meta\"><summary title=\"line verification details\">i</summary><div>",
+    );
     for row in rows {
         out.push_str("<p>");
         out.push_str(&html_escape(&row));
@@ -2691,6 +3056,111 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     }
     out.push_str("</div></details>");
     out
+}
+
+fn render_bug_history(annotation: &UiLineAnnotation) -> String {
+    let opacity = 0.18 + (annotation.bug_weight * 2.0).min(1.0) * 0.82;
+    let mut out = String::new();
+    out.push_str(
+        "<details class=\"bug-history\"><summary title=\"decayed bug/fix history\" style=\"opacity:",
+    );
+    out.push_str(&format!("{opacity:.3}"));
+    out.push_str("\">&#128027;</summary><div>");
+    for event in &annotation.bug_events {
+        out.push_str("<p><strong>");
+        out.push_str(&html_escape(&event.event_type));
+        out.push_str("</strong> <code>");
+        out.push_str(&html_escape(&short_commit(&event.commit_hash)));
+        out.push_str("</code> ");
+        out.push_str(&html_escape(&format!(
+            "{}:{} weight {:.3} @ {}",
+            event.path, event.line, event.weight, event.timestamp
+        )));
+        if !event.label.is_empty() {
+            out.push_str("<br>");
+            out.push_str(&html_escape(&event.label));
+        }
+        out.push_str("</p>");
+    }
+    out.push_str("</div></details>");
+    out
+}
+
+fn row_style(annotation: &UiLineAnnotation) -> String {
+    let coverage = coverage_background(annotation, false);
+    let gutter_coverage = coverage_background(annotation, true);
+    let churn = heat_background(annotation.semantic_churn, false);
+    let gutter_churn = heat_background(annotation.semantic_churn, true);
+    format!(
+        "--coverage-bg:{coverage};--gutter-coverage-bg:{gutter_coverage};--churn-bg:{churn};--gutter-churn-bg:{gutter_churn};"
+    )
+}
+
+fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
+    if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
+        if gutter {
+            "rgba(22, 101, 52, 0.34)".to_string()
+        } else {
+            "rgba(22, 101, 52, 0.24)".to_string()
+        }
+    } else if annotation.covered {
+        if gutter {
+            "rgba(34, 197, 94, 0.18)".to_string()
+        } else {
+            "rgba(34, 197, 94, 0.08)".to_string()
+        }
+    } else {
+        "transparent".to_string()
+    }
+}
+
+fn heat_background(weight: f64, gutter: bool) -> String {
+    let weight = weight.clamp(0.0, 1.0);
+    if weight <= 0.0 {
+        return "transparent".to_string();
+    }
+    let (red, green, blue) = if weight < 0.20 {
+        (254, 249, 195)
+    } else if weight < 0.45 {
+        (253, 186, 116)
+    } else if weight < 0.75 {
+        (248, 113, 113)
+    } else {
+        (220, 38, 38)
+    };
+    let base = if gutter { 0.18 } else { 0.08 };
+    let spread = if gutter { 0.44 } else { 0.24 };
+    let alpha = (base + weight * spread).min(if gutter { 0.70 } else { 0.42 });
+    format!("rgba({red}, {green}, {blue}, {alpha:.3})")
+}
+
+fn hazard_rail_title(annotation: &UiLineAnnotation) -> String {
+    let hazards = annotation
+        .hazards
+        .iter()
+        .filter(|hazard| !hazard.verified)
+        .map(|hazard| format!("{} requires {}", hazard.hazard_type, hazard.required_evidence))
+        .collect::<Vec<_>>();
+    hazards.join("\n")
+}
+
+fn gutter_title(annotation: &UiLineAnnotation) -> String {
+    let mut rows = Vec::new();
+    if annotation.semantic_churn_events > 0 {
+        rows.push(format!(
+            "{} semantic churn event(s), decayed score {:.3}",
+            annotation.semantic_churn_events,
+            annotation.semantic_churn.min(1.0)
+        ));
+    }
+    if annotation.covered {
+        rows.push(if annotation.mutant_tested {
+            "coverage quality: mutant tested".to_string()
+        } else {
+            "coverage quality: covered".to_string()
+        });
+    }
+    rows.join("\n")
 }
 
 fn line_has_details(annotation: &UiLineAnnotation) -> bool {
@@ -2702,6 +3172,8 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || annotation.line_hits.is_some()
         || annotation.line_coverage.is_some()
         || annotation.mutant_coverage.is_some()
+        || annotation.semantic_churn_events > 0
+        || !annotation.bug_events.is_empty()
 }
 
 fn annotation_has_dark_arms(annotation: &UiLineAnnotation) -> bool {
@@ -3294,6 +3766,46 @@ const STYLE: &str = r#"
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .source-view { display: contents; }
+  .mode-radio {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .source-actions {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+  }
+  .view-toggle {
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr;
+    justify-self: start;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .view-toggle label {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 12px;
+    border-right: 1px solid var(--line);
+  }
+  .view-toggle label:last-child { border-right: 0; }
+  #mode-coverage:checked ~ .topbar .view-toggle label[for="mode-coverage"],
+  #mode-churn:checked ~ .topbar .view-toggle label[for="mode-churn"] {
+    background: #eef2f7;
+    color: var(--text);
+    font-weight: 600;
+  }
   .history {
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -3398,16 +3910,28 @@ const STYLE: &str = r#"
   }
   .row {
     display: grid;
-    grid-template-columns: 84px 56px minmax(760px, 1fr);
+    grid-template-columns: 8px 100px 56px minmax(760px, 1fr);
     min-height: 20px;
-    border-left: 3px solid transparent;
   }
-  .row.covered { background: var(--covered); }
-  .row.mutant { background: var(--mutant); }
-  .row.hazard-open { border-left-color: var(--hazard); }
-  .row.hazard-verified { border-left-color: #8b95a5; }
+  #mode-coverage:checked ~ .viewer .row { background: var(--coverage-bg, transparent); }
+  #mode-churn:checked ~ .viewer .row { background: var(--churn-bg, transparent); }
   .ln { color: #8b95a5; text-align: right; padding-right: 10px; user-select: none; }
-  .gutter { min-width: 84px; text-align: right; padding-right: 8px; user-select: none; white-space: nowrap; }
+  .hazard-rail {
+    min-width: 8px;
+    background: transparent;
+  }
+  .row.hazard-open .hazard-rail { background: #7f1d1d; }
+  .row.hazard-verified .hazard-rail { background: #cbd5e1; }
+  .gutter {
+    min-width: 100px;
+    text-align: right;
+    padding-right: 8px;
+    user-select: none;
+    white-space: nowrap;
+    overflow: visible;
+  }
+  #mode-coverage:checked ~ .viewer .gutter { background: var(--gutter-churn-bg, transparent); }
+  #mode-churn:checked ~ .viewer .gutter { background: var(--gutter-coverage-bg, transparent); }
   .bomb {
     cursor: help;
     display: inline-block;
@@ -3417,7 +3941,8 @@ const STYLE: &str = r#"
   }
   .bomb.verified { opacity: 0.35; filter: grayscale(1); }
   .line-meta { display: inline-block; position: relative; }
-  .line-meta summary {
+  .line-meta summary,
+  .bug-history summary {
     cursor: pointer;
     color: var(--muted);
     display: inline;
@@ -3432,7 +3957,16 @@ const STYLE: &str = r#"
     box-shadow: inset 0 -1px 0 rgba(31, 41, 55, 0.48);
     border-radius: 2px;
   }
-  .line-meta div {
+  .bug-history { display: inline-block; position: relative; margin-right: 2px; }
+  .bug-history summary {
+    color: #991b1b;
+    font-size: 13px;
+    line-height: 18px;
+    list-style: none;
+  }
+  .bug-history summary::-webkit-details-marker { display: none; }
+  .line-meta div,
+  .bug-history div {
     position: absolute;
     z-index: 2;
     top: 18px;
@@ -3447,7 +3981,8 @@ const STYLE: &str = r#"
     text-align: left;
     white-space: normal;
   }
-  .line-meta p { margin: 0 0 4px; }
+  .line-meta p, .bug-history p { margin: 0 0 4px; }
+  .bug-history strong { color: #991b1b; font-size: 11px; text-transform: uppercase; }
   pre { margin: 0; white-space: pre; padding-right: 24px; }
   .tok-comment { color: #7a8495; font-style: italic; }
   .tok-string { color: #8a4b08; }
@@ -3462,8 +3997,8 @@ const STYLE: &str = r#"
     .app { grid-template-columns: 1fr; grid-template-rows: 36vh 64vh; }
     aside { border-right: 0; border-bottom: 1px solid var(--line); }
     .topbar { grid-template-columns: 1fr; }
-    .row { grid-template-columns: 72px 48px minmax(620px, 1fr); }
-    .gutter { min-width: 72px; padding-right: 6px; }
+    .row { grid-template-columns: 8px 86px 48px minmax(620px, 1fr); }
+    .gutter { min-width: 86px; padding-right: 6px; }
   }
 "#;
 
@@ -3653,6 +4188,143 @@ mod tests {
         assert_eq!(line_one.line_hits, Some(0));
         assert!(line_two.covered);
         assert_eq!(line_two.line_hits, Some(1));
+    }
+
+    #[test]
+    fn source_payload_adds_semantic_churn_and_decayed_bug_history() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  1\n  2\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            4,
+            "def run",
+            "def run\n1\n2\nend",
+        );
+        storage.upsert_logical_unit(&unit, 1).unwrap();
+        for (hash, event_type, start_line, end_line, semantic_change, timestamp) in [
+            ("comment", EventType::Change, 2, 2, false, 10),
+            ("move", EventType::Move, 1, 4, true, 20),
+            ("change", EventType::Change, 2, 2, true, 30),
+            ("fix", EventType::Fix, 1, 4, true, 40),
+        ] {
+            storage
+                .insert_event(&Event {
+                    unit_id: unit.id.clone(),
+                    commit_hash: hash.into(),
+                    event_type,
+                    path: "src/demo.rb".into(),
+                    name: "run".into(),
+                    start_line,
+                    end_line,
+                    semantic_change,
+                    lines_added: 1,
+                    lines_removed: 0,
+                    timestamp,
+                })
+                .unwrap();
+        }
+        storage
+            .insert_crash_event(&CrashEvent {
+                unit_id: unit.id,
+                commit_hash: "crash".into(),
+                timestamp: 50,
+                error_class: "RuntimeError".into(),
+                provider_id: "evt-1".into(),
+                is_verified: true,
+                path: "src/demo.rb".into(),
+                line: 2,
+                function: "run".into(),
+            })
+            .unwrap();
+
+        let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
+        let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
+        let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+
+        assert_eq!(line_one.semantic_churn_events, 1);
+        assert_eq!(line_two.semantic_churn_events, 2);
+        assert_eq!(
+            line_one
+                .bug_events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fix"]
+        );
+        assert_eq!(
+            line_two
+                .bug_events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fix", "crash"]
+        );
+        assert!(line_two.bug_weight > line_one.bug_weight);
+    }
+
+    #[test]
+    fn source_view_renders_css_only_coverage_and_churn_modes() {
+        let payload = UiSourcePayload {
+            path: "src/demo.rb".into(),
+            commit: None,
+            lines: vec!["def run".into(), "  maybe_work".into(), "end".into()],
+            versions: Vec::new(),
+            annotations: vec![UiLineAnnotation {
+                line: 2,
+                covered: true,
+                mutant_tested: false,
+                test_types: vec!["unit".to_string()],
+                distinct_tests: 1,
+                mutant_verified_tests: 0,
+                mutant_killed_tests: 0,
+                line_hits: Some(3),
+                line_coverage: Some(100.0),
+                mutant_coverage: None,
+                dark_arms: Vec::new(),
+                dark_arm_spans: Vec::new(),
+                hazards: vec![UiHazard {
+                    hazard_type: "zig_loom_atomic".to_string(),
+                    required_evidence: "loom".to_string(),
+                    source: "atomic store".to_string(),
+                    evidence_present: false,
+                    verified: false,
+                }],
+                semantic_churn: 0.70,
+                semantic_churn_events: 3,
+                bug_weight: 0.50,
+                bug_events: vec![UiBugEvent {
+                    event_type: "fix".to_string(),
+                    commit_hash: "abcdef1234567890".to_string(),
+                    timestamp: 100,
+                    path: "src/demo.rb".to_string(),
+                    line: 2,
+                    label: "fix crash".to_string(),
+                    weight: 0.50,
+                }],
+            }],
+            warnings: Vec::new(),
+        };
+
+        let html = render_source_view(&payload, "");
+
+        assert!(html.contains("id=\"mode-coverage\" checked"));
+        assert!(html.contains("id=\"mode-churn\""));
+        assert!(html.contains("Coverage Quality"));
+        assert!(html.contains("Churn Heat"));
+        assert!(html.contains("hazard-rail"));
+        assert!(html.contains("hazard-open"));
+        assert!(html.contains("bug-history"));
+        assert!(html.contains("decayed bug/fix history"));
+        assert!(html.contains("--coverage-bg:rgba(34, 197, 94, 0.08)"));
+        assert!(html.contains("--churn-bg:rgba(248, 113, 113"));
+        assert!(html.contains("--gutter-coverage-bg:rgba(34, 197, 94, 0.18)"));
+        assert!(html.contains("--gutter-churn-bg:rgba(248, 113, 113"));
     }
 
     #[test]
@@ -4102,6 +4774,10 @@ flags:
             dark_arms: Vec::new(),
             dark_arm_spans: Vec::new(),
             hazards: Vec::new(),
+            semantic_churn: 0.0,
+            semantic_churn_events: 0,
+            bug_weight: 0.0,
+            bug_events: Vec::new(),
         }];
         let lines = vec![
             "result = call(".to_string(),
@@ -4164,6 +4840,10 @@ flags:
                 span: Some([1, 4, 1, 8]),
             }],
             hazards: Vec::new(),
+            semantic_churn: 0.0,
+            semantic_churn_events: 0,
+            bug_weight: 0.0,
+            bug_events: Vec::new(),
         };
 
         let html =

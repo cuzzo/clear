@@ -531,6 +531,10 @@ mod tests {
                 evidence_present: false,
                 verified: false,
             }],
+            semantic_churn: 0.0,
+            semantic_churn_events: 0,
+            bug_weight: 0.0,
+            bug_events: Vec::new(),
         }
     }
 

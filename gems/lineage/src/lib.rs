@@ -46,7 +46,7 @@ pub use test_exposure::{
 };
 pub use ui::{
     dashboard_summary, file_index, line_annotations, serve_ui, serve_ui_with_overlays,
-    source_payload, source_payload_with_overlays, UiDashboard, UiFile, UiLineAnnotation,
-    UiOverlays, UiSourcePayload,
+    source_payload, source_payload_with_overlays, UiBugEvent, UiDashboard, UiFile,
+    UiLineAnnotation, UiOverlays, UiSourcePayload,
 };
 pub use vcs::VcsProvider;
