@@ -84,6 +84,55 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
     assert_operator run[:hidden], :>, 1.0
   end
 
+  def test_inlines_top_level_same_file_helper_chain
+    out = scan(<<~RB, min_score: 2, min_hidden: 1, max_depth: 2)
+      def run(input)
+        prepare(input)
+      end
+
+      def prepare(input)
+        validate(input)
+      end
+
+      def validate(input)
+        if input.ready?
+          if input.valid? && !input.locked?
+            true
+          end
+        end
+      end
+    RB
+
+    run = out.find { |row| row[:method] == "run" }
+    refute_nil run
+    assert_match(/\A\(top-level:/, run[:owner])
+    assert_equal %w[run prepare validate], run[:call_chain]
+    assert_operator run[:hidden], :>, 1.0
+  end
+
+  def test_inlines_non_ruby_top_level_helper_chain_when_grammar_is_available
+    out = scan(<<~PY, min_score: 2, min_hidden: 1, max_depth: 2, ext: ".py")
+      def run(input):
+          prepare(input)
+
+      def prepare(input):
+          validate(input)
+
+      def validate(input):
+          if input.ready and input.valid:
+              if not input.locked:
+                  return True
+    PY
+
+    run = out.find { |row| row[:method] == "run" }
+    refute_nil run
+    assert_match(/\A\(top-level:/, run[:owner])
+    assert_equal %w[run prepare validate], run[:call_chain]
+    assert_operator run[:hidden], :>, 1.0
+  rescue LoadError => e
+    skip e.message
+  end
+
   def test_shared_public_helper_is_dampened
     out = scan(<<~RB, min_score: 4, min_hidden: 4)
       class SharedPolicy
@@ -246,8 +295,9 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
 
   private
 
-  def scan(code, min_score:, min_hidden:, max_depth: Decomplex::WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH)
-    file = Tempfile.new(["wicc", ".rb"])
+  def scan(code, min_score:, min_hidden:, max_depth: Decomplex::WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH,
+           ext: ".rb")
+    file = Tempfile.new(["wicc", ext])
     file.write(code)
     file.close
     Decomplex::WeightedInlinedCognitiveComplexity.scan(

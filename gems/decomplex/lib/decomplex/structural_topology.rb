@@ -110,11 +110,16 @@ module Decomplex
 
       def scan(root)
         out = []
+        top_level_methods(root).each { |method| out << method }
         walk(root, [], out)
         out
       end
 
       private
+
+      def top_level_methods(root)
+        methods_from_statements(top_level_statements(root), top_level_owner)
+      end
 
       def walk(node, owners, out)
         return unless Ast.node?(node)
@@ -132,9 +137,13 @@ module Decomplex
         body = owner_body(owner_node)
         return [] unless Ast.node?(body)
 
+        methods_from_statements(owner_statements(body), owner)
+      end
+
+      def methods_from_statements(statements, owner)
         methods = []
         visibility = :public
-        owner_statements(body).each do |stmt|
+        statements.each do |stmt|
           next unless Ast.node?(stmt)
 
           if bare_visibility_marker?(stmt)
@@ -174,6 +183,14 @@ module Decomplex
 
       def owner_statements(body)
         body.type == :BLOCK ? body.children.compact : [body]
+      end
+
+      def top_level_statements(root)
+        return [] unless Ast.node?(root)
+
+        root.children.compact.flat_map do |child|
+          Ast.node?(child) && child.type == :BLOCK ? child.children.compact : [child]
+        end
       end
 
       def bare_visibility_marker?(node)
@@ -224,6 +241,10 @@ module Decomplex
         (owners + [owner_segment(node)]).join("::")
       end
 
+      def top_level_owner
+        "(top-level:#{@file})"
+      end
+
       def owner_segment(node)
         text = Ast.slice(node.children[0], @lines)
         text.empty? ? "(anonymous)" : text
@@ -239,11 +260,19 @@ module Decomplex
 
       def scan(root)
         out = []
+        top_level_methods(root).each do |method_node|
+          method = @method_by_id["#{top_level_owner}##{method_name(method_node)}"]
+          collect_calls(method_node, method, [], out) if method
+        end
         walk(root, [], out)
         out
       end
 
       private
+
+      def top_level_methods(root)
+        top_level_statements(root).select { |stmt| Ast.node?(stmt) && METHOD_TYPES.include?(stmt.type) }
+      end
 
       def walk(node, owners, out)
         return unless Ast.node?(node)
@@ -350,6 +379,14 @@ module Decomplex
         body.type == :BLOCK ? body.children.compact : [body]
       end
 
+      def top_level_statements(root)
+        return [] unless Ast.node?(root)
+
+        root.children.compact.flat_map do |child|
+          Ast.node?(child) && child.type == :BLOCK ? child.children.compact : [child]
+        end
+      end
+
       def visibility_call?(node)
         node.type == :FCALL && VISIBILITY_MIDS.include?(node.children[0])
       end
@@ -367,6 +404,10 @@ module Decomplex
       def owner_segment(node)
         text = Ast.slice(node.children[0], @lines)
         text.empty? ? "(anonymous)" : text
+      end
+
+      def top_level_owner
+        "(top-level:#{@file})"
       end
     end
   end

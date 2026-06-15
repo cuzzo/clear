@@ -1,54 +1,49 @@
 # Lineage
 
-Lineage is a Rust history engine for tracking logical code units across
-renames, moves, and refactors. It is intended to become Boobytrap's
-high-fidelity historical risk provider.
+Lineage is a Rust history and evidence engine for reviewing code at
+scale. It tracks logical code units across renames, moves, and
+refactors, then overlays verification evidence such as coverage,
+mutation results, systems hazards, and stack traces.
 
-The current crate is the bootstrap implementation:
+It is used by the CLEAR compiler and runtime to review LLM-assisted
+code with enough context to know which lines are risky, stale,
+undertested, or historically bug-prone.
 
-- `VcsProvider` defines the repository traversal boundary.
-- `GitProvider` implements that boundary with `git2`.
-- `BoundaryExtractor` defines the logical-unit extraction boundary.
-- `SourceFilter` defaults to a code-only whitelist for this repo's MVP:
-  `.rb`, `.zig`, `.py`, `.js`, `.lua`, `.c`, `.go`, and `.S`.
-  It also skips generated/cache/vendor path components by default.
-- `HeuristicExtractor` provides the first source-unit extractor behind
-  the same trait Tree-sitter language profiles will use.
-- `Storage` owns the portable SQLite schema from the design document.
-- `LineageEngine` compares commit snapshots and emits `CHANGE`, `MOVE`,
-  and `FIX` events.
-  `MOVE` events are recorded for lineage continuity, but they do not
-  contribute to summary risk.
+- See [Plugin Notes](docs/agents/plugins.md) for the provider adapter
+  boundary and future plugin architecture.
+- See [Coverage History](docs/agents/coverage-history.md) for how
+  coverage and test exposure evidence are modeled.
 
-## Usage
+## Getting Started
 
-```sh
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Prerequisites
+
+- Rust and Cargo
+- A git repository
+- Optional coverage, mutation, hazard, or stack-trace artifacts
+
+Build a Lineage database for this repository:
+
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- build \
   --repo . \
-  --db lineage.db
+  --db /tmp/lineage.db
 ```
 
-To cap analysis while testing:
+To cap analysis while iterating:
 
-```sh
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- build \
   --repo . \
   --db /tmp/lineage.db \
   --max-commits 100
 ```
 
-The CLI writes a SQLite database with:
+Inspect the highest-risk logical units:
 
-- `logical_units`
-- `events`
-- `metadata`
-- `quality_events`
-- `crash_events`
-- `test_exposure_events`
-
-Inspect the unit-level signal:
-
-```sh
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
   --db /tmp/lineage.db \
   --top 20 \
@@ -57,41 +52,109 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
   --only zig/
 ```
 
-Ingest coverage history after a build. The Codecov parser accepts API
-v2 `totals` responses and `report/tree` responses. Cobertura XML is
-also supported and records exact per-line hit counts for the source UI:
+Serve the local UI:
 
-```sh
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
   --db /tmp/lineage.db \
-  --format codecov \
-  --commit "$(git rev-parse HEAD)" \
-  --input gems/lineage/test/fixtures/codecov-clear-totals.json
-
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
-  --db /tmp/lineage.db \
-  --format cobertura \
-  --commit "$(git rev-parse HEAD)" \
-  --input coverage/coverage.xml
+  --repo . \
+  --overlay tmp/slopcop-constraints.json \
+  --port 8080
 ```
 
-Pass `--test-type` when a coverage artifact represents a specific
-verification lane. Lineage still stores aggregate line coverage, and it
-also writes suite-level `test_exposure_events` so the UI can distinguish
-which kind of test hit a line. The generated `test_id` names the coverage
-artifact, not an individual test case.
+## Outputs
 
-Recommended CLEAR lanes:
+Lineage can output a SQLite evidence database, text or JSON risk
+summaries, a local source-review UI, and LSP diagnostics/CodeLens data
+for editor integrations.
 
-- Ruby unit specs: `--format simplecov --test-type unit`
-- Ruby transpile-tests/integration coverage: `--format simplecov --test-type integration`
-- Ruby tools/fuzz coverage: `--format simplecov --test-type fuzz`
-- Zig kcov unit coverage: `--format cobertura --test-type unit`
-- Zig systems evidence: use `--test-type loom`, `--test-type vopr`, or
-  `--test-type tsan` for lane-specific artifacts. Loom/VOPR hazard facts
-  can also be emitted with `tools/lineage_zig_system_exposure.rb`.
+> [!NOTE]
+> CLEAR uses Lineage as its experimental UI for reviewing
+> LLM-assisted code at scale. Decomplex, SlopCop, Boobytrap, Nil-kill,
+> and mutation evidence become much easier to interpret when they are
+> rendered next to the source lines they describe.
 
-```sh
+### SQLite Database
+
+The build command writes a portable SQLite database with logical code
+units and history events:
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- build \
+  --repo . \
+  --db /tmp/lineage.db
+```
+
+Core tables include:
+
+- `logical_units`
+- `events`
+- `metadata`
+- `quality_events`
+- `crash_events`
+- `test_exposure_events`
+
+### Summary
+
+`summary` ranks logical units by history and verification risk:
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
+  --db /tmp/lineage.db \
+  --top 20 \
+  --format json
+```
+
+The text format is useful in a terminal. The JSON format is meant for
+tools, dashboards, and LLM review workflows.
+
+### Local UI
+
+`ui` serves a local source and verification browser:
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
+  --db /tmp/lineage.db \
+  --repo . \
+  --overlay tmp/slopcop-constraints.json \
+  --port 8080
+```
+
+The UI renders tracked files, source, prior commit versions, coverage,
+mutation evidence, dark-arm overlays, and systems hazards. It is
+server-rendered and works without a client-side application stack.
+
+The dashboard summary is also available as JSON:
+
+```bash
+curl http://127.0.0.1:8080/api/dashboard
+```
+
+### Language Server
+
+`lsp` runs a stdio language server for editor integrations:
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- lsp \
+  --db /tmp/lineage.db \
+  --repo . \
+  --overlay tmp/slopcop-constraints.json
+```
+
+The LSP publishes diagnostics for uncovered dark arms and open hazards,
+hover text for logical-unit history and test evidence, CodeLens risk
+summaries, and a custom gutter-update notification for editor wrappers.
+
+## Evidence Ingestion
+
+Lineage is most useful after loading verification artifacts for the
+current commit.
+
+### Coverage
+
+Ingest line coverage:
+
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
   --db /tmp/lineage.db \
   --repo . \
@@ -99,35 +162,28 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
   --commit "$(git rev-parse HEAD)" \
   --input coverage/.resultset.json \
   --test-type unit
-
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
-  --db /tmp/lineage.db \
-  --repo . \
-  --format cobertura \
-  --commit "$(git rev-parse HEAD)" \
-  --input zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
-  --test-type unit
 ```
 
-Coverage ingestion is commit-scoped. Re-ingesting the same artifact for
-the same commit updates existing rows instead of duplicating them. Use
-`--replace` when an artifact is authoritative for that commit and should
-delete prior coverage facts for that commit before loading the new file:
+Supported formats include `simplecov`, `cobertura`, `codecov`,
+`boobytrap`, and `generic`. Use `--replace` when an artifact is
+authoritative for that commit and should replace prior rows for the
+same source.
 
-```sh
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
-  --db /tmp/lineage.db \
-  --format cobertura \
-  --commit "$(git rev-parse HEAD)" \
-  --input coverage/coverage.xml \
-  --replace
-```
+Recommended CLEAR lanes:
 
-Ingest named test exposure history after a test run. This stores one
-event per `(commit, logical unit, test)` hit, with optional line, branch,
-test type, and mutation status fields:
+- Ruby unit specs: `--format simplecov --test-type unit`
+- Ruby transpile-tests/integration coverage:
+  `--format simplecov --test-type integration`
+- Ruby fuzz coverage: `--format simplecov --test-type fuzz`
+- Zig kcov unit coverage: `--format cobertura --test-type unit`
+- Zig systems evidence: `--test-type loom`, `--test-type vopr`, or
+  `--test-type tsan`
 
-```sh
+### Test Exposure
+
+Ingest named test exposure facts:
+
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure \
   --db /tmp/lineage.db \
   --repo . \
@@ -135,14 +191,15 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure \
   --input gems/lineage/test/fixtures/test-exposure-clear.json
 ```
 
-Ingest mutant facts after running a converter under
-`gems/lineage/tools/mutant-converters/`. The Ruby mutant converter/runner and
-`zig-mutants` both emit `mutant-facts/v1`; Lineage maps each fact onto
-current logical units, records `MUTANT_COV`, and marks the unit's source
-lines with killed/survived mutation exposure. Ruby spec mutants should
-use `--test-type unit`:
+Each record maps a commit, logical unit, and test to optional line,
+branch, test type, and mutation status fields.
 
-```sh
+### Mutants
+
+Ingest `mutant-facts/v1` after running a converter under
+`gems/lineage/tools/mutant-converters/`:
+
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-mutants \
   --db /tmp/lineage.db \
   --repo . \
@@ -151,10 +208,30 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-mutants \
   --test-type unit
 ```
 
+The Ruby mutant converter and `zig-mutants` both emit the
+`mutant-facts/v1` shape Lineage consumes.
+
+### Hazards
+
+Ingest current provider hazards:
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-hazards \
+  --db /tmp/lineage.db \
+  --repo . \
+  --provider zig \
+  --commit "$(git rev-parse HEAD)"
+```
+
+The current first-party provider scans Zig runtime/lib hazard sites used
+by CLEAR's Loom and VOPR coverage work.
+
+### Stack Traces
+
 Ingest Sentry-style stack traces and anchor verified frames to logical
 units:
 
-```sh
+```bash
 cargo run --manifest-path gems/lineage/Cargo.toml -- ingest \
   --db /tmp/lineage.db \
   --repo . \
@@ -162,51 +239,52 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest \
   --input gems/lineage/test/fixtures/sentry-clear-event.json
 ```
 
-Stack-trace ingestion is also commit-scoped through each payload's commit
-field. Re-ingesting the same Sentry event/frame is idempotent. Add
-`--replace` to delete prior crash frames for the commits present in the
-input before reloading them.
+Stack-trace ingestion is commit-scoped. Re-ingesting the same event is
+idempotent; use `--replace` to reload the commits present in an input
+file.
 
-The extractor boundary is deliberately separate from storage and VCS
-traversal so Tree-sitter-backed language profiles can replace the
-bootstrap extractor without changing Boobytrap's database contract.
+## Supported Languages Roadmap
 
-Serve the local source and verification UI:
+Lineage currently uses a heuristic logical-unit extractor. Ruby and Zig
+are the most exercised paths because CLEAR uses them for compiler and
+runtime review. Other language extraction is experimental until the
+planned Tree-sitter-backed profiles replace the bootstrap extractor.
 
-```sh
-cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
-  --db /tmp/lineage.db \
-  --repo . \
-  --overlay tmp/slopcop-constraints.json \
-  --port 8080
-```
+- [x] Ruby: used for CLEAR compiler review.
+- [x] Zig: used for CLEAR runtime review and systems hazards.
+- [ ] Python: experimentally supported.
+- [ ] JavaScript: experimentally supported.
+- [ ] Lua: experimentally supported.
+- [ ] C: experimentally supported.
+- [ ] Go: experimentally supported.
+- [ ] Assembly: experimentally supported.
 
-The MVP UI lists tracked files, renders source, lets you inspect prior
-commit versions, highlights covered lines, darkens mutation-tested
-lines, and shows systems hazards with tooltip details. The HTML view is
-server-rendered; filtering, file navigation, version history, and line
-details use regular links, GET forms, and `<details>` controls rather
-than client-side JavaScript.
+## Boundaries
 
-The UI home page shows a Codecov-style current snapshot: exact line
-coverage, active hazards with required evidence, covered-line share with
-killed-mutant evidence, and covered-line share with multiple verified
-test types. The same aggregate is available as JSON:
+Lineage does not:
 
-```sh
-curl http://127.0.0.1:8080/api/dashboard
-```
+- run tests;
+- collect coverage;
+- perform mutation testing;
+- compute Decomplex, SlopCop, Nil-kill, or Boobytrap findings;
+- prove that a code unit is correct or incorrect;
+- post GitHub comments or call the GitHub API;
+- replace the source tools that generate quality evidence.
 
-Run the language server over stdio for editor integrations:
+It stores, joins, and renders evidence. A good Lineage view should make a
+human say: "this line is risky, and here is the history and verification
+evidence explaining why."
 
-```sh
-cargo run --manifest-path gems/lineage/Cargo.toml -- lsp \
-  --db /tmp/lineage.db \
-  --repo . \
-  --overlay tmp/slopcop-constraints.json
-```
+Support to ingest lint data and code smell data into Lineage is not yet
+available. Though, it is planned for the first release.
 
-The LSP publishes standard diagnostics for uncovered dark arms and open
-hazards, hover text for logical-unit history and test evidence, CodeLens
-risk summaries above units, and a custom `lineage/gutterUpdate`
-notification for VS Code/Vim gutter wrappers.
+## Links
+
+- [CLEAR compiler](../../README.md)
+- [Decomplex](../decomplex/README.md): identifies complex state and
+  control-flow pressure.
+- [SlopCop](../slopcop/README.md): categorizes uncovered branches and
+  ranks the true test gaps.
+- [Boobytrap](../boobytrap/README.md): provides churn and risk signals.
+- [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
+  to its source.

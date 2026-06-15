@@ -115,12 +115,11 @@ is the headline; the rest is context.
 
 ## Parser-structural, language lexicons for text
 
-Boobytrap normalizes coverage into Tree-sitter branch arms. For
-coverage formats that only expose lines, SlopCop consumes the
-line-to-arm inference from Boobytrap; for legacy Ruby branch tuples,
-Boobytrap adapts those tuples to the same arm coverage contract. The
-decision predicate and arm body are classified with the
-`Decomplex::Syntax` language lexicon.
+Boobytrap normalizes real branch coverage into Tree-sitter branch arms.
+For legacy Ruby branch tuples, Boobytrap adapts those tuples to the same
+arm coverage contract. Coverage formats that only expose lines do not
+produce SlopCop dark-arm findings. The decision predicate and arm body
+are classified with the `Decomplex::Syntax` language lexicon.
 
 ## Honest v0 precision caveats (Engler: ranked, refine)
 

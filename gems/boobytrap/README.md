@@ -1,112 +1,209 @@
-# boobytrap: find the code most likely to be the source of bugs.
+# Boobytrap
 
- * boobytrap answers "where is the complexity that is *likely causing
-   my bugs*" -- not "what is the most complex code" (raw complexity is
-   a weak bug predictor).
- * It vendors the **bugspots** algorithm (Google's time-decayed
-   bug-fix-locality prediction, Lewis et al. ICSE'13 -- the actionable
-   FixCache variant) and joins it with **branch-coverage gap**.
- * Zero runtime dependencies: stdlib + the `git` CLI. It produces one
-   ranked report, like decomplex and nil-kill.
+Boobytrap helps you find the most likely parts of your codebase to have
+**latent** bugs. This helps prioritize your testing efforts. Boobytrap
+highlights the parts of the codebase with the most
+**semantic churn**, the lowest test coverage, and the highest complexity.
 
-## What is a *hotspot*?
+In plain terms: Boobytrap tells you where to look first. Decomplex,
+Nil-kill, lint violations, etc. help explain what *might* be wrong when
+you get there.
 
+> [!NOTE]
+> Boobytrap uses [Lineage](../lineage/README.md) to track changes to
+> lines across files over time, and to avoid penalizing non-semantic
+> changes like whitespace or comments.
+
+## Getting Started
+
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Prerequisites
+
+- Ruby 3.x
+- Bundler
+- A git repository
+- Optional branch coverage, mutation, test exposure, or Lineage data
+
+From this repository:
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --output=gems/boobytrap/report.md
 ```
+
+For this repo, scoping to production compiler code is usually the most
+useful default:
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --only=src/ \
+  --output=/tmp/boobytrap.md
+```
+
+No coverage data? Boobytrap still runs, but it loudly degrades to
+fix-churn-only evidence:
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report --repo=.
+```
+
+## Outputs
+
+Boobytrap outputs a Markdown report that ranks defect-risk hotspots for
+human review or LLM-assisted triage.
+
+### Markdown Report
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --output=report.md
+```
+
+The report opens with project prioritization, then shows ranked
+hotspots, mostly uncovered methods, state-based branch hotspots,
+multi-file fix blast radius, optional Lineage unit risk, fixed-but-
+unmeasured files, and a run summary. See [report.md](report.md) for a
+generated example over CLEAR.
+
+## Evidence Inputs
+
+Boobytrap's core score is:
+
+```text
 hotspot = normalized_fix_score x branch_coverage_gap
 ```
 
-A file that **keeps getting bug-fixed** (recently, repeatedly) AND is
-**under-exercised by the test corpus** is the highest-probability place
-for the next bug. fix_score is the bugspots logistic time-decay over
-fix commits; branch gap is uncovered decision arms / total, merged
-across every SimpleCov resultset entry. High on both = look here first.
+- `fix_score` is a time-decayed score from bug-fix commits, inspired by
+  [Google's FixCache](https://google-engtools.blogspot.com/2011/12/bug-prediction-at-google.html).
+- `branch_coverage_gap` is uncovered decision arms divided by total
+  decision arms.
+- High on both means the code is historically bug-prone and weakly
+  pinned by the current test corpus.
 
-## How well does it work?
+### Coverage
 
-On CLEAR's compiler (835 fix commits in history) the top hotspot is
-`src/mir/mir_lowering.rb` (fix_norm 1.0 -- the most-fixed, most-recent
--- x 24.6% branch gap), followed by `src/annotator.rb` and
-`src/mir/control_flow.rb`. Those are exactly the memory-safety passes
-behind bugs #1/#2/#9: the fix-history signal independently points at
-the same code branch-coverage triage and decomplex flagged, from a
-third direction, with no static analysis.
+`--coverage` accepts Boobytrap-normalized coverage inputs:
 
-## How do I use it?
+- SimpleCov `.resultset.json`;
+- kcov output directories;
+- kcov Cobertura XML;
+- kcov codecov JSON;
+- coverage.py JSON;
+- Nil-kill branch coverage JSON.
 
-```
-# Full report (markdown), like this gem's report.md:
-boobytrap report --repo=. --coverage=coverage/.resultset.json \
-                 --output=report.md
+### Lineage
 
-# Add optional logical-unit history from the Lineage SQLite DB:
-boobytrap report --repo=. --coverage=coverage/.resultset.json \
-                 --lineage-db=lineage.sqlite --output=report.md
+Add logical-unit history from Lineage:
 
-# Add optional named-test exposure facts:
-boobytrap report --repo=. --coverage=coverage/.resultset.json \
-                 --test-exposure=test-exposure.json --output=report.md
-
-# Restrict ranking to part of the codebase (repeatable). The
-# committed report.md is generated with --only=src/ -- the fix
-# time-decay baseline still spans the WHOLE history; only which
-# files are ranked is filtered:
-boobytrap report --only=src/
-boobytrap report --only=src/ --only=lib/
-
-# No coverage data? It degrades to fix-churn-only, loudly flagged:
-boobytrap report --repo=.
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --lineage-db=/tmp/lineage.db \
+  --output=/tmp/boobytrap.md
 ```
 
-`--only=PATH` takes a repo-relative path prefix and is repeatable.
-Scoping to `src/` is the recommended default for this repo: it
-removes test/tooling/example noise so the hotspot ranking is the
-production compiler only.
+Semantic `FIX` and `CHANGE` events add risk; pure moves are shown
+separately and do not add risk.
 
-The resultset is SimpleCov's `coverage/.resultset.json` with
-`enable_coverage :branch` (the repo already produces this; see
-`tools/branch_gap_report.rb`). See [report.md](report.md) for a demo
-over CLEAR's compiler.
+### Test Exposure
 
-### Reading the report
+Add named-test exposure facts:
 
-- **Project Prioritization** -- the single highest-risk file and how
-  many are within 50% of it (triage those first).
-- **Hotspots** -- ranked table: file, hotspot, fix_norm, branch gap,
-  uncovered/total arms.
-- **Lineage Unit Risk** -- optional logical-unit history from
-  `gems/lineage`. Semantic `FIX`/`CHANGE` events add risk; pure moves
-  are shown separately and do not add risk.
-- **Named-Test Exposure** -- optional `test-exposure/v1` facts that
-  count distinct tests hitting functions, lines, and branch arms,
-  including test type and mutation-killed status. When `--lineage-db`
-  contains `test_exposure_events`, Boobytrap can consume the same signal
-  from Lineage history without a separate side-input file.
-- **Fixed But Unmeasured** -- files with recurring fixes but *no*
-  branch-coverage data. Recurring-fix code the corpus does not measure
-  at all is itself a risk; it is surfaced, not dropped.
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --test-exposure=/tmp/test-exposure.json \
+  --output=/tmp/boobytrap.md
+```
 
-## What boobytrap does NOT do
+When `--lineage-db` contains `test_exposure_events`, Boobytrap can use
+the same signal from Lineage history without a separate side-input file.
+Direct `--test-exposure` wins when both are supplied to avoid
+double-counting the same current test run.
 
- * **It does not claim bugs.** A hotspot is a prioritization. Triage
-   top-down; the code may be fine.
- * **No complexity axis (v0).** Scoped to fix-churn x coverage.
-   Complexity (Flog) is the documented optional third axis.
- * **Lineage is optional.** Without `--lineage-db`, Boobytrap still
-   works from fix history, coverage, Decomplex, and mutation facts.
- * **Per-test exposure is optional.** Without `--test-exposure`,
-   Boobytrap falls back to aggregate coverage and mutation summaries,
-   or to Lineage-backed exposure history when `--lineage-db` supplies it.
-   Direct `--test-exposure` wins when both are supplied to avoid
-   double-counting the same current test run.
- * **Not duplication or type analysis.** That is decomplex (what
-   decision is duplicated) and nil-kill (which nils/types pollute).
-   boobytrap only says *where* to look; the other two say *what* is
-   wrong there. The three are complementary lenses.
+### Mutation Facts
+
+Add `mutant-facts/v1` evidence:
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --mutation=/tmp/mutant-facts.json \
+  --output=/tmp/boobytrap.md
+```
+
+Mutation facts help separate scary-looking but well-verified code from
+weakly verified empirical risk.
+
+## Scope
+
+Use `--only=PATH` to restrict which files are ranked:
+
+```bash
+bundle exec gems/boobytrap/exe/boobytrap report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --only=src/ \
+  --only=zig/runtime/
+```
+
+The fix time-decay baseline still spans the whole repository history.
+`--only` changes which files are displayed, not how historical recency is
+calculated.
+
+Use `--exclude=GLOB` to exclude generated, cache, or otherwise irrelevant
+paths from source scans and rankings.
+
+## Supported Languages Roadmap
+
+Boobytrap's history signal is language-neutral. Coverage and source-file
+support flow through Boobytrap coverage normalization and Decomplex
+source filtering.
+
+- [x] Ruby: used for CLEAR compiler review.
+- [x] Zig: used for CLEAR runtime review.
+- [ ] Python: experimentally supported.
+- [ ] JavaScript: experimentally supported.
+- [ ] TypeScript: experimentally supported.
+- [ ] Go: experimentally supported.
+- [ ] Rust: experimentally supported.
+
+## Boundaries
+
+Boobytrap does not:
+
+- claim that a hotspot is a bug;
+- collect coverage;
+- run tests;
+- run mutation testing;
+- explain structural complexity by itself;
+- infer nilability or type pressure;
+- replace Decomplex, SlopCop, Nil-kill, Lineage, fuzzing, mutation, or
+  type checks.
+
+It ranks likely bug sources. A good finding should make a human say:
+"this is where review and testing attention probably has the highest
+return."
+
+Boobytrap does not aggregate lint issues or code smells, as those issues
+are low signal / noise to the question Boobytrap wants to answer.
+Boobytrap wants to show you the most likely parts of your codebase that
+have latent bugs. Decomplex data is most useful there.
 
 ## FAQ
 
 **Why not the `churn` gem?** Raw churn measures activity and conflates
-feature development with fault-proneness. boobytrap filters to fix
+feature development with fault-proneness. Boobytrap filters to fix
 commits -- the signal Google's study found actually actionable.
 
 **Why not the bugspots CLI directly?** It is file-only, unmaintained,
@@ -120,5 +217,12 @@ the heuristic is reliable here.
 
 ## Links
 
- * [Design, prior art, boundaries](docs/agents/design.md)
- * [Demo report over CLEAR's compiler](report.md)
+- [CLEAR compiler](../../README.md)
+- [Decomplex](../decomplex/README.md): identifies complex state and
+  control-flow pressure.
+- [SlopCop](../slopcop/README.md): categorizes uncovered branches and
+  ranks the true test gaps.
+- [Lineage](../lineage/README.md): renders history and verification
+  evidence next to source.
+- [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
+  to its source.

@@ -1,139 +1,155 @@
-# decomplex: find duplicated and half-applied decisions in your codebase.
+# Decomplex
 
- * decomplex is the easiest way to find where your code re-derives a
-   decision that should be fixed state, copies state that then drifts,
-   or takes a path in many places but misses a step in one.
- * It is pure static analysis on the stdlib AST. Zero runtime
-   dependencies, no Sorbet, no z3, no runtime tracing, no whole-program
-   CFG, no points-to.
- * decomplex does not rewrite your code. It surfaces, ranked, the
-   places most worth a human's attention.
+![Decomplex](docs/assets/decomplex.png)
 
-## What is *scatter*?
+Decomplex is a cross-language static analyzer that helps you identify
+the source of complexity in your codebase and eliminate it.
 
-You can often resolve one missing abstraction and collapse dozens of
-re-derivations of the same decision.
+Linters and Code Smell detectors help you identify surface level issues.
+Decomplex does a much deeper analysis to find the structural issues
+causing problems *throughout* your codebase. In plain terms, Linters
+help you fix individual lines. Decomplex helps you fix your entire
+codebase systemically.
 
-`scatter` is how many distinct `(file, method)` decision units recompute
-the *same* guard tuple. A guard tuple checked inline in 14 methods with
-0 reifications is a missing named decision; resolving it once removes 14
-divergence risks. decomplex ranks findings by `support x scatter` so you
-spend effort where one fix has the largest blast radius. (This is the
-same prioritise-by-blast-radius idea as nil-kill's *pressure*, applied
-to a disjoint target: decisions, not types/nils.)
+- See [Metrics Expo](docs/agents/metrics-expo.md) for concrete examples
+  of what Decomplex measures.
+- See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
+  for a better understanding of what makes code "complex".
 
-## How well does it work?
+## Getting Started
 
-CLEAR's compiler is ~50k dense lines of Ruby across 93 source files.
-A full run takes ~11s and produced 10,662 ranked candidates, including:
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
- * **217 missing abstractions** -- top: a union-schema guard tuple
-   recomputed across 14 methods with 0 reifications.
- * **129 reification misses** -- an existing one-line predicate
-   reinvented inline (direct invariant-#16 violations).
- * **14 type-3 missed-rename clones** -- a pasted block where one
-   identifier was inconsistently renamed (the canonical paste bug).
+### Prerequisites
 
-decomplex independently rediscovered the same P0 cluster a separate
-branch-coverage triage had flagged, and surfaced the documented
-`storage`/`provenance` co-write desync -- both with no test run. The
-analysis is structural: it reads the decision text, not execution.
+- Ruby 3.x
+- Bundler
+- Tree-sitter grammars for any language you want to analyze
 
-### The ranked-candidate discipline
+From this repository:
 
-Output is a **ranked candidate list, never a verdict** (Engler's
-discipline: false positives are the accepted cost of recall). The broad
-statistical detectors emit thousands of raw candidates over a large
-codebase; the value is the rank-sorted *top* of each list, not the
-count. Every entry prints `file:method:line` and the offending text so
-triage is a one-line read. LLMs work well with this shape of data.
-
-## How do I use it?
-
-```
-# Targeted: the two duplication reports on specific files.
-decomplex src/mir/escape_analysis.rb src/mir/control_flow.rb
-
-# Full report (markdown, all 10 detectors), like this gem's report.md:
-decomplex report src --output=report.md
+```bash
+bundle exec gems/decomplex/exe/decomplex report src --output=gems/decomplex/report.md
 ```
 
-See [report.md](report.md) for a demo of what the full report looks
-like (generated over CLEAR's compiler).
+For a narrower run:
 
-### What it looks for
+```bash
+bundle exec gems/decomplex/exe/decomplex report src/annotator src/ast/type.rb --output=/tmp/decomplex.md
+```
 
-decomplex targets three pathologies that have each caused real
-memory-safety bugs in CLEAR (catalogued #1/#2/#9):
+For one targeted metric:
 
- 1. **Redundant state that drifts** -- `b = f(a)`, both used, they
-    desync; or `.storage` written without its documented `.provenance`
-    pair. (CoUpdate, DerivedState)
- 2. **Re-derived decisions that should be fixed state** -- `frame?` vs
-    `provenance == :frame` vs `storage == :frame` recomputed at N use
-    sites instead of named once. (Missing abstractions, semantic
-    predicate alias, reification miss)
- 3. **Similar paths, one missing a step** -- the same N-step decision
-    or co-call protocol in many places, one place omits step *k*.
-    (Neglected condition, neglected path condition, broken protocol,
-    type-3 clone)
- 4. **False simplicity** -- code whose local syntax understates its
-    non-local behaviour: hidden dynamic dispatch, hidden mutation,
-    hidden global/context dependency, hidden IO/effects, callback
-    control-inversion, metaprogramming, monkeypatch/reopen.
-    (False simplicity; see [docs/false-simplicity.md](docs/false-simplicity.md))
+```bash
+bundle exec gems/decomplex/exe/decomplex wicc src --output=/tmp/wicc.md
+bundle exec gems/decomplex/exe/decomplex locality-drag src --output=/tmp/locality-drag.md
+bundle exec gems/decomplex/exe/decomplex implicit-control-flow src --output=/tmp/icf.md
+```
 
-Eleven detectors, each grounded in prior art (PR-Miner, Engler "Bugs
-as Deviant Behavior", Chang/Podgurski/Yang neglected conditions,
-DynaMine inconsistent-update, CP-Miner, JADET, SLAM/BLAST predicate
-abstraction; false simplicity's shallow triggers vs. RuboCop/Reek are
-catalogued honestly in its design doc). Full catalogue and citations:
-[docs/agents/design.md](docs/agents/design.md).
+## Outputs
 
-### Reading the report
+Decomplex can output metrics in SARIF format like a linter, a json dump
+for an LLM, or a Markdown document for easy human review.
 
-The report opens with **Project Prioritization** -- detectors ordered
-by candidate volume -- then a section per detector with the top 25
-ranked entries, then a **Run Summary**. Start at the top of *Missing
-Abstractions* and *Reification Misses*: those are the highest-signal,
-lowest-false-positive sections and map directly to the
-single-source-of-truth contract.
+> [!NOTE]
+> Decomplex also integrates with [Lineage](../lineage/README.md),
+> CLEAR's experimental UI to review LLM-assisted code at scale.
 
-## What decomplex does NOT do
+### Markdown Report
 
-These are deliberate boundaries, recorded in the design doc:
+The main output is a Markdown report:
 
- * **No code rewriting.** It points; a human fixes. (This is the main
-   reason it is ~25x smaller than nil-kill.)
- * **No whole-program CFG, no pointer/points-to aliasing.** All
-   detectors are intra-procedural or syntactic. "Predicate aliasing"
-   (`frame?` vs `provenance==:frame`) is canonicalization, not
-   points-to.
- * **No type inference, no nil analysis, no "hash is secretly a
-   struct."** That is nil-kill's domain (branch `nil-kill-prod`);
-   decomplex defers to it entirely and ships no overlapping detector.
- * **No soundness claim.** It does not prove reified-but-wrong logic
-   correct -- that is what mutation and fuzz testing are for.
+```bash
+bundle exec gems/decomplex/exe/decomplex report src --output=report.md
+```
 
-## FAQ
+The report opens with cross-detector convergence and root-cause
+clusters, then lists each detector section by signal tier. See
+[report.md](report.md) for a generated example over CLEAR.
 
-**Is a flagged item always a bug?** No. It is a ranked candidate. A
-neglected condition may be a deliberate, correct special case; triage
-top-down and accept or fix.
+### Baseline And Delta
 
-**Why not just use Flay/Reek/RuboCop?** Decomplex now includes a
-Tree-sitter Type-2/Type-3 structural similarity signal. The rest of
-Decomplex mines the *frequency of a
-decision across sites* or *the one site that deviates from a popular
-decision*. The inconsistent-rename detector is intentionally narrower
-than broad clone detection: it looks for a specific missed-rename bug
-where the buggy copy may be the deviant member of an otherwise clean
-clone cluster.
+Decomplex can emit a JSON snapshot for later comparison:
 
-**Will it scale to my codebase?** It is single-pass per detector,
-stdlib-AST, zero-dep: ~11s for 50k LOC. It stays this small on purpose.
+```bash
+bundle exec gems/decomplex/exe/decomplex report src \
+  --output=report.md \
+  --emit-json=tmp/decomplex-baseline.json
+```
+
+Then compare a later run:
+
+```bash
+bundle exec gems/decomplex/exe/decomplex delta tmp/decomplex-baseline.json src
+```
+
+The delta path is intended for CI ratchets and PR review: line-only
+movement is treated as persisted instead of new debt.
+
+### SARIF
+
+Decomplex can generate SARIF 2.1.0 for GitHub code scanning:
+
+```bash
+bundle exec gems/decomplex/exe/decomplex report src \
+  --output=report.md \
+  --sarif=tmp/decomplex.sarif
+```
+
+SARIF is generated from the same structured report findings used by
+Markdown and delta, so downstream tools do not re-run or re-derive
+detectors.
+
+## CI Integration
+
+The current CI-ready path is:
+
+1. generate a Markdown report artifact;
+2. generate a JSON baseline snapshot;
+3. run `decomplex delta` on PRs;
+4. fail or warn only on new/growing high-confidence findings.
+
+> [!NOTE]
+> See
+> [CLEAR's GitHub Config](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A)
+> for how to include it as Pull Request review helper, or part of your
+> Continuous Integration workflow.
+
+## Supported Languages Roadmap
+
+Decomplex uses [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)
+to support multiple languages. Ruby support has been battle tested to
+develop the CLEAR compiler. Zig support is currently being used for the
+CLEAR runtime. Other languages are currently experimental.
+
+- [x] Ruby: fully supported.
+- [ ] Python: experimentally supported.
+- [ ] JavaScript: experimentally supported.
+- [ ] TypeScript: experimentally supported.
+- [ ] Go: experimentally supported.
+- [ ] Rust: experimentally supported.
+- [ ] Zig: experimentally supported.
+
+## Boundaries
+
+Decomplex does not:
+
+- rewrite code;
+- prove that a finding is a bug;
+- perform whole-program CFG or pointer-alias analysis;
+- infer types or nilability;
+- replace mutation, fuzz, coverage, or type checks.
+
+It ranks likely review targets. A good finding should make a human say:
+"this is where the design pressure is coming from."
+
+Decomplex does not detect lint issues or code smells, as packages for
+that already exist in every language.
 
 ## Links
 
- * [Design, detector catalogue, prior art, boundaries](docs/agents/design.md)
- * [Demo report over CLEAR's compiler](report.md)
+- [CLEAR compiler](../../README.md)
+- [SlopCop](../slopcop/README.md): categorizes uncovered branches and
+  ranks the true test gaps.
+- [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
+  to its source.

@@ -54,6 +54,20 @@ class RollupTest < Minitest::Test
       refute_empty json.fetch("dark_arms")
       assert json.fetch("dark_arms").all? { |arm| arm.fetch("message").start_with?("dark arm: ") }
 
+      report = SlopCop::Report.new(files: ["src/m.rb"], repo: dir, resultset: rsf)
+      sarif = JSON.parse(report.to_sarif)
+      run = sarif.fetch("runs").first
+      assert_equal "2.1.0", sarif.fetch("version")
+      assert_equal "SlopCop", run.dig("tool", "driver", "name")
+      assert_equal "slopcop.report.sarif.v1", run.dig("properties", "format")
+      assert run.dig("tool", "driver", "rules").any? { |rule| rule.fetch("id") == "slopcop.genuine-gap" }
+      result = run.fetch("results").first
+      refute_nil result
+      assert_equal "slopcop.genuine-gap", result.fetch("ruleId")
+      assert_equal "src/m.rb", result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")
+      assert_operator result.dig("locations", 0, "physicalLocation", "region", "startLine"), :>=, 1
+      assert result.fetch("partialFingerprints").fetch("slopcopGenuineGap")
+
       overlay = SlopCop::DarkArmOverlay.build(files: ["src/m.rb"], repo: dir, resultset: rsf)
       assert_equal "slopcop.dark-arms.v1", overlay.fetch("format")
       refute_empty overlay.fetch("dark_arms")

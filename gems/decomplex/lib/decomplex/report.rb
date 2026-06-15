@@ -342,7 +342,123 @@ module Decomplex
       out
     end
 
+    def to_sarif_hash
+      snapshot = Delta.snapshot(sections_data, root_clusters)
+      Decomplex::Sarif.document(
+        tool_name: "Decomplex",
+        information_uri: "https://github.com/cuzzo/clear",
+        rules: sarif_rules,
+        results: sarif_results,
+        properties: {
+          "format" => "decomplex.report.sarif.v1",
+          "decomplex.snapshot" => snapshot,
+          "files" => @files
+        }
+      )
+    end
+
+    def to_sarif
+      JSON.pretty_generate(to_sarif_hash)
+    end
+
     private
+
+    def sarif_rules
+      SECTIONS.reject { |title, *_| CONVERGENCE_EXCLUDED_SECTIONS.include?(title) }
+              .map do |title, _ivar, tier, desc|
+        Decomplex::Sarif.rule(
+          id: sarif_rule_id(title),
+          name: title,
+          short_description: desc,
+          default_level: tier.to_i <= 1 ? "warning" : "note",
+          properties: { "tier" => tier }
+        )
+      end
+    end
+
+    def sarif_results
+      sections_data.flat_map do |title, tier, findings|
+        Array(findings).flat_map do |finding|
+          sarif_locations_for_finding(finding).map do |location|
+            Decomplex::Sarif.result(
+              rule_id: sarif_rule_id(title),
+              level: tier.to_i <= 1 ? "warning" : "note",
+              message: sarif_message(title, finding, location),
+              path: location[:path],
+              line: location[:line],
+              start_column: location[:start_column],
+              end_line: location[:end_line],
+              end_column: location[:end_column],
+              partial_fingerprints: {
+                "decomplexFinding" => Delta.fingerprint(title, finding)
+              },
+              properties: {
+                "detector" => title,
+                "tier" => tier,
+                "method" => location[:method],
+                "decomplex_finding" => Delta.json_safe_finding(title, finding)
+              }
+            )
+          end
+        end
+      end
+    end
+
+    def sarif_rule_id(title)
+      "decomplex.#{Decomplex::Sarif.slug(title)}"
+    end
+
+    def sarif_message(title, finding, location)
+      subject = location[:method] || finding[:method] || finding[:name] ||
+                finding[:field] || finding[:contract] || finding[:owner] ||
+                finding[:token] || finding[:kind]
+      [title, subject].compact.join(": ")
+    end
+
+    def sarif_locations_for_finding(finding)
+      spans = finding[:spans]
+      if spans.is_a?(Hash) && !spans.empty?
+        return spans.filter_map do |loc, span|
+          parsed = parse_sarif_loc(loc)
+          next unless parsed[:path]
+
+          span = Array(span)
+          parsed.merge(
+            line: span[0].to_i.positive? ? span[0].to_i : parsed[:line],
+            start_column: zero_based_column_to_sarif(span[1]),
+            end_line: span[2].to_i.positive? ? span[2].to_i : nil,
+            end_column: zero_based_column_to_sarif(span[3])
+          )
+        end
+      end
+
+      locs = []
+      locs << finding[:at]
+      locs.concat(Array(finding[:sites]))
+      locs << finding[:ref_at]
+      locs.compact!
+      locs.uniq!
+      locs.map { |loc| parse_sarif_loc(loc) }.select { |loc| loc[:path] }
+    end
+
+    def parse_sarif_loc(loc)
+      parts = loc.to_s.split(":")
+      line = nil
+      line = parts.pop.to_i if parts.last.to_s.match?(/\A\d+\z/)
+      method = parts.pop if parts.size >= 2
+      path = parts.join(":")
+      {
+        path: path.empty? ? nil : path,
+        method: method,
+        line: line&.positive? ? line : 1
+      }
+    end
+
+    def zero_based_column_to_sarif(value)
+      return nil if value.nil?
+
+      value.to_i + 1
+    end
 
     def render_state_heatmap_item(item)
       out = "- `#{item[:field]}` -- messiness **#{item[:messiness]}** " \

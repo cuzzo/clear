@@ -53,8 +53,10 @@ module Boobytrap
         lines = cov.lines || []
         branch_misses = if cov.branch_coverage?
                           branch_misses_by_line(cov.branches)
-                        else
+                        elsif cov.branch_arm_coverage?
                           tree_sitter_branch_misses_by_line(abs, cov)
+                        else
+                          {}
                         end
         source_lines = ::File.readlines(abs, chomp: true)
 
@@ -253,7 +255,7 @@ module Boobytrap
     end
 
     def tree_sitter_branch_misses_by_line(abs, coverage)
-      return {} unless coverage.line_coverage? || coverage.branch_arm_coverage?
+      return {} unless coverage.branch_arm_coverage?
       return {} unless tree_sitter_source_for_coverage?(abs)
 
       doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")

@@ -1,15 +1,16 @@
 # Language-Neutral Branch Coverage API
 
 Boobytrap owns coverage normalization for both Boobytrap and SlopCop.
-Ruby SimpleCov branch tuples, kcov line coverage, and non-Ruby branch
-providers should all enter through `Boobytrap::CoverageData`.
+Ruby SimpleCov branch tuples, coverage.py branch arcs, and non-Ruby
+native branch providers should all enter through
+`Boobytrap::CoverageData`.
 
 ## Coverage Levels
 
 - `coverage`: native SimpleCov/Ruby branch tuples.
 - `native_branch`: exact branch-arm hit counts from the Nil-Kill branch
   coverage JSON API.
-- `kcov`: line hits projected onto Tree-sitter branch arms.
+- `line`: line hits only. This is not branch coverage.
 - `tree_sitter_static`: static branch arms when no coverage exists.
 
 `native_branch` is the non-Ruby equivalent of Ruby branch coverage: a
@@ -22,7 +23,8 @@ same normalized arm coverage. Language support should be added here
 rather than by branching inside those reports.
 
 Coverage-backed non-Ruby files automatically use Tree-sitter arm
-matching when the language grammar is configured. The global
+matching when the provider supplies real branch-arm hits and the
+language grammar is configured. The global
 `DECOMPLEX_PARSER=tree_sitter` switch is still used for static fallback
 analysis when no coverage file is present.
 
@@ -50,9 +52,8 @@ quirks:
 
 Adding a language should start with a small provider that declares
 capability. It is valid for a provider to support line coverage while
-returning `branch_coverage: false`; SlopCop and Boobytrap will still use
-Tree-sitter line projection where possible, but reports must not present
-that as exact native branch coverage.
+returning `branch_coverage: false`; SlopCop and Boobytrap will use that
+for line gaps, but will not infer branch gaps from it.
 
 ## Branch Catalog
 

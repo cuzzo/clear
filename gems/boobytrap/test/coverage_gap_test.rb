@@ -77,10 +77,7 @@ class CoverageGapTest < Minitest::Test
     end
   end
 
-  def test_kcov_cobertura_uses_tree_sitter_branch_arms
-    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
-    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
-
+  def test_kcov_cobertura_does_not_infer_branch_gaps_from_line_hits
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
       file = "#{dir}/src/worker.zig"
@@ -111,11 +108,7 @@ class CoverageGapTest < Minitest::Test
       XML
 
       with_env("DECOMPLEX_PARSER", "tree_sitter") do
-        gap = Boobytrap::CoverageGap.from_resultset(coverage, root: dir).fetch("src/worker.zig")
-
-        assert_operator gap.total, :>=, 2
-        assert_operator gap.uncovered, :>=, 1
-        assert_operator gap.gap, :>, 0.0
+        assert_empty Boobytrap::CoverageGap.from_resultset(coverage, root: dir)
       end
     end
   end

@@ -919,6 +919,59 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  slopcop-report-sarif:
+    name: SlopCop branch-gap SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - ruby-unit
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_src == 'true' && needs.ruby-unit.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tree-sitter Ruby grammar
+        run: npm install --no-save --package-lock=false tree-sitter-ruby@0.23.1
+      - name: Download Ruby unit coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ruby-coverage-unit
+          path: tmp/ruby-coverage-unit
+      - name: Generate SlopCop report SARIF
+        run: |
+          mkdir -p tmp
+          coverage_path="$(find tmp/ruby-coverage-unit -name .resultset.json -type f | sort | head -n 1)"
+          test -n "$coverage_path"
+          bundle exec ruby gems/slopcop/exe/slopcop report \
+            --repo=. \
+            --coverage="$coverage_path" \
+            --output=tmp/slopcop-report.md \
+            --json=tmp/slopcop-report.json \
+            --sarif=tmp/slopcop-report.sarif
+      - name: Upload SlopCop report SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/slopcop-report.sarif
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcop-report
+          path: |
+            tmp/slopcop-report.md
+            tmp/slopcop-report.json
+            tmp/slopcop-report.sarif
+          if-no-files-found: error
+          retention-days: 7
+
   zig-constraint-sarif:
     name: Zig constraint coverage SARIF
     runs-on: ubuntu-latest

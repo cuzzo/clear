@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tempfile"
+require "json"
 require_relative "../lib/decomplex"
 require_relative "../lib/decomplex/report"
 
@@ -29,6 +30,31 @@ class ReportTest < Minitest::Test
   def test_nav_passes_through_when_not_a_triple
     r = report
     assert_equal "already plain", r.nav("already plain")
+  end
+
+  def test_sarif_report_contains_rules_results_and_delta_snapshot
+    sarif = JSON.parse(report.to_sarif)
+    assert_equal "2.1.0", sarif.fetch("version")
+    run = sarif.fetch("runs").first
+
+    assert_equal "Decomplex", run.dig("tool", "driver", "name")
+    assert_equal "decomplex.report.sarif.v1", run.dig("properties", "format")
+    assert run.dig("properties", "decomplex.snapshot", "total").to_i.positive?
+    assert run.dig("tool", "driver", "rules").any? { |rule| rule.fetch("id") == "decomplex.missing-abstractions" }
+    assert run.fetch("results").all? { |result| result.fetch("ruleId").start_with?("decomplex.") }
+  end
+
+  def test_sarif_result_locations_use_report_finding_locations
+    sarif = JSON.parse(report.to_sarif)
+    result = sarif.fetch("runs").first.fetch("results").find do |entry|
+      entry.fetch("ruleId") == "decomplex.missing-abstractions"
+    end
+
+    refute_nil result
+    location = result.fetch("locations").first.fetch("physicalLocation")
+    assert_match(/rep/, location.dig("artifactLocation", "uri"))
+    assert_operator location.dig("region", "startLine"), :>=, 1
+    assert result.fetch("partialFingerprints").fetch("decomplexFinding")
   end
 
   def test_markdown_orders_sections_by_signal_tier_not_volume
