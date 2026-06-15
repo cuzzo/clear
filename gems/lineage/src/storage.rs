@@ -1,6 +1,6 @@
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
-    TestExposureEvent,
+    SarifArtifact, SarifFinding, TestExposureEvent,
 };
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -9,6 +9,14 @@ use std::path::Path;
 
 pub struct Storage {
     conn: Connection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentUnitSpan {
+    pub id: String,
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +191,48 @@ impl Storage {
               UNIQUE(commit_hash, path, line, source)
             );
 
+            CREATE TABLE IF NOT EXISTS sarif_artifacts (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source TEXT NOT NULL,
+              tool_name TEXT NOT NULL,
+              run_format TEXT NOT NULL,
+              artifact_path TEXT NOT NULL,
+              artifact_sha256 TEXT NOT NULL,
+              commit_hash TEXT NOT NULL,
+              timestamp INTEGER NOT NULL,
+              payload_json TEXT NOT NULL,
+              ingested_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+              UNIQUE(source, commit_hash, artifact_path, artifact_sha256)
+            );
+
+            CREATE TABLE IF NOT EXISTS sarif_findings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              artifact_id INTEGER NOT NULL,
+              finding_key TEXT NOT NULL,
+              source TEXT NOT NULL,
+              tool_name TEXT NOT NULL,
+              run_format TEXT NOT NULL,
+              commit_hash TEXT NOT NULL,
+              timestamp INTEGER NOT NULL,
+              rule_id TEXT NOT NULL,
+              level TEXT NOT NULL,
+              message TEXT NOT NULL,
+              path TEXT NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER,
+              end_line INTEGER,
+              end_column INTEGER,
+              category TEXT NOT NULL,
+              is_dark_arm INTEGER NOT NULL CHECK (is_dark_arm IN (0, 1)),
+              unit_id TEXT,
+              fingerprint TEXT NOT NULL,
+              properties_json TEXT NOT NULL,
+              raw_json TEXT NOT NULL,
+              FOREIGN KEY(artifact_id) REFERENCES sarif_artifacts(id) ON DELETE CASCADE,
+              FOREIGN KEY(unit_id) REFERENCES logical_units(id),
+              UNIQUE(source, commit_hash, finding_key)
+            );
+
             CREATE TABLE IF NOT EXISTS ui_file_summaries (
               path TEXT PRIMARY KEY,
               units INTEGER NOT NULL,
@@ -248,6 +298,16 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line_source_latest
               ON coverage_line_events(path, line, source, timestamp DESC, id DESC);
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_commit_hash ON coverage_line_events(commit_hash);
+            CREATE INDEX IF NOT EXISTS idx_sarif_artifacts_source_commit
+              ON sarif_artifacts(source, commit_hash);
+            CREATE INDEX IF NOT EXISTS idx_sarif_findings_path_line
+              ON sarif_findings(path, start_line);
+            CREATE INDEX IF NOT EXISTS idx_sarif_findings_source_commit
+              ON sarif_findings(source, commit_hash);
+            CREATE INDEX IF NOT EXISTS idx_sarif_findings_unit_id
+              ON sarif_findings(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_sarif_findings_rule_id
+              ON sarif_findings(rule_id);
             CREATE INDEX IF NOT EXISTS idx_ui_file_summaries_path ON ui_file_summaries(path);
             CREATE INDEX IF NOT EXISTS idx_ui_warning_units_path ON ui_warning_units(current_path);
             "#,
@@ -739,6 +799,201 @@ impl Storage {
             self.refresh_test_exposure_summary(&unit_id)?;
         }
         Ok(deleted)
+    }
+
+    pub fn delete_sarif_for_commit_source(&self, commit_hash: &str, source: &str) -> Result<usize> {
+        let findings = self.conn.execute(
+            "DELETE FROM sarif_findings WHERE commit_hash = ?1 AND source = ?2",
+            params![commit_hash, source],
+        )?;
+        let artifacts = self.conn.execute(
+            "DELETE FROM sarif_artifacts WHERE commit_hash = ?1 AND source = ?2",
+            params![commit_hash, source],
+        )?;
+        Ok(findings + artifacts)
+    }
+
+    pub fn insert_sarif_artifact(&self, artifact: &SarifArtifact) -> Result<i64> {
+        self.conn.execute(
+            r#"
+            INSERT INTO sarif_artifacts
+              (source, tool_name, run_format, artifact_path, artifact_sha256,
+               commit_hash, timestamp, payload_json)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(source, commit_hash, artifact_path, artifact_sha256) DO UPDATE SET
+              tool_name = excluded.tool_name,
+              run_format = excluded.run_format,
+              timestamp = excluded.timestamp,
+              payload_json = excluded.payload_json,
+              ingested_at = strftime('%s', 'now')
+            "#,
+            params![
+                artifact.source,
+                artifact.tool_name,
+                artifact.run_format,
+                artifact.artifact_path,
+                artifact.artifact_sha256,
+                artifact.commit_hash,
+                artifact.timestamp,
+                artifact.payload_json
+            ],
+        )?;
+        let id = self.conn.query_row(
+            r#"
+            SELECT id
+            FROM sarif_artifacts
+            WHERE source = ?1
+              AND commit_hash = ?2
+              AND artifact_path = ?3
+              AND artifact_sha256 = ?4
+            "#,
+            params![
+                artifact.source,
+                artifact.commit_hash,
+                artifact.artifact_path,
+                artifact.artifact_sha256
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(id)
+    }
+
+    pub fn insert_sarif_finding(&self, finding: &SarifFinding) -> Result<bool> {
+        let inserted = self.conn.execute(
+            r#"
+            INSERT OR IGNORE INTO sarif_findings
+              (artifact_id, finding_key, source, tool_name, run_format, commit_hash,
+               timestamp, rule_id, level, message, path, start_line, start_column,
+               end_line, end_column, category, is_dark_arm, unit_id, fingerprint,
+               properties_json, raw_json)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            "#,
+            params![
+                finding.artifact_id,
+                finding.finding_key,
+                finding.source,
+                finding.tool_name,
+                finding.run_format,
+                finding.commit_hash,
+                finding.timestamp,
+                finding.rule_id,
+                finding.level,
+                finding.message,
+                finding.path,
+                finding.start_line,
+                finding.start_column,
+                finding.end_line,
+                finding.end_column,
+                finding.category,
+                if finding.is_dark_arm { 1 } else { 0 },
+                finding.unit_id,
+                finding.fingerprint,
+                finding.properties_json,
+                finding.raw_json
+            ],
+        )?;
+        Ok(inserted > 0)
+    }
+
+    pub fn current_unit_id_for_path_line(&self, path: &str, line: u32) -> Result<Option<String>> {
+        Ok(self
+            .current_unit_spans()?
+            .into_iter()
+            .filter(|span| span.path == path && line >= span.start_line && line <= span.end_line)
+            .min_by_key(|span| (span.end_line.saturating_sub(span.start_line), span.id.clone()))
+            .map(|span| span.id))
+    }
+
+    pub fn current_unit_spans(&self) -> Result<Vec<CurrentUnitSpan>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH latest_events AS (
+              SELECT *
+              FROM (
+                SELECT e.*,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY e.unit_id
+                         ORDER BY e.timestamp DESC, e.id DESC
+                       ) AS rank
+                FROM events e
+              )
+              WHERE rank = 1
+            ),
+            current_units AS (
+              SELECT u.id,
+                     COALESCE(le.path, u.original_path) AS current_path,
+                     COALESCE(le.start_line, 1) AS start_line,
+                     COALESCE(le.end_line, le.start_line, 1) AS end_line
+              FROM logical_units u
+              LEFT JOIN latest_events le ON le.unit_id = u.id
+            )
+            SELECT id, current_path, start_line, end_line
+            FROM current_units
+            WHERE current_path <> ''
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CurrentUnitSpan {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                start_line: row.get::<_, i64>(2)?.max(1) as u32,
+                end_line: row.get::<_, i64>(3)?.max(1) as u32,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn sarif_findings_for_path(&self, path: &str) -> Result<Vec<SarifFinding>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT artifact_id, finding_key, source, tool_name, run_format, commit_hash,
+                   timestamp, rule_id, level, message, path, start_line, start_column,
+                   end_line, end_column, category, is_dark_arm, unit_id, fingerprint,
+                   properties_json, raw_json
+            FROM sarif_findings
+            WHERE path = ?1
+            ORDER BY start_line, source, tool_name, rule_id, message
+            "#,
+        )?;
+        let rows = stmt.query_map(params![path], |row| {
+            Ok(SarifFinding {
+                artifact_id: row.get(0)?,
+                finding_key: row.get(1)?,
+                source: row.get(2)?,
+                tool_name: row.get(3)?,
+                run_format: row.get(4)?,
+                commit_hash: row.get(5)?,
+                timestamp: row.get(6)?,
+                rule_id: row.get(7)?,
+                level: row.get(8)?,
+                message: row.get(9)?,
+                path: row.get(10)?,
+                start_line: row.get(11)?,
+                start_column: row.get(12)?,
+                end_line: row.get(13)?,
+                end_column: row.get(14)?,
+                category: row.get(15)?,
+                is_dark_arm: row.get::<_, i64>(16)? != 0,
+                unit_id: row.get(17)?,
+                fingerprint: row.get(18)?,
+                properties_json: row.get(19)?,
+                raw_json: row.get(20)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn sarif_finding_counts_by_file(&self) -> Result<HashMap<String, i64>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT path, COUNT(*) AS findings
+            FROM sarif_findings
+            GROUP BY path
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
     }
 
     fn refresh_current_quality_metrics(&self) -> Result<()> {
@@ -1656,6 +1911,8 @@ fn checked_table(table: &str) -> Result<&str> {
         | "test_exposure_events"
         | "unit_hazards"
         | "coverage_line_events"
+        | "sarif_artifacts"
+        | "sarif_findings"
         | "ui_file_summaries"
         | "ui_warning_units"
         | "ui_refresh_metadata" => Ok(table),

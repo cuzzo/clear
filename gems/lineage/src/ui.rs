@@ -30,6 +30,7 @@ pub struct UiFile {
     pub path: String,
     pub units: i64,
     pub hazards: i64,
+    pub sarif_findings: i64,
     pub evidence_covered_hazards: i64,
     pub covered_hazards: i64,
     pub distinct_tests: i64,
@@ -52,6 +53,7 @@ pub struct UiDirectory {
     pub files: i64,
     pub units: i64,
     pub hazards: i64,
+    pub sarif_findings: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
     pub tracked_lines: i64,
@@ -94,6 +96,17 @@ pub struct UiDarkArm {
     pub span: Option<[u32; 4]>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiFinding {
+    pub source: String,
+    pub tool: String,
+    pub rule_id: String,
+    pub level: String,
+    pub message: String,
+    pub category: String,
+    pub span: Option<[u32; 4]>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiBugEvent {
     pub event_type: String,
@@ -119,6 +132,7 @@ pub struct UiLineAnnotation {
     pub mutant_coverage: Option<f64>,
     pub dark_arms: Vec<String>,
     pub dark_arm_spans: Vec<UiDarkArm>,
+    pub findings: Vec<UiFinding>,
     pub hazards: Vec<UiHazard>,
     pub semantic_churn: f64,
     pub semantic_churn_events: i64,
@@ -143,6 +157,7 @@ pub struct UiDashboard {
     pub covered_lines: i64,
     pub coverage_percent: f64,
     pub active_hazards: i64,
+    pub sarif_findings: i64,
     pub evidence_covered_hazards: i64,
     pub hazard_evidence_percent: f64,
     pub covered_hazards: i64,
@@ -201,6 +216,7 @@ struct AnnotationBuilder {
     mutant_coverage: Option<f64>,
     dark_arms: Vec<String>,
     dark_arm_spans: Vec<UiDarkArm>,
+    findings: Vec<UiFinding>,
     hazards: Vec<UiHazard>,
     semantic_churn: f64,
     semantic_churn_events: i64,
@@ -247,9 +263,10 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
 
 pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
     let total_start = Instant::now();
-    if let Some(files) = read_model_file_index_with_scope(storage, scope)? {
+    let sarif_counts = storage.sarif_finding_counts_by_file()?;
+    if let Some(files) = read_model_file_index_with_scope(storage, scope, &sarif_counts)? {
         profile_log("file_index.read_model_total", total_start);
-        return Ok(files);
+        return Ok(append_sarif_only_files(files, scope, &sarif_counts, true));
     }
     let line_start = Instant::now();
     let line_stats = line_coverage_by_file(storage, scope)?;
@@ -298,10 +315,12 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
         let path = row.get::<_, String>(0)?;
         let fallback_line_coverage = row.get::<_, f64>(5)?;
         let stats = line_stats.get(&path).copied().unwrap_or_default();
+        let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
         Ok(UiFile {
             path,
             units: row.get(1)?,
             hazards: row.get(2)?,
+            sarif_findings,
             evidence_covered_hazards: 0,
             covered_hazards: 0,
             distinct_tests: row.get(3)?,
@@ -328,12 +347,59 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
         .collect();
     profile_log("file_index.current_units", query_start);
     profile_log("file_index.total", total_start);
-    Ok(files)
+    Ok(append_sarif_only_files(files, scope, &sarif_counts, false))
+}
+
+fn append_sarif_only_files(
+    mut files: Vec<UiFile>,
+    scope: &CoverageScope,
+    sarif_counts: &HashMap<String, i64>,
+    read_model: bool,
+) -> Vec<UiFile> {
+    let existing = files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<BTreeSet<_>>();
+    for (path, count) in sarif_counts {
+        if *count <= 0 || existing.contains(path) || !scope.allows(path) {
+            continue;
+        }
+        files.push(UiFile {
+            path: path.clone(),
+            units: 0,
+            hazards: 0,
+            sarif_findings: *count,
+            evidence_covered_hazards: 0,
+            covered_hazards: 0,
+            distinct_tests: 0,
+            mutant_killed_tests: 0,
+            tracked_lines: 0,
+            covered_lines: 0,
+            line_coverage: 0.0,
+            mutant_coverage: 0.0,
+            mutant_killed_covered_lines: 0,
+            stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_killed_covered_lines: 0,
+            multi_type_covered_lines: 0,
+            read_model,
+        });
+    }
+    files.sort_by(|left, right| {
+        right
+            .hazards
+            .cmp(&left.hazards)
+            .then_with(|| right.sarif_findings.cmp(&left.sarif_findings))
+            .then_with(|| right.mutant_killed_tests.cmp(&left.mutant_killed_tests))
+            .then_with(|| right.distinct_tests.cmp(&left.distinct_tests))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    files
 }
 
 fn read_model_file_index_with_scope(
     storage: &Storage,
     scope: &CoverageScope,
+    sarif_counts: &HashMap<String, i64>,
 ) -> Result<Option<Vec<UiFile>>> {
     let start = Instant::now();
     if storage.count_rows("ui_file_summaries")? == 0 {
@@ -361,10 +427,13 @@ fn read_model_file_index_with_scope(
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
+        let path = row.get::<_, String>(0)?;
+        let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
         Ok(UiFile {
-            path: row.get(0)?,
+            path,
             units: row.get(1)?,
             hazards: row.get(2)?,
+            sarif_findings,
             evidence_covered_hazards: row.get(3)?,
             covered_hazards: row.get(4)?,
             distinct_tests: row.get(5)?,
@@ -606,6 +675,11 @@ pub fn dashboard_summary_for_directory_with_scope(
         .iter()
         .filter(|file| path_in_directory(&file.path, &directory))
         .count();
+    let sarif_findings = files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, &directory))
+        .map(|file| file.sarif_findings)
+        .sum();
 
     let dashboard = UiDashboard {
         files: files_count,
@@ -613,6 +687,7 @@ pub fn dashboard_summary_for_directory_with_scope(
         covered_lines: line_counts.covered,
         coverage_percent: percent(line_counts.covered, line_counts.tracked),
         active_hazards,
+        sarif_findings,
         evidence_covered_hazards,
         hazard_evidence_percent: percent(evidence_covered_hazards, active_hazards),
         covered_hazards,
@@ -1174,6 +1249,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.files += 1;
         entry.units += file.units;
         entry.hazards += file.hazards;
+        entry.sarif_findings += file.sarif_findings;
         entry.distinct_tests += file.distinct_tests;
         entry.mutant_killed_tests += file.mutant_killed_tests;
         entry.tracked_lines += file.tracked_lines;
@@ -1197,6 +1273,7 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 files: builder.files,
                 units: builder.units,
                 hazards: builder.hazards,
+                sarif_findings: builder.sarif_findings,
                 distinct_tests: builder.distinct_tests,
                 mutant_killed_tests: builder.mutant_killed_tests,
                 tracked_lines: builder.tracked_lines,
@@ -1213,6 +1290,7 @@ struct DirectoryBuilder {
     files: i64,
     units: i64,
     hazards: i64,
+    sarif_findings: i64,
     distinct_tests: i64,
     mutant_killed_tests: i64,
     tracked_lines: i64,
@@ -1511,6 +1589,9 @@ pub fn line_annotations(
     let history_start = Instant::now();
     apply_history_heat(storage, path, &mut lines)?;
     profile_log("line_annotations.history_heat", history_start);
+    let sarif_start = Instant::now();
+    apply_sarif_findings(storage, path, &mut lines)?;
+    profile_log("line_annotations.sarif_findings", sarif_start);
     let overlay_start = Instant::now();
     apply_overlays(path, overlays, &mut lines);
     profile_log("line_annotations.overlays", overlay_start);
@@ -1530,6 +1611,7 @@ pub fn line_annotations(
             mutant_coverage: builder.mutant_coverage,
             dark_arms: builder.dark_arms,
             dark_arm_spans: builder.dark_arm_spans,
+            findings: builder.findings,
             hazards: builder.hazards,
             semantic_churn: builder.semantic_churn.min(1.0),
             semantic_churn_events: builder.semantic_churn_events,
@@ -1605,6 +1687,7 @@ fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
         mutant_coverage: None,
         dark_arms: Vec::new(),
         dark_arm_spans: Vec::new(),
+        findings: Vec::new(),
         hazards: Vec::new(),
         semantic_churn: 0.0,
         semantic_churn_events: 0,
@@ -2207,6 +2290,79 @@ fn apply_overlays(
     }
 }
 
+fn apply_sarif_findings(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<()> {
+    for finding in storage.sarif_findings_for_path(path)? {
+        let span = sarif_finding_span(
+            finding.start_line,
+            finding.start_column,
+            finding.end_line,
+            finding.end_column,
+        );
+        let label = sarif_finding_label(&finding.rule_id, &finding.category, &finding.message);
+        let ui_finding = UiFinding {
+            source: finding.source.clone(),
+            tool: finding.tool_name.clone(),
+            rule_id: finding.rule_id.clone(),
+            level: finding.level.clone(),
+            message: finding.message.clone(),
+            category: finding.category.clone(),
+            span,
+        };
+        lines
+            .entry(finding.start_line)
+            .or_default()
+            .findings
+            .push(ui_finding);
+
+        if finding.is_dark_arm {
+            let arm = UiDarkArm {
+                label,
+                span,
+            };
+            let (first_line, last_line) = span
+                .map(|span| (span[0], span[2].max(span[0])))
+                .unwrap_or((finding.start_line, finding.start_line));
+            for target_line in first_line..=last_line {
+                let entry = lines.entry(target_line).or_default();
+                if target_line == finding.start_line {
+                    entry.dark_arms.push(arm.label.clone());
+                }
+                entry.dark_arm_spans.push(arm.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sarif_finding_span(
+    start_line: u32,
+    start_column: Option<u32>,
+    end_line: Option<u32>,
+    end_column: Option<u32>,
+) -> Option<[u32; 4]> {
+    let end_line = end_line.unwrap_or(start_line);
+    if start_column.is_none() && end_column.is_none() && end_line == start_line {
+        return None;
+    }
+    let start = start_column.unwrap_or(1).saturating_sub(1);
+    let end = end_column.unwrap_or(start + 1).saturating_sub(1);
+    Some([start_line, start, end_line, end])
+}
+
+fn sarif_finding_label(rule_id: &str, category: &str, message: &str) -> String {
+    if !category.trim().is_empty() {
+        category.to_string()
+    } else if !rule_id.trim().is_empty() {
+        rule_id.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
 fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
     match value {
         Value::Array(items) => {
@@ -2635,6 +2791,12 @@ fn render_file_link(file: &UiFile, active: bool, filter: &str) -> String {
             file.hazards
         ));
     }
+    if file.sarif_findings > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"SARIF findings\">{}</span>",
+            file.sarif_findings
+        ));
+    }
     if file.line_coverage > 0.0 {
         out.push_str(&format!(
             "<span class=\"pill coverage-pill\" title=\"line coverage\">{:.0}%</span>",
@@ -2664,6 +2826,12 @@ fn render_directory_link(directory: &UiDirectory, active: bool, filter: &str) ->
         out.push_str(&format!(
             "<span class=\"pill\" title=\"active hazards\">{}</span>",
             directory.hazards
+        ));
+    }
+    if directory.sarif_findings > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"SARIF findings\">{}</span>",
+            directory.sarif_findings
         ));
     }
     if directory.line_coverage > 0.0 {
@@ -2774,6 +2942,11 @@ fn render_dashboard(
         ),
     ));
     out.push_str(&render_metric(
+        "SARIF findings",
+        &dashboard.sarif_findings.to_string(),
+        "persisted first-party and ecosystem analysis findings",
+    ));
+    out.push_str(&render_metric(
         "Files",
         &dashboard.files.to_string(),
         &format!("{} files currently report coverage", dashboard.files_with_coverage),
@@ -2853,11 +3026,12 @@ fn render_directory_dashboard_row(directory: &UiDirectory, filter: &str) -> Stri
     out.push_str(&html_escape(&directory.path));
     out.push_str("/</span><small>");
     out.push_str(&html_escape(&format!(
-        "{} files | {} / {} lines | {} hazards | {} mutant-killed tests",
+        "{} files | {} / {} lines | {} hazards | {} SARIF | {} mutant-killed tests",
         directory.files,
         directory.covered_lines,
         directory.tracked_lines,
         directory.hazards,
+        directory.sarif_findings,
         directory.mutant_killed_tests
     )));
     out.push_str("</small></span><strong class=\"metric-value\">");
@@ -2882,11 +3056,12 @@ fn render_file_dashboard_row(file: &UiFile, filter: &str) -> String {
 
 fn file_detail(file: &UiFile) -> String {
     html_escape(&format!(
-        "{} units | {} / {} lines | {} hazards | {} tests | {} mutant-killed tests",
+        "{} units | {} / {} lines | {} hazards | {} SARIF | {} tests | {} mutant-killed tests",
         file.units,
         file.covered_lines,
         file.tracked_lines,
         file.hazards,
+        file.sarif_findings,
         file.distinct_tests,
         file.mutant_killed_tests
     ))
@@ -2950,6 +3125,11 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         .iter()
         .map(|annotation| annotation.dark_arms.len())
         .sum();
+    let findings: usize = payload
+        .annotations
+        .iter()
+        .map(|annotation| annotation.findings.len())
+        .sum();
 
     let mut out = String::new();
     out.push_str("<section class=\"source-view\">");
@@ -2963,8 +3143,8 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
     out.push_str(&html_escape(&payload.path));
     out.push_str("</div><div class=\"subtle\">");
     out.push_str(&format!(
-        "{} covered lines | {} mutant lines | {} hazards | {} dark arms",
-        covered, mutant, hazards, dark_arms
+        "{} covered lines | {} mutant lines | {} hazards | {} dark arms | {} SARIF",
+        covered, mutant, hazards, dark_arms, findings
     ));
     out.push_str("</div></div><div class=\"source-actions\">");
     out.push_str(
@@ -3135,6 +3315,19 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     if !dark_arm_labels.is_empty() {
         rows.push(format!("dark arms: {}", dark_arm_labels.join(", ")));
     }
+    for finding in &annotation.findings {
+        rows.push(format!(
+            "SARIF {} {}: {}{}",
+            finding.tool,
+            finding.rule_id,
+            finding.message,
+            if finding.source.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", finding.source)
+            }
+        ));
+    }
     if let Some(value) = annotation.line_coverage {
         rows.push(format!("unit line coverage {:.1}%", value));
     }
@@ -3278,6 +3471,7 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || !annotation.test_types.is_empty()
         || !annotation.dark_arms.is_empty()
         || !annotation.dark_arm_spans.is_empty()
+        || !annotation.findings.is_empty()
         || annotation.line_hits.is_some()
         || annotation.line_coverage.is_some()
         || annotation.mutant_coverage.is_some()
@@ -4116,7 +4310,7 @@ mod tests {
     use super::*;
     use crate::model::{
         CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, TestExposureEvent,
-        UnitKind,
+        SarifArtifact, SarifFinding, UnitKind,
     };
     use tempfile::tempdir;
 
@@ -4310,6 +4504,115 @@ mod tests {
     }
 
     #[test]
+    fn source_payload_includes_persisted_sarif_findings() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  else\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\nelse\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc".into(),
+                event_type: EventType::Change,
+                path: "src/demo.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 3,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                artifact_path: "tmp/slopcop.sarif#run0".into(),
+                artifact_sha256: "abc123".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&SarifFinding {
+                artifact_id,
+                finding_key: "finding-1".into(),
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                rule_id: "slopcop.dark-arm.genuine".into(),
+                level: "warning".into(),
+                message: "dark arm: genuine".into(),
+                path: "src/demo.rb".into(),
+                start_line: 2,
+                start_column: Some(3),
+                end_line: Some(2),
+                end_column: Some(7),
+                category: "genuine".into(),
+                is_dark_arm: true,
+                unit_id: Some(unit.id),
+                fingerprint: "fp".into(),
+                properties_json: "{}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&SarifFinding {
+                artifact_id,
+                finding_key: "finding-2".into(),
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                rule_id: "slopcop.dark-arm.dead".into(),
+                level: "note".into(),
+                message: "dark arm: dead".into(),
+                path: "src/other.rb".into(),
+                start_line: 1,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+                category: "dead".into(),
+                is_dark_arm: true,
+                unit_id: None,
+                fingerprint: "fp2".into(),
+                properties_json: "{}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+
+        let payload =
+            source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &UiOverlays::default())
+                .unwrap();
+        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let dashboard = dashboard_summary(&storage).unwrap();
+        let files = file_index(&storage).unwrap();
+
+        assert_eq!(line.findings.len(), 1);
+        assert_eq!(line.findings[0].tool, "SlopCop");
+        assert_eq!(line.dark_arm_spans[0].span, Some([2, 2, 2, 6]));
+        assert_eq!(dashboard.sarif_findings, 2);
+        assert!(files.iter().any(|file| file.path == "src/other.rb" && file.sarif_findings == 1));
+    }
+
+    #[test]
     fn source_payload_uses_exact_line_coverage_when_present() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -4463,6 +4766,7 @@ mod tests {
                 mutant_coverage: None,
                 dark_arms: Vec::new(),
                 dark_arm_spans: Vec::new(),
+                findings: Vec::new(),
                 hazards: vec![UiHazard {
                     hazard_type: "zig_loom_atomic".to_string(),
                     required_evidence: "loom".to_string(),
@@ -4730,6 +5034,7 @@ mod tests {
                 path: "src/a.rb".into(),
                 units: 1,
                 hazards: 2,
+                sarif_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 3,
@@ -4748,6 +5053,7 @@ mod tests {
                 path: "src/internal/b.rb".into(),
                 units: 2,
                 hazards: 1,
+                sarif_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 5,
@@ -4766,6 +5072,7 @@ mod tests {
                 path: "zig/c.zig".into(),
                 units: 3,
                 hazards: 7,
+                sarif_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 8,
@@ -4948,6 +5255,7 @@ flags:
             mutant_coverage: None,
             dark_arms: Vec::new(),
             dark_arm_spans: Vec::new(),
+            findings: Vec::new(),
             hazards: Vec::new(),
             semantic_churn: 0.0,
             semantic_churn_events: 0,
@@ -5014,6 +5322,7 @@ flags:
                 label: "dark arm: else".to_string(),
                 span: Some([1, 4, 1, 8]),
             }],
+            findings: Vec::new(),
             hazards: Vec::new(),
             semantic_churn: 0.0,
             semantic_churn_events: 0,

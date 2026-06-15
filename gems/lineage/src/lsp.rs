@@ -327,6 +327,18 @@ pub fn diagnostics_for_annotations(annotations: &[UiLineAnnotation]) -> Vec<Diag
                 ..Diagnostic::default()
             });
         }
+        for finding in &annotation.findings {
+            diagnostics.push(Diagnostic {
+                range: range_for_line(annotation.line),
+                severity: Some(diagnostic_severity(&finding.level)),
+                code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                    finding.rule_id.clone(),
+                )),
+                source: Some(format!("lineage:{}", finding.tool)),
+                message: finding.message.clone(),
+                ..Diagnostic::default()
+            });
+        }
     }
     diagnostics
 }
@@ -384,8 +396,26 @@ pub fn gutter_items_for_annotations(annotations: &[UiLineAnnotation]) -> Vec<Gut
                 message: format!("uncovered branch arm: {dark_arm}"),
             });
         }
+        for finding in &annotation.findings {
+            items.push(GutterItem {
+                line: lsp_line(annotation.line),
+                kind: "sarif".to_string(),
+                label: finding.tool.clone(),
+                verified: false,
+                message: format!("{}: {}", finding.rule_id, finding.message),
+            });
+        }
     }
     items
+}
+
+fn diagnostic_severity(level: &str) -> DiagnosticSeverity {
+    match level.to_ascii_lowercase().as_str() {
+        "error" => DiagnosticSeverity::ERROR,
+        "warning" => DiagnosticSeverity::WARNING,
+        "note" => DiagnosticSeverity::INFORMATION,
+        _ => DiagnosticSeverity::HINT,
+    }
 }
 
 fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
@@ -443,6 +473,12 @@ fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
         }
         for dark_arm in &annotation.dark_arms {
             lines.push(format!("Dark arm: {dark_arm}"));
+        }
+        for finding in &annotation.findings {
+            lines.push(format!(
+                "SARIF {} `{}`: {}",
+                finding.tool, finding.rule_id, finding.message
+            ));
         }
     }
 
@@ -524,6 +560,7 @@ mod tests {
             mutant_coverage: None,
             dark_arms: vec!["else".to_string()],
             dark_arm_spans: Vec::new(),
+            findings: Vec::new(),
             hazards: vec![UiHazard {
                 hazard_type: "zig_loom_atomic".to_string(),
                 required_evidence: "loom".to_string(),

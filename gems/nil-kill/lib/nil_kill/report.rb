@@ -219,6 +219,7 @@ module NilKill
     def sarif_rules(evidence)
       action_kinds = sarif_actions(evidence).map { |action| action["kind"].to_s }.reject(&:empty?).uniq
       diagnostic_codes = sarif_diagnostics(evidence).map { |diagnostic| diagnostic_code(diagnostic) }.uniq
+      static_kinds = sarif_static_findings(evidence).map { |finding| finding.fetch("kind") }.uniq
       action_rules = action_kinds.map do |kind|
         Decomplex::Sarif.rule(
           id: "nil-kill.action.#{Decomplex::Sarif.slug(kind)}",
@@ -233,12 +234,20 @@ module NilKill
           short_description: "Nil-Kill diagnostic"
         )
       end
-      action_rules + diagnostic_rules
+      static_rules = static_kinds.map do |kind|
+        Decomplex::Sarif.rule(
+          id: "nil-kill.static.#{Decomplex::Sarif.slug(kind)}",
+          name: "Static: #{kind.tr("_", " ")}",
+          short_description: "Nil-Kill static analysis signal"
+        )
+      end
+      action_rules + diagnostic_rules + static_rules
     end
 
     def sarif_results(evidence)
       sarif_actions(evidence).map { |action| sarif_action_result(action, evidence) } +
-        sarif_diagnostics(evidence).map { |diagnostic| sarif_diagnostic_result(diagnostic) }
+        sarif_diagnostics(evidence).map { |diagnostic| sarif_diagnostic_result(diagnostic) } +
+        sarif_static_findings(evidence).map { |finding| sarif_static_result(finding) }
     end
 
     def sarif_actions(evidence)
@@ -255,6 +264,91 @@ module NilKill
           row.is_a?(Hash) ? row.merge("code" => row["code"] || kind.to_s) : { "code" => kind.to_s, "message" => row.to_s }
         end
       end
+    end
+
+    def sarif_static_findings(evidence)
+      return [] unless Schema::EvidenceBundle.v2?(evidence)
+
+      methods = Array(evidence.dig("static", "methods")).flat_map { |method| static_method_findings(method) }
+      fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
+      methods + fields
+    end
+
+    def static_method_findings(method)
+      signature = method["signature"].to_s
+      return [] if signature.empty?
+
+      findings = []
+      if static_untyped_signature?(signature)
+        findings << {
+          "kind" => "untyped_signature",
+          "level" => "warning",
+          "message" => "static signature includes an untyped or unknown type for #{static_member_label(method)}",
+          "path" => method["path"],
+          "line" => method["line"],
+          "static_kind" => method["kind"] || "method",
+          "language" => method["language"],
+          "owner" => method["owner"],
+          "name" => method["name"],
+          "signature" => signature,
+        }
+      end
+      if static_nullable_signature?(signature)
+        findings << {
+          "kind" => "nullable_signature",
+          "level" => "note",
+          "message" => "static signature includes a nullable type for #{static_member_label(method)}",
+          "path" => method["path"],
+          "line" => method["line"],
+          "static_kind" => method["kind"] || "method",
+          "language" => method["language"],
+          "owner" => method["owner"],
+          "name" => method["name"],
+          "signature" => signature,
+        }
+      end
+      findings
+    end
+
+    def static_field_finding(field)
+      type = field["type"] || field["signature"] || field.dig("source", "type")
+      return nil unless type.to_s.empty? || static_untyped_signature?(type.to_s)
+
+      {
+        "kind" => "untyped_field",
+        "level" => "warning",
+        "message" => "static field has no precise type for #{static_member_label(field)}",
+        "path" => field["path"],
+        "line" => field["line"],
+        "static_kind" => field["kind"] || "field",
+        "language" => field["language"],
+        "owner" => field["owner"],
+        "name" => field["name"] || field["field"],
+        "signature" => type,
+      }
+    end
+
+    def static_untyped_signature?(signature)
+      signature.to_s.match?(/\b(?:T\.untyped|typing\.Any|Any|any|unknown)\b/)
+    end
+
+    def static_nullable_signature?(signature)
+      text = signature.to_s
+      text.match?(/\bT\.nilable\b/) ||
+        text.match?(/\bOptional\s*\[/) ||
+        text.match?(/\bNone\b/) ||
+        text.match?(/\bnull\b/) ||
+        text.match?(/\bundefined\b/) ||
+        text.match?(/\|\s*(?:None|null|undefined)\b/)
+    end
+
+    def static_member_label(member)
+      owner = member["owner"].to_s
+      name = (member["name"] || member["field"]).to_s
+      return name if owner.empty?
+      return owner if name.empty?
+
+      "#{owner}##{name}"
     end
 
     def sarif_action_result(action, evidence)
@@ -281,6 +375,20 @@ module NilKill
         line: diagnostic_line(diagnostic),
         properties: Decomplex::Sarif.json_safe_value(diagnostic).merge(
           "source_format" => "nil-kill.diagnostics"
+        )
+      )
+    end
+
+    def sarif_static_result(finding)
+      kind = finding["kind"].to_s.empty? ? "static" : finding["kind"].to_s
+      Decomplex::Sarif.result(
+        rule_id: "nil-kill.static.#{Decomplex::Sarif.slug(kind)}",
+        level: finding["level"] || "note",
+        message: finding["message"] || kind,
+        path: finding["path"],
+        line: finding["line"],
+        properties: Decomplex::Sarif.json_safe_value(finding).merge(
+          "source_format" => "nil-kill.static.evidence.v2"
         )
       )
     end

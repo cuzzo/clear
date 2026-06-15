@@ -190,6 +190,43 @@ pub struct HazardEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SarifArtifact {
+    pub source: String,
+    pub tool_name: String,
+    pub run_format: String,
+    pub artifact_path: String,
+    pub artifact_sha256: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub payload_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SarifFinding {
+    pub artifact_id: i64,
+    pub finding_key: String,
+    pub source: String,
+    pub tool_name: String,
+    pub run_format: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub rule_id: String,
+    pub level: String,
+    pub message: String,
+    pub path: String,
+    pub start_line: u32,
+    pub start_column: Option<u32>,
+    pub end_line: Option<u32>,
+    pub end_column: Option<u32>,
+    pub category: String,
+    pub is_dark_arm: bool,
+    pub unit_id: Option<String>,
+    pub fingerprint: String,
+    pub properties_json: String,
+    pub raw_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitMetadata {
     pub hash: String,
     pub message: String,

@@ -93,6 +93,100 @@ Core tables include:
 - `quality_events`
 - `crash_events`
 - `test_exposure_events`
+- `sarif_artifacts`
+- `sarif_findings`
+
+## Supported Data Sources
+
+Lineage treats every uploaded artifact as data for a specific commit.
+Use `--commit "$(git rev-parse HEAD)"` for current-run artifacts, and
+use `--replace` when the uploaded artifact should replace previous rows
+from the same source and commit.
+
+| Source | Command | Current formats |
+| --- | --- | --- |
+| Git history | `build` | local Git repository |
+| Coverage | `ingest-coverage` | Codecov JSON, SimpleCov JSON, Cobertura XML, kcov Cobertura XML |
+| Test exposure | `ingest-test-exposure` | Lineage `test-exposure` JSON |
+| Mutation testing | `ingest-mutants` | Ruby `mutant-facts/v1` |
+| Systems hazards | `ingest-hazards` | Zig hazard provider |
+| Stack traces | `ingest` | Sentry-style event JSON |
+| Static analysis and risk findings | `ingest-sarif` | SARIF 2.1.0 files from Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier, and third-party tools |
+
+### SARIF Findings
+
+`ingest-sarif` recursively scans every `--input` path for `.sarif` and
+`.json` files. JSON files that are not SARIF are skipped, which lets CI
+upload a mixed artifact directory. Rows are keyed by
+`commit/source/tool/path/span/rule/fingerprint`, so re-ingesting the
+same findings is idempotent. `--replace` deletes prior SARIF rows for
+the same `source` and `commit` before loading the new artifact set.
+
+```sh
+mkdir -p tmp/lineage-sarif
+
+bundle exec ruby gems/decomplex/exe/decomplex report \
+  --emit-json=tmp/lineage-sarif/decomplex.sarif \
+  --output=tmp/lineage-sarif/decomplex.md \
+  src
+
+bundle exec ruby gems/slopcop/exe/slopcop report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --json=tmp/lineage-sarif/slopcop.sarif \
+  --output=tmp/lineage-sarif/slopcop.md
+
+bundle exec ruby tools/nil-kill static \
+  --root . \
+  --output tmp/lineage-sarif/nil-kill-static.json \
+  src
+
+mkdir -p tmp/lineage-sarif/no-runtime
+bundle exec ruby tools/nil-kill normalize \
+  --root . \
+  --static tmp/lineage-sarif/nil-kill-static.json \
+  --traces tmp/lineage-sarif/no-runtime \
+  --output tmp/lineage-sarif/nil-kill-static-evidence.json \
+  --no-analyze
+
+bundle exec ruby tools/nil-kill report \
+  --evidence tmp/lineage-sarif/nil-kill-static-evidence.json \
+  --format sarif \
+  --sarif tmp/lineage-sarif/nil-kill-static.sarif
+
+bundle exec ruby gems/espalier/exe/espalier \
+  --format sarif \
+  --output tmp/lineage-sarif/espalier.sarif \
+  --nil-kill tmp/lineage-sarif/nil-kill-static.json \
+  src
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-sarif \
+  --db lineage.db \
+  --repo . \
+  --input tmp/lineage-sarif \
+  --source first-party \
+  --commit "$(git rev-parse HEAD)" \
+  --replace
+```
+
+For third-party lint, smell, or security tools, upload their SARIF into
+a directory and use a source name that identifies the provider or CI
+lane:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-sarif \
+  --db lineage.db \
+  --repo . \
+  --input tmp/vendor-sarif \
+  --source rubocop \
+  --commit "$(git rev-parse HEAD)" \
+  --replace
+```
+
+Persisted SARIF findings appear in the dashboard counts, source line
+detail popovers, API responses, and LSP diagnostics/gutter payloads.
+Dark-arm SARIF from SlopCop/Boobytrap also feeds the same source-line
+dark-arm rendering as transient UI overlays.
 
 ### Summary
 

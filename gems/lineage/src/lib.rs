@@ -11,6 +11,7 @@ pub mod lsp;
 pub mod model;
 pub mod mutant;
 pub mod quality;
+pub mod sarif;
 pub mod stack_trace;
 pub mod storage;
 pub mod test_exposure;
@@ -27,7 +28,7 @@ pub use lsp::{
 };
 pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
-    HazardEvent, QualityMetric, TestExposureEvent, UnitKind,
+    HazardEvent, QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
 };
 pub use mutant::{ingest_mutant_facts_json, parse_mutant_facts, MutantFact, MutantIngestStats};
 pub use quality::{
@@ -35,6 +36,7 @@ pub use quality::{
     ingest_coverage_json_with_options, parse_coverage_input, resolve_coverage_record_paths,
     CoverageIngestOptions, CoverageIngestStats, CoverageRecord,
 };
+pub use sarif::{ingest_sarif_paths, SarifIngestStats};
 pub use stack_trace::{
     ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider,
     StackIngestStats, StackPayload, StackTraceProvider,

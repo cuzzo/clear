@@ -54,7 +54,9 @@ where
     fn run_inner(&mut self, max_commits: Option<usize>) -> Result<EngineStats> {
         let mut commits = self.provider.list_commits()?;
         if let Some(max) = max_commits {
-            commits.truncate(max);
+            if commits.len() > max {
+                commits = commits.split_off(commits.len() - max);
+            }
         }
 
         let mut previous: HashMap<String, LogicalUnit> = HashMap::new();
@@ -347,6 +349,50 @@ mod tests {
         assert_eq!(stats.commits, 2);
         assert_eq!(stats.events, 1);
         assert_eq!(stats.fixes, 1);
+    }
+
+    #[test]
+    fn capped_runs_keep_latest_commits() {
+        let commits = vec![
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "initial".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "middle".into(),
+                timestamp: 2,
+            },
+            CommitMetadata {
+                hash: "c3".into(),
+                message: "head".into(),
+                timestamp: 3,
+            },
+        ];
+        let mut files = HashMap::new();
+        for commit in &commits {
+            files.insert(
+                commit.hash.clone(),
+                vec![BlobFile {
+                    path: "src/a.rb".into(),
+                    contents: "def run\n1\nend\n".into(),
+                }],
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("lineage.db");
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open(&db).unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(Some(2)).unwrap();
+        let storage = Storage::open_existing(&db).unwrap();
+
+        assert_eq!(stats.commits, 2);
+        assert!(!storage.commit_exists("c1").unwrap());
+        assert!(storage.commit_exists("c2").unwrap());
+        assert!(storage.commit_exists("c3").unwrap());
     }
 
     #[test]
