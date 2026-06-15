@@ -3,7 +3,7 @@
 This branch turns mutation testing on for the three test surfaces that carry
 compiler correctness:
 
-- Ruby specs: `tools/mutants/ruby_specs.rb`
+- Ruby specs: `gems/lineage/tools/mutant-converters/ruby_mutant.rb`
 - transpile-tests: `tools/mutants/transpile_tests.rb`
 - fuzz templates: `tools/fuzz/mutants/run.rb`
 
@@ -42,7 +42,7 @@ cannot produce a summary, has no selected tests, drops below its baseline, or
 exceeds its timeout budget. Advisory subjects still run and report coverage, but
 do not block CI until they are promoted.
 
-The subject matrix lives in `tools/mutants/src_subjects.yml`.
+The subject matrix lives in `gems/lineage/tools/mutant-converters/src_subjects.yml`.
 
 Current matrix:
 
@@ -69,7 +69,7 @@ Important implementation details:
 Current local validation:
 
 ```sh
-MUTANT_JOBS=32 bundle exec ruby tools/mutants/ruby_specs.rb --since HEAD --out /tmp/clear-ruby-mutants-full-2
+MUTANT_JOBS=32 bundle exec ruby gems/lineage/tools/mutant-converters/ruby_mutant.rb --since HEAD --out /tmp/clear-ruby-mutants-full-2
 ```
 
 Result: exit 0. Hard-gated changed subjects passed; untouched subjects skipped;
@@ -251,5 +251,5 @@ Additional validation on this branch:
 - `bundle exec prspec`: 6,167 examples, 0 failures.
 - `bundle exec prspec spec/ --tag integration`: 237 examples, 0 failures.
 - `bundle exec srb tc`: no errors.
-- Mutation tooling syntax check: all `tools/mutants/**/*.rb` and
-  `tools/fuzz/mutants/**/*.rb` parsed successfully.
+- Mutation tooling syntax check: all `gems/lineage/tools/mutant-converters/**/*.rb`,
+  `tools/mutants/**/*.rb`, and `tools/fuzz/mutants/**/*.rb` parsed successfully.

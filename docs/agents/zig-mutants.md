@@ -127,12 +127,14 @@ evidence:
   "schema": "mutant-facts/v1",
   "source": "gems/zig-mutants",
   "language": "zig",
+  "mutation_kind": "invariant",
   "subjects": [
     {
       "file": "zig/lib/safety.zig",
       "method": "enter",
       "kill_rate": 100.0,
       "gate_status": "advisory",
+      "mutation_kind": "invariant",
       "mutations": 1,
       "killed": 1,
       "alive": 0,

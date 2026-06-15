@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # typed: strict
-# Thresholded direct mutant runner for Ruby specs.
+# Thresholded direct mutant runner and mutant-facts/v1 converter for Ruby specs.
 
 require 'optparse'
 require 'fileutils'
@@ -153,7 +153,7 @@ module RubySpecMutants
   def self.parse_options(argv)
     opts = Options.new(subject: nil, since: nil, shard: nil, out: '/tmp/clear-ruby-mutants', facts: nil, list: false)
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby tools/mutants/ruby_specs.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--facts FILE] [--list]'
+      o.banner = 'Usage: ruby gems/lineage/tools/mutant-converters/ruby_mutant.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--facts FILE] [--list]'
       o.on('--subject NAME') { |v| opts.subject = v }
       o.on('--since REV') { |v| opts.since = v }
       o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
@@ -195,7 +195,9 @@ module RubySpecMutants
     body = {
       schema: 'mutant-facts/v1',
       generated_at: Time.now.utc.iso8601,
-      source: 'tools/mutants/ruby_specs.rb',
+      source: 'gems/lineage/tools/mutant-converters/ruby_mutant.rb',
+      language: 'ruby',
+      mutation_kind: 'stochastic',
       subjects: results.filter_map { |result| fact_for_result(result) },
     }
     FileUtils.mkdir_p(File.dirname(path))
@@ -218,6 +220,7 @@ module RubySpecMutants
       alive: summary.alive,
       timeouts: summary.timeouts,
       selected_tests: summary.selected_tests,
+      mutation_kind: 'stochastic',
       ok: result.ok,
       blocking: result.blocking,
     }.compact

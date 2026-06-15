@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# typed: strict
+# frozen_string_literal: true
+
+require_relative "ruby_mutant"
+
+exit RubySpecMutants.main(ARGV)

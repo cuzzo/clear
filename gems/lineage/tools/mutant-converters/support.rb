@@ -8,7 +8,7 @@ require 'sorbet-runtime'
 module MutationTesting
   extend T::Sig
 
-  ROOT = T.let(File.expand_path('../..', __dir__), String)
+  ROOT = T.let(File.expand_path('../../../..', __dir__), String)
 
   class CommandResult < T::Struct
     const :output, String

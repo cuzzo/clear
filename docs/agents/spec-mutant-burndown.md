@@ -69,7 +69,7 @@ load-bearing.
 
 ## Current Findings
 
-- `tools/mutants/ruby_specs.rb` only accepted one `spec:` file per subject.
+- `gems/lineage/tools/mutant-converters/ruby_mutant.rb` only accepted one `spec:` file per subject.
   That hid existing load-bearing specs from mutant for broad subjects such as
   `FsmTransform::Emit`.
 - The runner did not accept raw class/module names such as

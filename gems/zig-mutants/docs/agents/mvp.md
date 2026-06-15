@@ -102,6 +102,8 @@ survivors.
 - Shards are deterministic and non-overlapping.
 - Survivors produce reproduction artifacts.
 - Facts include function names.
+- Facts include `language: zig` and `mutation_kind: invariant` for Lineage
+  runtime-safety ingestion.
 - New runtime mutators are covered by unit tests and discover real runtime
   mutants.
 - Ratchet mode fails on new survivors and passes when the same survivor is in

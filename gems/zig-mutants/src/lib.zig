@@ -192,6 +192,7 @@ pub fn writeFactsJson(
     try w.writeAll("  \"schema\": \"mutant-facts/v1\",\n");
     try w.writeAll("  \"source\": \"gems/zig-mutants\",\n");
     try w.writeAll("  \"language\": \"zig\",\n");
+    try w.writeAll("  \"mutation_kind\": \"invariant\",\n");
     try w.writeAll("  \"subjects\": [\n");
     var subjects_written: usize = 0;
     for (sources) |source| {
@@ -210,6 +211,7 @@ pub fn writeFactsJson(
             try w.print("{d:.2}", .{summary.killRate()});
             try w.writeAll(", \"gate_status\": ");
             try writeJsonString(w, if (hard_gate) "hard" else "advisory");
+            try w.writeAll(", \"mutation_kind\": \"invariant\"");
             try w.print(
                 ", \"mutations\": {d}, \"killed\": {d}, \"alive\": {d}, \"timeouts\": {d}, \"unviable\": {d}, \"skipped\": {d} }}",
                 .{
@@ -767,6 +769,7 @@ test "writes boobytrap-compatible mutant facts JSON" {
 
     try std.testing.expect(std.mem.indexOf(u8, json, "\"schema\": \"mutant-facts/v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"language\": \"zig\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"mutation_kind\": \"invariant\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"method\": \"f\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kill_rate\": 100.00") != null);
 }
