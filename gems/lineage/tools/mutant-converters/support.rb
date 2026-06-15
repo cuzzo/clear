@@ -2,8 +2,10 @@
 # Shared helpers for mutation-test runners.
 
 require 'fileutils'
+require 'json'
 require 'open3'
 require 'sorbet-runtime'
+require 'time'
 
 module MutationTesting
   extend T::Sig
@@ -116,6 +118,166 @@ module MutationTesting
   sig { params(shard: T.nilable(Shard)).returns(String) }
   def self.shard_label(shard)
     shard ? "#{shard.index}/#{shard.count}" : "all"
+  end
+
+  sig { params(path: String).returns(String) }
+  def self.relative_repo_path(path)
+    expanded = File.expand_path(path)
+    root = "#{ROOT}/"
+    expanded.start_with?(root) ? expanded.delete_prefix(root) : path
+  end
+
+  sig { params(patch: String).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  def self.patch_changed_line_records(patch)
+    hunks = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    current_path = T.let(nil, T.nilable(String))
+    current_hunk = T.let(nil, T.nilable(T::Hash[Symbol, T.untyped]))
+
+    File.foreach(patch, chomp: true) do |line|
+      if (match = line.match(/^diff --git a\/(.+?) b\/(.+)$/))
+        current_path = T.must(match[2])
+        current_hunk = nil
+        next
+      end
+
+      if (match = line.match(/^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/))
+        next unless current_path
+
+        current_hunk = {
+          file: T.must(current_path),
+          old_start: T.must(match[1]).to_i,
+          entries: [],
+        }
+        hunks << T.must(current_hunk)
+        next
+      end
+
+      next unless current_hunk
+      next if line.start_with?("\\")
+      next unless [" ", "-", "+"].include?(line[0])
+
+      T.cast(T.must(current_hunk)[:entries], T::Array[T::Array[String]]) << [T.must(line[0]), line[1..].to_s]
+    end
+
+    hunks.flat_map do |hunk|
+      hunk_changed_line_records(
+        T.cast(hunk[:file], String),
+        T.cast(hunk[:old_start], Integer),
+        T.cast(hunk[:entries], T::Array[T::Array[String]])
+      )
+    end
+  end
+
+  sig do
+    params(
+      path: String,
+      old_start: Integer,
+      entries: T::Array[T::Array[String]]
+    ).returns(T::Array[T::Hash[Symbol, T.untyped]])
+  end
+  def self.hunk_changed_line_records(path, old_start, entries)
+    records = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    source_lines = source_lines(path)
+    actual_start = best_hunk_start(source_lines, entries, old_start) || old_start
+    groups = T.let([], T::Array[[T::Array[Integer], T::Boolean, Integer]])
+    old_cursor = T.let(actual_start, Integer)
+    changed_lines = T.let([], T::Array[Integer])
+    has_added = false
+
+    entries.each do |tag, _text|
+      case tag
+      when " "
+        groups << [changed_lines.dup, has_added, old_cursor] if changed_lines.any? || has_added
+        changed_lines.clear
+        has_added = false
+        old_cursor += 1
+      when "-"
+        changed_lines << old_cursor
+        old_cursor += 1
+      when "+"
+        has_added = true
+      end
+    end
+    groups << [changed_lines.dup, has_added, old_cursor] if changed_lines.any? || has_added
+
+    groups.each do |line_numbers, added, insertion_line|
+      lines = line_numbers.dup
+      if lines.empty? && added
+        lines << insertion_anchor_line(path, insertion_line)
+      end
+      lines.uniq.each do |line_number|
+        context = source_lines[line_number - 1]
+        next unless context
+
+        records << { file: path, line: line_number, context_line: context }
+      end
+    end
+    records
+  end
+
+  sig do
+    params(
+      source_lines: T::Array[String],
+      entries: T::Array[T::Array[String]],
+      old_start: Integer
+    ).returns(T.nilable(Integer))
+  end
+  def self.best_hunk_start(source_lines, entries, old_start)
+    old_side = entries.filter_map do |tag, text|
+      text unless tag == "+"
+    end
+    return nil if old_side.empty? || source_lines.length < old_side.length
+
+    candidates = T.let([], T::Array[Integer])
+    limit = source_lines.length - old_side.length
+    (0..limit).each do |index|
+      candidates << index + 1 if source_lines[index, old_side.length] == old_side
+    end
+    candidates.min_by { |line| (line - old_start).abs }
+  end
+
+  sig { params(path: String, fallback_line: Integer).returns(Integer) }
+  def self.insertion_anchor_line(path, fallback_line)
+    absolute = File.join(ROOT, path)
+    line_count = File.file?(absolute) ? File.foreach(absolute).count : 0
+    return 1 if line_count.zero?
+    return line_count if fallback_line > line_count
+
+    [fallback_line, 1].max
+  end
+
+  sig { params(path: String, line_number: Integer).returns(T.nilable(String)) }
+  def self.source_line(path, line_number)
+    return nil unless line_number.positive?
+
+    source_lines(path)[line_number - 1]
+  rescue Errno::ENOENT
+    nil
+  end
+
+  sig { params(path: String).returns(T::Array[String]) }
+  def self.source_lines(path)
+    File.readlines(File.join(ROOT, path), chomp: true)
+  rescue Errno::ENOENT
+    []
+  end
+
+  sig do
+    params(
+      path: String,
+      source: String,
+      hits: T::Array[T::Hash[Symbol, T.untyped]]
+    ).void
+  end
+  def self.write_test_exposure(path, source:, hits:)
+    body = {
+      schema: 'test-exposure/v1',
+      generated_at: Time.now.utc.iso8601,
+      source: source,
+      hits: hits,
+    }
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, JSON.pretty_generate(body))
   end
 
   sig { params(output: String, label: String).returns(T.nilable(Integer)) }

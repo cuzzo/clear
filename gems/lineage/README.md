@@ -96,6 +96,17 @@ Core tables include:
 - `sarif_artifacts`
 - `sarif_findings`
 
+Inspect the unit-level signal:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
+  --db /tmp/lineage.db \
+  --top 20 \
+  --only src/ \
+  --only gems/ \
+  --only zig/
+```
+
 ## Supported Data Sources
 
 Lineage treats every uploaded artifact as data for a specific commit.
@@ -304,6 +315,37 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-mutants \
 
 The Ruby mutant converter and `zig-mutants` both emit the
 `mutant-facts/v1` shape Lineage consumes.
+
+Targeted ratchet mutants use narrower semantics. The transpile-test and
+fuzz mutant runners emit `test-exposure/v1` records for only the source
+lines changed by each mutant patch. Those records use
+`mutation_kind=invariant` because they prove a named contract or safety
+rule at a specific mutation site; they do not mark every line executed by
+the killing test.
+
+```sh
+ruby tools/mutants/transpile_tests.rb --all \
+  --out /tmp/clear-transpile-mutants \
+  --exposure /tmp/clear-transpile-mutants/test-exposure.json
+
+ruby tools/fuzz/mutants/run.rb --all \
+  --out /tmp/clear-fuzz-mutants \
+  --exposure /tmp/clear-fuzz-mutants/test-exposure.json
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure \
+  --db /tmp/lineage.db \
+  --repo . \
+  --commit "$(git rev-parse HEAD)" \
+  --input /tmp/clear-fuzz-mutants/test-exposure.json
+```
+
+After ingesting new coverage, SARIF, or test-exposure artifacts into a DB
+that has UI summaries, refresh the read model:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- refresh-ui \
+  --db /tmp/lineage.db
+```
 
 ### Hazards
 

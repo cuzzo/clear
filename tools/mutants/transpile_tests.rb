@@ -58,6 +58,7 @@ module TranspileTestMutants
     prop :all, T::Boolean
     prop :shard, T.nilable(MutationTesting::Shard)
     prop :out, String
+    prop :exposure, T.nilable(String)
     prop :list, T::Boolean
     prop :keep, T::Boolean
     prop :allow_dirty, T::Boolean
@@ -71,17 +72,19 @@ module TranspileTestMutants
       all: false,
       shard: nil,
       out: '/tmp/clear-transpile-mutants',
+      exposure: nil,
       list: false,
       keep: false,
       allow_dirty: false,
       dry_run: false
     )
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby tools/mutants/transpile_tests.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
+      o.banner = 'Usage: ruby tools/mutants/transpile_tests.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--exposure FILE] [--keep] [--dry-run] [--allow-dirty]'
       o.on('--mutant NAME') { |v| opts.mutant = v.to_sym }
       o.on('--all') { opts.all = true }
       o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
       o.on('--out DIR') { |v| opts.out = File.expand_path(v) }
+      o.on('--exposure FILE') { |v| opts.exposure = File.expand_path(v) }
       o.on('--keep') { opts.keep = true }
       o.on('--dry-run') { opts.dry_run = true }
       o.on('--allow-dirty') { opts.allow_dirty = true }
@@ -194,6 +197,23 @@ module TranspileTestMutants
     killed
   end
 
+  sig { params(mutant: Mutant, killed: T::Boolean).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  def self.exposure_hits(mutant, killed)
+    status = killed ? 'killed' : 'survived'
+    MutationTesting.patch_changed_line_records(mutant.patch).map do |record|
+      record.merge(
+        test_id: "mutant:transpile:#{mutant.name}",
+        test_type: 'integration',
+        mutation_status: status,
+        mutation_kind: 'invariant',
+        mutant: mutant.name.to_s,
+        description: mutant.description,
+        patch: MutationTesting.relative_repo_path(mutant.patch),
+        tests: mutant.files,
+      )
+    end
+  end
+
   sig { params(opts: Options).returns(T::Array[Mutant]) }
   def self.selected_mutants(opts)
     selected =
@@ -219,6 +239,7 @@ module TranspileTestMutants
         all: true,
         shard: opts.shard,
         out: opts.out,
+        exposure: opts.exposure,
         list: opts.list,
         keep: opts.keep,
         allow_dirty: opts.allow_dirty,
@@ -237,9 +258,21 @@ module TranspileTestMutants
     end
 
     puts "transpile mutant shard #{MutationTesting.shard_label(opts.shard)}: #{mutants.length} mutant(s)"
-    mutants.map do |mutant|
-      run_mutant(mutant, opts.out, allow_dirty: opts.allow_dirty, dry_run: opts.dry_run)
-    end.all? ? 0 : 1
+    hits = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    results = mutants.map do |mutant|
+      killed = run_mutant(mutant, opts.out, allow_dirty: opts.allow_dirty, dry_run: opts.dry_run)
+      hits.concat(exposure_hits(mutant, killed)) unless opts.dry_run
+      killed
+    end
+    if opts.exposure && !opts.dry_run
+      MutationTesting.write_test_exposure(
+        T.must(opts.exposure),
+        source: 'tools/mutants/transpile_tests.rb',
+        hits: hits
+      )
+      puts "wrote #{opts.exposure}"
+    end
+    results.all? ? 0 : 1
   end
 end
 

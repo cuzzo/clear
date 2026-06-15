@@ -228,6 +228,12 @@ module RubySpecMutants
 
   sig { params(subject: Subject).returns(T.nilable(String)) }
   def self.source_file_for(subject)
+    static_path = static_source_file_for(subject)
+    return static_path if static_path
+
+    source_path = source_location_file_for(subject)
+    return source_path if source_path && !source_path.include?('/gems/sorbet-runtime-')
+
     owner = subject.expression.delete_suffix('*').split(/[.#]/, 2).first.to_s
     hint = underscore(owner.split('::').last.to_s)
     candidates = subject.requires.filter_map do |req|
@@ -237,6 +243,133 @@ module RubySpecMutants
       end
     end.flatten.uniq
     candidates.find { |rel| rel.include?(hint) } || candidates.first
+  end
+
+  sig { params(subject: Subject).returns(T.nilable(String)) }
+  def self.source_location_file_for(subject)
+    $LOAD_PATH.unshift(File.join(MutationTesting::ROOT, 'src')) unless $LOAD_PATH.include?(File.join(MutationTesting::ROOT, 'src'))
+    subject.requires.each { |req| require req }
+
+    expression = subject.expression.delete_suffix('*')
+    if subject.expression.end_with?('*')
+      location = Object.const_source_location(expression)
+      return nil unless location&.first
+
+      return relative_repo_path(location.first)
+    end
+
+    owner, method_name, class_method = method_owner_and_name(expression)
+    return nil unless owner && method_name
+
+    owner_const = T.unsafe(Object).const_get(owner)
+    location =
+      if class_method
+        owner_const.method(method_name).source_location
+      else
+        owner_const.instance_method(method_name).source_location
+      end
+    return nil unless location&.first
+
+    relative_repo_path(location.first)
+  rescue LoadError, NameError
+    nil
+  end
+
+  sig { params(subject: Subject).returns(T.nilable(String)) }
+  def self.static_source_file_for(subject)
+    expression = subject.expression.delete_suffix('*')
+    if subject.expression.end_with?('*')
+      owner = expression
+      candidates = ruby_source_files.select { |path| file_mentions_owner?(path, owner) }
+      return best_owner_file(owner, candidates)
+    end
+
+    owner, method_name, _class_method = method_owner_and_name(expression)
+    return nil unless owner && method_name
+
+    candidates = ruby_source_files.select { |path| file_defines_method?(path, method_name) }
+    owner_candidates = candidates.select { |path| file_mentions_owner?(path, owner) }
+    return best_owner_file(owner, owner_candidates) unless owner_candidates.empty?
+
+    owner_mentioned = candidates.select { |path| method_body_mentions_owner?(path, method_name, owner) }
+    return owner_mentioned.first if owner_mentioned.length == 1
+    return candidates.first if candidates.length == 1
+
+    nil
+  end
+
+  sig { returns(T::Array[String]) }
+  def self.ruby_source_files
+    ['src', 'tools'].flat_map do |root|
+      Dir.glob(File.join(MutationTesting::ROOT, root, '**', '*.rb')).map do |path|
+        relative_repo_path(path)
+      end
+    end.sort
+  end
+
+  sig { params(owner: String, candidates: T::Array[String]).returns(T.nilable(String)) }
+  def self.best_owner_file(owner, candidates)
+    return nil if candidates.empty?
+
+    hint = underscore(owner.split('::').last.to_s)
+    candidates.find { |path| path.include?(hint) } || candidates.first
+  end
+
+  sig { params(path: String, owner: String).returns(T::Boolean) }
+  def self.file_mentions_owner?(path, owner)
+    text = File.read(File.join(MutationTesting::ROOT, path))
+    owner_tail = owner.split('::').last.to_s
+    owner_patterns = [owner, owner_tail].uniq
+    owner_patterns.any? do |name|
+      text.match?(/^\s*(class|module)\s+#{Regexp.escape(name)}(\s|$)/) ||
+        text.match?(/^\s*(class|module)\s+#{Regexp.escape(name)}[A-Z]/)
+    end
+  end
+
+  sig { params(path: String, method_name: String).returns(T::Boolean) }
+  def self.file_defines_method?(path, method_name)
+    method_pattern = method_definition_pattern(method_name)
+    File.foreach(File.join(MutationTesting::ROOT, path)).any? { |line| line.match?(method_pattern) }
+  end
+
+  sig { params(path: String, method_name: String, owner: String).returns(T::Boolean) }
+  def self.method_body_mentions_owner?(path, method_name, owner)
+    method_pattern = method_definition_pattern(method_name)
+    lines = File.readlines(File.join(MutationTesting::ROOT, path), chomp: true)
+    start = lines.index { |line| line.match?(method_pattern) }
+    return false unless start
+
+    owner_tail = owner.split('::').last.to_s
+    body = lines[start, 40].join("\n")
+    body.include?(owner) || body.include?(owner_tail)
+  end
+
+  sig { params(method_name: String).returns(Regexp) }
+  def self.method_definition_pattern(method_name)
+    escaped = Regexp.escape(method_name)
+    /^\s*(?:(?:private|protected|public|private_class_method|module_function)\s+)?def\s+(?:self\.)?#{escaped}(?=\s|\(|$)/
+  end
+
+  sig { params(expression: String).returns([T.nilable(String), T.nilable(String), T::Boolean]) }
+  def self.method_owner_and_name(expression)
+    if expression.include?('#')
+      owner, method_name = expression.split('#', 2)
+      return [owner, method_name, false]
+    end
+    owner, separator, method_name = expression.rpartition('.')
+    return [owner, method_name, true] unless separator.empty?
+
+    owner, separator, method_name = expression.rpartition('::')
+    return [owner, method_name, true] unless separator.empty?
+
+    [nil, nil, true]
+  end
+
+  sig { params(path: String).returns(String) }
+  def self.relative_repo_path(path)
+    expanded = File.expand_path(path)
+    root = "#{MutationTesting::ROOT}/"
+    expanded.start_with?(root) ? expanded.delete_prefix(root) : path
   end
 
   sig { params(value: String).returns(String) }

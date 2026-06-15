@@ -168,7 +168,7 @@ fn detect_candidate(line: &str, line_number: u32, extension: Option<&str>) -> Op
 }
 
 fn detect_ruby_python(line: &str, line_number: u32) -> Option<Candidate> {
-    if let Some(rest) = line.strip_prefix("def ") {
+    if let Some(rest) = ruby_python_def_rest(line) {
         return named_candidate(rest, UnitKind::Function, line, line_number);
     }
     if let Some(rest) = line.strip_prefix("class ") {
@@ -178,6 +178,22 @@ fn detect_ruby_python(line: &str, line_number: u32) -> Option<Candidate> {
         return named_candidate(rest, UnitKind::Module, line, line_number);
     }
     None
+}
+
+fn ruby_python_def_rest(line: &str) -> Option<&str> {
+    if let Some(rest) = line.strip_prefix("def ") {
+        return Some(rest);
+    }
+    let (prefix, rest) = line.split_once(" def ")?;
+    let prefix = prefix.trim();
+    if matches!(
+        prefix,
+        "private" | "protected" | "public" | "private_class_method" | "module_function"
+    ) {
+        Some(rest)
+    } else {
+        None
+    }
 }
 
 fn detect_javascript(line: &str, line_number: u32) -> Option<Candidate> {
@@ -281,6 +297,7 @@ fn identifier(input: &str) -> Option<&str> {
                 || ch == '_'
                 || ch == '!'
                 || ch == '?'
+                || ch == '='
                 || ch == '.'
                 || ch == ':'
             {
@@ -343,6 +360,20 @@ mod tests {
         let extractor = HeuristicExtractor::default();
         assert_eq!(extractor.extract_units(&go)[0].name, "Run");
         assert_eq!(extractor.extract_units(&zig)[0].name, "run");
+    }
+
+    #[test]
+    fn extracts_ruby_wrapped_class_methods_and_setters() {
+        let file = BlobFile {
+            path: "src/demo.rb".into(),
+            contents: "class Worker\n  private_class_method def self.build!\n    1\n  end\n  def value=(next_value)\n    @value = next_value\n  end\nend\n".into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units.iter().map(|unit| unit.name.as_str()).collect();
+
+        assert!(names.contains(&"self.build!"));
+        assert!(names.contains(&"value="));
     }
 
     #[test]

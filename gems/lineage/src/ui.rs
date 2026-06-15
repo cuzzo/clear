@@ -3350,7 +3350,7 @@ fn render_code_line(
     }
     out.push_str("</span><span class=\"ln\">");
     out.push_str(&line_no.to_string());
-    out.push_str("</span><pre>");
+    out.push_str("</span><pre class=\"source-text\">");
     out.push_str(&highlight_source_line_with_dark_arms(
         path, line_no, source, annotation,
     ));
@@ -4283,8 +4283,8 @@ const STYLE: &str = r#"
     grid-template-columns: 8px 100px 56px minmax(760px, 1fr);
     min-height: 20px;
   }
-  #mode-coverage:checked ~ .viewer .row { background: var(--coverage-bg, transparent); }
-  #mode-churn:checked ~ .viewer .row { background: var(--churn-bg, transparent); }
+  #mode-coverage:checked ~ .viewer .source-text { background: var(--coverage-bg, transparent); }
+  #mode-churn:checked ~ .viewer .source-text { background: var(--churn-bg, transparent); }
   .ln { color: #8b95a5; text-align: right; padding-right: 10px; user-select: none; }
   .hazard-rail {
     min-width: 8px;
@@ -4867,6 +4867,12 @@ mod tests {
         assert!(html.contains("hazard-open"));
         assert!(html.contains("bug-history"));
         assert!(html.contains("decayed bug/fix history"));
+        assert!(html.contains("<pre class=\"source-text\">"));
+        assert!(STYLE.contains("#mode-coverage:checked ~ .viewer .source-text"));
+        assert!(STYLE.contains("#mode-churn:checked ~ .viewer .source-text"));
+        assert!(STYLE.contains("#mode-coverage:checked ~ .viewer .gutter"));
+        assert!(!STYLE.contains("#mode-coverage:checked ~ .viewer .row { background"));
+        assert!(!STYLE.contains("#mode-churn:checked ~ .viewer .row { background"));
         assert!(html.contains("--coverage-bg:rgba(34, 197, 94, 0.08)"));
         assert!(html.contains("--churn-bg:rgba(248, 113, 113"));
         assert!(html.contains("--gutter-coverage-bg:rgba(34, 197, 94, 0.18)"));
