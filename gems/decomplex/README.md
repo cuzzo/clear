@@ -2,10 +2,14 @@
 
 ![Decomplex](docs/assets/decomplex.png)
 
-Decomplex is a set of metrics that help identify complex code and ways
-to mitigate it. It is used by the CLEAR compiler to produce
-LLM-assisted **working** code with both high velocity *and* high
-quality.
+Decomplex is a cross-language static analyzer that helps you identify
+the source of complexity in your codebase and eliminate it.
+
+Linters and Code Smell detectors help you identify surface level issues.
+Decomplex does a much deeper analysis to find the structural issues
+causing problems *throughout* your codebase. In plain terms, Linters
+help you fix individual lines. Decomplex helps you fix your entire
+codebase systemically.
 
 - See [Metrics Expo](docs/agents/metrics-expo.md) for concrete examples
   of what Decomplex measures.

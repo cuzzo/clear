@@ -244,22 +244,6 @@ Stack-trace ingestion is commit-scoped. Re-ingesting the same event is
 idempotent; use `--replace` to reload the commits present in an input
 file.
 
-## CI Integration
-
-The current CI-ready path is:
-
-1. build or restore a Lineage database for the repository history;
-2. ingest coverage, mutation, hazard, and crash artifacts for the PR
-   commit;
-3. ingest SlopCop/constraints overlays when available;
-4. run `refresh-ui` if cached UI summaries are needed;
-5. publish the database or serve the UI as an internal review artifact.
-
-> [!NOTE]
-> Lineage is not itself the CI gate. Decomplex, SlopCop, mutant tests,
-> fuzz tests, and systems tests produce the verdicts; Lineage makes that
-> evidence reviewable next to source.
-
 ## Supported Languages Roadmap
 
 Lineage currently uses a heuristic logical-unit extractor. Ruby and Zig
@@ -292,8 +276,8 @@ It stores, joins, and renders evidence. A good Lineage view should make a
 human say: "this line is risky, and here is the history and verification
 evidence explaining why."
 
-Lineage does not detect lint issues or code smells, as packages for that
-already exist in every language.
+Support to ingest lint data and code smell data into Lineage is not yet
+available. Though, it is planned for the first release.
 
 ## Links
 

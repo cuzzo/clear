@@ -1,5 +1,7 @@
 # Nil-kill: find `nil`s and type ambiguity at the source.
 
+![Nil-kill](docs/assets/nil-kill.png)
+
  * Nil-kill helps you eliminate `nil`s and strongly type your codebase by showing where the pressure originates.
  * It combines *static analysis* with *runtime observations*.
  * Nil-kill emits evidence and action plans. Source rewriting lives in [Auto-type](../auto-type/README.md).

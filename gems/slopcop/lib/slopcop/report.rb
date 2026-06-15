@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rollup"
+require_relative "sarif"
 require "json"
 require "pathname"
 
@@ -176,6 +177,10 @@ module SlopCop
 
     def to_json(*_args)
       JSON.pretty_generate(to_h)
+    end
+
+    def to_sarif
+      Sarif.render(self)
     end
 
     private

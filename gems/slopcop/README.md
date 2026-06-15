@@ -1,5 +1,7 @@
 # SlopCop
 
+![SlopCop](docs/assets/slopcop.png)
+
 SlopCop turns branch coverage into an ordered list of the test gaps that
 actually matter. A flat "673/2732 uncovered" count is not actionable;
 SlopCop classifies every dark branch arm, filters out arms that are not
@@ -57,8 +59,9 @@ bundle exec gems/slopcop/exe/slopcop dark-arms \
 ## Outputs
 
 SlopCop can output a Markdown report for human review, JSON for tools
-and LLMs, Lineage-ready dark-arm overlays, and SARIF/JSON/Markdown
-constraint reports for CI hazard checks.
+and LLMs, SARIF for GitHub code scanning, Lineage-ready dark-arm
+overlays, and SARIF/JSON/Markdown constraint reports for CI hazard
+checks.
 
 > [!NOTE]
 > SlopCop also integrates with [Lineage](../lineage/README.md),
@@ -91,6 +94,23 @@ bundle exec gems/slopcop/exe/slopcop report \
   --coverage=coverage/.resultset.json \
   --json=/tmp/slopcop.json
 ```
+
+### SARIF
+
+SlopCop can generate SARIF 2.1.0 for GitHub code scanning:
+
+```bash
+bundle exec gems/slopcop/exe/slopcop report \
+  --repo=. \
+  --coverage=coverage/.resultset.json \
+  --output=report.md \
+  --json=/tmp/slopcop.json \
+  --sarif=/tmp/slopcop.sarif
+```
+
+SARIF is generated from the same ranked genuine gaps used by Markdown
+and JSON output. It does not emit every dark arm; code scanning should
+surface actionable test gaps, not category noise.
 
 ### Lineage Overlay
 
@@ -129,16 +149,20 @@ Findings are advisory unless `--strict` is supplied.
 The current CI-ready path is:
 
 1. produce branch coverage for the code under test;
-2. run `slopcop report` to generate Markdown and JSON artifacts;
+2. run `slopcop report` to generate Markdown, JSON, and SARIF artifacts;
 3. optionally run `slopcop dark-arms` for Lineage overlays;
 4. optionally run `slopcop constraints` for hazard-specific coverage
    checks;
-5. fail or warn only on genuine gaps or strict constraint violations.
+5. upload report SARIF with `github/codeql-action/upload-sarif`;
+6. fail or warn only on genuine gaps or strict constraint violations.
 
 > [!NOTE]
-> See [CI Gate Notes](docs/agents/ci-gate.md) for the planned pull
-> request ratchet model. The gem emits artifacts; the consuming
-> repository owns posting comments and setting GitHub Checks.
+> See
+> [CLEAR's GitHub Config](https://github.com/cuzzo/clear/blob/decomplex-launch/.github/workflows/ci.yml#:~:text=slopcop-report-sarif%3A)
+> for how to include SlopCop SARIF as a Pull Request review helper, or
+> part of your Continuous Integration workflow. See
+> [CI Gate Notes](docs/agents/ci-gate.md) for the planned pull request
+> ratchet model.
 
 ## Coverage Inputs
 
