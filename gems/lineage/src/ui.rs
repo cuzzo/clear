@@ -39,8 +39,11 @@ pub struct UiFile {
     pub covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
+    pub mutant_verified_covered_lines: i64,
     pub mutant_killed_covered_lines: i64,
+    pub stochastic_mutant_verified_covered_lines: i64,
     pub stochastic_mutant_killed_covered_lines: i64,
+    pub invariant_mutant_verified_covered_lines: i64,
     pub invariant_mutant_killed_covered_lines: i64,
     pub multi_type_covered_lines: i64,
     #[serde(skip)]
@@ -162,10 +165,16 @@ pub struct UiDashboard {
     pub hazard_evidence_percent: f64,
     pub covered_hazards: i64,
     pub hazard_coverage_percent: f64,
+    pub mutant_verified_covered_lines: i64,
+    pub mutant_verified_covered_percent: f64,
     pub mutant_killed_covered_lines: i64,
     pub mutant_killed_covered_percent: f64,
+    pub stochastic_mutant_verified_covered_lines: i64,
+    pub stochastic_mutant_verified_covered_percent: f64,
     pub stochastic_mutant_killed_covered_lines: i64,
     pub stochastic_mutant_killed_covered_percent: f64,
+    pub invariant_mutant_verified_covered_lines: i64,
+    pub invariant_mutant_verified_covered_percent: f64,
     pub invariant_mutant_killed_covered_lines: i64,
     pub invariant_mutant_killed_covered_percent: f64,
     pub multi_type_covered_lines: i64,
@@ -179,8 +188,11 @@ pub struct UiDashboard {
 struct DashboardLineCounts {
     tracked: i64,
     covered: i64,
+    mutant_verified: i64,
     mutant_killed: i64,
+    stochastic_mutant_verified: i64,
     stochastic_mutant_killed: i64,
+    invariant_mutant_verified: i64,
     invariant_mutant_killed: i64,
     multi_type: i64,
 }
@@ -333,8 +345,11 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
                 fallback_line_coverage
             },
             mutant_coverage: row.get(6)?,
+            mutant_verified_covered_lines: 0,
             mutant_killed_covered_lines: 0,
+            stochastic_mutant_verified_covered_lines: 0,
             stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_verified_covered_lines: 0,
             invariant_mutant_killed_covered_lines: 0,
             multi_type_covered_lines: 0,
             read_model: false,
@@ -377,8 +392,11 @@ fn append_sarif_only_files(
             covered_lines: 0,
             line_coverage: 0.0,
             mutant_coverage: 0.0,
+            mutant_verified_covered_lines: 0,
             mutant_killed_covered_lines: 0,
+            stochastic_mutant_verified_covered_lines: 0,
             stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_verified_covered_lines: 0,
             invariant_mutant_killed_covered_lines: 0,
             multi_type_covered_lines: 0,
             read_model,
@@ -418,8 +436,11 @@ fn read_model_file_index_with_scope(
                covered_lines,
                line_coverage,
                mutant_coverage,
+               mutant_verified_covered_lines,
                mutant_killed_covered_lines,
+               stochastic_mutant_verified_covered_lines,
                stochastic_mutant_killed_covered_lines,
+               invariant_mutant_verified_covered_lines,
                invariant_mutant_killed_covered_lines,
                multi_type_covered_lines
         FROM ui_file_summaries
@@ -442,10 +463,13 @@ fn read_model_file_index_with_scope(
             covered_lines: row.get(8)?,
             line_coverage: row.get(9)?,
             mutant_coverage: row.get(10)?,
-            mutant_killed_covered_lines: row.get(11)?,
-            stochastic_mutant_killed_covered_lines: row.get(12)?,
-            invariant_mutant_killed_covered_lines: row.get(13)?,
-            multi_type_covered_lines: row.get(14)?,
+            mutant_verified_covered_lines: row.get(11)?,
+            mutant_killed_covered_lines: row.get(12)?,
+            stochastic_mutant_verified_covered_lines: row.get(13)?,
+            stochastic_mutant_killed_covered_lines: row.get(14)?,
+            invariant_mutant_verified_covered_lines: row.get(15)?,
+            invariant_mutant_killed_covered_lines: row.get(16)?,
+            multi_type_covered_lines: row.get(17)?,
             read_model: true,
         })
     })?;
@@ -692,11 +716,23 @@ pub fn dashboard_summary_for_directory_with_scope(
         hazard_evidence_percent: percent(evidence_covered_hazards, active_hazards),
         covered_hazards,
         hazard_coverage_percent: percent(covered_hazards, active_hazards),
+        mutant_verified_covered_lines: line_counts.mutant_verified,
+        mutant_verified_covered_percent: percent(line_counts.mutant_verified, line_counts.covered),
         mutant_killed_covered_lines: line_counts.mutant_killed,
         mutant_killed_covered_percent: percent(line_counts.mutant_killed, line_counts.covered),
+        stochastic_mutant_verified_covered_lines: line_counts.stochastic_mutant_verified,
+        stochastic_mutant_verified_covered_percent: percent(
+            line_counts.stochastic_mutant_verified,
+            line_counts.covered,
+        ),
         stochastic_mutant_killed_covered_lines: line_counts.stochastic_mutant_killed,
         stochastic_mutant_killed_covered_percent: percent(
             line_counts.stochastic_mutant_killed,
+            line_counts.covered,
+        ),
+        invariant_mutant_verified_covered_lines: line_counts.invariant_mutant_verified,
+        invariant_mutant_verified_covered_percent: percent(
+            line_counts.invariant_mutant_verified,
             line_counts.covered,
         ),
         invariant_mutant_killed_covered_lines: line_counts.invariant_mutant_killed,
@@ -967,8 +1003,11 @@ fn dashboard_line_counts_from_files(files: &[UiFile], directory: &str) -> Dashbo
     for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
         counts.tracked += file.tracked_lines;
         counts.covered += file.covered_lines;
+        counts.mutant_verified += file.mutant_verified_covered_lines;
         counts.mutant_killed += file.mutant_killed_covered_lines;
+        counts.stochastic_mutant_verified += file.stochastic_mutant_verified_covered_lines;
         counts.stochastic_mutant_killed += file.stochastic_mutant_killed_covered_lines;
+        counts.invariant_mutant_verified += file.invariant_mutant_verified_covered_lines;
         counts.invariant_mutant_killed += file.invariant_mutant_killed_covered_lines;
         counts.multi_type += file.multi_type_covered_lines;
     }
@@ -1017,7 +1056,7 @@ fn dashboard_line_counts(
         ),
         ranked_exposure AS (
           SELECT path, line, branch_id, test_id, test_type, is_verified,
-                 is_mutation_killed, mutation_kind,
+                 is_mutation_verified, is_mutation_killed, mutation_kind,
                  ROW_NUMBER() OVER (
                    PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
                    ORDER BY timestamp DESC, id DESC
@@ -1033,7 +1072,14 @@ fn dashboard_line_counts(
         SELECT path,
                line,
                COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
+               MAX(CASE WHEN is_verified = 1 AND is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
                MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
+                 THEN 1 ELSE 0
+               END) AS stochastic_mutant_verified,
                MAX(CASE
                  WHEN is_verified = 1
                   AND is_mutation_killed = 1
@@ -1045,7 +1091,13 @@ fn dashboard_line_counts(
                   AND is_mutation_killed = 1
                   AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
                  THEN 1 ELSE 0
-               END) AS invariant_mutant_killed
+               END) AS invariant_mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                 THEN 1 ELSE 0
+               END) AS invariant_mutant_verified
         FROM latest_exposure
         JOIN latest_lines USING (path, line)
         WHERE latest_lines.hits > 0
@@ -1060,6 +1112,9 @@ fn dashboard_line_counts(
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
             row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, i64>(8)?,
         ))
     })?;
     for row in rows {
@@ -1067,18 +1122,30 @@ fn dashboard_line_counts(
             path,
             _line,
             verified_test_types,
+            has_mutant_verified,
             has_mutant_killed,
+            has_stochastic_mutant_verified,
             has_stochastic_mutant_killed,
             has_invariant_mutant_killed,
+            has_invariant_mutant_verified,
         ) = row?;
         if !_scope.allows(&path) || !path_in_directory(&path, _directory) {
             continue;
         }
+        if has_mutant_verified > 0 {
+            counts.mutant_verified += 1;
+        }
         if has_mutant_killed > 0 {
             counts.mutant_killed += 1;
         }
+        if has_stochastic_mutant_verified > 0 {
+            counts.stochastic_mutant_verified += 1;
+        }
         if has_stochastic_mutant_killed > 0 {
             counts.stochastic_mutant_killed += 1;
+        }
+        if has_invariant_mutant_verified > 0 {
+            counts.invariant_mutant_verified += 1;
         }
         if has_invariant_mutant_killed > 0 {
             counts.invariant_mutant_killed += 1;
@@ -2911,26 +2978,26 @@ fn render_dashboard(
     ));
     out.push_str(&render_metric(
         "Mutant-backed lines",
-        &format!("{:.1}%", dashboard.mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines have killed-mutant evidence",
-            dashboard.mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines have mutant-verified evidence",
+            dashboard.mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
         "Stochastic mutants",
-        &format!("{:.1}%", dashboard.stochastic_mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.stochastic_mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines are stochastic-mutant backed",
-            dashboard.stochastic_mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines are stochastic-mutant verified",
+            dashboard.stochastic_mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
         "Invariant mutants",
-        &format!("{:.1}%", dashboard.invariant_mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.invariant_mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines are invariant-mutant backed",
-            dashboard.invariant_mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines are invariant-mutant verified",
+            dashboard.invariant_mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
@@ -5043,8 +5110,11 @@ mod tests {
                 covered_lines: 5,
                 line_coverage: 50.0,
                 mutant_coverage: 25.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,
@@ -5062,8 +5132,11 @@ mod tests {
                 covered_lines: 15,
                 line_coverage: 75.0,
                 mutant_coverage: 50.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,
@@ -5081,8 +5154,11 @@ mod tests {
                 covered_lines: 4,
                 line_coverage: 100.0,
                 mutant_coverage: 0.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,

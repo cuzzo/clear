@@ -245,8 +245,11 @@ impl Storage {
               covered_lines INTEGER NOT NULL,
               line_coverage REAL NOT NULL,
               mutant_coverage REAL NOT NULL,
+              mutant_verified_covered_lines INTEGER NOT NULL,
               mutant_killed_covered_lines INTEGER NOT NULL,
+              stochastic_mutant_verified_covered_lines INTEGER NOT NULL,
               stochastic_mutant_killed_covered_lines INTEGER NOT NULL,
+              invariant_mutant_verified_covered_lines INTEGER NOT NULL,
               invariant_mutant_killed_covered_lines INTEGER NOT NULL,
               multi_type_covered_lines INTEGER NOT NULL
             );
@@ -322,6 +325,21 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
         self.ensure_column("test_exposure_events", "mutation_kind", "TEXT NOT NULL DEFAULT ''")?;
+        self.ensure_column(
+            "ui_file_summaries",
+            "mutant_verified_covered_lines",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
+            "ui_file_summaries",
+            "stochastic_mutant_verified_covered_lines",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
+            "ui_file_summaries",
+            "invariant_mutant_verified_covered_lines",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         self.backfill_mutation_kind()?;
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_test_exposure_events_mutation_kind ON test_exposure_events(mutation_kind)",
@@ -1399,7 +1417,7 @@ impl Storage {
             ),
             ranked_exposure AS (
               SELECT path, line, branch_id, test_id, test_type, is_verified,
-                     is_mutation_killed, mutation_kind,
+                     is_mutation_verified, is_mutation_killed, mutation_kind,
                      ROW_NUMBER() OVER (
                        PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
                        ORDER BY timestamp DESC, id DESC
@@ -1416,7 +1434,14 @@ impl Storage {
               SELECT e.path,
                      e.line,
                      COUNT(DISTINCT CASE WHEN e.is_verified = 1 THEN e.test_type END) AS verified_test_types,
+                     MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
                      MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
+                     MAX(CASE
+                       WHEN e.is_verified = 1
+                        AND e.is_mutation_verified = 1
+                        AND lower(COALESCE(e.mutation_kind, '')) = 'stochastic'
+                       THEN 1 ELSE 0
+                     END) AS stochastic_mutant_verified,
                      MAX(CASE
                        WHEN e.is_verified = 1
                         AND e.is_mutation_killed = 1
@@ -1428,7 +1453,13 @@ impl Storage {
                         AND e.is_mutation_killed = 1
                         AND lower(COALESCE(e.mutation_kind, '')) IN ('invariant', 'contract')
                        THEN 1 ELSE 0
-                     END) AS invariant_mutant_killed
+                     END) AS invariant_mutant_killed,
+                     MAX(CASE
+                       WHEN e.is_verified = 1
+                        AND e.is_mutation_verified = 1
+                        AND lower(COALESCE(e.mutation_kind, '')) IN ('invariant', 'contract')
+                       THEN 1 ELSE 0
+                     END) AS invariant_mutant_verified
               FROM latest_exposure e
               JOIN latest_lines l
                 ON l.path = e.path
@@ -1438,8 +1469,11 @@ impl Storage {
             ),
             exposure_file AS (
               SELECT path,
+                     SUM(mutant_verified) AS mutant_verified_covered_lines,
                      SUM(mutant_killed) AS mutant_killed_covered_lines,
+                     SUM(stochastic_mutant_verified) AS stochastic_mutant_verified_covered_lines,
                      SUM(stochastic_mutant_killed) AS stochastic_mutant_killed_covered_lines,
+                     SUM(invariant_mutant_verified) AS invariant_mutant_verified_covered_lines,
                      SUM(invariant_mutant_killed) AS invariant_mutant_killed_covered_lines,
                      SUM(CASE WHEN verified_test_types >= 2 THEN 1 ELSE 0 END) AS multi_type_covered_lines
               FROM line_exposure
@@ -1542,8 +1576,11 @@ impl Storage {
               covered_lines,
               line_coverage,
               mutant_coverage,
+              mutant_verified_covered_lines,
               mutant_killed_covered_lines,
+              stochastic_mutant_verified_covered_lines,
               stochastic_mutant_killed_covered_lines,
+              invariant_mutant_verified_covered_lines,
               invariant_mutant_killed_covered_lines,
               multi_type_covered_lines
             )
@@ -1562,8 +1599,11 @@ impl Storage {
                      ELSE COALESCE(uf.fallback_line_coverage, 0.0)
                    END,
                    COALESCE(uf.mutant_coverage, 0.0),
+                   COALESCE(ef.mutant_verified_covered_lines, 0),
                    COALESCE(ef.mutant_killed_covered_lines, 0),
+                   COALESCE(ef.stochastic_mutant_verified_covered_lines, 0),
                    COALESCE(ef.stochastic_mutant_killed_covered_lines, 0),
+                   COALESCE(ef.invariant_mutant_verified_covered_lines, 0),
                    COALESCE(ef.invariant_mutant_killed_covered_lines, 0),
                    COALESCE(ef.multi_type_covered_lines, 0)
             FROM paths p

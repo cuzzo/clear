@@ -238,7 +238,15 @@ fn method_aliases(method: &str) -> Vec<String> {
 fn mutation_status(fact: &MutantFact) -> Option<&'static str> {
     let mutations = fact.mutations.unwrap_or(0);
     if mutations == 0 {
-        return None;
+        let gate = fact.gate_status.as_deref().unwrap_or_default().trim();
+        let verified_gate = matches!(
+            gate.to_ascii_lowercase().as_str(),
+            "hard" | "hard-gated" | "advisory" | "verified"
+        );
+        let complete = fact.kill_rate.unwrap_or(100.0) >= 100.0
+            && fact.killed.unwrap_or(0) == 0
+            && fact.alive.unwrap_or(0) == 0;
+        return (verified_gate && complete).then_some("verified");
     }
     if fact.killed.unwrap_or(0) > 0 {
         Some("killed")
@@ -415,6 +423,26 @@ mod tests {
         assert_eq!(facts[0].source, "gems/zig-mutants");
         assert_eq!(facts[0].mutation_kind, "invariant");
         assert_eq!(mutant_test_id(&facts[0]), "mutant:zig:gems/zig-mutants:poll");
+    }
+
+    #[test]
+    fn zero_mutation_hard_gates_are_mutant_verified_without_kills() {
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/demo.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 0,
+                "killed": 0,
+                "alive": 0
+            }]
+        });
+
+        let facts = parse_mutant_facts(&payload.to_string()).unwrap();
+
+        assert_eq!(mutation_status(&facts[0]), Some("verified"));
     }
 
     #[test]
