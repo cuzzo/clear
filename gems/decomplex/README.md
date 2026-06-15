@@ -105,10 +105,11 @@ The current CI-ready path is:
 3. run `decomplex delta` on PRs;
 4. fail or warn only on new/growing high-confidence findings.
 
-- See
-  [CLEAR's GitHub Config](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A)
-  for how to include it as Pull Request review helper, or part of your
-  Continuous Integration workflow.
+> [!NOTE]
+> See
+> [CLEAR's GitHub Config](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A)
+> for how to include it as Pull Request review helper, or part of your
+> Continuous Integration workflow.
 
 ## Supported Languages Roadmap
 
