@@ -28,22 +28,35 @@ pub struct UnitSummary {
     pub current_mutant_verified_tests: i64,
     pub current_mutant_killed_tests: i64,
     pub last_test_exposure_at: i64,
+    pub last_mutant_run_at: i64,
     pub latest_fix_at: i64,
     pub latest_change_at: i64,
     pub fixes_after_test_exposure: i64,
     pub changes_after_test_exposure: i64,
+    pub semantic_changes_after_mutant_run: i64,
+    pub verification_stale_seconds: i64,
+    pub verification_staleness_score: f64,
+    pub reopened_count: i64,
 }
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
+        configure_connection(&conn)?;
         let storage = Self { conn };
         storage.init_schema()?;
         Ok(storage)
     }
 
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self> {
+        let conn = Connection::open(path)?;
+        configure_connection(&conn)?;
+        Ok(Self { conn })
+    }
+
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        configure_connection(&conn)?;
         let storage = Self { conn };
         storage.init_schema()?;
         Ok(storage)
@@ -171,13 +184,23 @@ impl Storage {
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_events_unit_latest
+              ON events(unit_id, timestamp DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_unit_type_semantic_time
+              ON events(unit_id, event_type, semantic_change, timestamp);
             CREATE INDEX IF NOT EXISTS idx_events_commit_hash ON events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
             CREATE INDEX IF NOT EXISTS idx_quality_events_unit_id ON quality_events(unit_id);
             CREATE INDEX IF NOT EXISTS idx_quality_events_commit_hash ON quality_events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_crash_events_unit_id ON crash_events(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_crash_events_unit_path_line_time
+              ON crash_events(unit_id, path, line, timestamp);
             CREATE INDEX IF NOT EXISTS idx_crash_events_commit_hash ON crash_events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_unit_id ON test_exposure_events(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_unit_mutant_time
+              ON test_exposure_events(unit_id, is_mutation_verified, is_mutation_killed, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_test_exposure_events_path_line_latest
+              ON test_exposure_events(path, line, branch_id, test_id, test_type, timestamp DESC, id DESC);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_commit_hash ON test_exposure_events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_test_id ON test_exposure_events(test_id);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_type ON test_exposure_events(test_type);
@@ -186,6 +209,8 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_type ON unit_hazards(hazard_type);
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_detected_at ON unit_hazards(detected_at_hash);
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line ON coverage_line_events(path, line);
+            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line_source_latest
+              ON coverage_line_events(path, line, source, timestamp DESC, id DESC);
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_commit_hash ON coverage_line_events(commit_hash);
             "#,
         )?;
@@ -1018,6 +1043,37 @@ impl Storage {
     pub fn top_units(&self, limit: usize, only_prefixes: &[String]) -> Result<Vec<UnitSummary>> {
         let mut stmt = self.conn.prepare(
             r#"
+            WITH db_clock AS (
+              SELECT COALESCE(MAX(timestamp), 0) AS observed_at
+              FROM (
+                SELECT timestamp FROM metadata
+                UNION ALL SELECT timestamp FROM events
+                UNION ALL SELECT timestamp FROM quality_events
+                UNION ALL SELECT timestamp FROM crash_events
+                UNION ALL SELECT timestamp FROM test_exposure_events
+              )
+            ),
+            mutant_runs AS (
+              SELECT unit_id, MAX(timestamp) AS last_mutant_run_at
+              FROM test_exposure_events
+              WHERE is_mutation_verified = 1 OR is_mutation_killed = 1
+              GROUP BY unit_id
+            ),
+            reopened AS (
+              SELECT c.unit_id, COUNT(DISTINCT c.id) AS reopened_count
+              FROM crash_events c
+              WHERE EXISTS (
+                SELECT 1
+                FROM events fix
+                WHERE fix.unit_id = c.unit_id
+                  AND fix.event_type = 'FIX'
+                  AND fix.semantic_change = 1
+                  AND fix.path = c.path
+                  AND c.line BETWEEN fix.start_line AND fix.end_line
+                  AND c.timestamp > fix.timestamp
+              )
+              GROUP BY c.unit_id
+            )
             SELECT
               u.id,
               u.name,
@@ -1039,6 +1095,7 @@ impl Storage {
               u.current_mutant_verified_tests,
               u.current_mutant_killed_tests,
               u.last_test_exposure_at,
+              COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
               MAX(CASE WHEN e.event_type = 'FIX' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_fix_at,
               MAX(CASE WHEN e.event_type = 'CHANGE' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_change_at,
               SUM(CASE
@@ -1054,17 +1111,36 @@ impl Storage {
                  AND e.semantic_change = 1
                  AND e.timestamp > u.last_test_exposure_at
                 THEN 1 ELSE 0
-              END) AS changes_after_test_exposure
+              END) AS changes_after_test_exposure,
+              SUM(CASE
+                WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                 AND e.semantic_change = 1
+                 AND e.event_type IN ('FIX', 'CHANGE')
+                 AND e.timestamp > m.last_mutant_run_at
+                THEN 1 ELSE 0
+              END) AS semantic_changes_after_mutant_run,
+              CASE
+                WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                 AND clock.observed_at > m.last_mutant_run_at
+                THEN clock.observed_at - m.last_mutant_run_at
+                ELSE 0
+              END AS verification_stale_seconds,
+              COALESCE(r.reopened_count, 0) AS reopened_count
             FROM logical_units u
             JOIN events e ON e.unit_id = u.id
+            LEFT JOIN mutant_runs m ON m.unit_id = u.id
+            LEFT JOIN reopened r ON r.unit_id = u.id
+            CROSS JOIN db_clock clock
             GROUP BY u.id, u.name, u.type, u.original_path,
                      u.current_distinct_tests, u.current_test_types,
                      u.current_mutant_verified_tests,
-                     u.current_mutant_killed_tests, u.last_test_exposure_at
+                     u.current_mutant_killed_tests, u.last_test_exposure_at,
+                     m.last_mutant_run_at, r.reopened_count, clock.observed_at
             "#,
         )?;
 
         let rows = stmt.query_map([], |row| {
+            let verification_stale_seconds = row.get::<_, i64>(20)?;
             Ok(UnitSummary {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -1080,10 +1156,15 @@ impl Storage {
                 current_mutant_verified_tests: row.get(11)?,
                 current_mutant_killed_tests: row.get(12)?,
                 last_test_exposure_at: row.get(13)?,
-                latest_fix_at: row.get(14)?,
-                latest_change_at: row.get(15)?,
-                fixes_after_test_exposure: row.get(16)?,
-                changes_after_test_exposure: row.get(17)?,
+                last_mutant_run_at: row.get(14)?,
+                latest_fix_at: row.get(15)?,
+                latest_change_at: row.get(16)?,
+                fixes_after_test_exposure: row.get(17)?,
+                changes_after_test_exposure: row.get(18)?,
+                semantic_changes_after_mutant_run: row.get(19)?,
+                verification_stale_seconds,
+                verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
+                reopened_count: row.get(21)?,
                 risk_score: 0.0,
             })
         })?;
@@ -1116,6 +1197,16 @@ impl Storage {
         out.truncate(limit);
         Ok(out)
     }
+}
+
+fn configure_connection(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        PRAGMA foreign_keys = ON;
+        PRAGMA synchronous = NORMAL;
+        "#,
+    )?;
+    Ok(())
 }
 
 fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSummary>) -> Result<()> {
@@ -1474,7 +1565,7 @@ mod tests {
             .unwrap();
         storage
             .insert_event(&Event {
-                unit_id: unit.id,
+                unit_id: unit.id.clone(),
                 commit_hash: "fix2".into(),
                 event_type: EventType::Fix,
                 path: "src/a.rb".into(),
@@ -1487,6 +1578,19 @@ mod tests {
                 timestamp: 30,
             })
             .unwrap();
+        storage
+            .insert_crash_event(&CrashEvent {
+                unit_id: unit.id,
+                commit_hash: "crash1".into(),
+                timestamp: 40,
+                error_class: "RuntimeError".into(),
+                provider_id: "evt-1".into(),
+                is_verified: true,
+                path: "src/a.rb".into(),
+                line: 2,
+                function: "run".into(),
+            })
+            .unwrap();
 
         let top = storage.top_units(10, &[]).unwrap();
 
@@ -1496,7 +1600,12 @@ mod tests {
         assert_eq!(top[0].current_mutant_verified_tests, 1);
         assert_eq!(top[0].current_mutant_killed_tests, 1);
         assert_eq!(top[0].last_test_exposure_at, 20);
+        assert_eq!(top[0].last_mutant_run_at, 20);
         assert_eq!(top[0].latest_fix_at, 30);
         assert_eq!(top[0].fixes_after_test_exposure, 1);
+        assert_eq!(top[0].semantic_changes_after_mutant_run, 1);
+        assert_eq!(top[0].verification_stale_seconds, 20);
+        assert!(top[0].verification_staleness_score > 0.0);
+        assert_eq!(top[0].reopened_count, 1);
     }
 }

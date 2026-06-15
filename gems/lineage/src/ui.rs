@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageScope {
@@ -72,6 +73,13 @@ pub struct UiHazard {
     pub verified: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiWarning {
+    pub level: String,
+    pub label: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiLineAnnotation {
     pub line: u32,
@@ -95,6 +103,7 @@ pub struct UiSourcePayload {
     pub lines: Vec<String>,
     pub versions: Vec<UiVersion>,
     pub annotations: Vec<UiLineAnnotation>,
+    pub warnings: Vec<UiWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -118,6 +127,7 @@ pub struct UiDashboard {
     pub multi_type_covered_percent: f64,
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
+    pub warnings: Vec<UiWarning>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -128,6 +138,19 @@ struct DashboardLineCounts {
     stochastic_mutant_killed: i64,
     invariant_mutant_killed: i64,
     multi_type: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WarningUnit {
+    current_path: String,
+    current_distinct_tests: i64,
+    current_mutant_verified_tests: i64,
+    last_test_exposure_at: i64,
+    last_mutant_run_at: i64,
+    changes_after_test_exposure: i64,
+    semantic_changes_after_mutant_run: i64,
+    verification_stale_seconds: i64,
+    reopened_count: i64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -163,6 +186,7 @@ pub fn serve_ui_with_overlays(
 ) -> Result<()> {
     let db = db.as_ref().to_path_buf();
     let repo = repo.as_ref().to_path_buf();
+    Storage::open(&db)?;
     let overlays = UiOverlays::load(overlay_paths)?;
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
@@ -185,7 +209,11 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
 }
 
 pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
+    let total_start = Instant::now();
+    let line_start = Instant::now();
     let line_stats = line_coverage_by_file(storage, scope)?;
+    profile_log("file_index.line_coverage_by_file", line_start);
+    let query_start = Instant::now();
     let mut stmt = storage.connection().prepare(
         r#"
         WITH current_units AS (
@@ -245,11 +273,14 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
             mutant_coverage: row.get(6)?,
         })
     })?;
-    Ok(rows
+    let files = rows
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
         .filter(|file| scope.allows(&file.path))
-        .collect())
+        .collect();
+    profile_log("file_index.current_units", query_start);
+    profile_log("file_index.total", total_start);
+    Ok(files)
 }
 
 impl CoverageScope {
@@ -414,8 +445,11 @@ pub fn dashboard_summary_for_directory_with_scope(
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<UiDashboard> {
+    let total_start = Instant::now();
     let directory = normalize_directory(directory);
+    let files_start = Instant::now();
     let files = file_index_with_scope(storage, scope)?;
+    profile_log("dashboard.file_index", files_start);
     let mut top_hazard_files = files
         .iter()
         .filter(|file| path_in_directory(&file.path, &directory) && file.hazards > 0)
@@ -429,9 +463,25 @@ pub fn dashboard_summary_for_directory_with_scope(
     });
     top_hazard_files.truncate(8);
 
-    let line_counts = dashboard_line_counts(storage, &directory, scope)?;
+    let line_start = Instant::now();
+    let mut line_counts = dashboard_line_counts(storage, &directory, scope)?;
+    for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
+        line_counts.tracked += file.tracked_lines;
+        line_counts.covered += file.covered_lines;
+    }
+    if line_counts.tracked == 0 {
+        let fallback = dashboard_coverage_line_counts(storage, &directory, scope)?;
+        line_counts.tracked = fallback.tracked;
+        line_counts.covered = fallback.covered;
+    }
+    profile_log("dashboard.line_counts", line_start);
+    let hazard_start = Instant::now();
     let (active_hazards, evidence_covered_hazards, covered_hazards) =
         dashboard_hazard_counts(storage, &directory, scope)?;
+    profile_log("dashboard.hazard_counts", hazard_start);
+    let warning_start = Instant::now();
+    let warnings = warnings_for_directory(storage, &directory, scope)?;
+    profile_log("dashboard.warnings", warning_start);
 
     let files_with_coverage = files
         .iter()
@@ -442,7 +492,7 @@ pub fn dashboard_summary_for_directory_with_scope(
         .filter(|file| path_in_directory(&file.path, &directory))
         .count();
 
-    Ok(UiDashboard {
+    let dashboard = UiDashboard {
         files: files_count,
         tracked_lines: line_counts.tracked,
         covered_lines: line_counts.covered,
@@ -468,58 +518,236 @@ pub fn dashboard_summary_for_directory_with_scope(
         multi_type_covered_percent: percent(line_counts.multi_type, line_counts.covered),
         files_with_coverage,
         top_hazard_files,
-    })
+        warnings,
+    };
+    profile_log("dashboard.total", total_start);
+    Ok(dashboard)
+}
+
+fn warnings_for_directory(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiWarning>> {
+    let units = warning_units(storage)?
+        .into_iter()
+        .filter(|unit| scope.allows(&unit.current_path) && path_in_directory(&unit.current_path, directory))
+        .collect::<Vec<_>>();
+    Ok(warnings_for_units(&units))
+}
+
+fn warnings_for_path(storage: &Storage, path: &str) -> Result<Vec<UiWarning>> {
+    let units = warning_units(storage)?
+        .into_iter()
+        .filter(|unit| unit.current_path == path)
+        .collect::<Vec<_>>();
+    Ok(warnings_for_units(&units))
+}
+
+fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
+    let start = Instant::now();
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_events AS (
+          SELECT unit_id, path
+          FROM (
+            SELECT unit_id, path,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY unit_id
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM events
+          )
+          WHERE rank = 1
+        ),
+        current_units AS (
+          SELECT u.id,
+                 COALESCE(le.path, u.original_path) AS current_path,
+                 u.current_distinct_tests,
+                 u.current_mutant_verified_tests,
+                 u.last_test_exposure_at
+          FROM logical_units u
+          LEFT JOIN latest_events le ON le.unit_id = u.id
+        ),
+        db_clock AS (
+          SELECT COALESCE(MAX(timestamp), 0) AS observed_at
+          FROM (
+            SELECT timestamp FROM metadata
+            UNION ALL SELECT timestamp FROM events
+            UNION ALL SELECT timestamp FROM quality_events
+            UNION ALL SELECT timestamp FROM crash_events
+            UNION ALL SELECT timestamp FROM test_exposure_events
+          )
+        ),
+        mutant_runs AS (
+          SELECT unit_id, MAX(timestamp) AS last_mutant_run_at
+          FROM test_exposure_events
+          WHERE is_mutation_verified = 1 OR is_mutation_killed = 1
+          GROUP BY unit_id
+        ),
+        event_counts AS (
+          SELECT cu.id,
+                 SUM(CASE
+                   WHEN cu.last_test_exposure_at > 0
+                    AND e.semantic_change = 1
+                    AND e.event_type IN ('FIX', 'CHANGE')
+                    AND e.timestamp > cu.last_test_exposure_at
+                   THEN 1 ELSE 0
+                 END) AS changes_after_test_exposure,
+                 SUM(CASE
+                   WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                    AND e.semantic_change = 1
+                    AND e.event_type IN ('FIX', 'CHANGE')
+                    AND e.timestamp > m.last_mutant_run_at
+                   THEN 1 ELSE 0
+                 END) AS semantic_changes_after_mutant_run
+          FROM current_units cu
+          LEFT JOIN mutant_runs m ON m.unit_id = cu.id
+          LEFT JOIN events e ON e.unit_id = cu.id
+          GROUP BY cu.id
+        ),
+        reopened AS (
+          SELECT c.unit_id, COUNT(DISTINCT c.id) AS reopened_count
+          FROM crash_events c
+          WHERE EXISTS (
+            SELECT 1
+            FROM events fix
+            WHERE fix.unit_id = c.unit_id
+              AND fix.event_type = 'FIX'
+              AND fix.semantic_change = 1
+              AND fix.path = c.path
+              AND c.line BETWEEN fix.start_line AND fix.end_line
+              AND c.timestamp > fix.timestamp
+          )
+          GROUP BY c.unit_id
+        )
+        SELECT cu.current_path,
+               cu.current_distinct_tests,
+               cu.current_mutant_verified_tests,
+               cu.last_test_exposure_at,
+               COALESCE(m.last_mutant_run_at, 0) AS last_mutant_run_at,
+               COALESCE(ec.changes_after_test_exposure, 0) AS changes_after_test_exposure,
+               COALESCE(ec.semantic_changes_after_mutant_run, 0) AS semantic_changes_after_mutant_run,
+               CASE
+                 WHEN COALESCE(m.last_mutant_run_at, 0) > 0
+                  AND clock.observed_at > m.last_mutant_run_at
+                 THEN clock.observed_at - m.last_mutant_run_at
+                 ELSE 0
+               END AS verification_stale_seconds,
+               COALESCE(r.reopened_count, 0) AS reopened_count
+        FROM current_units cu
+        LEFT JOIN mutant_runs m ON m.unit_id = cu.id
+        LEFT JOIN event_counts ec ON ec.id = cu.id
+        LEFT JOIN reopened r ON r.unit_id = cu.id
+        CROSS JOIN db_clock clock
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(WarningUnit {
+            current_path: row.get(0)?,
+            current_distinct_tests: row.get(1)?,
+            current_mutant_verified_tests: row.get(2)?,
+            last_test_exposure_at: row.get(3)?,
+            last_mutant_run_at: row.get(4)?,
+            changes_after_test_exposure: row.get(5)?,
+            semantic_changes_after_mutant_run: row.get(6)?,
+            verification_stale_seconds: row.get(7)?,
+            reopened_count: row.get(8)?,
+        })
+    })?;
+    let units = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+    profile_log("warnings.units_query", start);
+    Ok(units)
+}
+
+fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
+    let coverage_stale = units
+        .iter()
+        .filter(|unit| {
+            unit.last_test_exposure_at > 0 && unit.changes_after_test_exposure > 0
+        })
+        .collect::<Vec<_>>();
+    let mutant_stale = units
+        .iter()
+        .filter(|unit| {
+            unit.last_mutant_run_at > 0 && unit.semantic_changes_after_mutant_run > 0
+        })
+        .collect::<Vec<_>>();
+    let missing_mutant = units
+        .iter()
+        .filter(|unit| unit.current_distinct_tests > 0 && unit.current_mutant_verified_tests == 0)
+        .count();
+    let reopened = units
+        .iter()
+        .filter(|unit| unit.reopened_count > 0)
+        .collect::<Vec<_>>();
+
+    let mut warnings = Vec::new();
+    if !coverage_stale.is_empty() {
+        let changes = coverage_stale
+            .iter()
+            .map(|unit| unit.changes_after_test_exposure)
+            .sum::<i64>();
+        warnings.push(UiWarning {
+            level: "caution".to_string(),
+            label: "Coverage data is stale".to_string(),
+            detail: format!(
+                "{} units changed after their latest test exposure; {} semantic changes need re-verification.",
+                coverage_stale.len(),
+                changes
+            ),
+        });
+    }
+    if !mutant_stale.is_empty() {
+        let changes = mutant_stale
+            .iter()
+            .map(|unit| unit.semantic_changes_after_mutant_run)
+            .sum::<i64>();
+        let max_stale_days = mutant_stale
+            .iter()
+            .map(|unit| unit.verification_stale_seconds as f64 / 86_400.0)
+            .fold(0.0, f64::max);
+        warnings.push(UiWarning {
+            level: "caution".to_string(),
+            label: "Mutation verification is stale".to_string(),
+            detail: format!(
+                "{} units changed after their latest mutant run; max stale age {}; {} semantic changes need mutant re-run.",
+                mutant_stale.len(),
+                format_days(max_stale_days),
+                changes
+            ),
+        });
+    }
+    if missing_mutant > 0 {
+        warnings.push(UiWarning {
+            level: "notice".to_string(),
+            label: "Mutation verification is missing".to_string(),
+            detail: format!("{missing_mutant} covered units have no mutant-verified test exposure."),
+        });
+    }
+    if !reopened.is_empty() {
+        let reopened_count = reopened.iter().map(|unit| unit.reopened_count).sum::<i64>();
+        warnings.push(UiWarning {
+            level: "caution".to_string(),
+            label: "Fixes have reopened crashes".to_string(),
+            detail: format!(
+                "{} units have crash frames after a prior fix in the same unit span; {} reopened crash frames total.",
+                reopened.len(),
+                reopened_count
+            ),
+        });
+    }
+    warnings
 }
 
 fn dashboard_line_counts(
     storage: &Storage,
-    directory: &str,
-    scope: &CoverageScope,
+    _directory: &str,
+    _scope: &CoverageScope,
 ) -> Result<DashboardLineCounts> {
-    let mut covered_lines = BTreeSet::<(String, u32)>::new();
+    let total_start = Instant::now();
     let mut counts = DashboardLineCounts::default();
-    let mut stmt = storage.connection().prepare(
-        r#"
-        WITH latest_source_lines AS (
-          SELECT path, line, hits
-          FROM (
-            SELECT path, line, source, hits,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY path, line, source
-                     ORDER BY timestamp DESC, id DESC
-                   ) AS rank
-            FROM coverage_line_events
-          )
-          WHERE rank = 1
-        ),
-        latest_lines AS (
-          SELECT path, line, MAX(hits) AS hits
-          FROM latest_source_lines
-          GROUP BY path, line
-        )
-        SELECT path, line, hits
-        FROM latest_lines
-        "#,
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, u32>(1)?,
-            row.get::<_, u32>(2)?,
-        ))
-    })?;
-    for row in rows {
-        let (path, line, hits) = row?;
-        if !scope.allows(&path) || !path_in_directory(&path, directory) {
-            continue;
-        }
-        counts.tracked += 1;
-        if hits > 0 {
-            counts.covered += 1;
-            covered_lines.insert((path, line));
-        }
-    }
-
+    let exposure_start = Instant::now();
     let mut stmt = storage.connection().prepare(
         r#"
         WITH ranked_exposure AS (
@@ -570,13 +798,13 @@ fn dashboard_line_counts(
     for row in rows {
         let (
             path,
-            line,
+            _line,
             verified_test_types,
             has_mutant_killed,
             has_stochastic_mutant_killed,
             has_invariant_mutant_killed,
         ) = row?;
-        if !covered_lines.contains(&(path, line)) {
+        if !_scope.allows(&path) || !path_in_directory(&path, _directory) {
             continue;
         }
         if has_mutant_killed > 0 {
@@ -593,6 +821,53 @@ fn dashboard_line_counts(
         }
     }
 
+    profile_log("dashboard_line_counts.exposure", exposure_start);
+    profile_log("dashboard_line_counts.total", total_start);
+    Ok(counts)
+}
+
+fn dashboard_coverage_line_counts(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<DashboardLineCounts> {
+    let start = Instant::now();
+    let mut counts = DashboardLineCounts::default();
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_source_lines AS (
+          SELECT path, line, hits
+          FROM (
+            SELECT path, line, source, hits,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY path, line, source
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM coverage_line_events
+          )
+          WHERE rank = 1
+        ),
+        latest_lines AS (
+          SELECT path, line, MAX(hits) AS hits
+          FROM latest_source_lines
+          GROUP BY path, line
+        )
+        SELECT path, hits
+        FROM latest_lines
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
+    for row in rows {
+        let (path, hits) = row?;
+        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+            continue;
+        }
+        counts.tracked += 1;
+        if hits > 0 {
+            counts.covered += 1;
+        }
+    }
+    profile_log("dashboard_coverage_line_counts.total", start);
     Ok(counts)
 }
 
@@ -601,19 +876,35 @@ fn dashboard_hazard_counts(
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<(i64, i64, i64)> {
+    let start = Instant::now();
     let mut active = 0;
     let mut evidence_covered = 0;
     let mut verified = 0;
     let mut stmt = storage.connection().prepare(
         r#"
-        WITH ranked_exposure AS (
-          SELECT unit_id, path, line, test_type, is_verified, is_mutation_killed, mutation_kind,
+        WITH active_hazards AS (
+          SELECT *
+          FROM unit_hazards
+          WHERE is_active = 1
+        ),
+        ranked_exposure AS (
+          SELECT t.unit_id,
+                 t.path,
+                 t.line,
+                 t.test_type,
+                 t.is_verified,
+                 t.is_mutation_killed,
+                 t.mutation_kind,
                  ROW_NUMBER() OVER (
-                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
-                   ORDER BY timestamp DESC, id DESC
+                   PARTITION BY t.path, t.line, COALESCE(t.branch_id, ''), t.test_id, t.test_type
+                   ORDER BY t.timestamp DESC, t.id DESC
                  ) AS rank
-          FROM test_exposure_events
-          WHERE line IS NOT NULL
+          FROM test_exposure_events t
+          JOIN active_hazards h
+            ON h.unit_id = t.unit_id
+           AND h.path = t.path
+           AND h.line = t.line
+          WHERE t.line IS NOT NULL
         ),
         latest_exposure AS (
           SELECT *
@@ -648,12 +939,11 @@ fn dashboard_hazard_counts(
                   AND MAX(COALESCE(e.has_invariant_mutation, 0)) = 1
                  THEN 1 ELSE 0
                END AS verified
-        FROM unit_hazards h
+        FROM active_hazards h
         LEFT JOIN evidence e
           ON e.unit_id = h.unit_id
          AND e.path = h.path
          AND e.line = h.line
-        WHERE h.is_active = 1
         GROUP BY h.id, h.path
         "#,
     )?;
@@ -677,6 +967,7 @@ fn dashboard_hazard_counts(
             verified += 1;
         }
     }
+    profile_log("dashboard_hazard_counts.total", start);
     Ok((active, evidence_covered, verified))
 }
 
@@ -755,17 +1046,32 @@ pub fn source_payload_with_overlays(
     commit: Option<&str>,
     overlays: &UiOverlays,
 ) -> Result<UiSourcePayload> {
+    let total_start = Instant::now();
     let repo = repo.as_ref();
+    let read_start = Instant::now();
     let file = read_source(repo, path, commit)?;
+    profile_log("source.read_source", read_start);
     let lines = file.contents.lines().map(str::to_string).collect::<Vec<_>>();
+    let annotation_start = Instant::now();
     let mut annotations = line_annotations(storage, path, overlays)?;
+    profile_log("source.line_annotations", annotation_start);
+    let paint_start = Instant::now();
     paint_statement_continuations(&lines, &mut annotations);
+    profile_log("source.paint_continuations", paint_start);
+    let versions_start = Instant::now();
+    let versions = file_versions(storage, path)?;
+    profile_log("source.file_versions", versions_start);
+    let warnings_start = Instant::now();
+    let warnings = warnings_for_path(storage, path)?;
+    profile_log("source.warnings", warnings_start);
+    profile_log("source.total", total_start);
     Ok(UiSourcePayload {
         path: path.to_string(),
         commit: commit.map(str::to_string),
         lines,
-        versions: file_versions(storage, path)?,
+        versions,
         annotations,
+        warnings,
     })
 }
 
@@ -817,7 +1123,7 @@ fn route(
     let (path, query) = split_target(target);
     match path {
         "/" | "/index.html" => {
-            let storage = Storage::open(db)?;
+            let storage = Storage::open_existing(db)?;
             let scope = CoverageScope::from_repo(repo);
             let selected = query.get("path").map(String::as_str);
             let directory = query.get("dir").map(String::as_str);
@@ -830,13 +1136,13 @@ fn route(
             write_response(stream, 200, "text/html; charset=utf-8", &body)
         }
         "/api/files" => {
-            let storage = Storage::open(db)?;
+            let storage = Storage::open_existing(db)?;
             let scope = CoverageScope::from_repo(repo);
             let json = serde_json::to_string(&file_index_with_scope(&storage, &scope)?)?;
             write_response(stream, 200, "application/json", &json)
         }
         "/api/dashboard" => {
-            let storage = Storage::open(db)?;
+            let storage = Storage::open_existing(db)?;
             let scope = CoverageScope::from_repo(repo);
             let directory = query.get("dir").map(String::as_str).unwrap_or_default();
             let json = serde_json::to_string(&dashboard_summary_for_directory_with_scope(&storage, directory, &scope)?)?;
@@ -850,7 +1156,7 @@ fn route(
                 .get("commit")
                 .map(String::as_str)
                 .filter(|value| !value.is_empty() && *value != "current");
-            let storage = Storage::open(db)?;
+            let storage = Storage::open_existing(db)?;
             match source_payload_with_overlays(&storage, repo, source_path, commit, overlays) {
                 Ok(payload) => {
                     let json = serde_json::to_string(&payload)?;
@@ -996,14 +1302,25 @@ pub fn line_annotations(
     path: &str,
     overlays: &UiOverlays,
 ) -> Result<Vec<UiLineAnnotation>> {
+    let total_start = Instant::now();
     let mut lines = BTreeMap::<u32, AnnotationBuilder>::new();
+    let line_start = Instant::now();
     let has_exact_line_coverage = apply_line_coverage(storage, path, &mut lines)?;
+    profile_log("line_annotations.line_coverage", line_start);
+    let unit_start = Instant::now();
     apply_unit_quality(storage, path, &mut lines, !has_exact_line_coverage)?;
+    profile_log("line_annotations.unit_quality", unit_start);
+    let exposure_start = Instant::now();
     apply_test_exposure(storage, path, &mut lines, !has_exact_line_coverage)?;
+    profile_log("line_annotations.test_exposure", exposure_start);
+    let hazard_start = Instant::now();
     apply_hazards(storage, path, &mut lines)?;
+    profile_log("line_annotations.hazards", hazard_start);
+    let overlay_start = Instant::now();
     apply_overlays(path, overlays, &mut lines);
+    profile_log("line_annotations.overlays", overlay_start);
 
-    Ok(lines
+    let annotations = lines
         .into_iter()
         .map(|(line, builder)| UiLineAnnotation {
             line,
@@ -1019,7 +1336,9 @@ pub fn line_annotations(
             dark_arms: builder.dark_arms,
             hazards: builder.hazards,
         })
-        .collect())
+        .collect();
+    profile_log("line_annotations.total", total_start);
+    Ok(annotations)
 }
 
 fn paint_statement_continuations(lines: &[String], annotations: &mut Vec<UiLineAnnotation>) {
@@ -1323,7 +1642,7 @@ fn apply_hazards(
                    ORDER BY timestamp DESC, id DESC
                  ) AS rank
           FROM test_exposure_events
-          WHERE line IS NOT NULL
+          WHERE path = ?1 AND line IS NOT NULL
         ),
         latest_exposure AS (
           SELECT *
@@ -1451,11 +1770,32 @@ fn u32_field(value: &Value, keys: &[&str]) -> Option<u32> {
         .and_then(|number| u32::try_from(number).ok())
 }
 
+fn profile_enabled() -> bool {
+    matches!(
+        std::env::var("LINEAGE_UI_PROFILE").ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
+fn profile_log(label: &str, start: Instant) {
+    if profile_enabled() {
+        eprintln!("lineage ui profile {label}: {:.3}s", start.elapsed().as_secs_f64());
+    }
+}
+
 fn percent(numerator: i64, denominator: i64) -> f64 {
     if denominator <= 0 {
         0.0
     } else {
         numerator as f64 * 100.0 / denominator as f64
+    }
+}
+
+fn format_days(days: f64) -> String {
+    if days >= 1.0 {
+        format!("{days:.1} days")
+    } else {
+        format!("{:.1} hours", days * 24.0)
     }
 }
 
@@ -1822,6 +2162,7 @@ fn render_dashboard(
         &format!("{} files currently report coverage", dashboard.files_with_coverage),
     ));
     out.push_str("</div>");
+    out.push_str(&render_warning_banner(&dashboard.warnings));
 
     out.push_str("<section class=\"dashboard-section\"><h2>Directories</h2>");
     if directories.is_empty() {
@@ -1946,6 +2287,26 @@ fn render_metric(label: &str, value: &str, detail: &str) -> String {
     out
 }
 
+fn render_warning_banner(warnings: &[UiWarning]) -> String {
+    if warnings.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<section class=\"warning-banner\" aria-label=\"verification warnings\">");
+    for warning in warnings {
+        out.push_str("<article class=\"warning ");
+        out.push_str(&html_escape(&warning.level));
+        out.push_str("\"><strong>");
+        out.push_str(&html_escape(&warning.label));
+        out.push_str("</strong><p>");
+        out.push_str(&html_escape(&warning.detail));
+        out.push_str("</p></article>");
+    }
+    out.push_str("</section>");
+    out
+}
+
 fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
     let annotations = payload
         .annotations
@@ -1979,7 +2340,9 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
     ));
     out.push_str("</div></div>");
     out.push_str(&render_history(payload, filter));
-    out.push_str("</div><div class=\"viewer\"><div class=\"code\">");
+    out.push_str("</div>");
+    out.push_str(&render_warning_banner(&payload.warnings));
+    out.push_str("<div class=\"viewer\"><div class=\"code\">");
     for (index, line) in payload.lines.iter().enumerate() {
         let line_no = (index + 1) as u32;
         out.push_str(&render_code_line(
@@ -2583,7 +2946,7 @@ const STYLE: &str = r#"
     text-align: center;
   }
   .coverage-pill { color: #166534; background: rgba(34, 197, 94, 0.08); }
-  main { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  main { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
   .topbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(260px, 34vw);
@@ -2612,7 +2975,7 @@ const STYLE: &str = r#"
   .history-list a { color: var(--text); text-decoration: none; font-size: 12px; }
   .crumbs { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
   .crumbs a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
-  .viewer { min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
+  .viewer { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
   .dashboard {
     max-width: 1180px;
     padding: 18px;
@@ -2631,6 +2994,31 @@ const STYLE: &str = r#"
   .metric div { color: var(--muted); font-size: 12px; }
   .metric strong { display: block; margin-top: 4px; font-size: 24px; letter-spacing: 0; }
   .metric p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  .warning-banner {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  main > .warning-banner {
+    margin: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: #fff7ed;
+  }
+  .warning {
+    border: 1px solid #fed7aa;
+    border-left: 3px solid #f97316;
+    border-radius: 6px;
+    background: #fff7ed;
+    padding: 8px 10px;
+  }
+  .warning.notice {
+    border-color: #bfdbfe;
+    border-left-color: #2563eb;
+    background: #eff6ff;
+  }
+  .warning strong { display: block; font-size: 12px; }
+  .warning p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
   .dashboard-section {
     margin-top: 16px;
     border-top: 1px solid var(--line);
@@ -2745,7 +3133,8 @@ const STYLE: &str = r#"
 mod tests {
     use super::*;
     use crate::model::{
-        CommitMetadata, Event, EventType, HazardEvent, LogicalUnit, TestExposureEvent, UnitKind,
+        CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, TestExposureEvent,
+        UnitKind,
     };
     use tempfile::tempdir;
 
@@ -3057,6 +3446,96 @@ mod tests {
         assert_eq!(dashboard.invariant_mutant_killed_covered_lines, 1);
         assert_eq!(dashboard.multi_type_covered_lines, 1);
         assert_eq!(dashboard.coverage_percent, 200.0 / 3.0);
+        assert!(dashboard.warnings.is_empty());
+    }
+
+    #[test]
+    fn dashboard_summary_warns_about_stale_verification_and_reopened_crashes() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "add".into(),
+                event_type: EventType::Change,
+                path: "src/a.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 3,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "cov".into(),
+                timestamp: 20,
+                path: "src/a.rb".into(),
+                function: Some("run".into()),
+                line: Some(2),
+                branch_id: None,
+                test_id: "spec/a_spec.rb:1".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "fix".into(),
+                event_type: EventType::Fix,
+                path: "src/a.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 1,
+                lines_removed: 0,
+                timestamp: 30,
+            })
+            .unwrap();
+        storage
+            .insert_crash_event(&CrashEvent {
+                unit_id: unit.id,
+                commit_hash: "crash".into(),
+                timestamp: 40,
+                error_class: "RuntimeError".into(),
+                provider_id: "evt-1".into(),
+                is_verified: true,
+                path: "src/a.rb".into(),
+                line: 2,
+                function: "run".into(),
+            })
+            .unwrap();
+
+        let dashboard = dashboard_summary(&storage).unwrap();
+        let labels = dashboard
+            .warnings
+            .iter()
+            .map(|warning| warning.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Coverage data is stale"));
+        assert!(labels.contains(&"Mutation verification is stale"));
+        assert!(labels.contains(&"Fixes have reopened crashes"));
     }
 
     #[test]

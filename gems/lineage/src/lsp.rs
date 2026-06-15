@@ -46,6 +46,9 @@ struct LspUnit {
     current_test_types: String,
     current_mutant_verified_tests: i64,
     current_mutant_killed_tests: i64,
+    semantic_changes_after_mutant_run: i64,
+    verification_staleness_score: f64,
+    reopened_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +81,7 @@ pub async fn serve_lsp(
     let db = db.as_ref().to_path_buf();
     let repo = repo.as_ref().to_path_buf();
     let overlays = UiOverlays::load(overlay_paths)?;
+    Storage::open(&db)?;
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::new(move |client| LineageLsp {
@@ -194,7 +198,7 @@ impl LineageLsp {
         let Some(path) = self.repo_path_for_uri(uri)? else {
             return Ok(None);
         };
-        let storage = Storage::open(&self.db)?;
+        let storage = Storage::open_existing(&self.db)?;
         let annotations = line_annotations(&storage, &path, &self.overlays)?;
         let units = file_units(&storage, &path)?;
         Ok(Some(FileFacts {
@@ -265,10 +269,8 @@ fn file_units(storage: &Storage, path: &str) -> Result<Vec<LspUnit>> {
     )?;
     let rows = stmt.query_map(params![path], |row| {
         let id: String = row.get(0)?;
-        let risk_score = risk_by_id
-            .get(&id)
-            .map(|unit| unit.risk_score)
-            .unwrap_or_default();
+        let summary = risk_by_id.get(&id);
+        let risk_score = summary.map(|unit| unit.risk_score).unwrap_or_default();
         Ok(LspUnit {
             id,
             name: row.get(1)?,
@@ -283,6 +285,13 @@ fn file_units(storage: &Storage, path: &str) -> Result<Vec<LspUnit>> {
             current_test_types: row.get(9)?,
             current_mutant_verified_tests: row.get(10)?,
             current_mutant_killed_tests: row.get(11)?,
+            semantic_changes_after_mutant_run: summary
+                .map(|unit| unit.semantic_changes_after_mutant_run)
+                .unwrap_or_default(),
+            verification_staleness_score: summary
+                .map(|unit| unit.verification_staleness_score)
+                .unwrap_or_default(),
+            reopened_count: summary.map(|unit| unit.reopened_count).unwrap_or_default(),
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -407,6 +416,15 @@ fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
         if !unit.current_test_types.trim().is_empty() {
             lines.push(format!("Test types: {}", unit.current_test_types));
         }
+        if unit.semantic_changes_after_mutant_run > 0 {
+            lines.push(format!(
+                "Mutation verification stale: {} semantic changes since latest mutant run, age {:.1} days",
+                unit.semantic_changes_after_mutant_run, unit.verification_staleness_score
+            ));
+        }
+        if unit.reopened_count > 0 {
+            lines.push(format!("Reopened crash frames after fix: {}", unit.reopened_count));
+        }
     }
     if let Some(annotation) = annotation {
         if let Some(hits) = annotation.line_hits {
@@ -449,12 +467,14 @@ fn code_lenses_for_units(facts: &FileFacts) -> Vec<CodeLens> {
             range: range_for_line(unit.start_line),
             command: Some(Command {
                 title: format!(
-                    "Lineage: risk {:.1} | fixes {} | tests {} | mutant {}/{}",
+                    "Lineage: risk {:.1} | fixes {} | tests {} | mutant {}/{} | stale {} | reopened {}",
                     unit.risk_score,
                     unit.fixes,
                     unit.current_distinct_tests,
                     unit.current_mutant_killed_tests,
-                    unit.current_mutant_verified_tests
+                    unit.current_mutant_verified_tests,
+                    unit.semantic_changes_after_mutant_run,
+                    unit.reopened_count
                 ),
                 command: "lineage.showUnit".to_string(),
                 arguments: Some(vec![serde_json::json!({

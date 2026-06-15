@@ -186,7 +186,7 @@ fn main() -> Result<()> {
             } else {
                 for (index, unit) in units.iter().enumerate() {
                     println!(
-                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={} tests={} mutant_killed={}/{}",
+                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={} tests={} mutant_killed={}/{} stale_mutant_days={:.1} stale_changes={} reopened={}",
                         index + 1,
                         unit.kind,
                         unit.name,
@@ -198,7 +198,10 @@ fn main() -> Result<()> {
                         unit.total_events,
                         unit.current_distinct_tests,
                         unit.current_mutant_killed_tests,
-                        unit.current_mutant_verified_tests
+                        unit.current_mutant_verified_tests,
+                        unit.verification_staleness_score,
+                        unit.semantic_changes_after_mutant_run,
+                        unit.reopened_count
                     );
                 }
             }
@@ -416,7 +419,7 @@ fn print_json_summary(units: &[lineage::UnitSummary]) {
             print!(",");
         }
         print!(
-            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6},\"current_distinct_tests\":{},\"current_test_types\":\"{}\",\"current_mutant_verified_tests\":{},\"current_mutant_killed_tests\":{},\"last_test_exposure_at\":{},\"latest_fix_at\":{},\"latest_change_at\":{},\"fixes_after_test_exposure\":{},\"changes_after_test_exposure\":{}}}",
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6},\"current_distinct_tests\":{},\"current_test_types\":\"{}\",\"current_mutant_verified_tests\":{},\"current_mutant_killed_tests\":{},\"last_test_exposure_at\":{},\"last_mutant_run_at\":{},\"latest_fix_at\":{},\"latest_change_at\":{},\"fixes_after_test_exposure\":{},\"changes_after_test_exposure\":{},\"semantic_changes_after_mutant_run\":{},\"verification_stale_seconds\":{},\"verification_staleness_score\":{:.6},\"reopened_count\":{}}}",
             json_escape(&unit.id),
             json_escape(&unit.name),
             json_escape(&unit.kind),
@@ -432,10 +435,15 @@ fn print_json_summary(units: &[lineage::UnitSummary]) {
             unit.current_mutant_verified_tests,
             unit.current_mutant_killed_tests,
             unit.last_test_exposure_at,
+            unit.last_mutant_run_at,
             unit.latest_fix_at,
             unit.latest_change_at,
             unit.fixes_after_test_exposure,
-            unit.changes_after_test_exposure
+            unit.changes_after_test_exposure,
+            unit.semantic_changes_after_mutant_run,
+            unit.verification_stale_seconds,
+            unit.verification_staleness_score,
+            unit.reopened_count
         );
     }
     println!("]");
