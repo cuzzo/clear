@@ -6,12 +6,21 @@ Decomplex is a set of metrics that help identify complex code and ways
 to mitigate it. It is used in the development of the CLEAR compiler and
 runtime to have LLMs write quality code at scale with high velocity.
 
-For the model behind the metrics, see
-[What even is complexity anyway?](../../docs/retrospective/what-even-is-complexity-anyway.md).
-For concrete examples of what Decomplex finds, see the
-[Metrics Expo](docs/agents/metrics-expo.md).
+See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
+for a deeper understanding of what complexity is, and how Decomplex
+identifies it and helps triage and prioritize your problems. See
+[Metrics Expo](docs/agents/metrics-expo.md) for concrete examples of
+what Decomplex measures.
 
-## Quick Start
+## Getting Started
+
+If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Prerequisites
+
+- Ruby 3.x
+- Bundler
+- Tree-sitter grammars for any language you want to analyze
 
 From this repository:
 
@@ -47,6 +56,11 @@ The report opens with cross-detector convergence and root-cause
 clusters, then lists each detector section by signal tier. See
 [report.md](report.md) for a generated example over CLEAR.
 
+CLEAR uses [Lineage](../lineage/README.md) to review code at scale.
+Lineage includes an experimental local UI that you can run on localhost
+to inspect source, coverage, mutation evidence, systems hazards, and
+quality-tool output together.
+
 ### Baseline And Delta
 
 Decomplex can emit a JSON snapshot for later comparison:
@@ -68,13 +82,17 @@ movement is treated as persisted instead of new debt.
 
 ### SARIF
 
-SARIF/code-scanning output is part of the Decomplex launch plan, but it
-is not implemented in this branch yet. The intended shape is a SARIF
-adapter over the same structured report findings used by Markdown and
-delta, so GitHub code scanning can surface high-confidence Decomplex
-findings inline.
+Decomplex can generate SARIF 2.1.0 for GitHub code scanning:
 
-Track this in [TODO.md](TODO.md).
+```bash
+bundle exec gems/decomplex/exe/decomplex report src \
+  --output=report.md \
+  --sarif=tmp/decomplex.sarif
+```
+
+SARIF is generated from the same structured report findings used by
+Markdown and delta, so downstream tools do not re-run or re-derive
+detectors.
 
 ### CI Integration
 
@@ -85,9 +103,10 @@ The current CI-ready path is:
 3. run `decomplex delta` on PRs;
 4. fail or warn only on new/growing high-confidence findings.
 
-GitHub Actions SARIF upload is planned after SARIF generation lands.
-Until then, Decomplex is best used as an artifact plus review comment or
-ratchet input.
+GitHub Actions can upload the generated SARIF with
+`github/codeql-action/upload-sarif`. The generalized gem SARIF workflow
+is implemented in the
+[`generalized-gems-sarif` CI job](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A).
 
 ## Supported Languages Roadmap
 
@@ -102,60 +121,6 @@ dogfood coverage today, while other languages are still experimental.
 - [ ] Go: experimentally supported.
 - [ ] Rust: experimentally supported.
 - [ ] Zig: experimentally supported.
-
-## Metrics
-
-The full report currently includes:
-
-- Decision Pressure
-- Redundant Nil Guards
-- State Heatmap
-- State-Based Branch Density
-- Temporal Ordering Pressure
-- Missing Abstractions
-- Reification Misses
-- Semantic Predicate Aliases
-- Exact Predicate Aliases
-- Inconsistent Rename Clones
-- Structural Similarity Type-2/Type-3
-- Neglected Updates
-- Derived-State Staleness
-- Neglected Conditions
-- Neglected Path Conditions
-- Oversized Predicates
-- Broken Protocols
-- Implicit Control Flow
-- Weighted Inlined Cognitive Complexity
-- Locality Drag
-- Operational Discontinuity
-- Function LCOM
-- False Simplicity
-- Fat Unions
-
-The practical reading order is:
-
-1. Cross-Detector Convergence
-2. Root-Cause Clusters
-3. Tier 1 metrics
-4. Tier 2 metrics
-5. Tier 3 metrics only when they overlap with other evidence
-
-## Architecture
-
-Decomplex is deliberately small:
-
-- `Decomplex::Syntax` owns parsing and normalized language facts.
-- Each detector is a separate module under `lib/decomplex/`.
-- `Decomplex::Report` is the single Markdown aggregation path.
-- `Decomplex::Delta` compares structured snapshots.
-- Language behavior belongs in syntax/profile adapters, not in detector
-  forks.
-
-The long-term plugin direction is similar in spirit to RuboCop custom
-cops: users should be able to add project-specific complexity metrics
-without editing Decomplex core. That plugin API is planned, not stable
-yet. Today, new metrics should be implemented as normal detector modules
-with tests and a report section.
 
 ## Contributing
 

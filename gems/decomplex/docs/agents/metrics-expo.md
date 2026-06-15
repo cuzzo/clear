@@ -9,6 +9,11 @@ unnecessary, implicit, shared, mutable, duplicated, or poorly bounded.
 Decomplex does not try to prove that code is wrong. It ranks candidates.
 The point is to show where a human should look first.
 
+Examples below use Ruby-like pseudocode because it is compact. The
+metrics themselves run over Decomplex's normalized Tree-sitter syntax
+facade; language maturity varies by profile, but the core metrics are
+not intended to be Ruby-only.
+
 ## Running Example
 
 The bad shape is a common object lifecycle:
@@ -408,9 +413,11 @@ uses it as supporting evidence; it is not by itself a bug report.
 Question: did a method look simple only because the complex work was
 moved into same-owner helpers?
 
-This metric uses Decomplex's conservative Ruby topology graph. It only
-inlines bare or `self.` calls inside the same class/module, so it avoids
-guessing about dynamic dispatch or cross-object call targets.
+This metric uses Decomplex's conservative structural topology graph over
+the normalized Tree-sitter AST. It is not Ruby-specific: Ruby is just the
+most mature profile today. The graph only inlines same-owner direct
+helper calls, such as bare calls or explicit self/this calls, so it
+avoids guessing about dynamic dispatch or cross-object call targets.
 
 The score is:
 
@@ -432,9 +439,9 @@ In the improved-looking billing shape:
 ```ruby
 CLASS BillingService
   FN checkout(user, cart)
-    validateUser(user)
+    validateUser(user)             # <-- WICC: hidden helper complexity
     discount = discountFor(user, cart)
-    processPayment(user, cart, discount)
+    processPayment(user, cart, discount) # <-- WICC: hidden helper complexity
   END
 
   FN validateUser(user)
@@ -494,7 +501,7 @@ place that first uses it?
 ```ruby
 CLASS BillingService
   FN checkout(user, cart, logger)
-    receiptId = user.id
+    receiptId = user.id  # <-- Locality Drag: initialized far before use
 
     total = cart.total
     IF total > 100 THEN discount = 10 END
@@ -502,7 +509,7 @@ CLASS BillingService
     IF logger.enabled? THEN logger.info(total) END
     IF cart.valid? THEN status = :ready END
 
-    emitReceipt(receiptId)
+    emitReceipt(receiptId) # <-- first meaningful use after unrelated work
   END
 END
 ```
@@ -521,7 +528,7 @@ CLASS BillingService
     IF logger.enabled? THEN logger.info(total) END
     IF cart.valid? THEN status = :ready END
 
-    receiptId = user.id
+    receiptId = user.id  # <-- moved next to use
     emitReceipt(receiptId)
   END
 END

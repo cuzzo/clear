@@ -91,6 +91,33 @@ class StructuralTopologyTest < Minitest::Test
     end
   end
 
+  def test_tracks_top_level_same_file_helper_edges
+    with_ruby_file(<<~RB) do |path|
+      def run
+        prepare
+      end
+
+      def prepare
+        validate
+      end
+
+      def validate; end
+    RB
+      graph = Decomplex::StructuralTopology.scan([path])
+      owner = "(top-level:#{path})"
+
+      assert graph.method_for(owner, "run")
+      assert graph.method_for(owner, "prepare")
+      assert graph.method_for(owner, "validate")
+
+      edges = graph.edges_for_owner(owner).map do |edge|
+        [edge.caller_name, edge.callee_name, edge.type, edge.kind, edge.confidence]
+      end
+      assert_includes edges, ["run", "prepare", :always, :bare_internal, :high]
+      assert_includes edges, ["prepare", "validate", :always, :bare_internal, :high]
+    end
+  end
+
   def test_keeps_module_owners_and_skips_nested_call_bodies
     with_ruby_file(<<~RB) do |path|
       module Outer

@@ -3,6 +3,7 @@
 require_relative "decomplex/ast"
 require_relative "decomplex/syntax"
 require_relative "decomplex/source_filter"
+require_relative "decomplex/sarif"
 require_relative "decomplex/local_flow"
 require_relative "decomplex/structural_topology"
 require_relative "decomplex/site_extractor"

@@ -14,18 +14,18 @@ Launch-readiness items for Decomplex.
 - [x] Add a small Decomplex-specific `CONTRIBUTING.md`.
 - [x] Check `docs/agents/metrics-expo.md` against the current report
   sections and update stale section names.
+- [x] Add SARIF generation from structured report findings.
+  - Implemented as `decomplex report --sarif=tmp/decomplex.sarif`.
+  - Uses the same finding identities and locations as Markdown/delta.
+  - Does not re-run detectors from the SARIF adapter.
 
 ## Current Launch
 
-- [ ] Add SARIF generation from structured report findings.
-  - Preferred shape: `decomplex report --sarif=tmp/decomplex.sarif`.
-  - Use the same finding identities and locations as Markdown/delta.
-  - Do not re-run detectors from the SARIF adapter.
 - [ ] Add CI integration docs and/or workflow example.
   - Generate `report.md` as an artifact.
   - Generate a JSON baseline snapshot.
   - Run `decomplex delta` on PRs.
-  - Upload SARIF after SARIF support exists.
+  - Upload SARIF with `github/codeql-action/upload-sarif`.
 - [ ] Add a release/retrospective doc for the Decomplex launch.
 - [ ] Update `docs/retrospective/what-even-is-complexity-anyway.md`
   with concrete examples for the Decomplex metrics, or write a separate
