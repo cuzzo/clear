@@ -1,0 +1,44 @@
+{
+  "subjects": [
+    {
+      "source": "zig/lib/safety.zig",
+      "test_command": "cd zig && zig build test -Dtest-file=safety-test.zig -j1",
+      "timeout_seconds": 30
+    },
+    {
+      "source": "zig/lib/atomic.zig",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=atomic-test.zig -j1 && zig build test-hammer -Dtest-file=atomic-hammer-test.zig -j1 && zig build test-loom-vopr -Dtest-file=observable-loom-test.zig -j1",
+      "timeout_seconds": 60
+    },
+    {
+      "source": "zig/lib/ownership.zig",
+      "test_command": "cd zig && zig build test -Dtest-file=ownership-test.zig -j1 && zig build test-loom-vopr -Dtest-file=ownership-loom-test.zig -j1",
+      "timeout_seconds": 60
+    },
+    {
+      "source": "zig/lib/observable.zig",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=observable-test.zig -j1 && zig build test-loom-vopr -Dtest-file=observable-loom-test.zig -j1",
+      "timeout_seconds": 60
+    },
+    {
+      "source": "zig/runtime/frame.zig",
+      "test_command": "cd zig && zig build test -Dtest-file=frame-test.zig -j1 && zig build test -Dtest-file=frame-rewind-test.zig -j1",
+      "timeout_seconds": 60
+    },
+    {
+      "source": "zig/runtime/fiber-memory.zig",
+      "test_command": "cd zig && zig build test -Dtest-file=fiber-memory-test.zig -j1 && zig build test-tsan -Dtest-file=fiber-test.zig -j1",
+      "timeout_seconds": 60
+    },
+    {
+      "source": "zig/runtime/fsm.zig",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=fsm-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-scheduler-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-lock-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-rwlock-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-cross-scheduler-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-concurrent-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-wg-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-fairness-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-steal-test.zig -j1 && zig build test-tsan -Dtest-file=fsm-race-test.zig -j1 && zig build test-hammer -Dtest-file=fsm-hammer-test.zig -j1 && zig build test-hammer -Dtest-file=fsm-rwlock-hammer-test.zig -j1 && zig build test-loom-vopr -Dtest-file=fsm-loom-test.zig -j1 && zig build test-loom-vopr -Dtest-file=fsm-vopr-test.zig -j1 && zig build test-loom-vopr -Dtest-file=fsm-lock-vopr-test.zig -j1",
+      "timeout_seconds": 300
+    },
+    {
+      "source": "zig/runtime/control-plane.zig",
+      "test_command": "cd zig && zig build test-tsan -Dtest-file=control-plane-test.zig -j1 && zig build test-hammer -Dtest-file=control-plane-hammer-test.zig -j1",
+      "timeout_seconds": 60
+    }
+  ]
+}

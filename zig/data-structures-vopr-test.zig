@@ -17,12 +17,14 @@ const Test = struct {
 };
 
 const tests = [_]Test{
-    .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",         .func = &gate.assertGapBActive },
-    .{ .name = "data-structures-vopr: Stream(i64) file-load + setError smoke",                .func = &dsv.testStreamFileLoad },
-    .{ .name = "data-structures-vopr: InfStream(i64) push + close smoke",                     .func = &dsv.testInfStreamPushCloseFileLoad },
-    .{ .name = "data-structures-vopr: partitioned map ownership local ops",                    .func = &dsv.testPartitionedMapOwnershipLocalOps },
-    .{ .name = "data-structures-vopr: partitioned map ownership waiters",                      .func = &dsv.testPartitionedMapOwnershipWaiters },
-    .{ .name = "data-structures-vopr: partitioned map remote ops",                             .func = &dsv.testPartitionedMapRemoteOps },
+    .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable", .func = &gate.assertGapBActive },
+    .{ .name = "data-structures-vopr: Stream(i64) file-load + setError smoke", .func = &dsv.testStreamFileLoad },
+    .{ .name = "data-structures-vopr: InfStream(i64) push + close smoke", .func = &dsv.testInfStreamPushCloseFileLoad },
+    .{ .name = "data-structures-vopr: BatchWindow flushes by SimClock elapsed time", .func = &dsv.testBatchWindowSimClockFlush },
+    .{ .name = "data-structures-vopr: partitioned map ownership local ops", .func = &dsv.testPartitionedMapOwnershipLocalOps },
+    .{ .name = "data-structures-vopr: partitioned map ownership waiters", .func = &dsv.testPartitionedMapOwnershipWaiters },
+    .{ .name = "data-structures-vopr: partitioned map remote ops", .func = &dsv.testPartitionedMapRemoteOps },
+    .{ .name = "data-structures-vopr: partitioned map put allocation failures still complete", .func = &dsv.testPartitionedMapPutAllocationFailureCompletes },
     // Stream + InfStream spinlock fault-injection scenarios removed:
     // routing Stream.Inner head/tail/lock through the comptime Atomic
     // alias (so SimAtomic could fault-inject the swap-spinlocks)

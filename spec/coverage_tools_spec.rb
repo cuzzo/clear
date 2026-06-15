@@ -69,6 +69,12 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
   end
 
+  it "classifies gem changes separately from tools and markdown changes" do
+    expect(bucket_for("gems/decomplex/lib/decomplex.rb")).to eq(:gems)
+    expect(bucket_for("gems/decomplex/docs/agents/metrics-expo.md")).to eq(:gems)
+    expect(bucket_for("docs/agents/metrics-expo.md")).to eq(:md)
+  end
+
   it "breaks src Ruby changed lines into public, private, and other buckets" do
     source = <<~RUBY
       require "set"
@@ -593,6 +599,20 @@ RSpec.describe "coverage gap tools" do
     )
 
     expect(paths).to eq(["src/probe.rb"])
+  end
+
+  it "builds src Ruby context paths for Nil-Kill static diff guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/nested"))
+    FileUtils.mkdir_p(File.join(@tmp, "tools"))
+    File.write(File.join(@tmp, "src/probe.rb"), "class Probe; end\n")
+    File.write(File.join(@tmp, "src/nested/context.rb"), "class Context; end\n")
+    File.write(File.join(@tmp, "tools/probe.rb"), "class ToolProbe; end\n")
+    File.write(File.join(@tmp, "src/probe.txt"), "ignored\n")
+
+    expect(src_ruby_context_paths(root: @tmp)).to eq([
+      "src/nested/context.rb",
+      "src/probe.rb",
+    ])
   end
 
   it "returns an unavailable RuboCop guardrail finding for invalid JSON" do

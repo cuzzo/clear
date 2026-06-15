@@ -18,6 +18,7 @@ const compat = @import("../lib/compat.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const sim_atomic = @import("vopr-atomic.zig");
+const SimClock = @import("testing/vopr-clock.zig").SimClock;
 
 // `bind` with stub deps -- lib/data-structures.zig's collection types
 // take cleanup / refcount hooks via the deps struct so user code can
@@ -158,6 +159,39 @@ pub fn testInfStreamSpinlockUnderFault() !void {
 
     const synthetic_after = sim_atomic.sim_swap_synthetic_fault_count;
     if (synthetic_after == synthetic_before) return error.NoSwapFaultInjected;
+}
+
+pub fn testBatchWindowSimClockFlush() !void {
+    const allocator = gpa.allocator();
+
+    SimClock.reset();
+
+    const BatchWindowI64 = DataStructures.BatchWindow(i64);
+    var window = BatchWindowI64.init(allocator, 0, 10_000_000);
+    defer window.deinit();
+
+    if (try window.push(1)) |batch| {
+        window.freeBatch(batch);
+        return error.BatchFlushedTooEarly;
+    }
+
+    SimClock.advanceMs(5);
+    if (try window.push(2)) |batch| {
+        window.freeBatch(batch);
+        return error.BatchFlushedTooEarly;
+    }
+
+    SimClock.advanceMs(6);
+    const batch = (try window.push(3)) orelse return error.BatchDidNotFlush;
+    defer window.freeBatch(batch);
+
+    if (batch.len != 3) return error.BatchLenWrong;
+    if (batch[0] != 1 or batch[1] != 2 or batch[2] != 3) return error.BatchContentsWrong;
+
+    if (try window.flush()) |leftover| {
+        window.freeBatch(leftover);
+        return error.BatchLeftoverAfterFlush;
+    }
 }
 
 /// Drives Stream.setError's spinlock retry body under swap fault
@@ -370,4 +404,47 @@ pub fn testPartitionedMapRemoteOps() !void {
     if (nmap.get(nkey) orelse -1 != 202) return error.RemoteNumericMapGetWrong;
     nmap.remove(allocator, nkey);
     if (nmap.contains(nkey)) return error.RemoteNumericMapRemoveFailed;
+}
+
+pub fn testPartitionedMapPutAllocationFailureCompletes() !void {
+    const allocator = gpa.allocator();
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+        resetSchedulerGlobals(allocator);
+    }
+
+    try fp.global_registry.register(allocator, std.Thread.getCurrentId(), &sched);
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+
+    var byte: u8 = 0;
+    const impossible_value = @as([*]const u8, @ptrCast(&byte))[0..std.math.maxInt(usize)];
+
+    const StringMap = DataStructures.PartitionedStringMap([]const u8, 4);
+    var smap: StringMap = .{};
+    defer smap.deinit(allocator, allocator);
+
+    if (smap.put(allocator, allocator, "oom-string", impossible_value)) |_| {
+        return error.StringPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (smap.contains("oom-string")) return error.StringPutFailureInsertedKey;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, []const u8, 4);
+    var nmap: NumericMap = .{};
+    defer nmap.deinit(allocator, allocator);
+
+    if (nmap.put(allocator, allocator, 9001, impossible_value)) |_| {
+        return error.NumericPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (nmap.contains(9001)) return error.NumericPutFailureInsertedKey;
 }

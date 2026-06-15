@@ -15,9 +15,9 @@ module NilKill
       index_sources
       load_sorbet if @run_sorbet
       build_actions
-      sorbet_validate_high_actions! if @run_sorbet
       build_flow_graph
       build_fallibility_pressure
+      build_hidden_enum_pressure
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
@@ -403,6 +403,13 @@ module NilKill
         NilKill.target_files,
         runtime_methods: @store.methods.values,
         runtime_edges: @store.facts["runtime_call_edges"]
+      )
+    end
+
+    def build_hidden_enum_pressure
+      @store.facts["hidden_enum_pressure"] = HiddenEnumPressure.scan(
+        NilKill.target_files,
+        evidence: @store.to_h
       )
     end
 
@@ -1252,7 +1259,7 @@ module NilKill
       # T.untyped but return_origins produced a strong candidate, promote
       # the inferred type into the lookup. This is the bridge that lets
       # newly-inferred returns participate in subsequent receiver-type
-      # narrowing without first re-running the signature autofix.
+      # narrowing without first applying the signature rewrite.
       Array(@store.facts["return_origins"]).each do |origin|
         next unless origin["confidence"].to_s == "strong"
         klass = origin["class"].to_s
@@ -1355,68 +1362,6 @@ module NilKill
         end
       origin["candidate_type"] = useful ? candidate : "T.untyped"
       origin["confidence"] = confidence
-    end
-
-    # Sorbet-validates the HIGH batch before it leaves infer: snapshot
-    # files, apply, srb tc. On failure, bisect the failing actions and
-    # downgrade them to REVIEW. Always restores files before returning.
-    def sorbet_validate_high_actions!
-      high = @store.actions.select { |a| a["confidence"] == HIGH }
-      return if high.empty?
-      paths = high.map { |a| a["path"].to_s }.uniq.reject(&:empty?)
-      snapshot = paths.each_with_object({}) do |rel, h|
-        abs = File.expand_path(rel, ROOT)
-        h[abs] = File.read(abs) if File.file?(abs)
-      end
-      begin
-        failing = sorbet_validate_batch(high, snapshot)
-      ensure
-        snapshot.each { |path, content| File.write(path, content) }
-      end
-      return if failing.empty?
-      failing_fps = failing.map { |a| sorbet_validate_fingerprint(a) }.to_set
-      @store.actions.each do |action|
-        next unless action["confidence"] == HIGH
-        next unless failing_fps.include?(sorbet_validate_fingerprint(action))
-        action["confidence"] = REVIEW
-        action["message"] = "[downgraded from high by sorbet pre-validate] #{action["message"]}"
-      end
-      warn "nil-kill: sorbet pre-validate downgraded #{failing.size} HIGH action(s) to REVIEW"
-    end
-
-    def sorbet_validate_batch(actions, snapshot)
-      return [] if actions.empty?
-      # Restore only files a prior node actually dirtied: files no node
-      # wrote already equal the snapshot, so the pre-`srb tc` tree is
-      # bitwise-identical to a full restore (same srb result, same tree).
-      snapshot.each do |path, content|
-        next if File.file?(path) && File.read(path) == content
-        File.write(path, content)
-      end
-      (@validate_applier ||= Apply.new([])).apply_actions(actions)
-      return [] if sorbet_clean?
-      return actions if actions.size == 1
-      mid = actions.size / 2
-      sorbet_validate_batch(actions.first(mid), snapshot) +
-        sorbet_validate_batch(actions.drop(mid), snapshot)
-    end
-
-    def sorbet_validate_cache_dir
-      @sorbet_validate_cache_dir ||= begin
-        dir = File.join(TMP_DIR, "srb-cache")
-        FileUtils.mkdir_p(dir)
-        dir
-      end
-    end
-
-    def sorbet_clean?
-      _, _, status = Open3.capture3({ "SRB_YES" => "1", "NO_COLOR" => "1" },
-        "bundle", "exec", "srb", "tc", "--cache-dir", sorbet_validate_cache_dir)
-      status.success?
-    end
-
-    def sorbet_validate_fingerprint(action)
-      JSON.generate([action["kind"], action["path"], action["line"], action["message"], action["data"]])
     end
 
     # Returns true when runtime observations for the given slot contain a class
@@ -1522,11 +1467,11 @@ module NilKill
 
     def collection_narrowing_confidence(rec, candidate)
       return REVIEW unless NilKill.acceptable_shape_candidate?(candidate)
-      return REVIEW unless simple_autofix_collection_candidate?(candidate)
+      return REVIEW unless simple_high_confidence_collection_candidate?(candidate)
       NilKill.confidence(rec["calls"])
     end
 
-    def simple_autofix_collection_candidate?(candidate)
+    def simple_high_confidence_collection_candidate?(candidate)
       raw = NilKill.strip_nilable_type(candidate)
       scalar = /(?:String|Symbol|Integer|Float|T::Boolean)/
       raw.match?(/\AT::Array\[#{scalar}\]\z/) ||

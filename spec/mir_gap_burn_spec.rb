@@ -489,7 +489,7 @@ RSpec.describe "MIR gap-burn characterization" do
       nil,
       Type.new(:String),
       MIR::InlineAllocMetadata.new(alloc: :heap),
-      :zig,
+      IntrinsicTemplateKind::Zig,
       "map",
     )
     put.ownership_consumption = MIR::OwnershipConsumptionFact.new(
@@ -893,7 +893,12 @@ RSpec.describe "MIR gap-burn characterization" do
     signature = FunctionSignature.new(params: [], return_type: Type.new(:Void))
     target = id("target")
     assignment = AST::Assignment.new(tok, target, lit("value"))
-    harness = harness_class.new(alloc: :frame, key_alloc: :heap, val_alloc: :arena, shard_alloc: :slab)
+    harness = harness_class.new(
+      IntrinsicAllocationKind::Alloc => :frame,
+      IntrinsicAllocationKind::KeyAlloc => :heap,
+      IntrinsicAllocationKind::ValAlloc => :arena,
+      IntrinsicAllocationKind::ShardAlloc => :slab,
+    )
 
     metadata = harness.send(:indexed_assignment_allocs, signature, target, assignment)
 
@@ -909,7 +914,7 @@ RSpec.describe "MIR gap-burn characterization" do
       [:slab, target, assignment],
     ])
 
-    missing_value_harness = harness_class.new(alloc: :frame)
+    missing_value_harness = harness_class.new(IntrinsicAllocationKind::Alloc => :frame)
     missing_value = missing_value_harness.send(:indexed_assignment_allocs, signature, target, assignment)
     expect(missing_value.primary).to eq(:resolved_frame)
     expect(missing_value.value_alloc).to be_nil
@@ -1179,11 +1184,11 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(pass.send(:with_block_lowers_through_runtime?, plain_with)).to eq(false)
 
     raise_with = AST::WithBlock.new(tok, [], [], nil)
-    raise_with.lock_error_clause = AST::ErrorClause.new(selectors: [], action: :raise, retries: nil, token: tok)
+    raise_with.lock_error_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: tok)
     expect(pass.send(:with_block_lowers_through_runtime?, raise_with)).to eq(true)
     expect(pass.send(:ast_node_lowers_through_runtime?, raise_with)).to eq(true)
 
-    bubble_clause = AST::ErrorClause.new(selectors: [], action: :pass, retries: nil, token: tok)
+    bubble_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Pass, retries: nil, token: tok)
     bubble_clause.bubble_types = [:Timeout]
     bubble_with = AST::WithBlock.new(tok, [], [], nil)
     bubble_with.lock_error_clause = bubble_clause
@@ -2489,7 +2494,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:ast_contains_return?, { nested: [AST::ReturnNode.new(tok, nil)] })).to eq(true)
     expect(low.send(:ast_contains_return?, fn([AST::ReturnNode.new(tok, nil)]))).to eq(false)
 
-    guard_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
+    guard_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Pass, retries: nil, token: tok)
     guard_clause.matched_types = [:GuardFail]
     guard_node = AST::WithBlock.new(tok, [], [], nil)
     guard_node.lock_error_clause = guard_clause
@@ -2506,8 +2511,9 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(pre_body.first.expr.args[2].value).to include("precondition failed")
     expect(pre_body.last.value).to eq(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
 
-    unknown_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
-    expect { low.send(:lock_failure_action, unknown_clause, "__with", with_node) }.to raise_error(/unknown lock action/)
+    expect {
+      AST::ErrorClause.new(selectors: [], action: T.unsafe(:unknown), retries: nil, token: tok)
+    }.to raise_error(TypeError)
   end
 
   it "covers concurrency lowering defensive and diagnostic branches" do
@@ -3404,7 +3410,7 @@ RSpec.describe "MIR gap-burn characterization" do
       shard_get = low.send(:index_access_value, plan)
       expect(shard_get).to be_a(MIR::ShardedMapGet)
       expect(shard_get.shard_idx.name).to eq("__idx")
-      expect(shard_get.template_kind).to eq(:shard_direct_zig)
+      expect(shard_get.template_kind).to eq(IntrinsicTemplateKind::ShardDirectZig)
       expect(shard_get.resolved_allocs.shard_alloc).to be_nil
     ensure
       INDEX_OPS[:string_map][:get][:shard_direct_zig] = old_shard_template
@@ -3557,7 +3563,7 @@ RSpec.describe "MIR gap-burn characterization" do
         [MIR::ExprStmt.new(MIR::Lit.new("handled_expr()"), false)]
     end
     low.define_singleton_method(:with_fiber_capture_map) { |_map, rt_override: nil, &blk| blk.call }
-    block_clause = AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: tok,
+    block_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Block, retries: nil, token: tok,
       body: [AST::PassStmt.new(tok)])
     with_node = AST::WithBlock.new(tok, [], [], nil)
     split = low.send(:emit_fsm_lock_error_arm_split,
@@ -3587,7 +3593,7 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(versioned_prelude).to include(".read(").and include("const alias")
 
-    guard_exit_clause = AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: tok,
+    guard_exit_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: tok,
       message: lit("guard timeout"))
     guard_exit_clause.matched_types = [:GuardFail]
     with_node.lock_error_clause = guard_exit_clause
@@ -3598,7 +3604,7 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(guard_exit_body.first.expr.args[2]).to eq(low.lower(guard_exit_clause.message))
 
-    exit_clause = AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: tok,
+    exit_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Exit, retries: nil, token: tok,
       message: lit("timeout"))
     exit_body = low.send(:error_action_stmts, exit_clause, "__with", with_node, :GuardFail, "guard failed")
     expect(exit_body).to contain_exactly(an_instance_of(MIR::ExprStmt), an_instance_of(MIR::ReturnStmt))
@@ -3606,10 +3612,9 @@ RSpec.describe "MIR gap-burn characterization" do
     block_body = low.send(:error_action_stmts, block_clause, "__with", with_node, :GuardFail, "guard failed")
     expect(block_body).to include(an_instance_of(MIR::Noop), an_instance_of(MIR::BreakStmt))
 
-    unknown_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
     expect {
-      low.send(:error_action_stmts, unknown_clause, "__with", with_node, :GuardFail, "guard failed")
-    }.to raise_error(/unknown lock action/)
+      AST::ErrorClause.new(selectors: [], action: T.unsafe(:unknown), retries: nil, token: tok)
+    }.to raise_error(TypeError)
 
     observable_source = id("running", type: Type.new(:"~String", observable: true))
     next_node = AST::NextExpr.new(tok, observable_source)

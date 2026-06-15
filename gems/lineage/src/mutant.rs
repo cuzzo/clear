@@ -11,6 +11,9 @@ use std::collections::HashMap;
 pub struct MutantFact {
     pub file: String,
     pub method: String,
+    pub source: String,
+    pub language: String,
+    pub mutation_kind: String,
     pub kill_rate: Option<f64>,
     pub gate_status: Option<String>,
     pub mutations: Option<u32>,
@@ -114,7 +117,7 @@ where
                             test_id: mutant_test_id(&fact),
                             test_type: test_type.clone(),
                             mutation_status: Some(status.to_string()),
-                            mutation_kind: Some("stochastic".to_string()),
+                            mutation_kind: Some(fact.mutation_kind.clone()),
                             is_mutation_verified: true,
                             is_mutation_killed: status == "killed",
                             is_verified: true,
@@ -143,14 +146,32 @@ where
 
 pub fn parse_mutant_facts(input: &str) -> Result<Vec<MutantFact>> {
     let value: Value = serde_json::from_str(input).context("parse mutant facts JSON")?;
+    let source = string_at(&value, &["source"])
+        .unwrap_or("unknown")
+        .to_string();
+    let language = string_at(&value, &["language"])
+        .unwrap_or("ruby")
+        .to_string();
+    let mutation_kind = normalized_mutation_kind(string_at(
+        &value,
+        &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+    ));
     let subjects = value
         .get("subjects")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow::anyhow!("mutant facts JSON contained no subjects"))?;
-    Ok(subjects.iter().filter_map(mutant_fact).collect())
+    Ok(subjects
+        .iter()
+        .filter_map(|subject| mutant_fact(subject, &source, &language, &mutation_kind))
+        .collect())
 }
 
-fn mutant_fact(subject: &Value) -> Option<MutantFact> {
+fn mutant_fact(
+    subject: &Value,
+    default_source: &str,
+    default_language: &str,
+    default_mutation_kind: &str,
+) -> Option<MutantFact> {
     let file = string_at(subject, &["file", "path", "filename"])?.to_string();
     let method = string_at(subject, &["method", "subject", "expression"])?.to_string();
     if file.is_empty() || method.is_empty() {
@@ -159,6 +180,17 @@ fn mutant_fact(subject: &Value) -> Option<MutantFact> {
     Some(MutantFact {
         file,
         method,
+        source: string_at(subject, &["source"])
+            .unwrap_or(default_source)
+            .to_string(),
+        language: string_at(subject, &["language"])
+            .unwrap_or(default_language)
+            .to_string(),
+        mutation_kind: normalized_mutation_kind(string_at(
+            subject,
+            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+        )
+        .or(Some(default_mutation_kind))),
         kill_rate: number_at(subject, &["kill_rate", "coverage"]),
         gate_status: string_at(subject, &["gate_status", "gate"]).map(str::to_string),
         mutations: u32_at(subject, &["mutations"]),
@@ -218,7 +250,12 @@ fn mutation_status(fact: &MutantFact) -> Option<&'static str> {
 }
 
 fn mutant_test_id(fact: &MutantFact) -> String {
-    format!("mutant:ruby:{}", fact.method.replace(char::is_whitespace, ""))
+    format!(
+        "mutant:{}:{}:{}",
+        test_id_component(&fact.language),
+        test_id_component(&fact.source),
+        test_id_component(&fact.method)
+    )
 }
 
 fn normalize_test_type(test_type: &str) -> String {
@@ -227,6 +264,32 @@ fn normalize_test_type(test_type: &str) -> String {
         "unit".to_string()
     } else {
         normalized.to_string()
+    }
+}
+
+fn normalized_mutation_kind(kind: Option<&str>) -> String {
+    match kind.unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+        "contract" | "contracts" | "invariant" | "invariants" | "property" | "properties"
+        | "property-based" | "fuzz" | "fuzzer" | "fuzzing" => "invariant".to_string(),
+        "stochastic" | "random" | "mutation" | "mutant" | "ruby-mutant" | "ruby_mutant"
+        | "cargo-mutant" | "cargo-mutants" | "cargo_mutant" | "cargo_mutants" => {
+            "stochastic".to_string()
+        }
+        "" => "stochastic".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn test_id_component(value: &str) -> String {
+    let mut out = value
+        .chars()
+        .map(|ch| if ch.is_whitespace() { '_' } else { ch })
+        .collect::<String>();
+    out.retain(|ch| ch != ':');
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
     }
 }
 
@@ -303,6 +366,9 @@ mod tests {
     fn parses_mutant_facts() {
         let payload = json!({
             "schema": "mutant-facts/v1",
+            "source": "gems/lineage/tools/mutant-converters/ruby_mutant.rb",
+            "language": "ruby",
+            "mutation_kind": "ruby-mutant",
             "subjects": [{
                 "file": "src/demo.rb",
                 "method": "Worker#run",
@@ -318,8 +384,37 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].file, "src/demo.rb");
         assert_eq!(facts[0].method, "Worker#run");
+        assert_eq!(facts[0].source, "gems/lineage/tools/mutant-converters/ruby_mutant.rb");
+        assert_eq!(facts[0].language, "ruby");
+        assert_eq!(facts[0].mutation_kind, "stochastic");
         assert_eq!(facts[0].kill_rate, Some(95.5));
         assert_eq!(mutation_status(&facts[0]), Some("killed"));
+    }
+
+    #[test]
+    fn parses_zig_mutant_facts_with_invariant_metadata() {
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "source": "gems/zig-mutants",
+            "language": "zig",
+            "mutation_kind": "invariant",
+            "subjects": [{
+                "file": "zig/runtime/fsm.zig",
+                "method": "poll",
+                "kill_rate": 100.0,
+                "mutations": 2,
+                "killed": 2,
+                "alive": 0
+            }]
+        });
+
+        let facts = parse_mutant_facts(&payload.to_string()).unwrap();
+
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].language, "zig");
+        assert_eq!(facts[0].source, "gems/zig-mutants");
+        assert_eq!(facts[0].mutation_kind, "invariant");
+        assert_eq!(mutant_test_id(&facts[0]), "mutant:zig:gems/zig-mutants:poll");
     }
 
     #[test]
@@ -380,5 +475,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(killed, 4);
+    }
+
+    #[test]
+    fn ingests_zig_mutant_facts_as_invariant_exposure() {
+        let storage = Storage::open_memory().unwrap();
+        let file = BlobFile {
+            path: "zig/runtime/demo.zig".into(),
+            contents: "pub fn poll() bool {\n    return true;\n}\n".into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        for unit in extractor.extract_units(&file) {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider { files: vec![file] };
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "source": "gems/zig-mutants",
+            "language": "zig",
+            "mutation_kind": "invariant",
+            "subjects": [{
+                "file": "zig/runtime/demo.zig",
+                "method": "poll",
+                "kill_rate": 100.0,
+                "mutations": 1,
+                "killed": 1,
+                "alive": 0
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "zig-mutants",
+        )
+        .unwrap();
+
+        assert_eq!(stats.facts, 1);
+        assert_eq!(stats.units, 1);
+        assert_eq!(stats.quality_events, 1);
+        assert_eq!(stats.exposure_events, 3);
+        let row: (String, String) = storage
+            .connection()
+            .query_row(
+                "SELECT test_id, mutation_kind FROM test_exposure_events WHERE is_mutation_killed = 1 LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "mutant:zig:gems/zig-mutants:poll");
+        assert_eq!(row.1, "invariant");
     }
 }

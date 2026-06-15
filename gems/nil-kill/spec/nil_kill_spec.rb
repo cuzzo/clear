@@ -242,9 +242,9 @@ RSpec.describe NilKill do
         # tables; the hygiene overview now leads with those.
         expect(lines.join("\n")).to include("### Type Soundness")
         expect(lines.join("\n")).to include("### Untyped Cause Breakdown")
-        expect(lines.join("\n")).to include("## Auto-Fix Action Counts")
-        expect(lines.join("\n")).to include("HIGH (auto-applied): 1")
-        expect(lines.join("\n")).to include("REVIEW (manual or verified-loop): 1")
+        expect(lines.join("\n")).to include("## Action Plan Counts")
+        expect(lines.join("\n")).to include("HIGH evidence: 1")
+        expect(lines.join("\n")).to include("REVIEW evidence: 1")
         # Heavy sections must NOT be present
         expect(lines.join("\n")).not_to include("### Param T.untyped Buckets")
         expect(lines.join("\n")).not_to include("### Return Origin Pressure")
@@ -818,7 +818,7 @@ RSpec.describe NilKill do
       )
     end
 
-    it "keeps runtime-only param fixes in review instead of high auto-fix" do
+    it "keeps runtime-only param fixes in review instead of high confidence" do
       infer = infer_with_store
       rec = {
         "calls" => 50,
@@ -1565,41 +1565,6 @@ RSpec.describe NilKill do
       end
     end
 
-    it "sorbet-validates HIGH actions and downgrades the ones that break srb tc" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # Two HIGH actions; the bisection should isolate the one that fails.
-      store.actions << { "kind" => "fix_sig_return", "confidence" => "high", "path" => "src/clean.rb",
-        "line" => 5, "message" => "clean narrowing", "data" => { "type" => "String", "source" => "static_return_origin" } }
-      store.actions << { "kind" => "fix_sig_return", "confidence" => "high", "path" => "src/dirty.rb",
-        "line" => 7, "message" => "broken narrowing", "data" => { "type" => "String", "source" => "static_return_origin" } }
-
-      # Stub IO: pretend file snapshot is empty, apply is a no-op, srb tc reports failure only when the dirty action is present.
-      allow(infer).to receive(:sorbet_validate_batch) do |actions, _snapshot|
-        actions.select { |a| a["path"] == "src/dirty.rb" }
-      end
-
-      infer.send(:sorbet_validate_high_actions!)
-
-      clean = store.actions.find { |a| a["path"] == "src/clean.rb" }
-      dirty = store.actions.find { |a| a["path"] == "src/dirty.rb" }
-      expect(clean["confidence"]).to eq("high")
-      expect(dirty["confidence"]).to eq("review")
-      expect(dirty["message"]).to start_with("[downgraded from high by sorbet pre-validate]")
-    end
-
-    it "sorbet_validate_high_actions! is a no-op when there are no HIGH actions" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.actions << { "kind" => "fix_sig_return", "confidence" => "review", "path" => "src/r.rb",
-        "line" => 5, "data" => { "type" => "String" } }
-      expect(infer).not_to receive(:sorbet_validate_batch)
-
-      infer.send(:sorbet_validate_high_actions!)
-
-      expect(store.actions.first["confidence"]).to eq("review")
-    end
-
     it "uses nested runtime shape evidence for generic narrowing" do
       infer = infer_with_store
       rec = {
@@ -1812,7 +1777,7 @@ RSpec.describe NilKill do
       )
     end
 
-    it "keeps runtime-only return observations in review instead of high auto-fix" do
+    it "keeps runtime-only return observations in review instead of high confidence" do
       infer = infer_with_store
       rec = {
         "calls" => 50,
@@ -2482,32 +2447,11 @@ RSpec.describe NilKill do
         end
       end
     end
-  end
 
-  describe NilKill::Loop do
-    def loop_for_hash_records(limit: 1)
-      described_class.allocate.tap do |loop|
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        loop.instance_variable_set(:@z3_solver, nil)
-        loop.instance_variable_set(:@hash_record_limit, limit)
-      end
-    end
-
-    def loop_for_signature_backflow(limit: 5)
-      described_class.allocate.tap do |loop|
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        loop.instance_variable_set(:@z3_solver, nil)
-        loop.instance_variable_set(:@signature_backflow_limit, limit)
-      end
-    end
-
-    describe "collection-escape soundness gate" do
-      it "blocks a cluster whose producer constructs the record inside an array literal" do
+    describe "hash-record collection escape gates" do
+      it "blocks a producer constructed inside an array literal" do
         Dir.mktmpdir("nil-kill-escape-gate") do |dir|
           path = File.join(dir, "lowering.rb")
-          rel = path
           File.write(path, <<~RUBY)
             class L
               def lower(node)
@@ -2518,15 +2462,17 @@ RSpec.describe NilKill do
               end
             end
           RUBY
-          infer = NilKill::Infer.allocate
+          infer = described_class.allocate
           infer.instance_variable_set(:@store, NilKill::Store.new)
+
           escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => rel, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }])
+            [{ "path" => path, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }])
+
           expect(escaping).not_to be_empty
         end
       end
 
-      it "blocks a producer pushed onto an array via <<" do
+      it "blocks a producer pushed onto an array" do
         Dir.mktmpdir("nil-kill-append") do |dir|
           path = File.join(dir, "parser.rb")
           File.write(path, <<~RUBY)
@@ -2536,15 +2482,17 @@ RSpec.describe NilKill do
               end
             end
           RUBY
-          infer = NilKill::Infer.allocate
+          infer = described_class.allocate
           infer.instance_variable_set(:@store, NilKill::Store.new)
+
           escaping = infer.send(:hash_record_producers_escaping_into_collection,
             [{ "path" => path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
+
           expect(escaping).not_to be_empty
         end
       end
 
-      it "blocks a producer bound to a local then stored via index-write" do
+      it "blocks a producer stored via index-write" do
         Dir.mktmpdir("nil-kill-idxwrite") do |dir|
           path = File.join(dir, "pprof.rb")
           File.write(path, <<~RUBY)
@@ -2559,17 +2507,18 @@ RSpec.describe NilKill do
               end
             end
           RUBY
-          infer = NilKill::Infer.allocate
+          infer = described_class.allocate
           infer.instance_variable_set(:@store, NilKill::Store.new)
-          # Hash literal spans lines 3-6; start line is 3.
+
           escaping = infer.send(:hash_record_producers_escaping_into_collection,
             [{ "path" => path, "line" => 3,
                "code" => "{\n      id: @next_func_id,\n      name_idx: intern(name),\n    }" }])
+
           expect(escaping).not_to be_empty
         end
       end
 
-      it "does NOT block a producer bound to a local (confined, enumerable)" do
+      it "does not block a confined local producer" do
         Dir.mktmpdir("nil-kill-confined") do |dir|
           path = File.join(dir, "label.rb")
           File.write(path, <<~RUBY)
@@ -2580,57 +2529,45 @@ RSpec.describe NilKill do
               end
             end
           RUBY
-          infer = NilKill::Infer.allocate
+          infer = described_class.allocate
           infer.instance_variable_set(:@store, NilKill::Store.new)
+
           escaping = infer.send(:hash_record_producers_escaping_into_collection,
             [{ "path" => path, "line" => 3, "code" => '{name: "Ada", id: 1}' }])
+
           expect(escaping).to be_empty
         end
       end
 
-      it "flags a COHERENT escaping record as a real opportunity (hidden element type)" do
-        Dir.mktmpdir("nil-kill-gate-coherent") do |dir|
+      it "separates coherent hidden element type opportunities from heterogeneous collection blockers" do
+        Dir.mktmpdir("nil-kill-gate-rows") do |dir|
           path = File.join(dir, "lowering.rb")
           File.write(path, <<~RUBY)
             class L
               def lower(node)
+                site_rows << { id: 1, a: x }
                 MIR::StructInit.new(node.union_name.to_s, [
                   { name: node.variant_name.to_s, value: inner }
                 ])
               end
             end
           RUBY
-          infer = NilKill::Infer.allocate
+          infer = described_class.allocate
           infer.instance_variable_set(:@store, NilKill::Store.new)
-          row = {
-            "struct_name" => "NameRecord", "type_name" => "MIR::NameRecord",
-            "common_keys" => %w[name value], "optional_keys" => [],
+
+          coherent = {
+            "struct_name" => "NameRecord",
+            "type_name" => "MIR::NameRecord",
+            "common_keys" => %w[name value],
+            "optional_keys" => [],
             "fields" => [{ "name" => "name", "type" => "String" }, { "name" => "value", "type" => "MIR::StructInit" }],
-            "producers" => [{ "path" => path, "line" => 4, "code" => "{ name: node.variant_name.to_s, value: inner }" }],
+            "producers" => [{ "path" => path, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }],
             "collection_slots" => 2,
           }
-          blockers = infer.send(:hash_record_cluster_blockers, row)
-          expect(blockers).to include(a_string_matching(/hidden element type.*element-typed-collection rewrite/))
-          expect(blockers).not_to include(a_string_matching(/not a struct candidate/))
-        end
-      end
-
-      it "flags a HETEROGENEOUS escaping cluster as not a struct candidate" do
-        Dir.mktmpdir("nil-kill-gate-hetero") do |dir|
-          path = File.join(dir, "lowering.rb")
-          File.write(path, <<~RUBY)
-            class L
-              def lower(node)
-                site_rows << { id: 1, a: x }
-              end
-            end
-          RUBY
-          infer = NilKill::Infer.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-          # 1 common key, 6 optional, mostly T.any -> divergent shapes merged.
-          row = {
-            "struct_name" => "AllocsRecord", "type_name" => "AllocsRecord",
-            "common_keys" => %w[id], "optional_keys" => %w[a b c d e f],
+          heterogeneous = coherent.merge(
+            "struct_name" => "AllocsRecord",
+            "common_keys" => %w[id],
+            "optional_keys" => %w[a b c d e f],
             "fields" => [
               { "name" => "id", "type" => "Integer" },
               { "name" => "a", "type" => "T.any(String, Symbol)" },
@@ -2642,525 +2579,54 @@ RSpec.describe NilKill do
             ],
             "producers" => [{ "path" => path, "line" => 3, "code" => "{ id: 1, a: x }" }],
             "collection_slots" => 4,
-          }
-          blockers = infer.send(:hash_record_cluster_blockers, row)
-          expect(blockers).to include(a_string_matching(/heterogeneous collection.*not a struct candidate/))
-          expect(blockers).not_to include(a_string_matching(/hidden element type/))
+          )
+
+          expect(infer.send(:hash_record_cluster_blockers, coherent)).to include(
+            a_string_matching(/hidden element type.*element-typed-collection rewrite/)
+          )
+          expect(infer.send(:hash_record_cluster_blockers, heterogeneous)).to include(
+            a_string_matching(/heterogeneous collection.*not a struct candidate/)
+          )
         end
       end
     end
+  end
 
-    describe "retry_with_useless_tcast_cleanup restores snapshot on verify exception (Bug 3)" do
-      it "restores files when verify raises (e.g. --verify-spec-subset with empty cmd fallback)" do
-        Dir.mktmpdir("nil-kill-tcast-crash") do |dir|
-          path = File.join(dir, "sample.rb")
-          File.write(path, "ORIGINAL\n")
+  describe NilKill::SpecDependencyIndex do
+    it "finds spec files that transitively require a changed src file" do
+      Dir.mktmpdir("nil-kill-dep-index", NilKill::ROOT) do |dir|
+        FileUtils.mkdir_p(File.join(dir, "src"))
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "src", "leaf.rb"), "")
+        File.write(File.join(dir, "src", "middle.rb"), "require_relative \"leaf\"\n")
+        File.write(File.join(dir, "src", "top.rb"), "require_relative \"middle\"\n")
+        spec_path = File.join(dir, "spec", "top_spec.rb")
+        File.write(spec_path, "require_relative \"../src/top\"\n")
+        unrelated_spec = File.join(dir, "spec", "unrelated_spec.rb")
+        File.write(unrelated_spec, "")
 
-          loop = described_class.allocate
-          loop.instance_variable_set(:@verify_spec_subset, false)
-          loop.instance_variable_set(:@verify_cmd, [])  # forces verify crash
-          # Stub apply_actions and apply_useless_tcast_feedback to record they ran.
-          apply_calls = 0
-          loop.define_singleton_method(:verify) { |**| raise ArgumentError, "wrong number of arguments (given 0, expected 1+)" }
-          stub_apply = Class.new do
-            define_method(:initialize) { |_| }
-            define_method(:apply_actions) do |_actions|
-              apply_calls += 1
-              File.write(path, "MODIFIED\n")
-              1
-            end
-          end
-          stub_const = stub_apply
-          loop.define_singleton_method(:apply_useless_tcast_feedback) { |_, _| 0 }
-
-          orig = NilKill::Apply
-          NilKill.send(:remove_const, :Apply)
-          NilKill.const_set(:Apply, stub_const)
-          begin
-            snapshot = { path => "ORIGINAL\n" }
-            action = { "kind" => "promote_hash_record_to_struct", "path" => path }
-            result = loop.send(:retry_with_useless_tcast_cleanup, action, snapshot, "stub output")
-            expect(result).to eq(0)
-            expect(File.read(path)).to eq("ORIGINAL\n")  # snapshot restored
-            expect(apply_calls).to be > 0  # apply ran before crash
-          ensure
-            NilKill.send(:remove_const, :Apply)
-            NilKill.const_set(:Apply, orig)
-          end
+        isolated_env("NIL_KILL_TARGETS" => dir) do
+          NilKill::SpecDependencyIndex.reset!
+          index = described_class.build
+          specs = index.specs_depending_on([File.join(dir, "src", "leaf.rb")])
+          expect(specs).to include(spec_path)
+          expect(specs).not_to include(unrelated_spec)
         end
       end
+    ensure
+      described_class.reset!
     end
 
-    describe "hash-record promoter respects forward refs (Bug 2)" do
-      it "inserts the new struct AFTER same-file constant-assigned types it references" do
-        Dir.mktmpdir("nil-kill-forward-ref") do |dir|
-          path = File.join(dir, "mir.rb")
-          File.write(path, <<~RUBY)
-            module MIR
-              # Inserted struct would forward-reference MIR::StructInit (defined
-              # below as a constant assignment, not a class). Promoter must
-              # detect this and place the new struct after.
-
-              StructInit = Struct.new(:zig_type, :fields)
-            end
-          RUBY
-          lines = File.readlines(path)
-          # allocate (not .new) -- insert_hash_record_struct is a pure
-          # transform; Apply#initialize calls Store.read which aborts
-          # (SystemExit) when this example's tmp has no evidence.json,
-          # which otherwise leaks a non-zero process exit despite the
-          # suite reporting 0 failures.
-          apply = NilKill::Apply.allocate
-          data = {
-            "struct_name" => "NameRecord",
-            "type_name" => "MIR::NameRecord",
-            "scope" => ["MIR"],
-            "struct_path" => path,
-            "fields" => [
-              { "name" => "name", "type" => "String" },
-              { "name" => "value", "type" => "MIR::StructInit" },
-            ],
-            "nested_structs" => [],
-          }
-
-          changed = apply.send(:insert_hash_record_struct, lines, data)
-          expect(changed).to be(true)
-
-          struct_init_line = lines.find_index { |l| l.include?("StructInit = Struct.new") }
-          name_record_line = lines.find_index { |l| l.include?("class NameRecord") }
-          expect(struct_init_line).not_to be_nil
-          expect(name_record_line).not_to be_nil
-          expect(name_record_line).to be > struct_init_line
+    it "returns spec files for non-existent paths as empty" do
+      Dir.mktmpdir("nil-kill-dep-empty", NilKill::ROOT) do |dir|
+        isolated_env("NIL_KILL_TARGETS" => dir) do
+          described_class.reset!
+          index = described_class.build
+          expect(index.specs_depending_on([File.join(dir, "does_not_exist.rb")])).to eq([])
         end
       end
-    end
-
-    describe "verify treats rspec load failures as failure (Bug 1)" do
-      def loop_with_fake_verify(stdout:, stderr:, exit_status: 0)
-        loop = described_class.allocate
-        loop.instance_variable_set(:@verify_spec_subset, false)
-        loop.instance_variable_set(:@verify_cmd, ["echo", "fake"])
-        loop.define_singleton_method(:verify) do |actions: nil|
-          combined = stdout + stderr
-          patterns = NilKill::Loop::RSPEC_LOAD_FAILURE_PATTERNS
-          ok = exit_status.zero? && patterns.none? { |re| re.match?(combined) }
-          [ok, combined]
-        end
-        loop
-      end
-
-      it "fails verify when output reports errors outside of examples even on exit 0" do
-        loop = loop_with_fake_verify(
-          stdout: "0 examples, 0 failures, 5 errors occurred outside of examples\n",
-          stderr: "",
-          exit_status: 0,
-        )
-        ok, _ = loop.verify
-        expect(ok).to be(false)
-      end
-
-      it "fails verify when output reports `An error occurred while loading ./spec/`" do
-        loop = loop_with_fake_verify(
-          stdout: "An error occurred while loading ./spec/foo_spec.rb.\nFailure/Error: require_relative\n",
-          stderr: "",
-          exit_status: 0,
-        )
-        ok, _ = loop.verify
-        expect(ok).to be(false)
-      end
-
-      it "succeeds when output is clean and exit is 0" do
-        loop = loop_with_fake_verify(
-          stdout: "42 examples, 0 failures\n",
-          stderr: "",
-          exit_status: 0,
-        )
-        ok, _ = loop.verify
-        expect(ok).to be(true)
-      end
-    end
-
-    it "selects unblocked review hash-record promotions for verified loop application" do
-      loop = loop_for_hash_records
-      evidence = {
-        "actions" => [
-          { "kind" => "promote_hash_record_cluster_to_struct", "confidence" => "review",
-            "path" => "src/users.rb", "line" => 10, "message" => "plan UserRecord",
-            "data" => { "pressure" => { "total" => 5 }, "blockers" => [] } },
-          { "kind" => "promote_hash_record_cluster_to_struct", "confidence" => "review",
-            "path" => "src/blocked.rb", "line" => 20, "message" => "plan BlockedRecord",
-            "data" => { "pressure" => { "total" => 50 }, "blockers" => ["dynamic hash-record key prevents struct accessor rewrite"] } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/other.rb", "line" => 30, "message" => "review only",
-            "data" => {} },
-        ],
-      }
-
-      actions = loop.send(:hash_record_review_actions, evidence)
-
-      expect(actions).to contain_exactly(
-        a_hash_including("kind" => "promote_hash_record_cluster_to_struct", "path" => "src/users.rb")
-      )
-    end
-
-    it "limits review hash-record promotions by pressure" do
-      loop = loop_for_hash_records(limit: 1)
-      evidence = {
-        "actions" => [
-          { "kind" => "promote_hash_record_cluster_to_struct", "confidence" => "review",
-            "path" => "src/low.rb", "line" => 10, "message" => "low",
-            "data" => { "pressure" => { "total" => 1 }, "blockers" => [] } },
-          { "kind" => "promote_hash_record_cluster_to_struct", "confidence" => "review",
-            "path" => "src/high.rb", "line" => 20, "message" => "high",
-            "data" => { "pressure" => { "total" => 9 }, "blockers" => [] } },
-        ],
-      }
-
-      actions = loop.send(:hash_record_review_actions, evidence)
-
-      expect(actions.map { |action| action["path"] }).to eq(["src/high.rb"])
-    end
-
-    it "selects static param backflow review actions for verified loop application" do
-      loop = loop_for_signature_backflow
-      evidence = {
-        "actions" => [
-          { "kind" => "fix_sig_param", "confidence" => "review",
-            "path" => "src/typed.rb", "line" => 10, "message" => "static callsites prove param node is Node",
-            "data" => { "name" => "node", "type" => "Node", "source" => "static_param_backflow", "callsite_count" => 3 } },
-          { "kind" => "fix_sig_param", "confidence" => "review",
-            "path" => "src/runtime.rb", "line" => 20, "message" => "runtime only",
-            "data" => { "name" => "node", "type" => "Node", "source" => "runtime", "callsite_count" => 30 } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/return.rb", "line" => 30, "message" => "not a param",
-            "data" => { "type" => "Node", "source" => "static_param_backflow" } },
-        ],
-      }
-
-      actions = loop.send(:signature_backflow_review_actions, evidence)
-
-      expect(actions).to contain_exactly(
-        a_hash_including("kind" => "fix_sig_param", "path" => "src/typed.rb")
-      )
-    end
-
-    it "limits static param backflow review actions by callsite count" do
-      loop = loop_for_signature_backflow(limit: 1)
-      evidence = {
-        "actions" => [
-          { "kind" => "fix_sig_param", "confidence" => "review",
-            "path" => "src/low.rb", "line" => 10, "message" => "low",
-            "data" => { "name" => "node", "type" => "Node", "source" => "static_param_backflow", "callsite_count" => 1 } },
-          { "kind" => "fix_sig_param", "confidence" => "review",
-            "path" => "src/high.rb", "line" => 20, "message" => "high",
-            "data" => { "name" => "node", "type" => "Node", "source" => "static_param_backflow", "callsite_count" => 9 } },
-        ],
-      }
-
-      actions = loop.send(:signature_backflow_review_actions, evidence)
-
-      expect(actions.map { |action| action["path"] }).to eq(["src/high.rb"])
-    end
-
-    describe NilKill::SpecDependencyIndex do
-      it "finds spec files that transitively require a changed src file" do
-        Dir.mktmpdir("nil-kill-dep-index", NilKill::ROOT) do |dir|
-          FileUtils.mkdir_p(File.join(dir, "src"))
-          FileUtils.mkdir_p(File.join(dir, "spec"))
-          File.write(File.join(dir, "src", "leaf.rb"), "")
-          File.write(File.join(dir, "src", "middle.rb"), "require_relative \"leaf\"\n")
-          File.write(File.join(dir, "src", "top.rb"), "require_relative \"middle\"\n")
-          spec_path = File.join(dir, "spec", "top_spec.rb")
-          File.write(spec_path, "require_relative \"../src/top\"\n")
-          unrelated_spec = File.join(dir, "spec", "unrelated_spec.rb")
-          File.write(unrelated_spec, "")
-
-          isolated_env("NIL_KILL_TARGETS" => dir) do
-            NilKill::SpecDependencyIndex.reset!
-            index = NilKill::SpecDependencyIndex.build
-            specs = index.specs_depending_on([File.join(dir, "src", "leaf.rb")])
-            expect(specs).to include(spec_path)
-            expect(specs).not_to include(unrelated_spec)
-          end
-        end
-      ensure
-        NilKill::SpecDependencyIndex.reset!
-      end
-
-      it "returns spec files for non-existent paths as empty" do
-        Dir.mktmpdir("nil-kill-dep-empty", NilKill::ROOT) do |dir|
-          isolated_env("NIL_KILL_TARGETS" => dir) do
-            NilKill::SpecDependencyIndex.reset!
-            index = NilKill::SpecDependencyIndex.build
-            expect(index.specs_depending_on([File.join(dir, "does_not_exist.rb")])).to eq([])
-          end
-        end
-      ensure
-        NilKill::SpecDependencyIndex.reset!
-      end
-    end
-
-    def loop_for_narrow_tlet(limit: 0)
-      described_class.allocate.tap do |loop|
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        loop.instance_variable_set(:@z3_solver, nil)
-        loop.instance_variable_set(:@narrow_tlet_limit, limit)
-      end
-    end
-
-    it "selects narrow_tlet REVIEW actions for verified-loop application" do
-      loop = loop_for_narrow_tlet
-      evidence = {
-        "actions" => [
-          { "kind" => "narrow_tlet", "confidence" => "review",
-            "path" => "src/a.rb", "line" => 5, "message" => "narrow T.let to String",
-            "data" => { "type" => "String" } },
-          { "kind" => "narrow_tlet", "confidence" => "high",
-            "path" => "src/b.rb", "line" => 10, "message" => "already high",
-            "data" => { "type" => "Integer" } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/c.rb", "line" => 15, "message" => "wrong kind",
-            "data" => { "type" => "String", "source" => "static_return_origin" } },
-        ],
-      }
-
-      actions = loop.send(:narrow_tlet_review_actions, evidence)
-
-      expect(actions.map { |a| a["path"] }).to contain_exactly("src/a.rb")
-    end
-
-    it "narrow_tlet skips actions already in high_actions, @skipped, or rejected by z3 preflight" do
-      loop = loop_for_narrow_tlet
-      action = { "kind" => "narrow_tlet", "confidence" => "review",
-        "path" => "src/x.rb", "line" => 1, "message" => "x",
-        "data" => { "type" => "String" } }
-      evidence = { "actions" => [action] }
-
-      expect(loop.send(:narrow_tlet_review_actions, evidence, [action])).to be_empty
-
-      loop.instance_variable_set(:@skipped, Set.new([loop.send(:fingerprint, action)]))
-      expect(loop.send(:narrow_tlet_review_actions, evidence)).to be_empty
-
-      loop.instance_variable_set(:@skipped, Set.new)
-      stub_solver = Object.new
-      def stub_solver.preflight_rejection(_action); "candidate uses bare generic collection type"; end
-      loop.instance_variable_set(:@z3_solver, stub_solver)
-      expect(loop.send(:narrow_tlet_review_actions, evidence)).to be_empty
-    end
-
-    def loop_for_narrow_generic(limit: 0)
-      described_class.allocate.tap do |loop|
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        loop.instance_variable_set(:@z3_solver, nil)
-        loop.instance_variable_set(:@narrow_generic_limit, limit)
-      end
-    end
-
-    it "selects narrow_generic_* REVIEW actions with collection_runtime source" do
-      loop = loop_for_narrow_generic
-      evidence = {
-        "actions" => [
-          { "kind" => "narrow_generic_param", "confidence" => "review",
-            "path" => "src/a.rb", "line" => 10, "message" => "narrow param",
-            "data" => { "name" => "items", "from" => "T::Array[T.untyped]", "type" => "T::Array[String]", "source" => "collection_runtime" } },
-          { "kind" => "narrow_generic_return", "confidence" => "review",
-            "path" => "src/b.rb", "line" => 20, "message" => "narrow return",
-            "data" => { "from" => "T::Hash[T.untyped, T.untyped]", "type" => "T::Hash[Symbol, String]", "source" => "collection_runtime" } },
-          { "kind" => "narrow_generic_param", "confidence" => "high",
-            "path" => "src/c.rb", "line" => 30, "message" => "already high",
-            "data" => { "name" => "x", "from" => "T::Array[T.untyped]", "type" => "T::Array[String]", "source" => "collection_runtime" } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/d.rb", "line" => 40, "message" => "wrong kind",
-            "data" => { "type" => "String", "source" => "forwarded_return_chain" } },
-          { "kind" => "narrow_generic_param", "confidence" => "review",
-            "path" => "src/e.rb", "line" => 50, "message" => "wrong source",
-            "data" => { "name" => "y", "from" => "T::Array[T.untyped]", "type" => "T::Array[String]", "source" => "other" } },
-        ],
-      }
-
-      actions = loop.send(:narrow_generic_review_actions, evidence)
-
-      expect(actions.map { |a| a["path"] }).to contain_exactly("src/a.rb", "src/b.rb")
-    end
-
-    it "narrow_generic skips actions already in high_actions, @skipped, or rejected by z3 preflight" do
-      loop = loop_for_narrow_generic
-      action = { "kind" => "narrow_generic_param", "confidence" => "review",
-        "path" => "src/x.rb", "line" => 1, "message" => "x",
-        "data" => { "name" => "x", "from" => "T::Array[T.untyped]", "type" => "T::Array[String]", "source" => "collection_runtime" } }
-      evidence = { "actions" => [action] }
-
-      # already in high_actions
-      expect(loop.send(:narrow_generic_review_actions, evidence, [action])).to be_empty
-      # in @skipped
-      loop.instance_variable_set(:@skipped, Set.new([loop.send(:fingerprint, action)]))
-      expect(loop.send(:narrow_generic_review_actions, evidence)).to be_empty
-      # z3 preflight reject
-      loop.instance_variable_set(:@skipped, Set.new)
-      stub_solver = Object.new
-      def stub_solver.preflight_rejection(_action); "candidate uses bare generic collection type"; end
-      loop.instance_variable_set(:@z3_solver, stub_solver)
-      expect(loop.send(:narrow_generic_review_actions, evidence)).to be_empty
-    end
-
-    def loop_for_return_backflow(limit: 5)
-      described_class.allocate.tap do |loop|
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        loop.instance_variable_set(:@z3_solver, nil)
-        loop.instance_variable_set(:@return_backflow_limit, limit)
-      end
-    end
-
-    it "selects forwarded-return-chain review actions for verified loop application" do
-      loop = loop_for_return_backflow
-      evidence = {
-        "actions" => [
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/forwarded.rb", "line" => 10, "message" => "forwarded chain",
-            "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a", "b", "c"] } },
-          { "kind" => "fix_sig_return", "confidence" => "high",
-            "path" => "src/high.rb", "line" => 20, "message" => "high already auto-applied",
-            "data" => { "type" => "void", "source" => "unused_return" } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/runtime.rb", "line" => 30, "message" => "runtime only",
-            "data" => { "type" => "String" } },
-          { "kind" => "fix_sig_param", "confidence" => "review",
-            "path" => "src/param.rb", "line" => 40, "message" => "not a return",
-            "data" => { "name" => "x", "type" => "String", "source" => "static_param_backflow" } },
-          { "kind" => "promote_hash_record_to_struct", "confidence" => "review",
-            "path" => "src/hash.rb", "line" => 50, "message" => "not a return",
-            "data" => {} },
-        ],
-      }
-
-      actions = loop.send(:return_backflow_review_actions, evidence)
-
-      expect(actions).to contain_exactly(
-        a_hash_including("kind" => "fix_sig_return", "path" => "src/forwarded.rb")
-      )
-    end
-
-    it "selects static-return-origin review actions" do
-      loop = loop_for_return_backflow
-      evidence = {
-        "actions" => [
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/static.rb", "line" => 10, "message" => "static origin",
-            "data" => { "type" => "Node", "source" => "static_return_origin", "blockers" => ["x"] } },
-        ],
-      }
-
-      actions = loop.send(:return_backflow_review_actions, evidence)
-
-      expect(actions).to contain_exactly(
-        a_hash_including("kind" => "fix_sig_return", "path" => "src/static.rb",
-                         "data" => a_hash_including("source" => "static_return_origin"))
-      )
-    end
-
-    it "limits review return-backflow actions by chain length" do
-      loop = loop_for_return_backflow(limit: 1)
-      evidence = {
-        "actions" => [
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/short.rb", "line" => 10, "message" => "short chain",
-            "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a"] } },
-          { "kind" => "fix_sig_return", "confidence" => "review",
-            "path" => "src/long.rb", "line" => 20, "message" => "long chain",
-            "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a", "b", "c", "d"] } },
-        ],
-      }
-
-      actions = loop.send(:return_backflow_review_actions, evidence)
-
-      expect(actions.map { |action| action["path"] }).to eq(["src/long.rb"])
-    end
-
-    it "skips return-backflow actions already in high_actions" do
-      loop = loop_for_return_backflow
-      review_action = { "kind" => "fix_sig_return", "confidence" => "review",
-        "path" => "src/dupe.rb", "line" => 10, "message" => "dupe",
-        "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a"] } }
-      existing = { "kind" => "fix_sig_return", "confidence" => "high",
-        "path" => "src/dupe.rb", "line" => 10, "message" => "dupe",
-        "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a"] } }
-
-      actions = loop.send(:return_backflow_review_actions, { "actions" => [review_action] }, [existing])
-
-      expect(actions).to be_empty
-    end
-
-    it "skips return-backflow actions present in @skipped or permanent_skip" do
-      loop = loop_for_return_backflow
-      action = { "kind" => "fix_sig_return", "confidence" => "review",
-        "path" => "src/skip.rb", "line" => 10, "message" => "skipped",
-        "data" => { "type" => "String", "source" => "forwarded_return_chain", "chain" => ["a"] } }
-
-      loop.instance_variable_set(:@skipped, Set.new([loop.send(:fingerprint, action)]))
-      expect(loop.send(:return_backflow_review_actions, { "actions" => [action] })).to be_empty
-
-      loop.instance_variable_set(:@skipped, Set.new)
-      loop.instance_variable_set(:@permanent_skip, [{ "kind" => "fix_sig_return", "path" => "src/skip.rb" }])
-      expect(loop.send(:return_backflow_review_actions, { "actions" => [action] })).to be_empty
-    end
-
-    it "skips return-backflow actions rejected by z3 preflight" do
-      loop = loop_for_return_backflow
-      action = { "kind" => "fix_sig_return", "confidence" => "review",
-        "path" => "src/z3reject.rb", "line" => 10, "message" => "rejected",
-        "data" => { "type" => "T.any(A, B, C, D)", "source" => "forwarded_return_chain", "chain" => ["a"] } }
-
-      stub_solver = Object.new
-      def stub_solver.preflight_rejection(_action) = "candidate union exceeds cutoff"
-      loop.instance_variable_set(:@z3_solver, stub_solver)
-
-      expect(loop.send(:return_backflow_review_actions, { "actions" => [action] })).to be_empty
-    end
-
-    it "snapshots every file touched by a cross-file hash-record action" do
-      loop = loop_for_hash_records
-      action = { "kind" => "promote_hash_record_cluster_to_struct", "path" => "src/producer.rb", "line" => 1,
-        "data" => {
-          "producers" => [{ "path" => "src/producer.rb", "line" => 1 }],
-          "consumers" => [{ "path" => "src/consumer.rb", "line" => 2 }],
-          "signatures" => [{ "path" => "src/signature.rb", "line" => 3 }],
-        } }
-
-      paths = loop.send(:snapshot_paths_for_action, action)
-
-      expect(paths).to contain_exactly("src/producer.rb", "src/consumer.rb", "src/signature.rb")
-    end
-
-    it "retries rejected return fixes as nilable when Sorbet reports nilable evidence" do
-      loop = described_class.allocate
-      output = <<~TEXT
-        lib/example.rb:12: Expected `String` but found `T.nilable(String)` for method result type https://srb.help/7005
-            12 |  end
-                  ^^^
-          Expected `String` for result type of method `name`:
-            lib/example.rb:8:
-             8 | sig { returns(String) }
-      TEXT
-      action = {
-        "kind" => "fix_sig_return",
-        "confidence" => "high",
-        "path" => "lib/example.rb",
-        "line" => 8,
-        "message" => "existing sig return is T.untyped; observed String",
-        "data" => { "type" => "String" },
-      }
-
-      fallback = loop.send(:nilable_widening_fallback, action, output)
-
-      expect(fallback).to include(
-        "kind" => "fix_sig_return",
-        "path" => "lib/example.rb",
-        "line" => 8,
-        "data" => a_hash_including("type" => "T.nilable(String)")
-      )
+    ensure
+      described_class.reset!
     end
   end
 
@@ -3216,38 +2682,6 @@ RSpec.describe NilKill do
         candidates = report.struct_field_candidates(runtime, static)
 
         expect(candidates.find { |c| c["class"] == "Example" && c["field"] == "items" }).to be_nil
-      end
-    end
-
-    describe "add_struct_field_sig (verified-loop struct-rbi)" do
-      it "applies via the Apply handler: update / insert / append / idempotent" do
-        ap = NilKill::Apply.allocate
-        lines = ["# typed: true\n", "\n", "class AST::Foo\n",
-                 "  sig { returns(T.untyped) }\n", "  def token; end\n", "end\n", "\n"]
-        act = ->(c, f, t) { { "kind" => "add_struct_field_sig", "line" => 1,
-                              "data" => { "class" => c, "field" => f, "type" => t } } }
-        expect(ap.send(:apply_add_struct_field_sig, lines, act.("AST::Foo", "token", "Token"))).to be(true)
-        expect(ap.send(:apply_add_struct_field_sig, lines, act.("AST::Foo", "name", "String"))).to be(true)
-        expect(ap.send(:apply_add_struct_field_sig, lines, act.("AST::Bar", "id", "Integer"))).to be(true)
-        expect(ap.send(:apply_add_struct_field_sig, lines, act.("AST::Foo", "token", "Token"))).to be(false)
-        out = lines.join
-        expect(out).to include("class AST::Foo\n  sig { returns(Token) }\n  def token; end")
-        expect(out).to include("  sig { returns(String) }\n  def name; end")
-        expect(out).to include("class AST::Bar\n  sig { returns(Integer) }\n  def id; end\nend")
-      end
-
-
-      it "the loop selector picks unskipped REVIEW add_struct_field_sig actions" do
-        loop = NilKill::Loop.allocate
-        loop.instance_variable_set(:@skipped, Set.new)
-        loop.instance_variable_set(:@permanent_skip, [])
-        ev = { "actions" => [
-          { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => "sorbet/rbi/ast-struct-fields.rbi",
-            "line" => 1, "message" => "type X#f as Y", "data" => { "class" => "X", "field" => "f", "type" => "Y" } },
-          { "kind" => "fix_sig_return", "confidence" => "review", "path" => "src/a.rb", "line" => 1, "data" => {} },
-        ] }
-        picked = loop.send(:struct_rbi_review_actions, ev)
-        expect(picked.map { |a| a["kind"] }).to eq(["add_struct_field_sig"])
       end
     end
 
@@ -3847,12 +3281,12 @@ RSpec.describe NilKill do
 
         expect(rows["unused_leaf"]).to include(
           "usage" => "unused via return-forwarding",
-          "fixability" => "auto-fixable: void"
+          "fixability" => "high action: void"
         )
         expect(rows["unused_wrapper"]).to include(
           "usage" => "unused via return-forwarding",
           "source_kind" => "explicit/direct forwarded return",
-          "fixability" => "auto-fixable: void"
+          "fixability" => "high action: void"
         )
         expect(rows["used_leaf"]).to include("usage" => "used as value")
         expect(rows["run"]).to include("usage" => "declared void", "fixability" => "addressed: void")
@@ -3973,34 +3407,6 @@ RSpec.describe NilKill do
         "strength" => "weak",
         "primary_reason" => "weak declared type: hash key/value evidence needed"
       )
-    end
-  end
-
-  describe NilKill::GuardedAutocorrect do
-    it "restores Sorbet autocorrect removals of defensive safe navigation" do
-      Dir.mktmpdir("nil-kill-autocorrect") do |dir|
-        path = File.join(dir, "example.rb")
-        File.write(path, "value&.name\n")
-        autocorrect = described_class.new([])
-        snapshot = { path => [{ line: 1, content: "value&.name\n" }] }
-
-        File.write(path, "value.name\n")
-
-        expect(autocorrect.send(:restore_safe_navigation, snapshot)).to eq(1)
-        expect(File.read(path)).to eq("value&.name\n")
-      end
-    end
-
-    it "restores known bogus did-you-mean autocorrect replacements" do
-      Dir.mktmpdir("nil-kill-autocorrect") do |dir|
-        path = File.join(dir, "example.rb")
-        original = ["node.class.module_alias\n"]
-        File.write(path, "node.class.module_eval\n")
-        autocorrect = described_class.new([])
-
-        expect(autocorrect.send(:restore_bogus_replacements, path => original)).to eq(1)
-        expect(File.read(path)).to eq("node.class.module_alias\n")
-      end
     end
   end
 

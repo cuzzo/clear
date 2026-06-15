@@ -322,7 +322,7 @@ class MIRPass
 
     clause = node.lock_error_clause
     return false unless clause
-    action_raises = %i[raise exit].include?(clause.action)
+    action_raises = [AST::ErrorActionKind::Raise, AST::ErrorActionKind::Exit].include?(clause.action)
     has_bubble = clause.bubble_types.any?
     action_raises || has_bubble
   end

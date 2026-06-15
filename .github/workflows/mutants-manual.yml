@@ -175,7 +175,7 @@ jobs:
               git fetch --no-tags --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "${BASE_SHA}"
             args+=(--since "${BASE_SHA}")
           fi
-          MUTANT_JOBS="$(nproc)" bundle exec ruby tools/mutants/ruby_specs.rb "${args[@]}"
+          MUTANT_JOBS="$(nproc)" bundle exec ruby gems/lineage/tools/mutant-converters/ruby_mutant.rb "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

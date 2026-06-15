@@ -1,7 +1,7 @@
 # typed: false
 # frozen_string_literal: true
 
-module NilKill
+module AutoType
   class GuardedAutocorrect
     BOGUS_AUTOCORRECT_PATTERNS = [
       /\.class\.module_eval\b/,
@@ -35,7 +35,7 @@ module NilKill
     end
 
     def target_files
-      NilKill.target_files
+      AutoType.target_files
     end
 
     def snapshot_safe_navigation

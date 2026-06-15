@@ -20,6 +20,7 @@
 
 const std = @import("std");
 const atomic = @import("atomic.zig");
+const AtomicValue = atomic.AtomicValue;
 
 // Re-export the atomic primitives so callers reach them via
 // `obs.AtomicInt64` etc. (matches the Go-style surface in CLEAR).
@@ -59,7 +60,7 @@ fn AtomicFor(comptime T: type) type {
 pub fn AtomicSum(comptime T: type) type {
     return struct {
         inner: AtomicFor(T) = .{},
-        seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+        seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -128,7 +129,7 @@ pub const AtomicCount = struct {
 pub fn AtomicMax(comptime T: type) type {
     return struct {
         inner: AtomicFor(T),
-        seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+        seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -159,7 +160,7 @@ pub fn AtomicMax(comptime T: type) type {
 pub fn AtomicMin(comptime T: type) type {
     return struct {
         inner: AtomicFor(T),
-        seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+        seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -223,7 +224,6 @@ pub fn AtomicAvg(comptime T: type) type {
         pub fn started(self: *const Self) bool {
             return self.count.started();
         }
-
     };
 }
 
@@ -244,7 +244,7 @@ pub fn AtomicAvg(comptime T: type) type {
 pub fn AtomicReduce(comptime T: type) type {
     return struct {
         inner: AtomicFor(T),
-        seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+        seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -336,8 +336,8 @@ pub fn AtomicFind(comptime T: type) type {
         // AtomicInt cleanly (the `found` bit is the publication
         // barrier, not a value), so this stays as raw atomics. Both
         // fields are still cache-line aligned.
-        found: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
-        value: std.atomic.Value(Backing) align(64) = .{ .raw = 0 },
+        found: AtomicValue(u8) align(64) = .{ .raw = 0 },
+        value: AtomicValue(Backing) align(64) = .{ .raw = 0 },
         // Single-writer enforcement (always-on after M4). The current
         // submit() pattern (store value, then CAS the flag) is unsafe
         // under multi-writer: writer A stores A, writer B overwrites
@@ -347,7 +347,7 @@ pub fn AtomicFind(comptime T: type) type {
         // producer by construction); the assert catches misuse from
         // raw Zig in every build mode (steady-state cost is one
         // relaxed load per submit; see assertSingleWriter).
-        writer_tid: std.atomic.Value(usize) = .{ .raw = 0 },
+        writer_tid: AtomicValue(usize) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -370,7 +370,6 @@ pub fn AtomicFind(comptime T: type) type {
         pub fn started(self: *const Self) bool {
             return self.found.load(.acquire) != 0;
         }
-
 
         inline fn encode(v: T) Backing {
             return switch (ti) {
@@ -416,11 +415,11 @@ fn AtomicFindString() type {
         const Box = struct { data: T };
         // Atomic head pointer. Null = no match yet; non-null = the box
         // we own holds the published string.
-        slot: std.atomic.Value(?*Box) align(64) = .{ .raw = null },
+        slot: AtomicValue(?*Box) align(64) = .{ .raw = null },
         alloc: std.mem.Allocator,
         // Single-writer contract enforcement (always-on after M4).
         // See StreamSetCfg.writer_tid for rationale.
-        writer_tid: std.atomic.Value(usize) = .{ .raw = 0 },
+        writer_tid: AtomicValue(usize) = .{ .raw = 0 },
 
         const Self = @This();
 
@@ -494,8 +493,8 @@ fn AtomicFindString() type {
 /// Lock-free OR-fold over a stream of bools. WITH VIEW returns
 /// "any true seen so far". Per-item: fetchOr.
 pub const AtomicAny = struct {
-    value: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
-    seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+    value: AtomicValue(u8) align(64) = .{ .raw = 0 },
+    seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
     const Self = @This();
 
@@ -524,7 +523,6 @@ pub const AtomicAny = struct {
     pub fn started(self: *const Self) bool {
         return self.seen.load(.acquire) != 0;
     }
-
 };
 
 /// Lock-free AND-fold over a stream of bools. WITH VIEW returns
@@ -533,8 +531,8 @@ pub const AtomicAny = struct {
 /// Initial state: 1 (true). Stays true until the first false flips
 /// it to 0. Once 0, it never goes back.
 pub const AtomicAll = struct {
-    value: std.atomic.Value(u8) align(64) = .{ .raw = 1 },
-    seen: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+    value: AtomicValue(u8) align(64) = .{ .raw = 1 },
+    seen: AtomicValue(u8) align(64) = .{ .raw = 0 },
 
     const Self = @This();
 
@@ -564,7 +562,6 @@ pub const AtomicAll = struct {
     pub fn started(self: *const Self) bool {
         return self.seen.load(.acquire) != 0;
     }
-
 };
 
 // =============================================================
@@ -617,7 +614,7 @@ pub fn ObservableTerminal(comptime Inner: type) type {
         // alignment also pushes the function-pointer table below into a
         // separate line so writes to `done` (rare, once) don't dirty
         // cold codegen-time fields.
-        done: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+        done: AtomicValue(u8) align(64) = .{ .raw = 0 },
         // Opaque "completion handle" -- the codegen heap-allocates a
         // `*WaitGroup` (from runtime/scheduler.zig) and stores its
         // pointer here at construction time. observable.zig calls
@@ -826,8 +823,7 @@ pub fn ObservableTerminal(comptime Inner: type) type {
         ) if (@hasDecl(Inner, "materialize"))
             @typeInfo(@TypeOf(Inner.materialize)).@"fn".return_type.?
         else
-            anyerror!View
-        {
+            anyerror!View {
             if (comptime @hasDecl(Inner, "materialize")) {
                 return self.inner.materialize(alloc);
             } else {
@@ -993,7 +989,7 @@ pub fn StreamSetBounded(comptime T: type, comptime N: usize) type {
 
     return struct {
         contents: [N]T = undefined,
-        count: std.atomic.Value(usize) = .{ .raw = 0 },
+        count: AtomicValue(usize) = .{ .raw = 0 },
         lookup: Lookup = .{},
         alloc: std.mem.Allocator,
 
@@ -1125,7 +1121,7 @@ pub const StreamSetConfig = struct {
 /// `std.Thread.Mutex` anymore. ParkingMutex is fiber-aware and
 /// requires a Task context, which we don't have here.
 const SpinLock = struct {
-    flag: std.atomic.Value(bool) = .{ .raw = false },
+    flag: AtomicValue(bool) = .{ .raw = false },
 
     fn lock(self: *SpinLock) void {
         while (self.flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
@@ -1146,8 +1142,8 @@ fn StreamSetBuffer(comptime T: type) type {
         data: []T,
         // Items currently in `data` (always <= data.len). Set by
         // the writer with .release; read by viewers with .acquire.
-        count: std.atomic.Value(usize) = .{ .raw = 0 },
-        refcount: std.atomic.Value(u32) = .{ .raw = 1 }, // head holds 1
+        count: AtomicValue(usize) = .{ .raw = 0 },
+        refcount: AtomicValue(u32) = .{ .raw = 1 }, // head holds 1
 
         const Self = @This();
 
@@ -1181,8 +1177,8 @@ pub fn StreamSetCfg(comptime T: type, comptime cfg: StreamSetConfig) type {
         std.AutoHashMapUnmanaged(T, void);
 
     return struct {
-        head: ?*Buffer = null,           // current write buffer; protected by mtx for swaps
-        mtx: SpinLock = .{},             // brief lock around head load+inc / swap+dec
+        head: ?*Buffer = null, // current write buffer; protected by mtx for swaps
+        mtx: SpinLock = .{}, // brief lock around head load+inc / swap+dec
         lookup: Lookup = .{},
         alloc: std.mem.Allocator,
         // Single-writer contract enforcement (always-on after M4).
@@ -1190,7 +1186,7 @@ pub fn StreamSetCfg(comptime T: type, comptime cfg: StreamSetConfig) type {
         // submits from the same thread are a single relaxed load on
         // the steady-state hot path. A different-thread submit panics
         // (silent corruption otherwise — see assertSingleWriter).
-        writer_tid: std.atomic.Value(usize) = .{ .raw = 0 },
+        writer_tid: AtomicValue(usize) = .{ .raw = 0 },
 
         const Self = @This();
         const Buffer = StreamSetBuffer(T);
@@ -1382,10 +1378,10 @@ pub fn Observable(comptime T: type) type {
         // Tracks the original initial value so `started()` can
         // distinguish the seeded snapshot from any user `set()`.
         // The pre-set state is `seen == 0`; any `set()` flips it.
-        seen: std.atomic.Value(u8) = .{ .raw = 0 },
+        seen: AtomicValue(u8) = .{ .raw = 0 },
         // Single-writer contract enforcement (always-on after M4).
         // See StreamSetCfg.writer_tid for rationale.
-        writer_tid: std.atomic.Value(usize) = .{ .raw = 0 },
+        writer_tid: AtomicValue(usize) = .{ .raw = 0 },
 
         const Self = @This();
         pub const Snap = ObservableSnap(T);
@@ -1499,7 +1495,7 @@ pub fn Observable(comptime T: type) type {
 pub fn ObservableSnap(comptime T: type) type {
     return struct {
         value: T,
-        refcount: std.atomic.Value(u32) = .{ .raw = 1 },
+        refcount: AtomicValue(u32) = .{ .raw = 1 },
     };
 }
 
@@ -1557,7 +1553,7 @@ fn ceiling(comptime T: type) T {
 /// emit code holds the `@observable` writer end). The runtime
 /// check is a backstop for raw-Zig misuse and mis-wired codegen,
 /// not a recoverable failure mode.
-fn assertSingleWriter(tid: *std.atomic.Value(usize)) void {
+fn assertSingleWriter(tid: *AtomicValue(usize)) void {
     // M4: removed the build-mode gate. The previous implementation
     // skipped this check in ReleaseFast, so a misuse (two writer
     // fibers on the same observable) would silently corrupt data with

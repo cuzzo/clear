@@ -1,6 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
+require "set"
+
 module NilKill
   class StaticDiffAudit
     Finding = Struct.new(:kind, :path, :line, :message, :detail, :code, keyword_init: true) do
@@ -16,53 +18,104 @@ module NilKill
       end
     end
 
-    TYPE_ERASURE_TOKEN = "T." + "untyped"
-
-    def initialize(root:, added_lines:)
+    def initialize(root:, added_lines:, context_paths: nil)
       @root = root
       @added_lines = added_lines
+      @context_paths = context_paths
     end
 
     def findings
       SourceIndex.reset_global_shape_indexes
-      src_ruby_paths.flat_map { |path| findings_for_path(path) }
+      added_lines_by_provider.flat_map do |provider, provider_added_lines|
+        provider.static_diff_findings(
+          root: root,
+          added_lines: provider_added_lines,
+          context_paths: context_paths_for(provider),
+          finding_class: Finding
+        )
+      end
     end
 
     private
 
-    attr_reader :root, :added_lines
+    attr_reader :root, :added_lines, :context_paths
 
-    def src_ruby_paths
-      added_lines.keys.select { |path| path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path)) }.sort
+    def added_lines_by_provider
+      existing_added_lines.each_with_object(Hash.new { |hash, provider| hash[provider] = {} }) do |(path, lines), grouped|
+        provider = Languages.provider_for_path(path)
+        next unless provider
+
+        grouped[provider][path] = lines
+      end
+    end
+
+    def existing_added_lines
+      @existing_added_lines ||= added_lines.select { |path, _lines| File.file?(File.join(root, path)) }
+    end
+
+    def context_paths_for(provider)
+      paths = context_paths || existing_added_lines.keys
+      paths.select { |path| provider_path?(provider, path) && File.file?(File.join(root, path)) }.sort
+    end
+
+    def provider_path?(provider, path)
+      provider.extensions.map(&:downcase).include?(File.extname(path).downcase)
+    end
+  end
+
+  class RubyStaticDiffAudit
+    TYPE_ERASURE_TOKEN = "T." + "untyped"
+    EMPTY_TYPED_IVAR_FILES = Set.new.freeze
+
+    def initialize(root:, added_lines:, context_paths:, finding_class:)
+      @root = root
+      @added_lines = added_lines
+      @context_paths = context_paths
+      @finding_class = finding_class
+      @typed_ivar_files_by_name = nil
+    end
+
+    def findings
+      ruby_paths.flat_map { |path| findings_for_path(path) }
+    end
+
+    private
+
+    attr_reader :root, :added_lines, :context_paths, :finding_class
+
+    def ruby_paths
+      added_lines.keys.select { |path| path.end_with?(".rb") && File.file?(File.join(root, path)) }.sort
     end
 
     def findings_for_path(path)
-      index = SourceIndex.new(File.join(root, path))
       lines = SourceIndex.source_lines(File.join(root, path))
-      audit_methods(path, index, lines) + audit_hash_records(path, index) + audit_added_source_lines(path, lines)
+      facts = lightweight_facts_for_path(path)
+      audit_methods(path, facts.fetch(:methods), lines) +
+        audit_hash_records(path, facts.fetch(:hash_shapes)) +
+        audit_added_source_lines(path, lines)
     end
 
-    def audit_methods(path, index, lines)
-      index.methods.filter_map do |method|
+    def audit_methods(path, methods, lines)
+      methods.filter_map do |method|
         next unless added_line?(path, method["line"])
 
         sig = signature_above(lines, method["line"])
         if !sig
           finding("missing_sig", path, method["line"],
-            "added src method has no Sorbet signature",
+            "added Ruby method has no Sorbet signature",
             "#{method["class"]}##{method["method"]}".sub(/\A#/, ""),
             method["method"])
         elsif weak_type?(sig)
           finding("untyped_sig", path, method["line"],
-            "added src method signature uses #{TYPE_ERASURE_TOKEN}",
+            "added Ruby method signature uses #{TYPE_ERASURE_TOKEN}",
             "#{method["class"]}##{method["method"]}".sub(/\A#/, ""),
             sig)
         end
       end
     end
 
-    def audit_hash_records(path, index)
-      index.hash_shapes.filter_map do |shape|
+    def audit_hash_records(path, hash_shapes)
+      hash_shapes.filter_map do |shape|
         next unless added_line?(path, shape["line"])
         keys = Array(shape["keys"])
         next if keys.length < 2
@@ -76,6 +129,45 @@ module NilKill
           "keys: #{keys.join(", ")}",
           shape["code"])
       end
+    end
+
+    def lightweight_facts_for_path(path)
+      lines = SourceIndex.source_lines(File.join(root, path))
+      line_numbers = added_lines.fetch(path)
+      {
+        methods: line_numbers.filter_map { |line_number| lightweight_method(path, line_number, lines[line_number - 1]) },
+        hash_shapes: line_numbers.filter_map { |line_number| lightweight_hash_shape(path, line_number, lines) },
+      }
+    end
+
+    def lightweight_method(path, line_number, line)
+      match = line.to_s.strip.match(/\Adef\s+((?:self\.)?[^\s(;]+)/)
+      return nil unless match
+
+      raw_name = match[1].delete_suffix("(")
+      class_method = raw_name.start_with?("self.")
+      method_name = raw_name.delete_prefix("self.")
+      {
+        "path" => path,
+        "line" => line_number,
+        "end_line" => line_number,
+        "class" => "",
+        "method" => method_name,
+        "kind" => class_method ? "class" : "instance",
+      }
+    end
+
+    def lightweight_hash_shape(path, line_number, lines)
+      first_line = lines[line_number - 1].to_s
+      return nil if first_line.strip.start_with?("sig ")
+
+      code = balanced_brace_code(lines, line_number - 1)
+      return nil unless code
+
+      keys = top_level_hash_keys(code)
+      return nil if keys.size < 2
+
+      { "path" => path, "line" => line_number, "keys" => keys, "code" => code }
     end
 
     def audit_added_source_lines(path, lines)
@@ -167,18 +259,184 @@ module NilKill
     end
 
     def typed_ivar_initialized_elsewhere?(path, ivar)
-      return false unless path.start_with?("src/")
+      typed_ivar_files_by_name.fetch(ivar, EMPTY_TYPED_IVAR_FILES).any? { |rel| rel != path }
+    end
 
-      Dir.glob(File.join(root, "src/**/*.rb")).any? do |candidate|
-        rel = candidate.delete_prefix("#{root}/")
-        next false if rel == path
-
-        SourceIndex.source_lines(candidate).any? { |line| typed_ivar_line?(line, ivar) }
+    def typed_ivar_files_by_name
+      @typed_ivar_files_by_name ||= begin
+        files_by_ivar = Hash.new { |hash, key| hash[key] = Set.new }
+        context_paths.each do |rel|
+          candidate = File.join(root, rel)
+          SourceIndex.source_lines(candidate).each do |line|
+            found_ivar = typed_ivar_from_line(line)
+            files_by_ivar[found_ivar] << rel if found_ivar
+          end
+        end
+        files_by_ivar
       end
     end
 
     def typed_ivar_line?(line, ivar)
-      line.strip.match?(/\A#{Regexp.escape(ivar)}\s*=\s*T\.let\(/)
+      typed_ivar_from_line(line) == ivar
+    end
+
+    def typed_ivar_from_line(line)
+      line.strip.match(/\A(@[a-zA-Z_]\w*)\s*=\s*T\.let\(/)&.[](1)
+    end
+
+    def balanced_brace_code(lines, start_index)
+      return nil unless lines[start_index].to_s.include?("{")
+
+      depth = 0
+      quote = nil
+      escape = false
+      seen_open = false
+      collected = []
+      lines[start_index, 80].to_a.each do |line|
+        collected << line
+        line.each_char do |char|
+          if quote
+            if escape
+              escape = false
+            elsif char == "\\"
+              escape = true
+            elsif char == quote
+              quote = nil
+            end
+            next
+          end
+
+          case char
+          when "'", "\""
+            quote = char
+          when "#"
+            break
+          when "{"
+            seen_open = true
+            depth += 1
+          when "}"
+            depth -= 1 if seen_open
+            return collected.join if seen_open && depth.zero?
+          end
+        end
+      end
+      nil
+    end
+
+    def top_level_hash_keys(code)
+      state = { brace: 0, paren: 0, bracket: 0, quote: nil, escape: false, keys: [] }
+      idx = 0
+      while idx < code.length
+        idx = scan_hash_key(code, idx, state)
+        char = code[idx]
+        break unless char
+
+        if advance_string_state(char, state)
+          idx += 1
+          next
+        end
+
+        case char
+        when "#"
+          idx = code.index("\n", idx) || code.length
+          next
+        when "{"
+          state[:brace] += 1
+        when "}"
+          state[:brace] -= 1 if state[:brace].positive?
+        when "("
+          state[:paren] += 1 if state[:brace].positive?
+        when ")"
+          state[:paren] -= 1 if state[:paren].positive?
+        when "["
+          state[:bracket] += 1 if state[:brace].positive?
+        when "]"
+          state[:bracket] -= 1 if state[:bracket].positive?
+        end
+        idx += 1
+      end
+      state.fetch(:keys)
+    end
+
+    def scan_hash_key(code, idx, state)
+      return idx unless state[:brace] == 1 && state[:paren].zero? && state[:bracket].zero? && !state[:quote]
+
+      if code[idx] =~ /[A-Za-z_]/
+        finish = scan_identifier_end(code, idx)
+        after = skip_space(code, finish)
+        if code[after] == ":" && code[after + 1] != ":"
+          state.fetch(:keys) << code[idx...finish]
+          return after + 1
+        elsif code[after, 2] == "=>"
+          state.fetch(:keys) << code[idx...finish]
+          return after + 2
+        end
+      elsif code[idx] == ":"
+        finish = scan_identifier_end(code, idx + 1)
+        after = skip_space(code, finish)
+        if finish > idx + 1 && code[after, 2] == "=>"
+          state.fetch(:keys) << code[(idx + 1)...finish]
+          return after + 2
+        end
+      elsif ["'", "\""].include?(code[idx])
+        finish, value = scan_string_literal(code, idx)
+        after = skip_space(code, finish)
+        if value && code[after, 2] == "=>"
+          state.fetch(:keys) << value
+          return after + 2
+        end
+      end
+
+      idx
+    end
+
+    def advance_string_state(char, state)
+      if state[:quote]
+        if state[:escape]
+          state[:escape] = false
+        elsif char == "\\"
+          state[:escape] = true
+        elsif char == state[:quote]
+          state[:quote] = nil
+        end
+        return true
+      end
+
+      if ["'", "\""].include?(char)
+        state[:quote] = char
+        return true
+      end
+
+      false
+    end
+
+    def scan_identifier_end(code, idx)
+      idx += 1 while idx < code.length && code[idx] =~ /[A-Za-z0-9_]/
+      idx
+    end
+
+    def skip_space(code, idx)
+      idx += 1 while idx < code.length && code[idx] =~ /\s/
+      idx
+    end
+
+    def scan_string_literal(code, idx)
+      quote = code[idx]
+      idx += 1
+      start = idx
+      escaped = false
+      while idx < code.length
+        char = code[idx]
+        if escaped
+          escaped = false
+        elsif char == "\\"
+          escaped = true
+        elsif char == quote
+          return [idx + 1, code[start...idx]]
+        end
+        idx += 1
+      end
+      [idx, nil]
     end
 
     def homogeneous_lookup_hash?(code)
@@ -227,7 +485,7 @@ module NilKill
     end
 
     def finding(kind, path, line, message, detail, code)
-      Finding.new(kind: kind, path: path, line: line.to_i, message: message, detail: detail.to_s, code: code.to_s)
+      finding_class.new(kind: kind, path: path, line: line.to_i, message: message, detail: detail.to_s, code: code.to_s)
     end
   end
 end

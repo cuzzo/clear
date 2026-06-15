@@ -48,6 +48,7 @@ module NilKill
       append_param_origin_report(lines, evidence)
       append_foreign_class_pressure(lines, evidence)
       append_type_normalizer_report(lines, evidence)
+      append_hidden_enum_pressure_report(lines, evidence)
       append_fallibility_pressure_report(lines, evidence)
       append_struct_report(lines, evidence)
       append_collection_report(lines, evidence)
@@ -82,15 +83,15 @@ module NilKill
       append_type_soundness_table(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       lines << ""
-      lines << "## Auto-Fix Action Counts"
+      lines << "## Action Plan Counts"
       counts = actions.group_by { |a| [a["confidence"], a["kind"], a.dig("data", "source") || "(none)"] }
         .transform_values(&:size)
         .sort_by { |_, count| -count }
       high = counts.select { |key, _| key[0] == "high" }
       review = counts.select { |key, _| key[0] == "review" }
-      lines << "- HIGH (auto-applied): #{high.sum { |_, c| c }}"
+      lines << "- HIGH evidence: #{high.sum { |_, c| c }}"
       high.each { |(_, kind, src), c| lines << "  - #{c.to_s.rjust(4)}  #{kind} / #{src}" }
-      lines << "- REVIEW (manual or verified-loop): #{review.sum { |_, c| c }}"
+      lines << "- REVIEW evidence: #{review.sum { |_, c| c }}"
       review.first(8).each { |(_, kind, src), c| lines << "  - #{c.to_s.rjust(4)}  #{kind} / #{src}" }
       lines << "  - ... #{review.size - 8} more action categories" if review.size > 8
     end
@@ -916,7 +917,7 @@ module NilKill
       lines << "- return syntax: whether the method uses implicit return, explicit `return`, or a mix"
       lines << "- return value usage: whether static callsites use this method's return value, forward it, or ignore it"
       lines << "- return source kind: the kind of expression that produces the return value"
-      lines << "- fixability: the report's estimate of whether the return is already addressed, directly fixable, cascading, or needs more evidence"
+      lines << "- fixability: the report's estimate of whether the return is already addressed, high-evidence, cascading, or needs more evidence"
       lines << "- row percent: share of all return slots; strength percents: share within that row"
       if rows.empty?
         lines << "- none"
@@ -933,7 +934,7 @@ module NilKill
       append_hygiene_bucket_lines(lines, "Return Source Kind", rows, "source_kind", total)
       append_hygiene_bucket_lines(lines, "Fixability", rows, "fixability", total)
 
-      easy = rows.select { |row| row["fixability"].start_with?("addressed") || row["fixability"].start_with?("auto-fixable") }
+      easy = rows.select { |row| row["fixability"].start_with?("addressed") || row["fixability"].start_with?("high action") }
       addressed = easy.count { |row| row["fixability"].start_with?("addressed") }
       lines << "- Easily addressable/addressed returns: #{format_hygiene_count(addressed, easy.size)}"
 
@@ -979,8 +980,8 @@ module NilKill
 
     def hygiene_fixability_rank(fixability)
       case fixability
-      when /\Aauto-fixable: void/ then 0
-      when /\Aauto-fixable/ then 1
+      when /\Ahigh action: void/ then 0
+      when /\Ahigh action/ then 1
       when /\Acascade/ then 2
       when /\Aneeds collection/ then 3
       else 4
@@ -1114,7 +1115,7 @@ module NilKill
       return "addressed: #{return_hygiene_type_strength(return_type)}" if return_type != "T.untyped"
       if action && action["confidence"] == HIGH
         type = action.dig("data", "type") || "return"
-        return "auto-fixable: #{type}"
+        return "high action: #{type}"
       end
       if action
         type = action.dig("data", "type") || "return"
@@ -1300,6 +1301,35 @@ module NilKill
         end
         lines << "  - ... #{sites.size - 5} more" if sites.size > 5
       end
+    end
+
+    def append_hidden_enum_pressure_report(lines, evidence)
+      rows = Array(evidence.dig("facts", "hidden_enum_pressure"))
+      lines << ""
+      lines << "## Hidden Enum Pressure (#{rows.size})"
+      lines << "- primitive String/Symbol slots with static closed-set decisions; report-only, no automated rewrite"
+      if rows.empty?
+        lines << "- none"
+        return
+      end
+
+      rows.first(50).each do |row|
+        values = Array(row["values"]).first(10).join(", ")
+        runtime = row["runtime"] || {}
+        runtime_text = runtime.empty? ? "" : "; runtime #{runtime["calls"].to_i} call(s), classes #{Array(runtime["classes"]).join(", ")}"
+        blockers = Array(row["blockers"])
+        blocker_text = blockers.empty? ? "" : "; blockers #{blockers.map { |site| site["kind"] }.uniq.join(", ")}"
+        label = [row["owner"], row["method"]].compact.reject(&:empty?).join(row["method_kind"] == "class" ? "." : "#")
+        label = row["owner"].to_s if label.empty?
+        lines << "- #{row["path"]}:#{row["line"]} #{label} #{row["kind"]} `#{row["slot"]}`: " \
+                 "#{row["confidence"]} score #{row["score"].to_i}; values #{values}; " \
+                 "decision pressure #{row["decision_pressure"].to_i}#{runtime_text}#{blocker_text}; #{row["suggestion"]}"
+        Array(row["decisions"]).first(3).each do |site|
+          lines << "  - decision: #{site["path"]}:#{site["line"]} #{site["kind"]} `#{site["code"]}`"
+        end
+        lines << "  - ... #{Array(row["decisions"]).size - 3} more decision(s)" if Array(row["decisions"]).size > 3
+      end
+      lines << "- ... #{rows.size - 50} more hidden enum candidate(s)" if rows.size > 50
     end
 
     def append_fallibility_pressure_report(lines, evidence)
@@ -1611,7 +1641,7 @@ module NilKill
       end
       lines << ""
       lines << "### Deterministic Guard Collapse"
-      lines << "- `static_proven` rows are predicates nil-kill can prove from source/type facts. `contract_proven` rows are guard clusters that collapse when the named origin is typed to its observed singleton producer. Runtime-only dominance is review material, not an autofix proof."
+      lines << "- `static_proven` rows are predicates nil-kill can prove from source/type facts. `contract_proven` rows are guard clusters that collapse when the named origin is typed to its observed singleton producer. Runtime-only dominance is review material, not a rewrite proof."
       if static_guards.empty? && contract_rows.empty?
         lines << "- none"
         return

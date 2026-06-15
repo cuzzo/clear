@@ -1,4 +1,11 @@
 PATH
+  remote: gems/auto-type
+  specs:
+    auto-type (0.1.0)
+      nil-kill (= 0.1.0)
+      sorbet-runtime
+
+PATH
   remote: gems/decomplex
   specs:
     decomplex (0.0.1)
@@ -278,6 +285,7 @@ PLATFORMS
   x86_64-linux-gnu
 
 DEPENDENCIES
+  auto-type!
   byebug (~> 12.0)
   csv
   debride

@@ -498,15 +498,15 @@ class FunctionSignature
     intrinsic_contract.template.zig
   end
 
-  sig { params(kind: Symbol).returns(T.nilable(T.any(String, Symbol))) }
+  sig { params(kind: IntrinsicTemplateKind).returns(T.nilable(T.any(String, Symbol))) }
   def intrinsic_template(kind)
     intrinsic_contract.template.pattern_for(kind)
   end
 
-  sig { params(kind: Symbol).returns(String) }
+  sig { params(kind: IntrinsicTemplateKind).returns(String) }
   def required_intrinsic_template(kind)
     pattern = intrinsic_template(kind)
-    raise "registry template missing :#{kind} for #{inspect}" unless pattern
+    raise "registry template missing :#{kind.serialize} for #{inspect}" unless pattern
 
     pattern.to_s.dup
   end
@@ -521,7 +521,7 @@ class FunctionSignature
     intrinsic_contract.template.bc
   end
 
-  sig { params(kind: Symbol).returns(T.nilable(Symbol)) }
+  sig { params(kind: IntrinsicAllocationKind).returns(T.nilable(Symbol)) }
   def intrinsic_alloc(kind)
     intrinsic_contract.allocation.placeholder(kind)
   end

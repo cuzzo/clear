@@ -1253,8 +1253,18 @@ module AST
     const :token, T.nilable(Lexer::Token)
   end
 
+  class ErrorActionKind < T::Enum
+    enums do
+      Raise = new("raise")
+      Pass = new("pass")
+      Return = new("return")
+      Exit = new("exit")
+      Block = new("block")
+    end
+  end
+
   class ErrorAction < T::Struct
-    const :action, Symbol
+    const :action, ErrorActionKind
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil
     const :message, T.nilable(Node), default: nil
@@ -1265,7 +1275,7 @@ module AST
     extend T::Sig
 
     const :selectors, T::Array[ErrorSelector]
-    const :action, Symbol
+    const :action, ErrorActionKind
     const :retries, T.nilable(Integer)
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil

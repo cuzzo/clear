@@ -402,11 +402,11 @@ module Annotator
         resolve_error_selectors!(node, clause, is_snapshot_txn)
 
         case clause.action
-        when :exit
+        when AST::ErrorActionKind::Exit
           visit(T.must(clause.message))
-        when :return
+        when AST::ErrorActionKind::Return
           visit(T.must(clause.value))
-        when :block
+        when AST::ErrorActionKind::Block
           visit_stmts(clause.body)
         end
       end
@@ -550,9 +550,9 @@ module Annotator
         (node.arms || []).each do |arm|
           (arm[:lock_error_clauses] || []).each do |clause|
             case clause.action
-            when :exit
+            when AST::ErrorActionKind::Exit
               visit(T.must(clause.message))
-            when :block
+            when AST::ErrorActionKind::Block
               visit_stmts(clause.body)
             end
           end

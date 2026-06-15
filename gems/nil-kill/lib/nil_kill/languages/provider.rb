@@ -62,10 +62,6 @@ module NilKill
         }
       end
 
-      def autofix?
-        false
-      end
-
       def notes
         []
       end
@@ -83,7 +79,6 @@ module NilKill
           "runtime_tracing" => runtime_tracing?,
           "runtime_trace_events" => runtime_trace_events.map(&:to_s).sort,
           "runtime_capabilities" => runtime_capabilities,
-          "autofix" => autofix?,
           "notes" => notes.map(&:to_s),
         }
       end
@@ -101,6 +96,10 @@ module NilKill
       end
 
       def external_type_definitions(root:)
+        []
+      end
+
+      def static_diff_findings(root:, added_lines:, context_paths:, finding_class:)
         []
       end
 

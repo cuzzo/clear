@@ -189,7 +189,7 @@ Run end-to-end:
 ```bash
 bundle exec gems/nil-kill/exe/nil-kill infer --no-sorbet
 jq '.actions | map(select(.kind == "fix_sig_param")) | length' tmp/nil-kill/evidence.json
-ruby gems/nil-kill/exe/nil-kill loop --signature-backflow --verify-spec-subset
+bundle exec auto-type loop --signature-backflow --verify-spec-subset
 ```
 
 **Decision gate:**

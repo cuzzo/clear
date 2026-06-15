@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# typed: strict
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "optparse"
+require "sorbet-runtime"
+
+module Lineage
+  module MutantConverters
+    module ZigMutants
+      extend T::Sig
+
+      class Options < T::Struct
+        const :input, String
+        const :output, String
+      end
+
+      sig { params(argv: T::Array[String]).returns(Options) }
+      def self.parse_options(argv)
+        input = T.let(nil, T.nilable(String))
+        output = T.let(nil, T.nilable(String))
+        OptionParser.new do |o|
+          o.banner = "Usage: ruby gems/lineage/tools/mutant-converters/zig-mutants --input PATH --output PATH"
+          o.on("--input PATH") { |v| input = v }
+          o.on("--output PATH") { |v| output = v }
+          o.on("-h", "--help") { puts o; exit 0 }
+        end.parse!(argv)
+
+        raise "--input is required" unless input
+        raise "--output is required" unless output
+
+        Options.new(input: T.must(input), output: T.must(output))
+      end
+
+      sig { params(input_path: String, output_path: String).void }
+      def self.convert_file(input_path, output_path)
+        payload = parse_json(File.read(input_path))
+        normalized = normalize(payload)
+        FileUtils.mkdir_p(File.dirname(output_path))
+        File.write(output_path, JSON.pretty_generate(normalized) + "\n")
+      end
+
+      sig { params(payload: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
+      def self.normalize(payload)
+        schema = payload["schema"]
+        raise "expected schema mutant-facts/v1, got #{schema.inspect}" unless schema == "mutant-facts/v1"
+
+        language = payload["language"] || "zig"
+        raise "expected zig mutant facts, got language #{language.inspect}" unless language == "zig"
+
+        subjects = payload["subjects"]
+        raise "expected subjects array" unless subjects.is_a?(Array)
+
+        normalized_subjects = subjects.map { |subject| normalize_subject(T.cast(subject, T::Hash[String, T.untyped])) }
+        normalized = payload.merge(
+          "source" => payload["source"] || "gems/zig-mutants",
+          "language" => "zig",
+          "mutation_kind" => payload["mutation_kind"] || "invariant",
+          "subjects" => normalized_subjects
+        )
+        normalized
+      end
+
+      sig { params(subject: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
+      def self.normalize_subject(subject)
+        file = subject["file"] || subject["path"] || subject["filename"]
+        method = subject["method"] || subject["subject"] || subject["expression"]
+        raise "subject missing file/path/filename" unless file.is_a?(String) && !file.empty?
+        raise "subject missing method/subject/expression" unless method.is_a?(String) && !method.empty?
+
+        subject.merge(
+          "file" => file,
+          "method" => method,
+          "mutation_kind" => subject["mutation_kind"] || "invariant"
+        )
+      end
+
+      sig { params(source: String).returns(T::Hash[String, T.untyped]) }
+      def self.parse_json(source)
+        parsed = JSON.parse(source)
+        raise "expected JSON object" unless parsed.is_a?(Hash)
+
+        T.cast(parsed, T::Hash[String, T.untyped])
+      end
+
+      sig { params(argv: T::Array[String]).returns(Integer) }
+      def self.main(argv)
+        opts = parse_options(argv)
+        convert_file(opts.input, opts.output)
+        0
+      rescue StandardError => e
+        warn "zig-mutants converter failed: #{e.message}"
+        1
+      end
+    end
+  end
+end
+
+exit Lineage::MutantConverters::ZigMutants.main(ARGV) if $PROGRAM_NAME == __FILE__

@@ -24,12 +24,8 @@ module NilKill
       when "trace-spec" then Commands::TraceSpecCommand.new(@argv).run
       when "espalier-evidence" then EspalierEvidence.new(@argv).run
       when "focus-hash-record" then FocusHashRecord.new(@argv).run
-      when "apply" then Apply.new(@argv).run
-      when "review" then InteractiveReview.new(@argv).run
-      when "loop" then Loop.new(@argv).run
       when "report" then guard_fresh_evidence! unless explicit_evidence_path?(@argv); Report.new(@argv).run
       when "struct-rbi" then StructRBI.new(@argv).run
-      when "guarded-autocorrect" then GuardedAutocorrect.new(@argv).run
       when "doctor" then Doctor.new.run
       when "help", nil then help
       else
@@ -302,20 +298,21 @@ module NilKill
           bundle exec tools/nil-kill trace-spec
           bundle exec tools/nil-kill espalier-evidence [--output tmp/nil-kill/espalier-evidence.json]
           bundle exec tools/nil-kill focus-hash-record STRUCT [--targets path[:path...]]
-          bundle exec tools/nil-kill apply [--dry-run]
-          bundle exec tools/nil-kill review [--kind replace_nil_with_default]
-          bundle exec tools/nil-kill loop [--defaults] [--try-levenshtein] [--hash-records] [--signature-backflow] [--return-backflow] [--narrow-generic] [--narrow-tlet] -- <verify command...>
           bundle exec tools/nil-kill report [--evidence evidence.json] [--with-links] [--output-path PATH] [--hygiene]
           bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
-          bundle exec tools/nil-kill guarded-autocorrect [--max-iterations N]
           bundle exec tools/nil-kill doctor
+
+          # Source rewrites live in auto-type:
+          bundle exec auto-type apply [--dry-run]
+          bundle exec auto-type review [--kind replace_nil_with_default]
+          bundle exec auto-type loop [--defaults] [--try-levenshtein] [--hash-records] [--signature-backflow] [--return-backflow] [--narrow-generic] [--narrow-tlet] -- <verify command...>
+          bundle exec auto-type guarded-autocorrect [--max-iterations N]
 
         Config:
           NIL_KILL_TARGETS=src[:other_dir]   target Ruby source roots
           NIL_KILL_EXCLUDE_TARGETS=src/tools  exclude Ruby source roots
           NIL_KILL_MIN_CALLS=20              runtime confidence threshold
           NIL_KILL_UNION_POLICY=untyped|any  default: untyped
-          NIL_KILL_AUTO_DEFAULTS=1           promote safe nil default rewrites into loop/apply
           NIL_KILL_LEVENSHTEIN_DISTANCE=2    max param-name/class-name distance for speculative narrowing
           NIL_KILL_LEVENSHTEIN_LIMIT=50      max speculative actions per loop iteration; 0 = unlimited
           NIL_KILL_HASH_RECORD_LIMIT=1        max review hash-record promotions per loop iteration; 0 = unlimited
@@ -323,7 +320,6 @@ module NilKill
           NIL_KILL_RETURN_BACKFLOW_LIMIT=5    max review return-backflow fixes per loop iteration; 0 = unlimited
           NIL_KILL_NARROW_GENERIC_LIMIT=0     max review narrow-generic fixes per loop iteration; 0 = unlimited
           NIL_KILL_NARROW_TLET_LIMIT=0        max review narrow-tlet fixes per loop iteration; 0 = unlimited
-          NIL_KILL_UNSAFE_APPLY_ALL=1         debug-only: allow raw apply --all without verification
           NIL_KILL_PRESSURE_SORT=priority|slots|hotness
           NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
           NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect

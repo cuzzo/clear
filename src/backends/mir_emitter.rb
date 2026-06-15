@@ -447,7 +447,7 @@ class MIREmitter
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
-    pattern = entry.required_intrinsic_template(:zig)
+    pattern = entry.required_intrinsic_template(IntrinsicTemplateKind::Zig)
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -483,8 +483,8 @@ class MIREmitter
   sig { params(node: T.untyped).returns(T.untyped) }
   def sharded_map_template(node)
     op = node.stdlib_def
-    kind = node.template_kind || :zig
-    op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind} template (contract=#{op.intrinsic_contract.inspect})"
+    kind = node.template_kind || IntrinsicTemplateKind::Zig
+    op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind.serialize} template (contract=#{op.intrinsic_contract.inspect})"
   end
 
   sig { params(pattern: String, node: T.untyped).returns(String) }
@@ -506,7 +506,7 @@ class MIREmitter
 
   sig { params(node: MIR::RegistryCall).returns(String) }
   def emit_registry_call(node)
-    code = registry_template(node.entry, :zig)
+    code = registry_template(node.entry, IntrinsicTemplateKind::Zig)
     code = substitute_registry_common(code, node.entry, node.allocs, node.key_type, node.value_type)
     node.args.each_with_index do |arg, index|
       rendered = coerce_registry_arg(T.must(emit(arg.expr)), arg.coerce_type)
@@ -530,7 +530,7 @@ class MIREmitter
       .gsub("{value}", value)
   end
 
-  sig { params(entry: FunctionSignature, template_kind: Symbol).returns(String) }
+  sig { params(entry: FunctionSignature, template_kind: IntrinsicTemplateKind).returns(String) }
   def registry_template(entry, template_kind)
     entry.required_intrinsic_template(template_kind)
   end

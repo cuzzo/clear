@@ -1103,7 +1103,7 @@ module Annotator
             ret_alloc = matched_def.return_alloc
             # For allocating methods without explicit return_alloc, the method's
             # alloc IS the return alloc (e.g. map.values() on sharded maps).
-            ret_alloc ||= matched_def.intrinsic_alloc(:alloc) if matched_def.emits_allocating?
+            ret_alloc ||= matched_def.intrinsic_alloc(IntrinsicAllocationKind::Alloc) if matched_def.emits_allocating?
             if ret_alloc
               if [:heap, :frame].include?(ret_alloc)
                 val.storage = ret_alloc if val.respond_to?(:storage=)

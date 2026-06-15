@@ -973,7 +973,7 @@ RSpec.describe "pipeline backend coverage" do
       conc.capture_analysis = analysis
       concurrent_host.bc_target = true
       expr_callback = concurrent_lowerer.send(:build_bounded_concurrent_callback,
-        conc, Type.new(:Int64), Type.new(:Int64), :expr)
+        conc, Type.new(:Int64), Type.new(:Int64), PipelineConcurrentCallbackBodyKind::Expr)
       expect(expr_callback.ctx_def.methods.first.body).to include(an_object_having_attributes(name: "c"))
       expect(expr_callback.ctx_def.fields.map(&:name)).to include("alloc")
       expect(expr_callback.ctx_let.init.fields.map(&:name)).to include(:alloc)
@@ -981,18 +981,18 @@ RSpec.describe "pipeline backend coverage" do
       each_conc = typed(AST::ConcurrentOp.new(tok, each, {}), Type.new(:Void))
       each_conc.capture_analysis = analysis
       each_callback = concurrent_lowerer.send(:build_bounded_concurrent_callback,
-        each_conc, Type.new(:Int64), Type.new(:Void), :each)
+        each_conc, Type.new(:Int64), Type.new(:Void), PipelineConcurrentCallbackBodyKind::Each)
       expect(each_callback.ctx_def.methods.first.body.last).to be_a(MIR::ReturnStmt)
 
       expect {
-        concurrent_lowerer.send(:callback_body, each_conc, :bad, Type.new(:Void), {}, {})
-      }.to raise_error(/unknown bounded concurrent callback kind/)
+        concurrent_lowerer.send(:callback_body, each_conc, T.unsafe(:bad), Type.new(:Void), {}, {})
+      }.to raise_error(/unknown bounded concurrent callback kind|Expected type PipelineConcurrentCallbackBodyKind/)
       expect {
         concurrent_lowerer.send(:callback_expression, each_conc)
       }.to raise_error(/expected expression op/)
       expect {
-        concurrent_lowerer.send(:list_reduce_initial, :median, "i64", Type.new(:Int64))
-      }.to raise_error(/unsupported reduce kind/)
+        concurrent_lowerer.send(:list_reduce_initial, T.unsafe(:median), "i64", Type.new(:Int64))
+      }.to raise_error(TypeError)
 
       nested_assignment = AST::FuncCall.new(tok, "touch", [
         AST::Assignment.new(tok, id("_"), lit(1)),

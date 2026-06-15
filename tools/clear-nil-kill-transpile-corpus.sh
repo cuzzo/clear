@@ -141,6 +141,6 @@ find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.ch
       file="$1"
       should_skip_live_data_file "$file" && exit 0
       run_transpiler_with_timeout "$file" >/dev/null
-    ' _ {} || status=1
+    ' _ {} && status=0 || status=1
 
 exit "$status"

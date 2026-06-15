@@ -42,6 +42,22 @@ class PipelineConcurrentTerminalKind < T::Enum
   end
 end
 
+class PipelineConcurrentCallbackBodyKind < T::Enum
+  enums do
+    Expr = new("expr")
+    Each = new("each")
+  end
+end
+
+class PipelineConcurrentReduceKind < T::Enum
+  enums do
+    Sum = new("sum")
+    Average = new("average")
+    Min = new("min")
+    Max = new("max")
+  end
+end
+
 class PipelineConcurrentPlan < T::Struct
   const :source_kind, PipelineConcurrentSourceKind
   const :terminal_kind, PipelineConcurrentTerminalKind
@@ -602,7 +618,7 @@ class PipelineConcurrentLowerer < T::Struct
     ])
   end
 
-  sig { params(conc_op: AST::ConcurrentOp, item_type: Type, return_type: T.any(Type, Symbol), body_kind: Symbol).returns(PipelineConcurrentCallback) }
+  sig { params(conc_op: AST::ConcurrentOp, item_type: Type, return_type: T.any(Type, Symbol), body_kind: PipelineConcurrentCallbackBodyKind).returns(PipelineConcurrentCallback) }
   def build_bounded_concurrent_callback(conc_op, item_type, return_type, body_kind)
     id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
@@ -1084,7 +1100,7 @@ class PipelineConcurrentLowerer < T::Struct
       MIR::Ident.new(result_zig),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
       initial,
-      MIR::EnumTag.new(variant: kind.to_s),
+      MIR::EnumTag.new(variant: kind.serialize),
     ])
 
     label = self.next_label.call
@@ -1293,12 +1309,12 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type, return_type: T.any(Type, Symbol)).returns(PipelineConcurrentInvocation) }
   def bounded_expr_invocation(conc_op, item_type, return_type)
-    bounded_invocation(conc_op, build_bounded_concurrent_callback(conc_op, item_type, return_type, :expr))
+    bounded_invocation(conc_op, build_bounded_concurrent_callback(conc_op, item_type, return_type, PipelineConcurrentCallbackBodyKind::Expr))
   end
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type).returns(PipelineConcurrentInvocation) }
   def bounded_each_invocation(conc_op, item_type)
-    bounded_invocation(conc_op, build_bounded_concurrent_callback(conc_op, item_type, :Void, :each))
+    bounded_invocation(conc_op, build_bounded_concurrent_callback(conc_op, item_type, :Void, PipelineConcurrentCallbackBodyKind::Each))
   end
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type).returns(PipelineConcurrentInvocation) }
@@ -1336,10 +1352,10 @@ class PipelineConcurrentLowerer < T::Struct
     body
   end
 
-  sig { params(conc_op: AST::ConcurrentOp, body_kind: Symbol, ret_type: Type, capture_map: T::Hash[String, String], capture_symbols: T::Hash[String, SymbolEntry]).returns(T::Array[MIR::Emittable]) }
+  sig { params(conc_op: AST::ConcurrentOp, body_kind: PipelineConcurrentCallbackBodyKind, ret_type: Type, capture_map: T::Hash[String, String], capture_symbols: T::Hash[String, SymbolEntry]).returns(T::Array[MIR::Emittable]) }
   def callback_body(conc_op, body_kind, ret_type, capture_map, capture_symbols)
     case body_kind
-    when :expr
+    when PipelineConcurrentCallbackBodyKind::Expr
       expr_node = callback_expression(conc_op)
       expr_mir = self.callback_expr_mir.call(expr_node, "__item", capture_map, capture_symbols, "__rt")
       expr_mir.try_wrap = false if expr_mir.is_a?(MIR::Call) || expr_mir.is_a?(MIR::MethodCall)
@@ -1348,7 +1364,7 @@ class PipelineConcurrentLowerer < T::Struct
         expr_mir = MIR::Cast.new(MIR::Cast.new(expr_mir, nil, :floatFromInt), ret_type.zig_type, :as)
       end
       [MIR::ReturnStmt.new(expr_mir)]
-    when :each
+    when PipelineConcurrentCallbackBodyKind::Each
       [
         *self.callback_body_mir.call(
           T.cast(conc_op.op, AST::EachOp).body,
@@ -1360,7 +1376,7 @@ class PipelineConcurrentLowerer < T::Struct
         MIR::ReturnStmt.new(nil),
       ]
     else
-      raise "unknown bounded concurrent callback kind #{body_kind}"
+      raise "unknown bounded concurrent callback kind #{body_kind.inspect}"
     end
   end
 
@@ -1424,24 +1440,25 @@ class PipelineConcurrentLowerer < T::Struct
     )
   end
 
-  sig { params(kind: Symbol, result_zig: String, result_type: Type).returns(MIR::Emittable) }
+  sig { params(kind: PipelineConcurrentReduceKind, result_zig: String, result_type: Type).returns(MIR::Emittable) }
   def list_reduce_initial(kind, result_zig, result_type)
     case kind
-    when :sum then MIR::Lit.new("0")
-    when :average then MIR::Lit.new("0.0")
-    when :min then self.agg_min_sentinel_mir.call(result_zig)
-    when :max then self.agg_max_sentinel_mir.call(result_zig, result_type)
-    else raise "lower_concurrent_list_reduce: unsupported reduce kind #{kind}"
+    when PipelineConcurrentReduceKind::Sum then MIR::Lit.new("0")
+    when PipelineConcurrentReduceKind::Average then MIR::Lit.new("0.0")
+    when PipelineConcurrentReduceKind::Min then self.agg_min_sentinel_mir.call(result_zig)
+    when PipelineConcurrentReduceKind::Max then self.agg_max_sentinel_mir.call(result_zig, result_type)
+    else T.absurd(kind)
     end
   end
 
-  sig { params(inner: T.any(AST::AverageOp, AST::MaxOp, AST::MinOp, AST::SumOp)).returns(Symbol) }
+  sig { params(inner: T.any(AST::AverageOp, AST::MaxOp, AST::MinOp, AST::SumOp)).returns(PipelineConcurrentReduceKind) }
   def list_reduce_kind(inner)
     case inner
-    when AST::SumOp then :sum
-    when AST::AverageOp then :average
-    when AST::MinOp then :min
-    when AST::MaxOp then :max
+    when AST::SumOp then PipelineConcurrentReduceKind::Sum
+    when AST::AverageOp then PipelineConcurrentReduceKind::Average
+    when AST::MinOp then PipelineConcurrentReduceKind::Min
+    when AST::MaxOp then PipelineConcurrentReduceKind::Max
+    else T.absurd(inner)
     end
   end
 

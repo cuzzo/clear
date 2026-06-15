@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 // -------------------------------------------------------------------------
 // Reference Counted Pointer (Rc<T>) - Single-Threaded
 // -------------------------------------------------------------------------
@@ -111,11 +116,11 @@ pub fn Arc(comptime T: type) type {
         /// The control block outlives the data when weak references exist.
         pub const Inner = struct {
             data: T,
-            strong_count: std.atomic.Value(usize),
+            strong_count: Atomic(usize),
             /// Weak count starts at 1 representing the "implicit" weak reference
             /// held collectively by all strong references. When strong_count drops
             /// to 0, this implicit weak reference is released.
-            weak_count: std.atomic.Value(usize),
+            weak_count: Atomic(usize),
         };
 
         inner: *Inner,
@@ -128,8 +133,8 @@ pub fn Arc(comptime T: type) type {
             const inner = try allocator.create(Inner);
             inner.* = .{
                 .data = val,
-                .strong_count = std.atomic.Value(usize).init(1),
-                .weak_count = std.atomic.Value(usize).init(1), // Implicit weak from strong refs
+                .strong_count = Atomic(usize).init(1),
+                .weak_count = Atomic(usize).init(1), // Implicit weak from strong refs
             };
             return Self{
                 .inner = inner,

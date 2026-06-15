@@ -52,15 +52,15 @@ module Annotator
         [
           AST::ErrorClause.new(
             selectors: [AST::ErrorSelector.new(form: :type, name: :LockTimeout, token: nil)],
-            retries: 3, action: :raise, token: nil,
+            retries: 3, action: AST::ErrorActionKind::Raise, token: nil,
           ),
           AST::ErrorClause.new(
             selectors: [AST::ErrorSelector.new(form: :type, name: :MvccConflict, token: nil)],
-            retries: nil, action: :raise, token: nil,
+            retries: nil, action: AST::ErrorActionKind::Raise, token: nil,
           ),
           AST::ErrorClause.new(
             selectors: [AST::ErrorSelector.new(form: :type, name: :AtomicConflict, token: nil)],
-            retries: nil, action: :raise, token: nil,
+            retries: nil, action: AST::ErrorActionKind::Raise, token: nil,
           ),
         ]
       end
@@ -187,9 +187,9 @@ module Annotator
 
         (node.handlers || []).each do |clause|
           case clause.action
-          when :exit
+          when AST::ErrorActionKind::Exit
             visit(T.must(clause.message))
-          when :block
+          when AST::ErrorActionKind::Block
             visit_stmts(clause.body)
           end
         end

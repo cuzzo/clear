@@ -569,6 +569,7 @@ class MIRLowering
     return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::Orelse)
     return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::TryCatch)
     source_alloc = mir_owned_alloc(mir)
+    return destination_keep_plan(dest_alloc) if heap_owned_async_boundary_destination?(mir, ast_node, dest_alloc, ti)
     if source_alloc && source_alloc != dest_alloc && ownership_bearing_type?(ti)
       return DestinationPlacementPlan.new(action: :owned_alloc_mismatch, type_info: ti, dest_alloc: dest_alloc, source_alloc: source_alloc)
     end
@@ -649,6 +650,18 @@ class MIRLowering
   sig { params(ast_node: AST::Node, ti: Type, dest_alloc: T.nilable(Symbol)).returns(T::Boolean) }
   def borrowed_string_destination?(ast_node, ti, dest_alloc)
     ti.string? && !MIR::Placement.heap?(dest_alloc) && AST.container_borrow?(ast_node)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol, type_info: Type).returns(T::Boolean) }
+  def heap_owned_async_boundary_destination?(mir, ast_node, dest_alloc, type_info)
+    return false unless MIR::Placement.frame?(dest_alloc)
+    return false unless ast_node.is_a?(AST::BgBlock)
+
+    source_type = Type.from_node!(ast_node, context: "async boundary destination")
+    return false unless type_info.single_future? || source_type.single_future?
+
+    effect = MIR::OwnershipEffect.of(mir)
+    effect.produces_owned && MIR::Placement.heap?(effect.alloc)
   end
 
   sig { params(mir: MIR::Node, ti: Type).returns(MIR::Node) }

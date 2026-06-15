@@ -305,6 +305,7 @@ pub const FsmRunQueue = struct {
     fn makeArray(alloc: std.mem.Allocator, log_size: u5) !*CircularArray {
         const size = @as(u32, 1) << log_size;
         const data = try alloc.alloc(Atomic(?*FsmTask), size);
+        errdefer alloc.free(data);
         for (data) |*slot| slot.* = Atomic(?*FsmTask).init(null);
         const arr = try alloc.create(CircularArray);
         arr.* = .{ .data = data, .mask = size - 1 };
@@ -333,7 +334,8 @@ pub const FsmRunQueue = struct {
                 .monotonic,
             );
         }
-        self.old_arrays.append(self.allocator, old_arr) catch {};
+        errdefer self.freeArray(new_arr);
+        try self.old_arrays.append(self.allocator, old_arr);
         self.array.store(new_arr, .release);
     }
 
@@ -443,5 +445,3 @@ pub fn dispatchOnce(task: *FsmTask) YieldReason {
     }
     return reason;
 }
-
-

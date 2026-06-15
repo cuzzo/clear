@@ -3,12 +3,12 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::StaticDiffAudit do
-  def audit_for(rel, source, added)
+  def audit_for(rel, source, added, context_paths: nil)
     Dir.mktmpdir("nil-kill-static-diff-audit", File.join(NilKill::ROOT, "tmp")) do |dir|
       path = File.join(dir, rel)
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, source)
-      audit = described_class.new(root: dir, added_lines: { rel => added.to_set })
+      audit = described_class.new(root: dir, added_lines: { rel => added.to_set }, context_paths: context_paths)
       return [audit.findings.map(&:to_h), path]
     end
   end
@@ -37,6 +37,30 @@ RSpec.describe NilKill::StaticDiffAudit do
       "path" => include("src/static_diff_methods.rb"),
       "line" => 6
     ))
+  end
+
+  it "lets callers choose the audited path scope instead of hard-coding src" do
+    findings, = audit_for("lib/static_diff_methods.rb", <<~RUBY, [2])
+      class StaticDiffMethods
+        def missing(value)
+          value
+        end
+      end
+    RUBY
+
+    expect(findings).to include(a_hash_including(
+      "kind" => "missing_sig",
+      "path" => include("lib/static_diff_methods.rb"),
+      "line" => 2
+    ))
+  end
+
+  it "ignores unsupported language paths through the provider dispatcher" do
+    findings, = audit_for("zig/static_diff_methods.zig", <<~ZIG, [1])
+      pub fn missing(value: i64) i64 { return value; }
+    ZIG
+
+    expect(findings).to eq([])
   end
 
   it "flags added untyped ivars, weak collection types, and hash record candidates" do
@@ -75,6 +99,21 @@ RSpec.describe NilKill::StaticDiffAudit do
     RUBY
 
     expect(findings).not_to include(a_hash_including("kind" => "missing_sig", "line" => 7))
+  end
+
+  it "does not treat inline signatures as hash records" do
+    findings, = audit_for("src/static_diff_inline_sig.rb", <<~RUBY, [4])
+      class StaticDiffInlineSig
+        extend T::Sig
+
+        sig { params(value: String).returns(String) }
+        def signed(value)
+          value
+        end
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 4))
   end
 
   it "accepts long multiline signatures on added methods" do
@@ -145,7 +184,11 @@ RSpec.describe NilKill::StaticDiffAudit do
 
       audit = described_class.new(
         root: dir,
-        added_lines: { "src/annotator/domains/control_flow.rb" => [5].to_set }
+        added_lines: { "src/annotator/domains/control_flow.rb" => [5].to_set },
+        context_paths: [
+          "src/annotator/annotator.rb",
+          "src/annotator/domains/control_flow.rb",
+        ]
       )
       findings = audit.findings.map(&:to_h)
       expect(findings).not_to include(a_hash_including("kind" => "untyped_ivar", "line" => 5))

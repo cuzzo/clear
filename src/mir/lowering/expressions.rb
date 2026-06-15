@@ -11,6 +11,13 @@ module MIRLoweringExpressions
   StructLitTypeSubst = T.type_alias { T::Hash[Symbol, Type::TypeInput] }
   UnionVariantFieldTypes = T.type_alias { T::Hash[String, Type::TypeInput] }
 
+  class OptionalOperandSide < T::Enum
+    enums do
+      Left = new("left")
+      Right = new("right")
+    end
+  end
+
   class OrExitFacts < T::Struct
     const :kind, T.nilable(String)
     const :error_name, T.nilable(String)
@@ -63,7 +70,7 @@ module MIRLoweringExpressions
     const :variant, T.nilable(UnitVariantAccess), default: nil
     const :tag_source, T.nilable(Symbol), default: nil
     const :union_error_type, T.nilable(Symbol), default: nil
-    const :optional_side, T.nilable(Symbol), default: nil
+    const :optional_side, T.nilable(OptionalOperandSide), default: nil
     const :optional_capture, T.nilable(String), default: nil
   end
 
@@ -433,8 +440,8 @@ module MIRLoweringExpressions
     return nil unless OPTIONAL_COMPARISON_OPS.include?(facts.op)
     return nil unless facts.left_type.optional? != facts.right_type.optional?
 
-    optional_side = facts.left_type.optional? ? :left : :right
-    payload_type = optional_side == :left ? facts.right_type : facts.left_type
+    optional_side = facts.left_type.optional? ? OptionalOperandSide::Left : OptionalOperandSide::Right
+    payload_type = optional_side == OptionalOperandSide::Left ? facts.right_type : facts.left_type
     return nil if payload_type.resolved == :NIL
 
     BinaryOperationPlan.new(
@@ -532,7 +539,7 @@ module MIRLoweringExpressions
     capture = T.must(plan.optional_capture)
     optional_side = T.must(plan.optional_side)
     capture_ref = MIR::Ident.new(capture)
-    optional_source = optional_side == :left ? facts.left : facts.right
+    optional_source = optional_side == OptionalOperandSide::Left ? facts.left : facts.right
     then_expr = emit_optional_comparison_then_expr(facts, optional_side, capture_ref)
     else_expr = MIR::Lit.new(facts.op == :NEQ ? "true" : "false")
     result = MIR::IfOptional.new(optional_source, capture, then_expr, else_expr)
@@ -540,16 +547,16 @@ module MIRLoweringExpressions
     result
   end
 
-  sig { params(facts: BinaryOperandFacts, optional_side: Symbol, capture_ref: MIR::Ident).returns(MIR::Node) }
+  sig { params(facts: BinaryOperandFacts, optional_side: OptionalOperandSide, capture_ref: MIR::Ident).returns(MIR::Node) }
   def emit_optional_comparison_then_expr(facts, optional_side, capture_ref)
-    inner_type = optional_side == :left ? T.must(facts.left_type.wrapped_type) : T.must(facts.right_type.wrapped_type)
+    inner_type = optional_side == OptionalOperandSide::Left ? T.must(facts.left_type.wrapped_type) : T.must(facts.right_type.wrapped_type)
     inner_facts = BinaryOperandFacts.new(
       node: facts.node,
       op: facts.op,
-      left: optional_side == :left ? capture_ref : facts.left,
-      right: optional_side == :right ? capture_ref : facts.right,
-      left_type: optional_side == :left ? inner_type : facts.left_type,
-      right_type: optional_side == :right ? inner_type : facts.right_type,
+      left: optional_side == OptionalOperandSide::Left ? capture_ref : facts.left,
+      right: optional_side == OptionalOperandSide::Right ? capture_ref : facts.right,
+      left_type: optional_side == OptionalOperandSide::Left ? inner_type : facts.left_type,
+      right_type: optional_side == OptionalOperandSide::Right ? inner_type : facts.right_type,
       int_arithmetic: facts.int_arithmetic,
       left_unit_variant: facts.left_unit_variant,
       right_unit_variant: facts.right_unit_variant,
@@ -1015,7 +1022,7 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(MIR::DefaultValue) }
   def or_pass_fallback(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")
@@ -1285,10 +1292,10 @@ module MIRLoweringExpressions
       # is computed by the surrounding loop -- direct dispatch skips
       # routing.
       shard_direct = shard && plan.target_name == shard[:map]
-      template_kind = if shard_direct then :shard_direct_zig
-                      elsif (map_ft.sharded? || map_ft.striped?) && op.intrinsic_template(:sharded_zig)
-                        :sharded_zig
-                      else :zig
+      template_kind = if shard_direct then IntrinsicTemplateKind::ShardDirectZig
+                      elsif (map_ft.sharded? || map_ft.striped?) && op.intrinsic_template(IntrinsicTemplateKind::ShardedZig)
+                        IntrinsicTemplateKind::ShardedZig
+                      else IntrinsicTemplateKind::Zig
                       end
       alloc_metadata = MIR::InlineAllocMetadata.new
       key_type = (kind == :numeric_map) ? map_ft.key_type : nil

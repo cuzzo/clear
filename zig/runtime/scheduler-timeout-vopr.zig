@@ -26,6 +26,7 @@ const fc = @import("fiber-core.zig");
 const fsm_mod = @import("fsm.zig");
 const rt_mod = @import("runtime.zig");
 const sim_atomic = @import("vopr-atomic.zig");
+const parking_lot = @import("../lib/parking-lot.zig");
 const observable = @import("../lib/observable.zig");
 const profile_lock = @import("profile-lock.zig");
 const fiber_profile = @import("fiber-profile.zig");
@@ -45,6 +46,7 @@ var g_wg_vopr: *fp.WaitGroup = undefined;
 var g_sem_vopr: *fp.Semaphore = undefined;
 var g_wg_vopr_woke: bool = false;
 var g_sem_vopr_acquired: bool = false;
+const ThreadFlag = std.atomic.Value(bool);
 
 fn waitGroupFiberEntry() callconv(.c) void {
     g_wg_vopr.wait();
@@ -361,6 +363,211 @@ pub fn testWaitGroupSemaphoreFiberParkResume() !void {
     if (test_err) |err| return err;
 }
 
+fn waitForThreadContention(started: *ThreadFlag, finished: *ThreadFlag) bool {
+    while (!started.load(.acquire)) {
+        std.Thread.yield() catch {};
+    }
+    compat.sleepNs(1_000_000);
+    return !finished.load(.acquire);
+}
+
+const WaitGroupDoneThread = struct {
+    wg: *fp.WaitGroup,
+    started: *ThreadFlag,
+    finished: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        self.wg.done();
+        self.finished.store(true, .release);
+    }
+};
+
+const WaitGroupRegisterFsmThread = struct {
+    wg: *fp.WaitGroup,
+    task: *fsm_mod.FsmTask,
+    started: *ThreadFlag,
+    finished: *ThreadFlag,
+    registered: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        const ok = self.wg.registerFsmWaiter(self.task);
+        self.registered.store(ok, .release);
+        self.finished.store(true, .release);
+    }
+};
+
+const WaitGroupFiberWaitThread = struct {
+    wg: *fp.WaitGroup,
+    started: *ThreadFlag,
+    finished: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        self.wg.wait();
+        self.finished.store(true, .release);
+    }
+};
+
+const SemaphoreAcquireThread = struct {
+    sem: *fp.Semaphore,
+    started: *ThreadFlag,
+    finished: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        self.sem.acquire();
+        self.finished.store(true, .release);
+    }
+};
+
+const SemaphoreReleaseThread = struct {
+    sem: *fp.Semaphore,
+    started: *ThreadFlag,
+    finished: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        self.sem.release();
+        self.finished.store(true, .release);
+    }
+};
+
+pub fn testSchedulerPrimitiveSpinContentionWithThreads() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    {
+        var wg = fp.WaitGroup.init(&sched);
+        wg.add(1);
+        wg.lock.store(1, .release);
+
+        var started = ThreadFlag.init(false);
+        var finished = ThreadFlag.init(false);
+        var ctx = WaitGroupDoneThread{ .wg = &wg, .started = &started, .finished = &finished };
+        const thread = try std.Thread.spawn(.{}, WaitGroupDoneThread.run, .{&ctx});
+
+        const blocked = waitForThreadContention(&started, &finished);
+        wg.lock.store(0, .release);
+        thread.join();
+
+        if (!blocked) return error.ThreadDidNotBlockOnHeldLock;
+        if (!finished.load(.acquire)) return error.WaitGroupDoneThreadDidNotFinish;
+        if (wg.counter.load(.seq_cst) != 0) return error.WaitGroupDoneCounterWrong;
+    }
+
+    {
+        var wg = fp.WaitGroup.init(&sched);
+        wg.add(1);
+        wg.lock.store(1, .release);
+
+        var task: fsm_mod.FsmTask = .{ .resume_fn = &dummyFsmResume };
+        var started = ThreadFlag.init(false);
+        var finished = ThreadFlag.init(false);
+        var registered = ThreadFlag.init(false);
+        var ctx = WaitGroupRegisterFsmThread{
+            .wg = &wg,
+            .task = &task,
+            .started = &started,
+            .finished = &finished,
+            .registered = &registered,
+        };
+        const thread = try std.Thread.spawn(.{}, WaitGroupRegisterFsmThread.run, .{&ctx});
+
+        const blocked = waitForThreadContention(&started, &finished);
+        wg.lock.store(0, .release);
+        thread.join();
+
+        if (!blocked) return error.ThreadDidNotBlockOnHeldLock;
+        if (!registered.load(.acquire)) return error.WaitGroupFsmWaiterNotRegistered;
+        if (wg.waiting_fsm != &task) return error.WaitGroupFsmWaiterWrong;
+    }
+
+    {
+        var wg = fp.WaitGroup.init(&sched);
+        wg.add(1);
+        wg.lock.store(1, .release);
+
+        var task: qs.Task = .{
+            .base = undefined,
+            .user_fn = @ptrCast(&dummyFn),
+            .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+        };
+        sched.current_task = &task;
+        defer sched.current_task = null;
+
+        var started = ThreadFlag.init(false);
+        var finished = ThreadFlag.init(false);
+        var ctx = WaitGroupFiberWaitThread{ .wg = &wg, .started = &started, .finished = &finished };
+        const thread = try std.Thread.spawn(.{}, WaitGroupFiberWaitThread.run, .{&ctx});
+
+        const blocked = waitForThreadContention(&started, &finished);
+        wg.counter.store(0, .seq_cst);
+        wg.lock.store(0, .release);
+        thread.join();
+
+        if (!blocked) return error.ThreadDidNotBlockOnHeldLock;
+        if (!finished.load(.acquire)) return error.WaitGroupFiberWaitThreadDidNotFinish;
+        sched.current_task = null;
+    }
+
+    {
+        var sem = fp.Semaphore.init(0, &sched);
+        sem.lock.store(1, .release);
+
+        var task: qs.Task = .{
+            .base = undefined,
+            .user_fn = @ptrCast(&dummyFn),
+            .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+        };
+        sched.current_task = &task;
+        defer sched.current_task = null;
+
+        var started = ThreadFlag.init(false);
+        var finished = ThreadFlag.init(false);
+        var ctx = SemaphoreAcquireThread{ .sem = &sem, .started = &started, .finished = &finished };
+        const thread = try std.Thread.spawn(.{}, SemaphoreAcquireThread.run, .{&ctx});
+
+        const blocked = waitForThreadContention(&started, &finished);
+        sem.counter.store(1, .seq_cst);
+        sem.lock.store(0, .release);
+        thread.join();
+
+        if (!blocked) return error.ThreadDidNotBlockOnHeldLock;
+        if (!finished.load(.acquire)) return error.SemaphoreAcquireThreadDidNotFinish;
+        if (sem.counter.load(.seq_cst) != 0) return error.SemaphoreCounterWrongAfterAcquire;
+        if (task.status.load(.acquire) != .Ready) return error.SemaphoreTaskNotReadyAfterRecheck;
+        sched.current_task = null;
+    }
+
+    {
+        var sem = fp.Semaphore.init(0, &sched);
+        sem.lock.store(1, .release);
+
+        var started = ThreadFlag.init(false);
+        var finished = ThreadFlag.init(false);
+        var ctx = SemaphoreReleaseThread{ .sem = &sem, .started = &started, .finished = &finished };
+        const thread = try std.Thread.spawn(.{}, SemaphoreReleaseThread.run, .{&ctx});
+
+        const blocked = waitForThreadContention(&started, &finished);
+        sem.lock.store(0, .release);
+        thread.join();
+
+        if (!blocked) return error.ThreadDidNotBlockOnHeldLock;
+        if (!finished.load(.acquire)) return error.SemaphoreReleaseThreadDidNotFinish;
+        if (sem.counter.load(.seq_cst) != 1) return error.SemaphoreCounterWrongAfterRelease;
+    }
+}
+
 // testWaitGroupSpinlockUnderFault and testSemaphoreSpinlockUnderFault
 // were dropped in V29: routing scheduler.zig WaitGroup/Semaphore
 // counter+lock through the comptime `Atomic` alias (so SimAtomic.swap
@@ -617,7 +824,7 @@ pub fn testEarliestLockWaiterDeadline() !void {
         .user_fn = @ptrCast(&dummyFn),
         .status = qs.Atomic(TaskStatus).init(.Blocked),
     };
-    task1.waiting_for_lock.store(@constCast(@ptrCast(&sentinel)), .release);
+    task1.waiting_for_lock.store(@ptrCast(@constCast(&sentinel)), .release);
     task1.lock_wait_start_ms.store(compat.milliTimestamp() - 30, .release);
     try sched.lock_waiters.append(allocator, &task1);
 
@@ -666,6 +873,92 @@ pub fn testRegisterLockWaiter() !void {
     // registerLockWaiter; verify it's a sane non-zero value.
     if (stub_task.lock_wait_start_ms.load(.acquire) == 0) {
         return error.WaitStartMsNotStamped;
+    }
+}
+
+pub fn testFsmParkingRegistrationTimestamps() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    SimClock.reset();
+    SimClock.advanceMs(1234);
+
+    {
+        var mutex: parking_lot.ParkingMutex = .{};
+        if (!mutex.tryLock()) return error.MutexInitialLockFailed;
+
+        var task: fsm_mod.FsmTask = .{ .resume_fn = &dummyFsmResume };
+        var waiter: qs.WaiterNode = undefined;
+        if (mutex.tryLockForFsm(&task, &waiter, &sched) != .Registered) {
+            return error.MutexFsmDidNotRegister;
+        }
+        if (task.waiting_for_lock.load(.acquire) != @as(?*anyopaque, @ptrCast(&mutex))) {
+            return error.MutexFsmWrongLock;
+        }
+        if (task.lock_waiter.load(.acquire) != @as(?*anyopaque, @ptrCast(&waiter))) {
+            return error.MutexFsmWrongWaiter;
+        }
+        if (task.lock_wait_start_ms.load(.acquire) != 1234) {
+            return error.MutexFsmTimestampWrong;
+        }
+        if (sched.fsm_lock_waiters.items.len != 1) return error.MutexFsmWaiterNotTracked;
+        sched.fsm_lock_waiters.clearRetainingCapacity();
+    }
+
+    SimClock.advanceMs(10);
+
+    {
+        var rw: parking_lot.ParkingRwLock = .{};
+        try rw.lock();
+
+        var task: fsm_mod.FsmTask = .{ .resume_fn = &dummyFsmResume };
+        var waiter: qs.WaiterNode = undefined;
+        if (rw.tryWriteLockForFsm(&task, &waiter, &sched) != .Registered) {
+            return error.RwWriteFsmDidNotRegister;
+        }
+        if (task.waiting_for_lock.load(.acquire) != @as(?*anyopaque, @ptrCast(&rw))) {
+            return error.RwWriteFsmWrongLock;
+        }
+        if (task.lock_waiter.load(.acquire) != @as(?*anyopaque, @ptrCast(&waiter))) {
+            return error.RwWriteFsmWrongWaiter;
+        }
+        if (task.lock_wait_start_ms.load(.acquire) != 1244) {
+            return error.RwWriteFsmTimestampWrong;
+        }
+        if (sched.fsm_lock_waiters.items.len != 1) return error.RwWriteFsmWaiterNotTracked;
+        sched.fsm_lock_waiters.clearRetainingCapacity();
+    }
+
+    SimClock.advanceMs(10);
+
+    {
+        var rw: parking_lot.ParkingRwLock = .{};
+        try rw.lock();
+
+        var task: fsm_mod.FsmTask = .{ .resume_fn = &dummyFsmResume };
+        var waiter: qs.WaiterNode = undefined;
+        if (rw.tryReadLockForFsm(&task, &waiter, &sched) != .Registered) {
+            return error.RwReadFsmDidNotRegister;
+        }
+        if (task.waiting_for_lock.load(.acquire) != @as(?*anyopaque, @ptrCast(&rw))) {
+            return error.RwReadFsmWrongLock;
+        }
+        if (task.lock_waiter.load(.acquire) != @as(?*anyopaque, @ptrCast(&waiter))) {
+            return error.RwReadFsmWrongWaiter;
+        }
+        if (task.lock_wait_start_ms.load(.acquire) != 1254) {
+            return error.RwReadFsmTimestampWrong;
+        }
+        if (sched.fsm_lock_waiters.items.len != 1) return error.RwReadFsmWaiterNotTracked;
+        sched.fsm_lock_waiters.clearRetainingCapacity();
     }
 }
 

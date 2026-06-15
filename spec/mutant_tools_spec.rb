@@ -1,5 +1,8 @@
-require_relative "../tools/mutants/support" unless defined?(MutationTesting)
-require_relative "../tools/mutants/ruby_specs" unless defined?(RubySpecMutants)
+require "tmpdir"
+
+require_relative "../gems/lineage/tools/mutant-converters/support" unless defined?(MutationTesting)
+require_relative "../gems/lineage/tools/mutant-converters/ruby_mutant" unless defined?(RubySpecMutants)
+load File.expand_path("../gems/lineage/tools/mutant-converters/zig-mutants", __dir__) unless defined?(Lineage::MutantConverters::ZigMutants)
 
 RSpec.describe MutationTesting do
   describe ".parse_mutant_summary" do
@@ -194,5 +197,58 @@ RSpec.describe RubySpecMutants do
     missing = described_class::SUBJECTS.reject { |subject| subject.specs.all? { |spec| File.file?(spec) } }
 
     expect(missing).to be_empty
+  end
+
+  it "writes mutant-facts/v1 with Ruby metadata" do
+    Dir.mktmpdir("ruby-mutant-facts") do |dir|
+      path = File.join(dir, "facts.json")
+      result = RubySpecMutants::SubjectResult.new(
+        subject: mutant_subject(hard_gate: true),
+        ok: true,
+        blocking: false,
+        summary: mutant_summary(coverage: 100.0, mutations: 1, selected_tests: 1)
+      )
+
+      described_class.write_facts([result], path)
+      facts = JSON.parse(File.read(path))
+
+      expect(facts).to include(
+        "schema" => "mutant-facts/v1",
+        "language" => "ruby",
+        "mutation_kind" => "stochastic"
+      )
+      expect(facts.fetch("subjects").first).to include("mutation_kind" => "stochastic")
+    end
+  end
+end
+
+RSpec.describe Lineage::MutantConverters::ZigMutants do
+  it "validates and normalizes zig-mutants facts" do
+    payload = {
+      "schema" => "mutant-facts/v1",
+      "subjects" => [
+        {
+          "file" => "zig/runtime/fsm.zig",
+          "method" => "poll",
+          "kill_rate" => 100.0,
+          "mutations" => 1,
+          "killed" => 1,
+          "alive" => 0,
+        },
+      ],
+    }
+
+    normalized = described_class.normalize(payload)
+
+    expect(normalized).to include(
+      "source" => "gems/zig-mutants",
+      "language" => "zig",
+      "mutation_kind" => "invariant"
+    )
+    expect(normalized.fetch("subjects").first).to include(
+      "file" => "zig/runtime/fsm.zig",
+      "method" => "poll",
+      "mutation_kind" => "invariant"
+    )
   end
 end

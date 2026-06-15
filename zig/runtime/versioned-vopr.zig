@@ -47,6 +47,7 @@ const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 
 const FlowKind = enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit };
 const Flow = struct { kind: FlowKind = .cont_commit };
+const OwnedBytes = struct { data: []const u8 };
 
 fn flowIncrement(p: *i64, flow: *Flow) void {
     p.* += 1;
@@ -68,18 +69,24 @@ fn flowRaiseNoCommit(p: *i64, flow: *Flow) void {
     flow.kind = .raise_no_commit;
 }
 
+fn keepOwnedBytes(_: *OwnedBytes) void {}
+
+fn flowKeepOwnedBytes(_: *OwnedBytes, flow: *Flow) void {
+    flow.kind = .cont_commit;
+}
+
 fn writePair(views: anytype, a: i64, b: i64) !void {
     views[0].* = a;
     views[1].* = b;
 }
 
 const OpKind = enum {
-    Read,           // read + immediate release
-    ReadHold,       // read but defer release to a later step
-    ReleaseHeld,    // release one of the held guards
-    Update,         // update with a fresh value
-    ReclaimLocal,   // sweep this thread's limbo
-    ReclaimGlobal,  // advance epoch + sweep orphans
+    Read, // read + immediate release
+    ReadHold, // read but defer release to a later step
+    ReleaseHeld, // release one of the held guards
+    Update, // update with a fresh value
+    ReclaimLocal, // sweep this thread's limbo
+    ReclaimGlobal, // advance epoch + sweep orphans
 };
 
 fn pickOp(random: std.Random, has_held: bool) OpKind {
@@ -155,7 +162,9 @@ fn runSequence(seed: u64, steps: usize, allocator: std.mem.Allocator) !void {
                 const new_v = @as(i64, @intCast(step)) + 1;
                 const limbo_before = rt.ebr.limbo_list.items.len;
                 try s.update(&rt, allocator, struct {
-                    fn call(p: *i64, v: i64) void { p.* = v; }
+                    fn call(p: *i64, v: i64) void {
+                        p.* = v;
+                    }
                 }.call, .{new_v});
                 live_value = new_v;
                 // I1: a read RIGHT NOW returns the just-written
@@ -334,6 +343,77 @@ pub fn testMvccUpdateFlowNoCommitBranches() !void {
     if (g.get().* != 10) return error.NoCommitMutatedCell;
 }
 
+pub fn testMvccUpdateOwnedCopyFailureCleansCandidate() !void {
+    const backing = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(backing);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, backing, 0);
+    defer rt.deinit();
+    try ctx.register(backing, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    const initial = OwnedBytes{ .data = try backing.dupe(u8, "stable") };
+    var s = try versioned.Versioned(OwnedBytes).init(backing, initial);
+    defer {
+        s.deinit(&rt, backing) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(backing);
+            rt.ebr.reclaimLocal(backing);
+        }
+    }
+
+    var failing = std.testing.FailingAllocator.init(backing, .{ .fail_index = 1 });
+    const result = s.update(&rt, failing.allocator(), keepOwnedBytes, .{});
+    if (result) |_| {
+        return error.UpdateUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) return err;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (!std.mem.eql(u8, g.get().data, "stable")) return error.CellMutatedDespiteCopyFailure;
+}
+
+pub fn testMvccUpdateFlowOwnedCopyFailureCleansCandidate() !void {
+    const backing = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(backing);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, backing, 0);
+    defer rt.deinit();
+    try ctx.register(backing, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    const initial = OwnedBytes{ .data = try backing.dupe(u8, "stable-flow") };
+    var s = try versioned.Versioned(OwnedBytes).init(backing, initial);
+    defer {
+        s.deinit(&rt, backing) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(backing);
+            rt.ebr.reclaimLocal(backing);
+        }
+    }
+
+    var flow = Flow{};
+    var failing = std.testing.FailingAllocator.init(backing, .{ .fail_index = 1 });
+    const result = s.updateFlow(&rt, failing.allocator(), flowKeepOwnedBytes, .{&flow});
+    if (result) |_| {
+        return error.UpdateFlowUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) return err;
+
+    if (flow.kind != .cont_commit) return error.FlowShouldNotHaveRunAfterCopyFailure;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (!std.mem.eql(u8, g.get().data, "stable-flow")) return error.CellMutatedDespiteCopyFailure;
+}
+
 /// Drives Versioned.update's tag-spin retry body at versioned.zig:315.
 /// The path fires when an updateMulti has tagged this cell's ptr
 /// (low-bit set); update spins reloading until the tag is cleared.
@@ -387,6 +467,45 @@ pub fn testMvccTagSpinRetryBody() !void {
     var g = s.read(&rt);
     defer g.release();
     if (g.get().* != 99) return error.UpdateValueWrong;
+}
+
+pub fn testMvccUpdateFlowTagSpinRetryBody() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 7);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.resetFault();
+    sim_atomic.inject_load_tagged_count_remaining = 3;
+
+    const synthetic_before = sim_atomic.sim_load_synthetic_tag_count;
+
+    var flow = Flow{};
+    try s.updateFlow(&rt, allocator, flowIncrement, .{&flow});
+
+    const synthetic_after = sim_atomic.sim_load_synthetic_tag_count;
+    if (synthetic_after == synthetic_before) return error.NoTagInjected;
+    if (flow.kind != .cont_commit) return error.FlowKindUnexpected;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 8) return error.UpdateFlowValueWrong;
 }
 
 /// Drives MVCC Versioned.update bounded-retry exhaustion at 100% fault
@@ -478,6 +597,48 @@ pub fn testMvccUpdateMultiTaggedContentionRetry() !void {
     if (gb.get().* != 20) return error.SecondCellWrong;
 }
 
+pub fn testMvccUpdateMultiCasLoserRetry() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var a = try versioned.Versioned(i64).init(allocator, 1);
+    var b = try versioned.Versioned(i64).init(allocator, 2);
+    defer {
+        a.deinit(&rt, allocator) catch unreachable;
+        b.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.resetFault();
+    sim_atomic.inject_cas_fault_count_remaining = 1;
+    const synthetic_before = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+
+    try versioned.updateMulti(.{ &a, &b }, &rt, allocator, writePair, .{ @as(i64, 30), @as(i64, 40) });
+
+    if (sim_atomic.sim_cmpxchg_synthetic_fault_count != synthetic_before + 1) {
+        return error.CasLoserNotInjected;
+    }
+
+    var ga = a.read(&rt);
+    defer ga.release();
+    var gb = b.read(&rt);
+    defer gb.release();
+    if (ga.get().* != 30) return error.FirstCellWrong;
+    if (gb.get().* != 40) return error.SecondCellWrong;
+}
+
 pub fn testManySeedsShortSteps() !void {
     var i: u64 = 0;
     const seeds = if (build_options.coverage) 4 else 200;
@@ -534,7 +695,9 @@ pub fn testFiftyHeldGuards() !void {
         captured_values[i] = guards[i].get().*;
         if (i & 1 == 1) {
             try s.update(&rt, allocator, struct {
-                fn call(p: *i64, v: i64) void { p.* = v; }
+                fn call(p: *i64, v: i64) void {
+                    p.* = v;
+                }
             }.call, .{@as(i64, @intCast(i)) + 1});
         }
     }

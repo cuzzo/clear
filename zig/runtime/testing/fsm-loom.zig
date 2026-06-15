@@ -11,6 +11,9 @@
 //   - owner pop vs thief steal        (a=7, b=4, depth 11, 2048 schedules)
 //   - owner push+pop vs thief steal   (a=11, b=4, depth 12, 4096 schedules)
 //   - two thieves vs one push         (a=4, b=4+4, depth 12, 4096 schedules)
+//   - owner drain vs thief drain      (multi-item conservation)
+//   - grow while thief drains         (array publish + stealing)
+//   - dispatch waiter state clearing  (lock_waiter atomic protocol)
 //
 // Invariants (checked after each exhaustive run):
 //   I1. At-most-once delivery: each pushed task is observed by exactly one
@@ -18,17 +21,21 @@
 //   I2. Queue drained: after the scenario, queue.len() == 0.
 //   I3. No crashes: MAX_STEPS bound not exceeded.
 //
-// Invocation: `zig build test` runs this through fsm-loom-test.zig.
+// Invocation: `zig build test-loom-vopr -Dtest-file=fsm-loom-test.zig`
+// runs this through executable-rooted fsm-loom-test.zig. Do not route this
+// through `b.addTest`: Zig's generated test runner would hide root.SimAtomic
+// and silently disable the loom seam.
 
 const std = @import("std");
 const fc = @import("../fiber-core.zig");
 const fsm = @import("../fsm.zig");
+const va = @import("../vopr-atomic.zig");
 
 // Re-export SimAtomic so fsm.zig's Chase-Lev ops pick it up via
 // `@import("root").SimAtomic`. When this file is the root (direct
 // compilation via fsm-loom-test.zig wrapper), FsmRunQueue's atomic
 // operations become SimAtomic yield points.
-pub const SimAtomic = @import("../vopr-atomic.zig").SimAtomic;
+pub const SimAtomic = va.SimAtomic;
 pub const SimRing = @import("../vopr-ring.zig").SimRing;
 
 const Fiber = fc.Fiber;
@@ -38,12 +45,14 @@ const FsmRunQueue = fsm.FsmRunQueue;
 const FsmTask = fsm.FsmTask;
 
 const MAX_THREADS = 4;
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 128;
 const STACK_SIZE = 64 * 1024;
 const MAX_STEPS = 10_000;
 
 // Global harness pointer — fiber entry fns access this to record results.
 var harness: *LoomHarness = undefined;
+var stale_waiter_byte: u8 = 0;
+var fresh_waiter_byte: u8 = 0;
 
 const ScheduleMode = union(enum) {
     prng: struct {
@@ -226,10 +235,30 @@ fn entryOwnerPop() callconv(.c) void {
     unreachable;
 }
 
+fn entryOwnerDrain() callconv(.c) void {
+    const h = harness;
+    while (h.queue.pop()) |task| {
+        h.recordResult(0, task);
+    }
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
 fn entryThiefSteal() callconv(.c) void {
     const h = harness;
     const result = h.queue.stealOne();
     h.recordResult(1, result);
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryThiefDrain() callconv(.c) void {
+    const h = harness;
+    while (h.queue.stealOne()) |task| {
+        h.recordResult(1, task);
+    }
     h.done[1] = true;
     fc.__fiber.?.yield();
     unreachable;
@@ -266,6 +295,60 @@ fn entryOwnerPushPop() callconv(.c) void {
     unreachable;
 }
 
+fn entryGrowProducer() callconv(.c) void {
+    const h = harness;
+    const initial_capacity = @as(usize, 1) << fsm.FsmRunQueue.INITIAL_LOG_SIZE;
+    var i = initial_capacity;
+    while (i < initial_capacity + 8) : (i += 1) {
+        h.queue.push(h.allocator, &h.stub_tasks[i]) catch @panic("grow producer push failed");
+    }
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryStealUntilProducerDone() callconv(.c) void {
+    const h = harness;
+    while (!h.done[0]) {
+        if (h.queue.stealOne()) |task| {
+            h.recordResult(1, task);
+        } else {
+            fc.__fiber.?.yield();
+        }
+    }
+    while (h.queue.stealOne()) |task| {
+        h.recordResult(1, task);
+    }
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn resumeYielded(_: *FsmTask) fsm.YieldReason {
+    return .{ .Yielded = {} };
+}
+
+fn resumeWaitForLock(task: *FsmTask) fsm.YieldReason {
+    task.lock_waiter.store(@as(*anyopaque, @ptrCast(&fresh_waiter_byte)), .release);
+    return .{ .WaitForLock = {} };
+}
+
+fn entryDispatchYielded() callconv(.c) void {
+    const h = harness;
+    _ = fsm.dispatchOnce(&h.stub_tasks[0]);
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryDispatchWaitForLock() callconv(.c) void {
+    const h = harness;
+    _ = fsm.dispatchOnce(&h.stub_tasks[1]);
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
 // -----------------------------------------------------------------------
 // Invariant check — confirm exactly-once delivery across threads.
 // -----------------------------------------------------------------------
@@ -281,6 +364,33 @@ fn checkAtMostOnce(h: *LoomHarness, n_threads: usize) !void {
             }
         }
     }
+}
+
+fn stubIndex(h: *LoomHarness, task: *FsmTask, expected_count: usize) ?usize {
+    for (h.stub_tasks[0..expected_count], 0..) |*stub, idx| {
+        if (stub == task) return idx;
+    }
+    return null;
+}
+
+fn checkExactDelivery(h: *LoomHarness, n_threads: usize, expected_count: usize) !void {
+    var seen = [_]bool{false} ** MAX_RESULTS;
+    var total: usize = 0;
+    for (h.results[0..n_threads], 0..) |row, tid| {
+        for (row[0..h.result_counts[tid]]) |slot_opt| {
+            if (slot_opt) |task| {
+                const idx = stubIndex(h, task, expected_count) orelse return error.UnexpectedTask;
+                if (seen[idx]) return error.DuplicateDelivery;
+                seen[idx] = true;
+                total += 1;
+            }
+        }
+    }
+    if (total != expected_count) return error.LossOrDuplicate;
+    for (seen[0..expected_count]) |was_seen| {
+        if (!was_seen) return error.LossOrDuplicate;
+    }
+    if (h.queue.len() != 0) return error.QueueNotDrained;
 }
 
 // -----------------------------------------------------------------------
@@ -300,7 +410,9 @@ fn runPopVsSteal(h: *LoomHarness) !void {
     // Total delivered across both threads: exactly 1.
     var total: usize = 0;
     for (h.result_counts[0..2], 0..) |n, tid| {
-        for (h.results[tid][0..n]) |s| if (s != null) { total += 1; };
+        for (h.results[tid][0..n]) |s| if (s != null) {
+            total += 1;
+        };
     }
     if (total != 1) return error.LossOrDuplicate;
 }
@@ -320,7 +432,9 @@ fn runPushPopVsSteal(h: *LoomHarness) !void {
     // at most 2. (Could be 1 if CAS fails for one.)
     var total: usize = 0;
     for (h.result_counts[0..2], 0..) |n, tid| {
-        for (h.results[tid][0..n]) |s| if (s != null) { total += 1; };
+        for (h.results[tid][0..n]) |s| if (s != null) {
+            total += 1;
+        };
     }
     if (total > 2) return error.DuplicateDelivery;
 }
@@ -336,9 +450,63 @@ fn runTwoThievesOneItem(h: *LoomHarness) !void {
     try checkAtMostOnce(h, 2);
     var total: usize = 0;
     for (h.result_counts[0..2], 0..) |n, tid| {
-        for (h.results[tid][0..n]) |s| if (s != null) { total += 1; };
+        for (h.results[tid][0..n]) |s| if (s != null) {
+            total += 1;
+        };
     }
     if (total > 1) return error.DuplicateSteal;
+}
+
+/// Owner drains from the bottom while a thief drains from the top. This
+/// strengthens the single-pop/steal smoke case into full conservation:
+/// every preseeded task must be delivered exactly once and the queue must
+/// end empty.
+fn runOwnerDrainVsThiefDrain(h: *LoomHarness) !void {
+    const total_tasks = 16;
+    h.initStubs(total_tasks);
+    for (h.stub_tasks[0..total_tasks]) |*task| {
+        try h.queue.push(h.allocator, task);
+    }
+    try h.createThread(0, @intFromPtr(&entryOwnerDrain));
+    try h.createThread(1, @intFromPtr(&entryThiefDrain));
+    try h.run();
+    try checkExactDelivery(h, 2, total_tasks);
+}
+
+/// Fill the initial circular array, then let the owner push enough extra work
+/// to force grow() while a thief concurrently drains. The invariant is still
+/// exact delivery; failures here usually mean a broken array publish, stale
+/// top/bottom read, or lost task during grow.
+fn runGrowWhileStealing(h: *LoomHarness) !void {
+    const initial_capacity = @as(usize, 1) << fsm.FsmRunQueue.INITIAL_LOG_SIZE;
+    const total_tasks = initial_capacity + 8;
+    h.initStubs(total_tasks);
+    for (h.stub_tasks[0..initial_capacity]) |*task| {
+        try h.queue.push(h.allocator, task);
+    }
+    try h.createThread(0, @intFromPtr(&entryGrowProducer));
+    try h.createThread(1, @intFromPtr(&entryStealUntilProducerDone));
+    try h.run();
+    try checkExactDelivery(h, 2, total_tasks);
+}
+
+/// dispatchOnce has a small but important atomic protocol: stale lock waiters
+/// must be cleared before resuming, while a WaitForLock resume that installs a
+/// fresh waiter must survive the post-resume status update.
+fn runDispatchWaiterProtocol(h: *LoomHarness) !void {
+    h.stub_tasks[0] = FsmTask.init(&resumeYielded);
+    h.stub_tasks[0].lock_waiter.store(@as(*anyopaque, @ptrCast(&stale_waiter_byte)), .monotonic);
+    h.stub_tasks[1] = FsmTask.init(&resumeWaitForLock);
+
+    try h.createThread(0, @intFromPtr(&entryDispatchYielded));
+    try h.createThread(1, @intFromPtr(&entryDispatchWaitForLock));
+    try h.run();
+
+    if (h.stub_tasks[0].status != .Ready) return error.DispatchStatusWrong;
+    if (h.stub_tasks[0].lock_waiter.load(.acquire) != null) return error.StaleWaiterNotCleared;
+    if (h.stub_tasks[1].status != .Blocked) return error.DispatchStatusWrong;
+    const fresh = @as(*anyopaque, @ptrCast(&fresh_waiter_byte));
+    if (h.stub_tasks[1].lock_waiter.load(.acquire) != fresh) return error.FreshWaiterLost;
 }
 
 // -----------------------------------------------------------------------
@@ -387,6 +555,18 @@ test "loom: FsmRunQueue exhaustive two thieves" {
     try runExhaustiveN(std.testing.allocator, runTwoThievesOneItem, "two_thieves", 8);
 }
 
+test "loom: FsmRunQueue exhaustive owner drain vs thief drain" {
+    try runExhaustiveN(std.testing.allocator, runOwnerDrainVsThiefDrain, "owner_drain_vs_thief_drain", 10);
+}
+
+test "loom: FsmRunQueue grow while thief drains" {
+    try runExhaustiveN(std.testing.allocator, runGrowWhileStealing, "grow_while_stealing", 8);
+}
+
+test "loom: dispatchOnce waiter protocol" {
+    try runExhaustiveN(std.testing.allocator, runDispatchWaiterProtocol, "dispatch_waiter_protocol", 8);
+}
+
 // PRNG variant for broader randomized coverage. Set LOOM_FUZZ_SEEDS env
 // var to scale up (default 200 for the unit test; 10K+ for nightly).
 fn fuzzSeedCount(default_seeds: usize) usize {
@@ -395,9 +575,7 @@ fn fuzzSeedCount(default_seeds: usize) usize {
     return std.fmt.parseInt(usize, s, 10) catch default_seeds;
 }
 
-test "loom: FsmRunQueue PRNG seeds (200 default, LOOM_FUZZ_SEEDS to scale)" {
-    const allocator = std.testing.allocator;
-    const n = fuzzSeedCount(200);
+fn runPrngSeeds(allocator: std.mem.Allocator, n: usize) !void {
     var failed: usize = 0;
     var seed: u64 = 0;
     while (seed < n) : (seed += 1) {
@@ -409,4 +587,32 @@ test "loom: FsmRunQueue PRNG seeds (200 default, LOOM_FUZZ_SEEDS to scale)" {
         h.deinit();
     }
     if (failed > 0) return error.PrngFailures;
+}
+
+fn checkSimAtomicCoverage() !void {
+    std.debug.print(
+        "  fsm_loom_atomic_sites={d}, sim_atomic_ops={d}\n",
+        .{ va.sim_unique_site_count, va.sim_atomic_op_count },
+    );
+    if (va.sim_atomic_op_count == 0) return error.SimAtomicDidNotFire;
+    if (va.sim_unique_site_count < 20) return error.FsmLoomCoverageRegressed;
+}
+
+test "loom: FsmRunQueue PRNG seeds (200 default, LOOM_FUZZ_SEEDS to scale)" {
+    try runPrngSeeds(std.testing.allocator, fuzzSeedCount(200));
+}
+
+test "loom: FsmRunQueue SimAtomic coverage gate" {
+    try checkSimAtomicCoverage();
+}
+
+pub fn runAll(allocator: std.mem.Allocator) !void {
+    try runExhaustiveN(allocator, runPopVsSteal, "pop_vs_steal", 11);
+    try runExhaustiveN(allocator, runPushPopVsSteal, "push_pop_vs_steal", 12);
+    try runExhaustiveN(allocator, runTwoThievesOneItem, "two_thieves", 8);
+    try runExhaustiveN(allocator, runOwnerDrainVsThiefDrain, "owner_drain_vs_thief_drain", 10);
+    try runExhaustiveN(allocator, runGrowWhileStealing, "grow_while_stealing", 8);
+    try runExhaustiveN(allocator, runDispatchWaiterProtocol, "dispatch_waiter_protocol", 8);
+    try runPrngSeeds(allocator, fuzzSeedCount(200));
+    try checkSimAtomicCoverage();
 }

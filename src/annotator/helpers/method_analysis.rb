@@ -96,8 +96,8 @@ module MethodAnalysis
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
-    sharded_pattern = defn.intrinsic_template(:sharded_zig)
-    numeric_pattern = defn.intrinsic_template(:numeric_zig)
+    sharded_pattern = defn.intrinsic_template(IntrinsicTemplateKind::ShardedZig)
+    numeric_pattern = defn.intrinsic_template(IntrinsicTemplateKind::NumericZig)
     zig = if (obj_type.sharded? || obj_type.striped?) && sharded_pattern
       sharded_pattern
     elsif obj_type.plain_numeric_map? && numeric_pattern
@@ -107,10 +107,10 @@ module MethodAnalysis
     end
 
     # Resolve alloc variant for sharded types
-    alloc = if (obj_type.sharded? || obj_type.striped?) && defn.intrinsic_alloc(:sharded_alloc)
-      defn.intrinsic_alloc(:sharded_alloc)
+    alloc = if (obj_type.sharded? || obj_type.striped?) && defn.intrinsic_alloc(IntrinsicAllocationKind::ShardedAlloc)
+      defn.intrinsic_alloc(IntrinsicAllocationKind::ShardedAlloc)
     else
-      defn.intrinsic_alloc(:alloc)
+      defn.intrinsic_alloc(IntrinsicAllocationKind::Alloc)
     end
 
     # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles

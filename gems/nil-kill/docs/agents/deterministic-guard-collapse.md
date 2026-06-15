@@ -46,7 +46,7 @@ Every finding must carry a `proof_tier`:
 - `observed_always`: runtime evidence saw only one predicate result, but the
   static contract does not prove it. This is high-value review material, not an
   automatic rewrite.
-- `unsafe_to_autofix`: the branch may be deterministic in one corpus but has
+- `unsafe_to_rewrite`: the branch may be deterministic in one corpus but has
   dynamic state, callback, reflection, external IO, or insufficient coverage.
 
 Only `static_proven` and verified `contract_proven` work should become
@@ -110,7 +110,7 @@ The report should surface rows like:
 ```text
 - static_proven true at src/foo.rb:42 `x.is_a?(String)` -- `x` has static type String
 - 17 guards collapse | `.type_info` across 9 methods -> always `Type`: type origin, delete normalizers
-- observed_always true at src/bar.rb:88 `feature.enabled?` -- 284/284 observed true; review, not autofix
+- observed_always true at src/bar.rb:88 `feature.enabled?` -- 284/284 observed true; review, not automated rewrite
 ```
 
 This gives agents a ranked work queue: type or normalize the source of truth,

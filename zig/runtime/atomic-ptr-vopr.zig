@@ -33,6 +33,21 @@ fn flowIncrement(p: *i64, flow: *Flow) void {
     flow.kind = .cont_commit;
 }
 
+fn flowSkipNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 111;
+    flow.kind = .skip_no_commit;
+}
+
+fn flowRetNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 222;
+    flow.kind = .ret_no_commit;
+}
+
+fn flowRaiseNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 333;
+    flow.kind = .raise_no_commit;
+}
+
 const OpKind = enum {
     Read,
     ReadHold,
@@ -112,7 +127,9 @@ fn runSequence(seed: u64, steps: usize, allocator: std.mem.Allocator) !void {
                 const new_v = @as(i64, @intCast(step)) + 1;
                 const limbo_before = ebr.limbo_list.items.len;
                 try cell.update(ebr, allocator, struct {
-                    fn call(p: *i64, v: i64) void { p.* = v; }
+                    fn call(p: *i64, v: i64) void {
+                        p.* = v;
+                    }
                 }.call, .{new_v});
                 live_value = new_v;
                 // I1
@@ -261,6 +278,46 @@ pub fn testUpdateFlowRetryBodyUnderFault() !void {
     var g = cell.read(ebr);
     defer g.release();
     if (g.get().* != 16) return error.UpdateFlowValueWrong;
+}
+
+pub fn testUpdateFlowNoCommitBranches() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var ebr = try allocator.create(ThreadLocalEbr);
+    ebr.* = ThreadLocalEbr{ .context = &ctx };
+    try ctx.register(allocator, ebr);
+
+    var cell = try atomic_ptr.AtomicPtr(i64).init(allocator, 10);
+    defer {
+        cell.deinit(ebr, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            ebr.reclaimLocal(allocator);
+        }
+        ctx.unregister(ebr);
+        ebr.deinit(allocator);
+        allocator.destroy(ebr);
+    }
+
+    var skip = Flow{};
+    try cell.updateFlow(ebr, allocator, flowSkipNoCommit, .{&skip});
+    if (skip.kind != .skip_no_commit) return error.FlowKindUnexpected;
+
+    var ret = Flow{};
+    try cell.updateFlow(ebr, allocator, flowRetNoCommit, .{&ret});
+    if (ret.kind != .ret_no_commit) return error.FlowKindUnexpected;
+
+    var raised = Flow{};
+    try cell.updateFlow(ebr, allocator, flowRaiseNoCommit, .{&raised});
+    if (raised.kind != .raise_no_commit) return error.FlowKindUnexpected;
+
+    var g = cell.read(ebr);
+    defer g.release();
+    if (g.get().* != 10) return error.NoCommitMutatedCell;
 }
 
 /// Drives the AtomicPtr.update bounded-retry-exhaustion contract:

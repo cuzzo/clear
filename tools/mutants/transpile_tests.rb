@@ -5,7 +5,7 @@
 require 'fileutils'
 require 'optparse'
 require 'sorbet-runtime'
-require_relative 'support'
+require_relative '../../gems/lineage/tools/mutant-converters/support'
 
 module TranspileTestMutants
   extend T::Sig

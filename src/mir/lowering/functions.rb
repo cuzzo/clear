@@ -1608,7 +1608,7 @@ module MIRLoweringFunctions
     pre_resolved_alloc = nil
     entry = intrinsic_signature_for(node)
     raise "lower_intrinsic: missing stdlib signature for #{node.name}" unless entry
-    entry_alloc = entry.intrinsic_alloc(:alloc)
+    entry_alloc = entry.intrinsic_alloc(IntrinsicAllocationKind::Alloc)
     if entry_alloc
       pre_resolved_alloc = resolve_alloc_sym(entry_alloc, nil, node)
     end

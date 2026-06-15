@@ -49,6 +49,18 @@ test "multiple overflows ratchet: Standard → Large → XL" {
     try std.testing.expectEqual(StackSize.Xl, cp.recommendSize(fn_addr, .Standard));
 }
 
+test "recordOverflow never lowers an existing recommendation" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xDEAD_0020;
+
+    cp.recordOverflow(fn_addr, .Large);
+    try std.testing.expectEqual(StackSize.Xl, cp.recommendSize(fn_addr, .Standard));
+
+    cp.recordOverflow(fn_addr, .Standard);
+    try std.testing.expectEqual(StackSize.Xl, cp.recommendSize(fn_addr, .Standard));
+    try std.testing.expectEqual(@as(u32, 2), cp.getOverflowCount(fn_addr));
+}
+
 test "XL stays at XL (no higher tier)" {
     cp.resetRegistry();
     const fn_addr: usize = 0xDEAD_0003;
@@ -272,6 +284,24 @@ test "underflow policy = ignore suppresses counting" {
     try std.testing.expectEqual(@as(u32, 0), counts.tier2);
 }
 
+test "lower recommendation is ignored when underflow policy is not downsize" {
+    cp.resetRegistry();
+    const fn_addr: usize = 0xFACE_0020;
+
+    const saved_threshold = cp.config.underflow_1tier_threshold;
+    cp.config.underflow_1tier_threshold = 1;
+    defer cp.config.underflow_1tier_threshold = saved_threshold;
+
+    cp.recordCompletion(fn_addr, .Large, 20 * 1024);
+    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(fn_addr, .Large));
+
+    const saved_policy = cp.config.on_underflow;
+    cp.config.on_underflow = .log;
+    defer cp.config.on_underflow = saved_policy;
+
+    try std.testing.expectEqual(StackSize.Large, cp.recommendSize(fn_addr, .Large));
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // OnSkew tests
 // ═══════════════════════════════════════════════════════════════════
@@ -291,6 +321,11 @@ test "isSkewed: below min_ops threshold is not skewed" {
     // Looks skewed but total < 1000 (warmup period).
     const counts = [_]u64{ 500, 1, 1, 1 };
     try std.testing.expect(!cp.isSkewed(&counts));
+}
+
+test "isSkewed: skew at min_ops threshold is detected" {
+    const counts = [_]u64{ 997, 1, 1, 1 };
+    try std.testing.expect(cp.isSkewed(&counts));
 }
 
 test "isSkewed: mild imbalance is not skewed (CV < threshold)" {

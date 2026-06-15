@@ -60,7 +60,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
         AST::ErrorClause.new(
           selectors: [AST::ErrorSelector.new(form: :type, name: name, token: nil)],
           retries: nil,
-          action: :raise,
+          action: AST::ErrorActionKind::Raise,
           token: nil,
         )
       }
@@ -79,7 +79,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
       node.lock_error_clause = AST::ErrorClause.new(
         selectors: [AST::ErrorSelector.new(form: :kind, name: :Transient, token: nil)],
         retries: nil,
-        action: :raise,
+        action: AST::ErrorActionKind::Raise,
         token: nil,
       )
       handled = WithMatchCheck.handled_error_set(node, [])
@@ -91,7 +91,6 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
     it "returns an empty set when no clause and no policy" do
       node = AST::WithBlock.new(nil, [], [], nil)
       expect(WithMatchCheck.handled_error_set(node, [])).to eq(Set.new)
-      expect(WithMatchCheck.handled_error_set(node, nil)).to eq(Set.new)
     end
   end
 

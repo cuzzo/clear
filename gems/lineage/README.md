@@ -135,8 +135,9 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure \
   --input gems/lineage/test/fixtures/test-exposure-clear.json
 ```
 
-Ingest Ruby mutant facts after running `tools/mutants/ruby_specs.rb`.
-The mutant runner emits `mutant-facts/v1`; Lineage maps each fact onto
+Ingest mutant facts after running a converter under
+`gems/lineage/tools/mutant-converters/`. The Ruby mutant converter/runner and
+`zig-mutants` both emit `mutant-facts/v1`; Lineage maps each fact onto
 current logical units, records `MUTANT_COV`, and marks the unit's source
 lines with killed/survived mutation exposure. Ruby spec mutants should
 use `--test-type unit`:

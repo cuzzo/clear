@@ -37,6 +37,7 @@ pub fn build(b: *std.Build) void {
     // upload its own cobertura.xml without a separate join job.
     const shard_index = b.option(u32, "shard-index", "Test shard index (0-based, default 0)") orelse 0;
     const shard_count = b.option(u32, "shard-count", "Total test shards for CI parallelism (default 1 = no sharding)") orelse 1;
+    const test_file_filter = b.option([]const u8, "test-file", "Run only a matching test file path or basename") orelse "";
 
     // Common paths
     const switch_s = b.path("runtime/switch.S");
@@ -208,8 +209,10 @@ pub fn build(b: *std.Build) void {
         .{ .path = "fsm-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "fsm-lock-safety-test.zig", .tsan = true },
         .{ .path = "fsm-lock-test.zig", .tsan = true },
+        // fsm-loom-test built as executable (see fsm_loom_exe). Building via
+        // b.addTest puts the test_runner at module root, hiding SimAtomic and
+        // silently disabling the loom seam.
         // fsm-lock-vopr-test built as executable (see vopr_exes).
-        .{ .path = "fsm-loom-test.zig", .loom_vopr = true },
         .{ .path = "fsm-race-test.zig", .tsan = true },
         .{ .path = "fsm-rwlock-test.zig", .tsan = true },
         .{ .path = "fsm-scheduler-test.zig", .tsan = true },
@@ -288,6 +291,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "partitioned-map-test.zig", .tsan = true },
         .{ .path = "resource-test.zig" },
         .{ .path = "runtime-header-test.zig" },
+        .{ .path = "safety-test.zig" },
         .{ .path = "sigaltstack-test.zig" },
         .{ .path = "soa-list-test.zig" },
         .{ .path = "soa-pool-test.zig" },
@@ -486,6 +490,7 @@ pub fn build(b: *std.Build) void {
         // Loom/vopr entries are likewise excluded from `test_step` —
         // they run only via `test_loom_vopr_step` (sharded, no TSan).
         var include_in_test_step =
+            matchesTestFile(filename, test_file_filter) and
             !skip_for_coverage and
             ((coverage and !entry.loom_vopr) or
                 (!coverage and !entry.tsan and !entry.hammer and !entry.loom_vopr));
@@ -571,7 +576,7 @@ pub fn build(b: *std.Build) void {
         if (entry.tsan or entry.hammer) {
             const target_step = if (entry.hammer) test_hammer_step else test_tsan_step;
             const idx_ref = if (entry.hammer) &hammer_step_idx else &tsan_step_idx;
-            const in_shard = (idx_ref.* % shard_count) == shard_index;
+            const in_shard = matchesTestFile(filename, test_file_filter) and (idx_ref.* % shard_count) == shard_index;
             idx_ref.* += 1;
             if (in_shard) {
                 const tsan_tests = b.addTest(.{
@@ -607,7 +612,7 @@ pub fn build(b: *std.Build) void {
         // and TSan adds multiple-minutes-per-test overhead with zero
         // marginal value. Sharded the same way as TSan/hammer.
         if (entry.loom_vopr) {
-            const in_shard = (loom_vopr_step_idx % shard_count) == shard_index;
+            const in_shard = matchesTestFile(filename, test_file_filter) and (loom_vopr_step_idx % shard_count) == shard_index;
             loom_vopr_step_idx += 1;
             // Loom-only filter for the coverage-loom report. VOPR test
             // entries (`*-vopr-test.zig`) are excluded -- VOPR is a
@@ -749,6 +754,7 @@ pub fn build(b: *std.Build) void {
     };
 
     for (hammer_test_files) |filename| {
+        if (!matchesTestFile(filename, test_file_filter)) continue;
         const hammer_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -777,6 +783,7 @@ pub fn build(b: *std.Build) void {
     };
 
     for (hammer_exe_files) |filename| {
+        if (!matchesTestFile(filename, test_file_filter)) continue;
         const hammer_exe = b.addExecutable(.{
             .name = std.fs.path.stem(filename),
             .root_module = b.createModule(.{
@@ -809,8 +816,8 @@ pub fn build(b: *std.Build) void {
             // Required so the module's path (zig/) covers both runtime/
             // and lib/ -- runtime files use relative ../lib/ imports
             // and would otherwise fail "import outside module path".
-            // Mirrors the unit-test shim pattern (vopr-test.zig).
-            .root_source_file = b.path("vopr.zig"),
+            // Mirrors the unit-test shim pattern.
+            .root_source_file = b.path("vopr-test.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
@@ -818,7 +825,9 @@ pub fn build(b: *std.Build) void {
     vopr_exe.root_module.link_libc = true;
     const run_vopr = b.addRunArtifact(vopr_exe);
     run_vopr.has_side_effects = true;
-    vopr_step.dependOn(&run_vopr.step);
+    if (matchesTestFile("vopr-test.zig", test_file_filter)) {
+        vopr_step.dependOn(&run_vopr.step);
+    }
 
     // -------------------------------------------------------------------------
     // LOOM -- Deterministic atomic interleaving tests
@@ -846,7 +855,7 @@ pub fn build(b: *std.Build) void {
     loom_exe.root_module.link_libc = true;
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
-    if (coverage and shard_index == 0) {
+    if (coverage and shard_index == 0 and matchesTestFile("vopr-loom-runner.zig", test_file_filter)) {
         const loom_kcov_dir = "zig-out/coverage/loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", loom_kcov_dir });
         const run_loom_kcov = b.addSystemCommand(&.{
@@ -865,7 +874,137 @@ pub fn build(b: *std.Build) void {
         merge_cmd.?.addArg(loom_kcov_dir);
         merge_cmd.?.step.dependOn(&run_loom_kcov.step);
     }
-    loom_step.dependOn(&run_loom.step);
+    if (matchesTestFile("vopr-loom-runner.zig", test_file_filter)) {
+        loom_step.dependOn(&run_loom.step);
+    }
+
+    // fsm-loom-test — built as an executable so `@import("root")` from
+    // inside runtime/fsm.zig resolves to the entry file. Building this with
+    // b.addTest puts Zig's test runner at module root, hiding SimAtomic and
+    // silently disabling the loom seam.
+    const fsm_loom_exe = b.addExecutable(.{
+        .name = "fsm-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("fsm-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage or coverage_loom) true else null,
+    });
+    fsm_loom_exe.root_module.addImport("build_options", build_options_mod);
+    fsm_loom_exe.root_module.addAssemblyFile(switch_s);
+    fsm_loom_exe.root_module.addAssemblyFile(onroot_s);
+    fsm_loom_exe.root_module.link_libc = true;
+    const run_fsm_loom = b.addRunArtifact(fsm_loom_exe);
+    run_fsm_loom.has_side_effects = true;
+    run_fsm_loom.stdio = .inherit;
+    const include_fsm_loom = matchesTestFile("fsm-loom-test.zig", test_file_filter);
+    if (coverage and include_fsm_loom and shard_index == 0) {
+        const fsm_loom_kcov_dir = "zig-out/coverage/fsm-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", fsm_loom_kcov_dir });
+        const run_fsm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            fsm_loom_kcov_dir,
+        });
+        run_fsm_loom_kcov.addArtifactArg(fsm_loom_exe);
+        run_fsm_loom_kcov.stdio = .inherit;
+        run_fsm_loom_kcov.setCwd(b.path("."));
+        run_fsm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_fsm_loom_kcov.step);
+        merge_cmd.?.addArg(fsm_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_fsm_loom_kcov.step);
+    } else if (!coverage and include_fsm_loom and shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_fsm_loom.step);
+    }
+    if (coverage_loom and include_fsm_loom and shard_index == 0) {
+        const fsm_loom_kcov_dir = "zig-out/coverage-loom/fsm-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", fsm_loom_kcov_dir });
+        const run_fsm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            fsm_loom_kcov_dir,
+        });
+        run_fsm_loom_kcov.addArtifactArg(fsm_loom_exe);
+        run_fsm_loom_kcov.stdio = .inherit;
+        run_fsm_loom_kcov.setCwd(b.path("."));
+        run_fsm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_fsm_loom_kcov.step);
+        merge_cmd_loom.?.addArg(fsm_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_fsm_loom_kcov.step);
+    }
+    if (include_fsm_loom) {
+        loom_step.dependOn(&run_fsm_loom.step);
+    }
+
+    // observable-loom-test — standalone for the same SimAtomic root-seam
+    // reason as fsm-loom and parking-lot-loom.
+    const observable_loom_exe = b.addExecutable(.{
+        .name = "observable-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("observable-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage or coverage_loom) true else null,
+    });
+    observable_loom_exe.root_module.addImport("build_options", build_options_mod);
+    observable_loom_exe.root_module.addAssemblyFile(switch_s);
+    observable_loom_exe.root_module.addAssemblyFile(onroot_s);
+    observable_loom_exe.root_module.link_libc = true;
+    const run_observable_loom = b.addRunArtifact(observable_loom_exe);
+    run_observable_loom.has_side_effects = true;
+    run_observable_loom.stdio = .inherit;
+    const include_observable_loom = matchesTestFile("observable-loom-test.zig", test_file_filter);
+    if (coverage and include_observable_loom and shard_index == 0) {
+        const observable_loom_kcov_dir = "zig-out/coverage/observable-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", observable_loom_kcov_dir });
+        const run_observable_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            observable_loom_kcov_dir,
+        });
+        run_observable_loom_kcov.addArtifactArg(observable_loom_exe);
+        run_observable_loom_kcov.stdio = .inherit;
+        run_observable_loom_kcov.setCwd(b.path("."));
+        run_observable_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_observable_loom_kcov.step);
+        merge_cmd.?.addArg(observable_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_observable_loom_kcov.step);
+    } else if (!coverage and include_observable_loom and shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_observable_loom.step);
+    }
+    if (coverage_loom and include_observable_loom and shard_index == 0) {
+        const observable_loom_kcov_dir = "zig-out/coverage-loom/observable-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", observable_loom_kcov_dir });
+        const run_observable_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            kcov_codecov_exclude_arg,
+            observable_loom_kcov_dir,
+        });
+        run_observable_loom_kcov.addArtifactArg(observable_loom_exe);
+        run_observable_loom_kcov.stdio = .inherit;
+        run_observable_loom_kcov.setCwd(b.path("."));
+        run_observable_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_observable_loom_kcov.step);
+        merge_cmd_loom.?.addArg(observable_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_observable_loom_kcov.step);
+    }
+    if (include_observable_loom) {
+        loom_step.dependOn(&run_observable_loom.step);
+    }
 
     // parking-lot-loom — built as an executable so `@import("root")` from
     // inside lib/parking-lot.zig and runtime/queues.zig resolves to the
@@ -897,7 +1036,7 @@ pub fn build(b: *std.Build) void {
     const run_pl_loom = b.addRunArtifact(pl_loom_exe);
     run_pl_loom.has_side_effects = true;
     run_pl_loom.stdio = .inherit;
-    if (coverage and shard_index == 0) {
+    if (coverage and shard_index == 0 and matchesTestFile("parking-lot-loom-test.zig", test_file_filter)) {
         const pl_loom_kcov_dir = "zig-out/coverage/parking-lot-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", pl_loom_kcov_dir });
         const run_pl_loom_kcov = b.addSystemCommand(&.{
@@ -915,13 +1054,13 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&run_pl_loom_kcov.step);
         merge_cmd.?.addArg(pl_loom_kcov_dir);
         merge_cmd.?.step.dependOn(&run_pl_loom_kcov.step);
-    } else if (!coverage and shard_index == 0) {
+    } else if (!coverage and shard_index == 0 and matchesTestFile("parking-lot-loom-test.zig", test_file_filter)) {
         test_loom_vopr_step.dependOn(&run_pl_loom.step);
     }
     // Loom-only coverage: route parking-lot-loom into the dedicated tree.
     // Independent of the `coverage`/`!coverage` branches above so this can
     // be combined or run on its own without mixing with the unit-test report.
-    if (coverage_loom and shard_index == 0) {
+    if (coverage_loom and shard_index == 0 and matchesTestFile("parking-lot-loom-test.zig", test_file_filter)) {
         const pl_loom_kcov_dir = "zig-out/coverage-loom/parking-lot-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", pl_loom_kcov_dir });
         const run_pl_loom_kcov = b.addSystemCommand(&.{
@@ -940,7 +1079,9 @@ pub fn build(b: *std.Build) void {
         merge_cmd_loom.?.addArg(pl_loom_kcov_dir);
         merge_cmd_loom.?.step.dependOn(&run_pl_loom_kcov.step);
     }
-    loom_step.dependOn(&run_pl_loom.step);
+    if (matchesTestFile("parking-lot-loom-test.zig", test_file_filter)) {
+        loom_step.dependOn(&run_pl_loom.step);
+    }
 
     // VOPR executables. Built as `b.addExecutable` (NOT `b.addTest`)
     // so `@import("root")` from inside lib/compat.zig resolves to the
@@ -962,6 +1103,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "data-structures-vopr", .entry = "data-structures-vopr-test.zig" },
     };
     for (vopr_exes) |ve| {
+        if (!matchesTestFile(ve.entry, test_file_filter)) continue;
         const exe = b.addExecutable(.{
             .name = ve.name,
             .root_module = b.createModule(.{
@@ -1036,10 +1178,11 @@ pub fn build(b: *std.Build) void {
     const run_versioned_loom = b.addRunArtifact(versioned_loom_exe);
     run_versioned_loom.has_side_effects = true;
     run_versioned_loom.stdio = .inherit;
-    if (shard_index == 0) {
+    const include_versioned_loom = matchesTestFile("versioned-loom-test.zig", test_file_filter);
+    if (include_versioned_loom and shard_index == 0) {
         test_loom_vopr_step.dependOn(&run_versioned_loom.step);
     }
-    if (coverage and shard_index == 0) {
+    if (coverage and include_versioned_loom and shard_index == 0) {
         const versioned_loom_kcov_dir = "zig-out/coverage/versioned-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", versioned_loom_kcov_dir });
         const run_versioned_loom_kcov = b.addSystemCommand(&.{
@@ -1058,7 +1201,9 @@ pub fn build(b: *std.Build) void {
         merge_cmd.?.addArg(versioned_loom_kcov_dir);
         merge_cmd.?.step.dependOn(&run_versioned_loom_kcov.step);
     }
-    loom_step.dependOn(&run_versioned_loom.step);
+    if (include_versioned_loom) {
+        loom_step.dependOn(&run_versioned_loom.step);
+    }
 
     // versioned-multi-loom -- multi-fiber Loom harness for updateMulti
     // contention. Built as an executable so `@import("root")` resolves
@@ -1081,11 +1226,14 @@ pub fn build(b: *std.Build) void {
     const run_vm_loom = b.addRunArtifact(vm_loom_exe);
     run_vm_loom.has_side_effects = true;
     run_vm_loom.stdio = .inherit;
-    if (shard_index == 0) {
+    const include_vm_loom = matchesTestFile("versioned-multi-loom-test.zig", test_file_filter);
+    if (include_vm_loom and shard_index == 0) {
         test_loom_vopr_step.dependOn(&run_vm_loom.step);
     }
-    loom_step.dependOn(&run_vm_loom.step);
-    if (coverage and shard_index == 0) {
+    if (include_vm_loom) {
+        loom_step.dependOn(&run_vm_loom.step);
+    }
+    if (coverage and include_vm_loom and shard_index == 0) {
         const vm_loom_kcov_dir = "zig-out/coverage/versioned-multi-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", vm_loom_kcov_dir });
         const run_vm_loom_kcov = b.addSystemCommand(&.{
@@ -1104,7 +1252,7 @@ pub fn build(b: *std.Build) void {
         merge_cmd.?.addArg(vm_loom_kcov_dir);
         merge_cmd.?.step.dependOn(&run_vm_loom_kcov.step);
     }
-    if (coverage_loom and shard_index == 0) {
+    if (coverage_loom and include_vm_loom and shard_index == 0) {
         const vm_loom_kcov_dir = "zig-out/coverage-loom/versioned-multi-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", vm_loom_kcov_dir });
         const run_vm_loom_kcov = b.addSystemCommand(&.{
@@ -1144,11 +1292,14 @@ pub fn build(b: *std.Build) void {
     const run_ow_loom = b.addRunArtifact(ow_loom_exe);
     run_ow_loom.has_side_effects = true;
     run_ow_loom.stdio = .inherit;
-    if (shard_index == 0) {
+    const include_ow_loom = matchesTestFile("ownership-loom-test.zig", test_file_filter);
+    if (include_ow_loom and shard_index == 0) {
         test_loom_vopr_step.dependOn(&run_ow_loom.step);
     }
-    loom_step.dependOn(&run_ow_loom.step);
-    if (coverage and shard_index == 0) {
+    if (include_ow_loom) {
+        loom_step.dependOn(&run_ow_loom.step);
+    }
+    if (coverage and include_ow_loom and shard_index == 0) {
         const ow_loom_kcov_dir = "zig-out/coverage/ownership-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", ow_loom_kcov_dir });
         const run_ow_loom_kcov = b.addSystemCommand(&.{
@@ -1167,7 +1318,7 @@ pub fn build(b: *std.Build) void {
         merge_cmd.?.addArg(ow_loom_kcov_dir);
         merge_cmd.?.step.dependOn(&run_ow_loom_kcov.step);
     }
-    if (coverage_loom and shard_index == 0) {
+    if (coverage_loom and include_ow_loom and shard_index == 0) {
         const ow_loom_kcov_dir = "zig-out/coverage-loom/ownership-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", ow_loom_kcov_dir });
         const run_ow_loom_kcov = b.addSystemCommand(&.{
@@ -1213,7 +1364,9 @@ pub fn build(b: *std.Build) void {
     const run_versioned_exhaust = b.addRunArtifact(versioned_exhaust_exe);
     run_versioned_exhaust.has_side_effects = true;
     versioned_exhaust_step.dependOn(&run_versioned_exhaust.step);
-    hammer_step.dependOn(&run_versioned_exhaust.step);
+    if (matchesTestFile("versioned-exhaust.zig", test_file_filter)) {
+        hammer_step.dependOn(&run_versioned_exhaust.step);
+    }
 
     // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)
@@ -1244,4 +1397,10 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addAssemblyFile(onroot_s);
     lib.root_module.link_libc = true;
     b.installArtifact(lib);
+}
+
+fn matchesTestFile(filename: []const u8, filter: []const u8) bool {
+    if (filter.len == 0) return true;
+    if (std.mem.eql(u8, filename, filter)) return true;
+    return std.mem.eql(u8, std.fs.path.basename(filename), filter);
 }

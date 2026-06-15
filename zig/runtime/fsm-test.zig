@@ -138,6 +138,67 @@ test "FsmIoWaiter: marker distinguishes FSM from stackful IoWaiter" {
     try testing.expect(!FsmIoWaiter.isFsmMarker(@intFromPtr(&fsm_waiter)));
 }
 
+test "FsmRunQueue: init propagates array allocation failure" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+
+    try testing.expectError(error.OutOfMemory, fsm.FsmRunQueue.initWithAllocator(failing.allocator()));
+}
+
+test "FsmRunQueue: init propagates array header allocation failure" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 1 });
+
+    try testing.expectError(error.OutOfMemory, fsm.FsmRunQueue.initWithAllocator(failing.allocator()));
+}
+
+test "FsmRunQueue: push propagates growth allocation failure" {
+    const initial_capacity = @as(usize, 1) << fsm.FsmRunQueue.INITIAL_LOG_SIZE;
+    const State = struct {
+        fn doResume(_: *FsmTask) YieldReason {
+            return .{ .Done = {} };
+        }
+    };
+
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 2 });
+    var queue = try fsm.FsmRunQueue.initWithAllocator(failing.allocator());
+    defer queue.deinit();
+
+    var tasks: [initial_capacity + 1]FsmTask = undefined;
+    for (&tasks) |*task| {
+        task.* = FsmTask.init(&State.doResume);
+    }
+
+    for (tasks[0..initial_capacity]) |*task| {
+        try queue.push(failing.allocator(), task);
+    }
+
+    try testing.expectError(error.OutOfMemory, queue.push(failing.allocator(), &tasks[initial_capacity]));
+}
+
+test "FsmRunQueue: push propagates old-array retention failure" {
+    const initial_capacity = @as(usize, 1) << fsm.FsmRunQueue.INITIAL_LOG_SIZE;
+    const State = struct {
+        fn doResume(_: *FsmTask) YieldReason {
+            return .{ .Done = {} };
+        }
+    };
+
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 4 });
+    var queue = try fsm.FsmRunQueue.initWithAllocator(failing.allocator());
+    defer queue.deinit();
+
+    var tasks: [initial_capacity + 1]FsmTask = undefined;
+    for (&tasks) |*task| {
+        task.* = FsmTask.init(&State.doResume);
+    }
+
+    for (tasks[0..initial_capacity]) |*task| {
+        try queue.push(failing.allocator(), task);
+    }
+
+    try testing.expectError(error.OutOfMemory, queue.push(failing.allocator(), &tasks[initial_capacity]));
+    try testing.expectEqual(initial_capacity, queue.len());
+}
+
 test "dispatchOnce: Yielded reuses task across many iterations" {
     const State = struct {
         remaining: u32 = 0,

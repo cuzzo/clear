@@ -69,6 +69,7 @@ const SPLIT_STREAM_FIBER_STACK = 64 * 1024;
 const MAX_THREADS = 4;
 const STACK_SIZE = 64 * 1024;
 const MAX_STEPS = 50_000;
+const ThreadFlag = std.atomic.Value(bool);
 
 // Override default (500) via env var LOOM_FUZZ_SEEDS.
 // Used by prng-mode tests to scale coverage for nightly/manual runs.
@@ -90,6 +91,12 @@ fn splitStreamDummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
 var g_split_park_subscriber: *LoomSplitStream = undefined;
 var g_split_park_woke: bool = false;
 var g_split_park_err: ?anyerror = null;
+var g_split_value_subscriber: *LoomSplitStream = undefined;
+var g_split_value_seen: ?i64 = null;
+var g_split_value_err: ?anyerror = null;
+var g_split_backpressure_producer: *LoomSplitStream = undefined;
+var g_split_backpressure_done: bool = false;
+var g_split_backpressure_err: ?anyerror = null;
 var g_scheduler_primitive_wg: *fp.WaitGroup = undefined;
 var g_scheduler_primitive_sem: *fp.Semaphore = undefined;
 var g_scheduler_primitive_wg_woke: bool = false;
@@ -108,6 +115,30 @@ fn entrySplitStreamParkedSubscriber() callconv(.c) void {
     while (true) fc.__fiber.?.yield();
 }
 
+fn entrySplitStreamParkedValueSubscriber() callconv(.c) void {
+    const next = g_split_value_subscriber.next() catch |err| {
+        g_split_value_err = err;
+        while (true) fc.__fiber.?.yield();
+    };
+    g_split_value_seen = next orelse {
+        g_split_value_err = error.ExpectedSplitStreamValue;
+        while (true) fc.__fiber.?.yield();
+    };
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entrySplitStreamBackpressureProducer() callconv(.c) void {
+    var i: usize = 0;
+    while (i < 4097) : (i += 1) {
+        g_split_backpressure_producer.push(@intCast(i + 1)) catch |err| {
+            g_split_backpressure_err = err;
+            while (true) fc.__fiber.?.yield();
+        };
+    }
+    g_split_backpressure_done = true;
+    while (true) fc.__fiber.?.yield();
+}
+
 fn entryWaitGroupParkedFiber() callconv(.c) void {
     g_scheduler_primitive_wg.wait();
     g_scheduler_primitive_wg_woke = true;
@@ -119,6 +150,21 @@ fn entrySemaphoreParkedFiber() callconv(.c) void {
     g_scheduler_primitive_sem_acquired = true;
     while (true) fc.__fiber.?.yield();
 }
+
+const SemaphoreRecheckReleaseCtx = struct {
+    sem: *fp.Semaphore,
+    started: *ThreadFlag,
+
+    fn run(self: *@This()) void {
+        self.started.store(true, .release);
+        var spins: usize = 0;
+        while (spins < 1000) : (spins += 1) {
+            std.Thread.yield() catch {};
+        }
+        self.sem.counter.store(1, .seq_cst);
+        self.sem.lock.store(0, .release);
+    }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Global scheduler shared by all fibers under test.
@@ -3270,6 +3316,165 @@ pub fn testSplitStreamParkedSubscriberCloseWake() !void {
     if (test_err) |err| return err;
 }
 
+pub fn testSplitStreamParkedSubscriberPublishWakeOne() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var producer = try LoomSplitStream.spawnNew(allocator, &sched);
+    var subscriber = producer.retain();
+    g_split_value_subscriber = &subscriber;
+    g_split_value_seen = null;
+    g_split_value_err = null;
+
+    const stack_mem = try allocator.alloc(u8, SPLIT_STREAM_FIBER_STACK);
+    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&entrySplitStreamParkedValueSubscriber), .Large);
+    var task: qs.Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&splitStreamDummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    const prev_disable = sim_atomic.disable_fiber_yield_point;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sched.current_task = &task;
+    sim_atomic.disable_fiber_yield_point = true;
+
+    var test_err: ?anyerror = null;
+
+    fiber.switchTo(&sched.main_ctx);
+    if (task.status.load(.acquire) != .Blocked) test_err = error.SubscriberDidNotPark;
+    if (test_err == null and subscriber.inner.subscribers.items[subscriber.subscriber_id].parked.load(.acquire) != 1) {
+        test_err = error.SubscriberParkFlagMissing;
+    }
+
+    if (test_err == null) {
+        sched.current_task = null;
+        var i: usize = 0;
+        while (i < 256) : (i += 1) {
+            try producer.push(@intCast(i + 1));
+        }
+        if (subscriber.inner.subscribers.items[subscriber.subscriber_id].parked.load(.acquire) != 0) {
+            test_err = error.SubscriberParkFlagNotCleared;
+        }
+        if (test_err == null and task.status.load(.acquire) != .Ready) test_err = error.PublishDidNotWakeSubscriber;
+    }
+
+    if (test_err == null) {
+        sched.current_task = &task;
+        fiber.switchTo(&sched.main_ctx);
+        if (g_split_value_seen != 1) test_err = error.SubscriberDidNotReadPublishedValue;
+        if (test_err == null) {
+            if (g_split_value_err) |err| test_err = err;
+        }
+    }
+
+    fc.__fiber = null;
+    fc.__fiber_parent_ctx = null;
+    fc.__fiber_stack_limit = null;
+    sim_atomic.disable_fiber_yield_point = prev_disable;
+    sched.current_task = null;
+    fp.active_scheduler = prev_active;
+    fp.scheduler_running = prev_running;
+    g_split_value_subscriber = undefined;
+
+    const final_b = sched.ready_queue.bottom.load(.monotonic);
+    sched.ready_queue.top.store(final_b, .monotonic);
+
+    subscriber.deinit();
+    producer.deinit();
+    allocator.free(stack_mem);
+    sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (test_err) |err| return err;
+}
+
+pub fn testSplitStreamProducerBackpressureWake() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var producer = try LoomSplitStream.spawnNew(allocator, &sched);
+    var subscriber = producer.retain();
+    g_split_backpressure_producer = &producer;
+    g_split_backpressure_done = false;
+    g_split_backpressure_err = null;
+
+    const stack_mem = try allocator.alloc(u8, SPLIT_STREAM_FIBER_STACK);
+    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&entrySplitStreamBackpressureProducer), .Large);
+    var task: qs.Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&splitStreamDummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    const prev_disable = sim_atomic.disable_fiber_yield_point;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sched.current_task = &task;
+    sim_atomic.disable_fiber_yield_point = true;
+
+    var test_err: ?anyerror = null;
+
+    fiber.switchTo(&sched.main_ctx);
+    if (task.status.load(.acquire) != .Blocked) test_err = error.ProducerDidNotParkForBackpressure;
+    if (test_err == null and producer.inner.producer_parked.load(.acquire) != 1) test_err = error.ProducerParkFlagMissing;
+    if (test_err == null and producer.inner.producer_task.load(.acquire) != &task) test_err = error.ProducerTaskNotPublished;
+    if (test_err == null and producer.inner.producer_sched.load(.acquire) != &sched) test_err = error.ProducerSchedulerNotPublished;
+    if (test_err == null and g_split_backpressure_done) test_err = error.ProducerCompletedBeforeBackpressure;
+
+    if (test_err == null) {
+        var i: usize = 0;
+        while (i < 256) : (i += 1) {
+            const value = (try subscriber.next()) orelse return error.SubscriberSawCloseEarly;
+            if (value != @as(i64, @intCast(i + 1))) return error.SubscriberSawWrongValue;
+        }
+        if (producer.inner.producer_parked.load(.acquire) != 0) test_err = error.ProducerParkFlagNotCleared;
+        if (test_err == null and task.status.load(.acquire) != .Ready) test_err = error.BackpressureWakeDidNotReadyProducer;
+    }
+
+    if (test_err == null) {
+        sched.current_task = &task;
+        fiber.switchTo(&sched.main_ctx);
+        if (!g_split_backpressure_done) test_err = error.ProducerDidNotResumeAfterBackpressure;
+        if (test_err == null) {
+            if (g_split_backpressure_err) |err| test_err = err;
+        }
+    }
+
+    fc.__fiber = null;
+    fc.__fiber_parent_ctx = null;
+    fc.__fiber_stack_limit = null;
+    sim_atomic.disable_fiber_yield_point = prev_disable;
+    sched.current_task = null;
+    fp.active_scheduler = prev_active;
+    fp.scheduler_running = prev_running;
+    g_split_backpressure_producer = undefined;
+
+    const final_b = sched.ready_queue.bottom.load(.monotonic);
+    sched.ready_queue.top.store(final_b, .monotonic);
+
+    subscriber.deinit();
+    producer.deinit();
+    allocator.free(stack_mem);
+    sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (test_err) |err| return err;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stream(T) SPSC ring head/tail release/acquire protocol
 //
@@ -5309,6 +5514,136 @@ pub fn testScanLockWaitersTimeoutFire() !void {
     if (sched.lock_waiters.items.len != 0) return error.LockWaiterNotRemoved;
 }
 
+pub fn testScanLockWaitersRemovesQueuedNode() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    sched.lock_timeout_ms = 1;
+
+    var waiter_list: qs.WaiterList = .{};
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    var waiter_node = qs.WaiterNode{
+        .task = &stub_task,
+        .sched_ptr = &sched,
+        .kind = .Write,
+    };
+    waiter_list.push(&waiter_node);
+
+    var writers_waiting: u32 = 1;
+    stub_task.waiting_for_lock.store(@ptrCast(&s8_lock_sentinel), .release);
+    stub_task.lock_wait_start_ms.store(0, .release);
+    stub_task.waiting_for_lock_list.store(&waiter_list, .release);
+    stub_task.lock_waiter_node.store(&waiter_node, .release);
+    stub_task.lock_counter_ptr = &writers_waiting;
+
+    try sched.lock_waiters.append(allocator, &stub_task);
+
+    _ = sched.scanLockWaitersPub();
+
+    if (!waiter_list.isEmpty()) return error.WaiterNodeNotRemoved;
+    if (writers_waiting != 0) return error.WriterWaiterCountNotDecremented;
+    if (stub_task.waiting_for_lock.load(.monotonic) != null) return error.WaitFieldNotCleared;
+    if (stub_task.waiting_for_lock_list.load(.monotonic) != null) return error.WaiterListNotCleared;
+    if (stub_task.lock_waiter_node.load(.monotonic) != null) return error.WaiterNodeBackPointerNotCleared;
+    if (!stub_task.lock_timed_out.load(.monotonic)) return error.LockTimedOutNotSet;
+    if (stub_task.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+    if (sched.lock_waiters.items.len != 0) return error.LockWaiterNotRemoved;
+}
+
+pub fn testEarliestLockWaiterDeadlineSkipsStaleWaiters() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    sched.lock_timeout_ms = 100;
+
+    var stale_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    stale_task.waiting_for_lock.store(null, .release);
+
+    var live_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    live_task.waiting_for_lock.store(@ptrCast(&s8_lock_sentinel), .release);
+    live_task.lock_wait_start_ms.store(0, .release);
+
+    try sched.lock_waiters.append(allocator, &stale_task);
+    try sched.lock_waiters.append(allocator, &live_task);
+
+    const until = sched.earliestLockWaiterDeadlineMsUntil() orelse return error.NoDeadline;
+    if (until < 1) return error.InvalidDeadline;
+}
+
+pub fn testPartitionedMapPutAllocationFailureCompletes() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+        fp.global_registry.deinit(allocator);
+        fp.global_registry = .{};
+    }
+
+    try fp.global_registry.register(allocator, std.Thread.getCurrentId(), &sched);
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+
+    var byte: u8 = 0;
+    const impossible_value = @as([*]const u8, @ptrCast(&byte))[0..std.math.maxInt(usize)];
+
+    const StringMap = DataStructures.PartitionedStringMap([]const u8, 4);
+    var smap: StringMap = .{};
+    defer smap.deinit(allocator, allocator);
+
+    if (smap.put(allocator, allocator, "oom-string", impossible_value)) |_| {
+        return error.StringPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (smap.contains("oom-string")) return error.StringPutFailureInsertedKey;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, []const u8, 4);
+    var nmap: NumericMap = .{};
+    defer nmap.deinit(allocator, allocator);
+
+    if (nmap.put(allocator, allocator, 9001, impossible_value)) |_| {
+        return error.NumericPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (nmap.contains(9001)) return error.NumericPutFailureInsertedKey;
+}
+
 pub fn testScanFsmLockWaitersTimeoutFire() !void {
     const allocator = std.heap.c_allocator;
 
@@ -5333,6 +5668,47 @@ pub fn testScanFsmLockWaitersTimeoutFire() !void {
     sched.scanFsmLockWaitersPub();
 
     if (stub_fsm.waiting_for_lock.load(.monotonic) != null) return error.FsmWaitFieldNotCleared;
+    if (sched.fsm_lock_waiters.items.len != 0) return error.FsmLockWaiterNotRemoved;
+}
+
+pub fn testScanFsmLockWaitersRemovesQueuedNode() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    sched.lock_timeout_ms = 1;
+
+    var waiter_list: qs.WaiterList = .{};
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+    var waiter_node = qs.WaiterNode{
+        .fsm_task = &stub_fsm,
+        .sched_ptr = &sched,
+        .kind = .Write,
+    };
+    waiter_list.push(&waiter_node);
+
+    stub_fsm.waiting_for_lock.store(@ptrCast(&s8_lock_sentinel), .release);
+    stub_fsm.lock_wait_start_ms.store(0, .release);
+    stub_fsm.waiting_for_lock_list.store(&waiter_list, .release);
+    stub_fsm.lock_waiter.store(&waiter_node, .release);
+
+    try sched.fsm_lock_waiters.append(allocator, &stub_fsm);
+
+    sched.scanFsmLockWaitersPub();
+
+    if (!waiter_list.isEmpty()) return error.FsmWaiterNodeNotRemoved;
+    if (stub_fsm.waiting_for_lock.load(.monotonic) != null) return error.FsmWaitFieldNotCleared;
+    if (stub_fsm.waiting_for_lock_list.load(.monotonic) != null) return error.FsmWaiterListNotCleared;
+    if (stub_fsm.lock_waiter.load(.monotonic) != null) return error.FsmWaiterBackPointerNotCleared;
+    if (stub_fsm.lock_error != .LockTimeout) return error.FsmLockTimeoutNotSet;
+    if (stub_fsm.status != .Ready) return error.FsmStatusNotReady;
     if (sched.fsm_lock_waiters.items.len != 0) return error.FsmLockWaiterNotRemoved;
 }
 
@@ -5616,6 +5992,44 @@ pub fn testSemaphoreAcquireFiberParkResume() !void {
     if (!g_scheduler_primitive_sem_acquired) return error.SemaphoreFiberDidNotResume;
 }
 
+pub fn testSemaphoreAcquireRecheckSlotAppearsUnderLock() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+
+    var sem = fp.Semaphore.init(0, &sched);
+    sem.lock.store(1, .release);
+    sched.current_task = &task;
+    defer sched.current_task = null;
+
+    var started = ThreadFlag.init(false);
+    var ctx = SemaphoreRecheckReleaseCtx{ .sem = &sem, .started = &started };
+    const releaser = try std.Thread.spawn(.{}, SemaphoreRecheckReleaseCtx.run, .{&ctx});
+    while (!started.load(.acquire)) {
+        std.Thread.yield() catch {};
+    }
+
+    sem.acquire();
+    releaser.join();
+
+    if (sem.counter.load(.seq_cst) != 0) return error.SemaphoreCounterNotConsumedAfterRecheck;
+    if (task.status.load(.acquire) != .Ready) return error.SemaphoreTaskNotReadyAfterRecheck;
+    if (sem.waiting_task != null) return error.SemaphoreRecheckShouldNotPark;
+}
+
 // N1 batch 2: io_uring submit functions. Each parks a task by storing
 // .Blocked into status. SimRing makes this safe under loom (no real
 // fds, just staged SQEs). One test calls all 6 (read/write/accept/
@@ -5668,6 +6082,16 @@ pub fn testIoSubmitFns() !void {
     stub_task.status.store(.Ready, .release);
     try sched.submitSend(&w, 0, cbuf);
     if (stub_task.status.load(.monotonic) != .Blocked) return error.SendStatusMissing;
+
+    stub_task.status.store(.Blocked, .release);
+    var completion_waiter: fp.Scheduler.IoWaiter = .{ .task = &stub_task };
+    try sched.submitRead(&completion_waiter, 0, &buf);
+    sched.flushRing();
+    if (!sched.ring.complete(completion_waiter.encode(), 17)) return error.IoCompletionNotStaged;
+    sched.pollNonBlocking();
+    if (completion_waiter.result != 17) return error.IoCompletionResultMissing;
+    if (stub_task.status.load(.monotonic) != .Ready) return error.IoCompletionDidNotReadyTask;
+    if (sched.ready_queue.pop() != &stub_task) return error.IoCompletionDidNotEnqueueTask;
 }
 
 // N1 batch 3: sleepTask + fsmSleepTask. Both link in via direct call

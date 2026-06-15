@@ -9,9 +9,9 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     typescript = NilKill::Languages.capability_for("typescript")
     zig = NilKill::Languages.capability_for("zig")
 
-    expect(ruby).to include("runtime_tracing" => true, "autofix" => true)
+    expect(ruby).to include("runtime_tracing" => true)
     expect(ruby["type_systems"]).to include("sorbet", "rbi")
-    expect(python).to include("runtime_tracing" => true, "autofix" => false)
+    expect(python).to include("runtime_tracing" => true)
     expect(python).to include("type_indexing" => true)
     expect(python["type_systems"]).to include("python-typing")
     expect(python.dig("runtime_capabilities", "params")).to be(true)
@@ -20,6 +20,14 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(typescript["type_systems"]).to include("typescript")
     expect(zig).to include("static_analysis" => true, "runtime_tracing" => false)
     expect(zig["notes"].join).to include("runtime tracing is not implemented")
+  end
+
+  it "resolves language providers from file extensions for static diff dispatch" do
+    expect(NilKill::Languages.provider_for_path("src/probe.rb").language).to eq("ruby")
+    expect(NilKill::Languages.provider_for_path("src/probe.py").language).to eq("python")
+    expect(NilKill::Languages.provider_for_path("src/probe.ts").language).to eq("typescript")
+    expect(NilKill::Languages.provider_for_path("src/probe.zig").language).to eq("zig")
+    expect(NilKill::Languages.provider_for_path("src/probe.txt")).to be_nil
   end
 
   it "keeps Zig runtime collection explicitly unsupported behind the provider API" do
@@ -351,21 +359,4 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "keeps unsupported non-Ruby auto-fixes report-only" do
-    action = NilKill::Actions::Record.build(
-      kind: "add_nullability",
-      language: "python",
-      confidence: "review",
-      target: {"path" => "pkg/user.py", "line" => 12, "symbol_id" => "python\u0000pkg/user.py\u0000User\u0000method\u0000name\u000012"},
-      message: "param fallback observed None",
-      data: {"slot" => "param", "name" => "fallback"}
-    )
-
-    provider = NilKill::AutoFix.provider_for("python")
-    plan = provider.plan(action)
-
-    expect(provider.supports?(action)).to be(false)
-    expect(plan["supported"]).to be(false)
-    expect(plan.dig("diagnostics", 0, "code")).to eq("unsupported_autofix_provider")
-  end
 end
