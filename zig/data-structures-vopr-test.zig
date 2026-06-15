@@ -24,6 +24,7 @@ const tests = [_]Test{
     .{ .name = "data-structures-vopr: partitioned map ownership local ops", .func = &dsv.testPartitionedMapOwnershipLocalOps },
     .{ .name = "data-structures-vopr: partitioned map ownership waiters", .func = &dsv.testPartitionedMapOwnershipWaiters },
     .{ .name = "data-structures-vopr: partitioned map remote ops", .func = &dsv.testPartitionedMapRemoteOps },
+    .{ .name = "data-structures-vopr: partitioned map put allocation failures still complete", .func = &dsv.testPartitionedMapPutAllocationFailureCompletes },
     // Stream + InfStream spinlock fault-injection scenarios removed:
     // routing Stream.Inner head/tail/lock through the comptime Atomic
     // alias (so SimAtomic could fault-inject the swap-spinlocks)

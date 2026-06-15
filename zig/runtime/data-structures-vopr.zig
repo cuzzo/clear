@@ -405,3 +405,46 @@ pub fn testPartitionedMapRemoteOps() !void {
     nmap.remove(allocator, nkey);
     if (nmap.contains(nkey)) return error.RemoteNumericMapRemoveFailed;
 }
+
+pub fn testPartitionedMapPutAllocationFailureCompletes() !void {
+    const allocator = gpa.allocator();
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+        resetSchedulerGlobals(allocator);
+    }
+
+    try fp.global_registry.register(allocator, std.Thread.getCurrentId(), &sched);
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+
+    var byte: u8 = 0;
+    const impossible_value = @as([*]const u8, @ptrCast(&byte))[0..std.math.maxInt(usize)];
+
+    const StringMap = DataStructures.PartitionedStringMap([]const u8, 4);
+    var smap: StringMap = .{};
+    defer smap.deinit(allocator, allocator);
+
+    if (smap.put(allocator, allocator, "oom-string", impossible_value)) |_| {
+        return error.StringPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (smap.contains("oom-string")) return error.StringPutFailureInsertedKey;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, []const u8, 4);
+    var nmap: NumericMap = .{};
+    defer nmap.deinit(allocator, allocator);
+
+    if (nmap.put(allocator, allocator, 9001, impossible_value)) |_| {
+        return error.NumericPutUnexpectedlySucceeded;
+    } else |err| if (err != error.OutOfMemory) {
+        return err;
+    }
+    if (nmap.contains(9001)) return error.NumericPutFailureInsertedKey;
+}
