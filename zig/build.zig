@@ -331,6 +331,10 @@ pub fn build(b: *std.Build) void {
     if (merge_cmd) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
+        const empty_kcov_dir = "zig-out/coverage/.empty";
+        const mkdir_empty_kcov = b.addSystemCommand(&.{ "mkdir", "-p", empty_kcov_dir });
+        m.addArg(empty_kcov_dir);
+        m.step.dependOn(&mkdir_empty_kcov.step);
     }
     const sanitize_cmd = if (coverage)
         b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage/merged/kcov-merged/cobertura.xml" })
@@ -349,6 +353,10 @@ pub fn build(b: *std.Build) void {
     if (merge_cmd_loom) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
+        const empty_kcov_dir = "zig-out/coverage-loom/.empty";
+        const mkdir_empty_kcov = b.addSystemCommand(&.{ "mkdir", "-p", empty_kcov_dir });
+        m.addArg(empty_kcov_dir);
+        m.step.dependOn(&mkdir_empty_kcov.step);
     }
     const sanitize_cmd_loom = if (coverage_loom)
         b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-loom/merged/kcov-merged/cobertura.xml" })
@@ -367,6 +375,10 @@ pub fn build(b: *std.Build) void {
     if (merge_cmd_vopr) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
+        const empty_kcov_dir = "zig-out/coverage-vopr/.empty";
+        const mkdir_empty_kcov = b.addSystemCommand(&.{ "mkdir", "-p", empty_kcov_dir });
+        m.addArg(empty_kcov_dir);
+        m.step.dependOn(&mkdir_empty_kcov.step);
     }
     const sanitize_cmd_vopr = if (coverage_vopr)
         b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml" })
