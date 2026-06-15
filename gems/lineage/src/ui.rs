@@ -5559,15 +5559,6 @@ fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
         out.push_str("\" target=\"_blank\" rel=\"noopener\">");
         out.push_str(&html_escape(&finding.rule_id));
         out.push_str("</a>");
-        if !finding.level.is_empty() {
-            out.push_str(" ");
-            out.push_str(&html_escape(&finding.level));
-        }
-        if !finding.category.is_empty() {
-            out.push_str(" [");
-            out.push_str(&html_escape(&finding.category));
-            out.push(']');
-        }
         out.push_str(": ");
         out.push_str(&html_escape(&finding.message));
         if !finding.source.is_empty() {
@@ -7215,6 +7206,8 @@ mod tests {
             html.find("tier 1").unwrap() < html.find("tier 2").unwrap(),
             "Decomplex findings should be ordered by tier"
         );
+        assert!(html.contains("decomplex.decision-pressure</a>: decision pressure"));
+        assert!(!html.contains("decomplex.decision-pressure</a> warning ["));
         assert!(html.contains("gems/decomplex/docs/false-simplicity.md"));
         assert!(html.contains("tests by type: fuzz (2), integration (1), unit (6) - 9 total"));
         let newer_fix = "fedcba987654 1970-01-02 weight 0.25: new noisy commit body";
