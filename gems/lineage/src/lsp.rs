@@ -560,6 +560,7 @@ mod tests {
             mutant_coverage: None,
             dark_arms: vec!["else".to_string()],
             dark_arm_spans: Vec::new(),
+            effect_spans: Vec::new(),
             findings: Vec::new(),
             hazards: vec![UiHazard {
                 hazard_type: "zig_loom_atomic".to_string(),
@@ -568,6 +569,7 @@ mod tests {
                 evidence_present: false,
                 verified: false,
             }],
+            test_type_counts: std::collections::BTreeMap::new(),
             semantic_churn: 0.0,
             semantic_churn_events: 0,
             bug_weight: 0.0,

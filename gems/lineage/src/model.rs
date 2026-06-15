@@ -235,20 +235,80 @@ pub struct CommitMetadata {
 
 impl CommitMetadata {
     pub fn is_fix(&self) -> bool {
-        let msg = self.message.to_ascii_lowercase();
-        [
+        let subject = self.message.lines().next().unwrap_or_default().trim();
+        if let Some(commit_type) = conventional_commit_type(subject) {
+            return matches!(commit_type.as_str(), "fix" | "bug" | "bugfix" | "hotfix");
+        }
+
+        let subject = subject.to_ascii_lowercase();
+        subject_has_fix_signal(&subject)
+    }
+}
+
+fn conventional_commit_type(subject: &str) -> Option<String> {
+    let (prefix, _) = subject.split_once(':')?;
+    let prefix = prefix.trim();
+    if prefix.is_empty() || prefix.contains(char::is_whitespace) {
+        return None;
+    }
+
+    let prefix = prefix.trim_end_matches('!');
+    let commit_type = prefix
+        .split_once('(')
+        .map(|(commit_type, _)| commit_type)
+        .unwrap_or(prefix);
+    if commit_type.is_empty()
+        || !commit_type
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '+'))
+    {
+        return None;
+    }
+    Some(commit_type.to_ascii_lowercase())
+}
+
+fn subject_has_fix_signal(subject: &str) -> bool {
+    subject.contains("bug fix")
+        || [
             "fix",
+            "fixes",
+            "fixed",
             "bug",
+            "bugfix",
             "regression",
             "crash",
             "panic",
             "fault",
             "incorrect",
             "wrong",
+            "closes",
+            "closed",
         ]
         .iter()
-        .any(|needle| msg.contains(needle))
+        .any(|word| contains_word(subject, word))
+}
+
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    let mut offset = 0;
+    while let Some(index) = haystack[offset..].find(needle) {
+        let start = offset + index;
+        let end = start + needle.len();
+        let before = haystack[..start]
+            .chars()
+            .next_back()
+            .map(|ch| !ch.is_ascii_alphanumeric())
+            .unwrap_or(true);
+        let after = haystack[end..]
+            .chars()
+            .next()
+            .map(|ch| !ch.is_ascii_alphanumeric())
+            .unwrap_or(true);
+        if before && after {
+            return true;
+        }
+        offset = end;
     }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +370,42 @@ mod tests {
         assert!(CommitMetadata {
             hash: "a".into(),
             message: "Fix parser crash".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(CommitMetadata {
+            hash: "b".into(),
+            message: "fix(parser): handle invalid tokens".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(CommitMetadata {
+            hash: "c".into(),
+            message: "bug(runtime): prevent stale branch state".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(!CommitMetadata {
+            hash: "d".into(),
+            message: "chore(nil-kill): tighten nil-returning method sigs\n\nMentions fixable_helpers and build_auto_candidate_fix in the body.".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(!CommitMetadata {
+            hash: "e".into(),
+            message: "docs: fix typo".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(!CommitMetadata {
+            hash: "f".into(),
+            message: "refactor: move fixable_helpers".into(),
+            timestamp: 0,
+        }
+        .is_fix());
+        assert!(!CommitMetadata {
+            hash: "g".into(),
+            message: "test+docs: Bug #7 reproduced and documented".into(),
             timestamp: 0,
         }
         .is_fix());
