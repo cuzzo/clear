@@ -18,26 +18,73 @@ module NilKill
       end
     end
 
-    TYPE_ERASURE_TOKEN = "T." + "untyped"
-    EMPTY_TYPED_IVAR_FILES = Set.new.freeze
-
-    def initialize(root:, added_lines:)
+    def initialize(root:, added_lines:, context_paths: nil)
       @root = root
       @added_lines = added_lines
-      @typed_ivar_files_by_name = nil
+      @context_paths = context_paths
     end
 
     def findings
       SourceIndex.reset_global_shape_indexes
-      src_ruby_paths.flat_map { |path| findings_for_path(path) }
+      added_lines_by_provider.flat_map do |provider, provider_added_lines|
+        provider.static_diff_findings(
+          root: root,
+          added_lines: provider_added_lines,
+          context_paths: context_paths_for(provider),
+          finding_class: Finding
+        )
+      end
     end
 
     private
 
-    attr_reader :root, :added_lines
+    attr_reader :root, :added_lines, :context_paths
 
-    def src_ruby_paths
-      added_lines.keys.select { |path| path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path)) }.sort
+    def added_lines_by_provider
+      existing_added_lines.each_with_object(Hash.new { |hash, provider| hash[provider] = {} }) do |(path, lines), grouped|
+        provider = Languages.provider_for_path(path)
+        next unless provider
+
+        grouped[provider][path] = lines
+      end
+    end
+
+    def existing_added_lines
+      @existing_added_lines ||= added_lines.select { |path, _lines| File.file?(File.join(root, path)) }
+    end
+
+    def context_paths_for(provider)
+      paths = context_paths || existing_added_lines.keys
+      paths.select { |path| provider_path?(provider, path) && File.file?(File.join(root, path)) }.sort
+    end
+
+    def provider_path?(provider, path)
+      provider.extensions.map(&:downcase).include?(File.extname(path).downcase)
+    end
+  end
+
+  class RubyStaticDiffAudit
+    TYPE_ERASURE_TOKEN = "T." + "untyped"
+    EMPTY_TYPED_IVAR_FILES = Set.new.freeze
+
+    def initialize(root:, added_lines:, context_paths:, finding_class:)
+      @root = root
+      @added_lines = added_lines
+      @context_paths = context_paths
+      @finding_class = finding_class
+      @typed_ivar_files_by_name = nil
+    end
+
+    def findings
+      ruby_paths.flat_map { |path| findings_for_path(path) }
+    end
+
+    private
+
+    attr_reader :root, :added_lines, :context_paths, :finding_class
+
+    def ruby_paths
+      added_lines.keys.select { |path| path.end_with?(".rb") && File.file?(File.join(root, path)) }.sort
     end
 
     def findings_for_path(path)
@@ -55,12 +102,12 @@ module NilKill
         sig = signature_above(lines, method["line"])
         if !sig
           finding("missing_sig", path, method["line"],
-            "added src method has no Sorbet signature",
+            "added Ruby method has no Sorbet signature",
             "#{method["class"]}##{method["method"]}".sub(/\A#/, ""),
             method["method"])
         elsif weak_type?(sig)
           finding("untyped_sig", path, method["line"],
-            "added src method signature uses #{TYPE_ERASURE_TOKEN}",
+            "added Ruby method signature uses #{TYPE_ERASURE_TOKEN}",
             "#{method["class"]}##{method["method"]}".sub(/\A#/, ""),
             sig)
         end
@@ -212,16 +259,14 @@ module NilKill
     end
 
     def typed_ivar_initialized_elsewhere?(path, ivar)
-      return false unless path.start_with?("src/")
-
       typed_ivar_files_by_name.fetch(ivar, EMPTY_TYPED_IVAR_FILES).any? { |rel| rel != path }
     end
 
     def typed_ivar_files_by_name
       @typed_ivar_files_by_name ||= begin
         files_by_ivar = Hash.new { |hash, key| hash[key] = Set.new }
-        Dir.glob(File.join(root, "src/**/*.rb")).sort.each do |candidate|
-          rel = candidate.delete_prefix("#{root}/")
+        context_paths.each do |rel|
+          candidate = File.join(root, rel)
           SourceIndex.source_lines(candidate).each do |line|
             found_ivar = typed_ivar_from_line(line)
             files_by_ivar[found_ivar] << rel if found_ivar
@@ -440,7 +485,7 @@ module NilKill
     end
 
     def finding(kind, path, line, message, detail, code)
-      Finding.new(kind: kind, path: path, line: line.to_i, message: message, detail: detail.to_s, code: code.to_s)
+      finding_class.new(kind: kind, path: path, line: line.to_i, message: message, detail: detail.to_s, code: code.to_s)
     end
   end
 end

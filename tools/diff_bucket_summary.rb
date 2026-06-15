@@ -915,7 +915,12 @@ def print_src_ruby_visibility_markdown(breakdown)
 end
 
 def type_guardrail_findings(adds_by_path)
-  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
+  ruby_paths = src_ruby_added_paths(adds_by_path)
+  NilKill::StaticDiffAudit.new(
+    root: ROOT,
+    added_lines: added_lines_for_paths(adds_by_path, ruby_paths),
+    context_paths: src_ruby_context_paths
+  ).findings +
     rubocop_guardrail_findings(adds_by_path) +
     src_ast_walk_guardrail_findings(adds_by_path)
 end
@@ -936,6 +941,18 @@ def src_ruby_added_paths(adds_by_path, root: ROOT)
   adds_by_path.keys.select do |path|
     path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path))
   end.sort
+end
+
+def src_ruby_context_paths(root: ROOT)
+  Dir.glob(File.join(root, "src/**/*.rb")).filter_map do |path|
+    next unless File.file?(path)
+
+    path.delete_prefix("#{root}/")
+  end.sort
+end
+
+def added_lines_for_paths(adds_by_path, paths)
+  paths.to_h { |path| [path, adds_by_path.fetch(path, Set.new)] }
 end
 
 def rubocop_guardrail_findings(adds_by_path, root: ROOT)

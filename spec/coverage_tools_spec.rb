@@ -601,6 +601,20 @@ RSpec.describe "coverage gap tools" do
     expect(paths).to eq(["src/probe.rb"])
   end
 
+  it "builds src Ruby context paths for Nil-Kill static diff guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/nested"))
+    FileUtils.mkdir_p(File.join(@tmp, "tools"))
+    File.write(File.join(@tmp, "src/probe.rb"), "class Probe; end\n")
+    File.write(File.join(@tmp, "src/nested/context.rb"), "class Context; end\n")
+    File.write(File.join(@tmp, "tools/probe.rb"), "class ToolProbe; end\n")
+    File.write(File.join(@tmp, "src/probe.txt"), "ignored\n")
+
+    expect(src_ruby_context_paths(root: @tmp)).to eq([
+      "src/nested/context.rb",
+      "src/probe.rb",
+    ])
+  end
+
   it "returns an unavailable RuboCop guardrail finding for invalid JSON" do
     findings = rubocop_guardrail_findings_from_json({}, "not-json", root: @tmp)
 

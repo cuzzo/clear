@@ -99,6 +99,10 @@ module NilKill
         []
       end
 
+      def static_diff_findings(root:, added_lines:, context_paths:, finding_class:)
+        []
+      end
+
       def static_evidence(document:, facts:, rel_path:)
         state_declarations = Array(facts[:state_declarations]) +
           extra_state_declarations(document: document, facts: facts, rel_path: rel_path)

@@ -90,6 +90,15 @@ module NilKill
           sorbet.external_type_definitions(root: root)
         end
 
+        def static_diff_findings(root:, added_lines:, context_paths:, finding_class:)
+          NilKill::RubyStaticDiffAudit.new(
+            root: root,
+            added_lines: added_lines,
+            context_paths: context_paths,
+            finding_class: finding_class
+          ).findings
+        end
+
         def sorbet
           @sorbet ||= Sorbet.new
         end

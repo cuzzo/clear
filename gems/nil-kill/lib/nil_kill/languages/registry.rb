@@ -20,6 +20,13 @@ module NilKill
         providers.fetch(normalize(language)) { GenericTreeSitterProvider.new(language) }
       end
 
+      def provider_for_path(path)
+        extension = File.extname(path).downcase
+        registered_providers.find do |provider|
+          provider.extensions.map(&:downcase).include?(extension)
+        end
+      end
+
       def registered_providers
         providers.values.uniq.sort_by(&:language)
       end
@@ -43,6 +50,10 @@ module NilKill
 
     def self.provider_for(language)
       Registry.provider_for(language)
+    end
+
+    def self.provider_for_path(path)
+      Registry.provider_for_path(path)
     end
 
     def self.capabilities

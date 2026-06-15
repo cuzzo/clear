@@ -22,6 +22,14 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(zig["notes"].join).to include("runtime tracing is not implemented")
   end
 
+  it "resolves language providers from file extensions for static diff dispatch" do
+    expect(NilKill::Languages.provider_for_path("src/probe.rb").language).to eq("ruby")
+    expect(NilKill::Languages.provider_for_path("src/probe.py").language).to eq("python")
+    expect(NilKill::Languages.provider_for_path("src/probe.ts").language).to eq("typescript")
+    expect(NilKill::Languages.provider_for_path("src/probe.zig").language).to eq("zig")
+    expect(NilKill::Languages.provider_for_path("src/probe.txt")).to be_nil
+  end
+
   it "keeps Zig runtime collection explicitly unsupported behind the provider API" do
     provider = NilKill::Languages.provider_for("zig")
 
