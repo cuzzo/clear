@@ -1026,6 +1026,97 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  generalized-gems-sarif:
+    name: Decomplex / Boobytrap / SlopCop SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - ruby-unit
+      - ruby-integration
+      - transpile-tests
+      - examples-benchmarks-coverage-shard
+      - tools-fuzz-shard
+      - bc-lower-coverage-shard
+      - zig-coverage
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tree-sitter grammars
+        run: |
+          npm install --no-save --package-lock=false \
+            tree-sitter-ruby@0.23.1 \
+            tree-sitter-python \
+            tree-sitter-javascript \
+            tree-sitter-typescript \
+            tree-sitter-go \
+            tree-sitter-rust \
+            @tree-sitter-grammars/tree-sitter-zig
+      - name: Download Ruby coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ruby-coverage-*
+          path: tmp/generalized-gems-coverage
+      - name: Download Zig coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/generalized-gems-coverage
+      - name: Generate ordered SARIF reports
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          mkdir -p tmp/generalized-gems-sarif
+          coverage_args=()
+          while IFS= read -r path; do
+            coverage_args+=(--coverage="${path}")
+          done < <(
+            find tmp/generalized-gems-coverage -type f \
+              \( -name .resultset.json -o -name cobertura.xml -o -name codecov.json \) \
+              ! -path '*zig-coverage-loom-*' \
+              ! -path '*zig-coverage-vopr-*' \
+              | sort
+          )
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/generalized-gems-sarif \
+            --top=80 \
+            "${coverage_args[@]}"
+      - name: Upload Decomplex SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/decomplex.sarif
+          category: decomplex
+      - name: Upload Boobytrap SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/boobytrap.sarif
+          category: boobytrap
+      - name: Upload SlopCop SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/slopcop.sarif
+          category: slopcop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generalized-gems-sarif
+          path: |
+            tmp/generalized-gems-sarif/*.sarif
+            tmp/generalized-gems-sarif/*.md
+          if-no-files-found: error
+          retention-days: 7
+
   diff-coverage-comment:
     name: Diff coverage bucket PR comment
     runs-on: ubuntu-latest

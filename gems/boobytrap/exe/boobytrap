@@ -9,7 +9,7 @@ def usage
 
       boobytrap report [--repo=.] [--coverage=coverage/.resultset.json] \\
                        [--output=report.md] [--sarif=report.sarif] [--json=report.sarif] \\
-                       [--top=40] [--only=PATH ...] \\
+                       [--top=40] [--only=PATH ...] [--files=a.rb,b.rb] \\
                        [--mutation=mutant-facts.json] \\
                        [--test-exposure=test-exposure.json] \\
                        [--lineage-db=lineage.sqlite] [--exclude=GLOB ...]
@@ -20,6 +20,8 @@ def usage
                  (repeatable, e.g. --only=src/ --only=lib/). The fix
                  time-decay baseline stays over the whole history;
                  only WHICH files are ranked is filtered.
+    --files      restrict ranking to exact repo-relative source files
+                 (comma-separated; useful for PR-diff SARIF).
     --mutation   mutant-facts/v1 JSON with file/method kill-rate and
                  gate status; used to separate safe complexity from
                  weakly verified empirical risk.
@@ -44,7 +46,7 @@ usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
 usage unless ARGV[0] == "report"
 
 opts = { repo: ".", coverage: "coverage/.resultset.json",
-         output: nil, sarif: nil, json: nil, top: 40, only: [], mutation: nil, test_exposure: nil,
+         output: nil, sarif: nil, json: nil, top: 40, only: [], files: [], mutation: nil, test_exposure: nil,
          lineage: nil, lineage_command: nil, exclude: [] }
 args = ARGV[1..].dup
 until args.empty?
@@ -57,6 +59,7 @@ until args.empty?
   when /\A--json=(.+)/      then opts[:json] = Regexp.last_match(1)
   when /\A--top=(\d+)/      then opts[:top] = Regexp.last_match(1).to_i
   when /\A--only=(.+)/      then opts[:only] << Regexp.last_match(1)
+  when /\A--files=(.+)/     then opts[:files].concat(Regexp.last_match(1).split(","))
   when /\A--mutation=(.+)/  then opts[:mutation] = Regexp.last_match(1)
   when /\A--test-exposure=(.+)/ then opts[:test_exposure] = Regexp.last_match(1)
   when /\A--lineage-db=(.+)/ then opts[:lineage] = Regexp.last_match(1)
@@ -72,6 +75,7 @@ report = Boobytrap::Report.new(
   resultset: opts[:coverage],
   top: opts[:top],
   only: opts[:only],
+  files: opts[:files],
   mutation: opts[:mutation],
   test_exposure: opts[:test_exposure],
   lineage: opts[:lineage],

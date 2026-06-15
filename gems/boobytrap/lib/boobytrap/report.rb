@@ -27,12 +27,13 @@ module Boobytrap
     # global fix-history time span is deliberately UNCHANGED -- recency
     # weighting stays consistent with the whole project; we only filter
     # WHICH files are ranked. Empty = whole repo.
-    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [],
+    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [], files: [],
                    mutation: nil, test_exposure: nil, exclude: [], lineage: nil,
                    lineage_command: nil)
       @repo = ::File.realpath(repo)
       @top = top
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
+      @files = normalize_file_scope(files)
       @exclude = Array(exclude)
       @mutation_facts = MutationFacts.load(mutation, root: @repo)
       @test_exposure_facts = TestExposureFacts.load(test_exposure, root: @repo)
@@ -102,6 +103,7 @@ module Boobytrap
 
     def in_scope?(rel)
       return false if excluded_path?(rel)
+      return false if @files.any? && !@files.include?(rel)
       return true if @only.empty?
 
       @only.any? { |p| rel == p || rel.start_with?("#{p}/") }
@@ -121,6 +123,8 @@ module Boobytrap
 
     def current_source_files
       files = []
+      return @files.select { |rel| current_file?(rel) && source_file?(rel) } if @files.any?
+
       IO.popen(["git", "-C", @repo, "ls-files"], &:read).to_s.each_line do |line|
         rel = line.strip
         next if rel.empty?
@@ -138,6 +142,25 @@ module Boobytrap
             exts.include?(::File.extname(rel).downcase) && source_file?(rel)
         end
       end
+    end
+
+    def normalize_file_scope(files)
+      Array(files).flat_map { |value| value.to_s.split(",") }
+                  .map { |path| normalize_scope_path(path) }
+                  .reject(&:empty?)
+                  .uniq
+    end
+
+    def normalize_scope_path(path)
+      raw = path.to_s.strip.tr("\\", "/").sub(%r{\A\./}, "")
+      return "" if raw.empty?
+
+      if raw.start_with?("/")
+        expanded = ::File.expand_path(raw).tr("\\", "/")
+        root = "#{@repo.tr('\\', '/')}/"
+        return expanded[root.length..].to_s if expanded.start_with?(root)
+      end
+      raw.chomp("/")
     end
 
     def source_file?(rel, parser: nil)
@@ -356,7 +379,7 @@ module Boobytrap
 
       o << "## Run Summary\n"
       o << "- Repo: `#{@repo}`\n"
-      o << "- Scope: #{@only.empty? ? 'whole repo' : @only.map { |p| "`#{p}/`" }.join(', ')}\n"
+      o << "- Scope: #{scope_label}\n"
       o << "- Fix commits matched: #{@fix_commits} (time span over whole history, unfiltered)\n"
       o << "- Files ranked: #{@ranked.size}; fixed-but-unmeasured: " \
            "#{@unmeasured.size}\n"
@@ -526,7 +549,7 @@ module Boobytrap
     def sarif_summary
       {
         "repo" => @repo,
-        "scope" => @only,
+        "scope" => { "only" => @only, "files" => @files },
         "fix_commits" => @fix_commits,
         "files_ranked" => @ranked.size,
         "fixed_but_unmeasured" => @unmeasured.size,
@@ -554,6 +577,13 @@ module Boobytrap
     def state_branch_line(row)
       parsed = row[:at].to_s.split(":").last
       parsed.to_i.positive? ? parsed.to_i : 1
+    end
+
+    def scope_label
+      return @files.map { |path| "`#{path}`" }.join(", ") if @files.any?
+      return "whole repo" if @only.empty?
+
+      @only.map { |path| "`#{path}/`" }.join(", ")
     end
 
     def empirical_columns?

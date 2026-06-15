@@ -52,6 +52,44 @@ class CoverageDataTest < Minitest::Test
     end
   end
 
+  def test_load_merges_multiple_coverage_paths
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/a.rb"
+      File.write(file, "def a\n  1\nend\n")
+      first = "#{dir}/first.json"
+      second = "#{dir}/second.json"
+      File.write(first, JSON.dump(
+        "one" => { "coverage" => {
+          file => {
+            "lines" => [1, 0, nil],
+            "branches" => {
+              "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 0 }
+            }
+          }
+        } }
+      ))
+      File.write(second, JSON.dump(
+        "two" => { "coverage" => {
+          file => {
+            "lines" => [2, nil, nil],
+            "branches" => {
+              "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 5 }
+            }
+          }
+        } }
+      ))
+
+      dataset = Boobytrap::CoverageData.load([first, second].join(File::PATH_SEPARATOR), root: dir)
+      coverage = dataset[file]
+
+      assert_equal "SimpleCov", dataset.label
+      assert_equal 3, coverage.line_hits(1)
+      assert_equal 0, coverage.line_hits(2)
+      assert_equal 5, coverage.branches["[:if,0,1,0,1,9]"]["[:then,1,1,0,1,4]"]
+    end
+  end
+
   def test_simplecov_nested_branch_does_not_mark_enclosing_arm_dark
     arm = Struct.new(:kind, :member, :line, :span, :decision_line, :decision_span, keyword_init: true)
     coverage = Boobytrap::CoverageData::FileCoverage.new(
