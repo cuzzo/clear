@@ -40,9 +40,13 @@ In short, Nil-kill has 6 analyzer uses, but the 4 major ones are:
 
 For automated fixes, use `auto-type`. It consumes Nil-kill evidence/actions and currently supports Ruby/Sorbet rewrites. Its provider interface is designed so other language rewriters can be added without changing Nil-kill's analyzer.
 
-> WARNING: the `<command>` for `auto-type loop` MUST include your host project's behavioral test suite (e.g. `bundle exec rspec spec/`). Running with `srb tc` alone is NOT enough: Sorbet typecheck cannot see runtime call paths that flow through `||` fallthrough, `T.unsafe`, or dynamic dispatch, so a narrowing the proposer derives from static evidence can be accepted by Sorbet while still violating the runtime contract on those paths. If the loop's verifier doesn't exercise the code, the fix can land changes that pass typecheck but break callers.
-
-> NOTE: `nil-kill collect -- <command>` runs `<command>` roughly **20-100x slower** than running it uninstrumented -- one to two orders of magnitude, scaling with how collection-mutation-heavy the traced code is (return/build-heavy code is near the low end; code that repeatedly mutates collections passed as parameters is near the high end). This is expected: with no types yet, every traced call and every mutation of a traced collection is recorded. `collect` is a one-time evidence-gathering pass, not a steady state. Run `nil-kill infer` first -- resolving ~50% of types makes subsequent collects considerably faster.
+> [!WARNING]
+> `nil-kill collect -- <command>` runs `<command>` roughly **5-10x
+> slower** than running it uninstrumented, scaling with how
+> collection-mutation-heavy the traced code is. This is expected:
+> `collect` is a one-time evidence-gathering pass, not a steady state.
+> Run `nil-kill infer` first when possible; resolving obvious static
+> types makes subsequent collects faster.
 
 > SUBPROCESSES: `nil-kill collect` instruments your target source **in place** for the duration of the collect (the pristine tree is snapshotted and restored automatically, including after a crash). There is exactly one copy of every target file, at its real path, and it is always instrumented -- so the wrapped code runs regardless of how it is loaded: `require`, `require_relative`, `Kernel#load`, autoload, an absolute-path require, a bare `ruby file.rb` entrypoint, a re-exec, or any Ruby subprocess your tests/runner spawn. Subprocess collection is therefore **in scope and guaranteed**: a method body that executes is recorded, whatever process or load path reached it. (Non-Ruby subprocesses still execute no Ruby and so produce no Ruby evidence -- there is nothing to record there.)
 

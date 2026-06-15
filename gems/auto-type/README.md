@@ -42,4 +42,14 @@ For review actions, use the verified loop with a real behavioral test command:
 bundle exec auto-type loop --signature-backflow --return-backflow -- bundle exec prspec
 ```
 
+> [!WARNING]
+> The verifier command for `auto-type loop` must include your host
+> project's behavioral test suite. Running with `srb tc` alone is not
+> enough: Sorbet typecheck cannot see runtime call paths that flow
+> through `||` fallthrough, `T.unsafe`, or dynamic dispatch. A narrowing
+> derived from static evidence can be accepted by Sorbet while still
+> violating the runtime contract on those paths. If the loop verifier
+> does not exercise the code, the fix can pass typecheck and still break
+> callers.
+
 `auto-type loop` snapshots touched files, applies candidate actions, runs the verifier, and rolls back or bisects failing batches. Review actions should not be applied raw unless you are debugging with `NIL_KILL_UNSAFE_APPLY_ALL=1`.
