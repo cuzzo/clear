@@ -36,18 +36,20 @@ cd gems/zig-mutants
 zig build test
 zig build run -- list --source ../../zig/lib/safety.zig
 zig build run -- list --source ../../zig/lib/safety.zig --json
+zig build run -- list --root ../.. --manifest subjects.json --json
 zig build run -- run \
   --root ../.. \
-  --source zig/lib/safety.zig \
-  --test-command "cd zig && zig build test" \
+  --manifest subjects.json \
   --facts /tmp/zig-mutants.json \
   --out /tmp/zig-mutants-work \
-  --max-mutants 25
+  --artifact-dir /tmp/zig-mutants-artifacts \
+  --shard 0/8 \
+  --ratchet /path/to/reviewed-baseline.json
 ```
 
-The MVP is sequential and intentionally narrow. Parallel workers, manifests,
-package discovery, allowlists, and type-directed function-body replacement are
-deferred until this core proves useful.
+The MVP uses process-level sharding for CI parallelism. In-process worker pools,
+automatic package discovery, allowlists, and type-directed function-body
+replacement remain deferred until real survivor data proves they are needed.
 
 ## Discovery
 
@@ -63,11 +65,20 @@ Implemented mutators:
 - `while` condition negation
 - `std.debug.assert(expr)` weakening to `std.debug.assert(true)`
 - `defer` / `errdefer` removal by replacing the statement with `{};`
+- `try expr` replacement with `(expr catch unreachable)`
+- `lhs catch rhs` replacement with `lhs catch unreachable`
+- standalone cleanup call removal for `.free`, `.destroy`, `.deinit`, and
+  `.release`
+- standalone `.lock` / `.unlock` removal
+- atomic ordering weakening to `.monotonic`
+- `return error.X` replacement with `unreachable`
+- obvious bounds/check `if` guard weakening to `true`
 
 Every mutant records:
 
 - stable ID
 - source path
+- enclosing function/method name
 - kind
 - line/column
 - byte span
@@ -84,14 +95,17 @@ zig:<path>:<line>:<column>:<kind>:<sha16>
 
 The runner:
 
-1. Discovers mutants from one or more `--source` files.
+1. Resolves subjects from explicit `--source` flags or a JSON `--manifest`.
 2. Copies `--root` to `--out` with a tar-based scratch copy.
-3. Runs the unmutated `--test-command` as the baseline.
-4. Applies one mutant at a time in the scratch copy.
-5. Runs a parse viability check.
-6. Runs the test command.
-7. Restores the original file after each mutant.
-8. Emits optional `mutant-facts/v1` JSON.
+3. Runs each subject's unmutated test command as the baseline.
+4. Applies one selected mutant at a time in the scratch copy.
+5. Skips mutants outside the selected `--shard INDEX/COUNT`.
+6. Runs a parse viability check.
+7. Runs the subject's test command.
+8. Writes survivor/timeout artifacts.
+9. Restores the original file after each mutant.
+10. Emits optional `mutant-facts/v1` JSON.
+11. Optionally enforces `--ratchet BASELINE_FACTS` against new alive mutants.
 
 Outcome taxonomy:
 
@@ -116,7 +130,7 @@ evidence:
   "subjects": [
     {
       "file": "zig/lib/safety.zig",
-      "method": "*",
+      "method": "enter",
       "kill_rate": 100.0,
       "gate_status": "advisory",
       "mutations": 1,
@@ -131,33 +145,60 @@ evidence:
     {
       "id": "zig:zig/lib/safety.zig:28:12:comparison_flip:...",
       "file": "zig/lib/safety.zig",
+      "method": "enter",
       "kind": "comparison_flip",
       "outcome": "killed",
       "line": 28,
       "column": 12,
-      "exit_code": 1
+      "exit_code": 1,
+      "artifact": "/tmp/zig-mutants-artifacts/..."
     }
   ]
 }
 ```
 
-The MVP uses `method: "*"` because source-file-level evidence is the reliable
-first increment. Function attribution should be added later using AST scope
-tracking.
+Subjects are grouped by `file + method`. Mutants outside a named function, such
+as test blocks or top-level comptime expressions, use `method: "*"`.
 
 ## Deferred Work
 
 Do not do these until the MVP has real survivor data:
 
 - automatic package/import/test-target discovery
-- parallel worker directories
-- sharding
+- in-process parallel worker directories
 - allowlist/equivalence database
 - type-directed function-body replacement
 - integer literal perturbation
-- removing `try`
-- mutating allocator choices, atomic memory orderings, or lock APIs
-- hard CI gate
+- broader allocator-choice mutation beyond cleanup call removal
+- hard CI gate beyond survivor-ID ratcheting
+
+## Runtime Ratchet Status
+
+As of 2026-06-15, the runtime/lib subject manifest lives at:
+
+```text
+gems/zig-mutants/subjects.json
+```
+
+The reviewed runtime ratchet baseline lives at:
+
+```text
+gems/zig-mutants/baselines/runtime-reviewed.json
+```
+
+The final 8-shard run over `zig/lib` and `zig/runtime` selected 659 mutants:
+
+- 334 killed
+- 222 survived
+- 19 timeout
+- 84 unviable
+
+High-confidence survivor triage produced two production fixes in
+`FsmRunQueue` OOM cleanup and added load-bearing allocation-failure coverage
+for `StackPool` and `FsmRunQueue`. Remaining alive mutants are retained in the
+ratchet baseline with review reasons. Most are atomic-ordering weakenings,
+disabled debug stack-origin code, observable allocator/OOM paths, and frame
+arena boundary/debug-accounting variants.
 
 ## Acceptance Criteria
 
@@ -168,4 +209,6 @@ Current MVP is acceptable when:
 - `list --json` emits valid JSON on stdout
 - `run` kills at least one mutant in a tiny fixture
 - `run --facts` emits parseable `mutant-facts/v1` JSON
+- `run --ratchet` fails only on new alive mutant IDs
+- survivor artifacts include a reproduction script and command output
 - the implementation never mutates the developer worktree

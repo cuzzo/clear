@@ -49,3 +49,15 @@ test "StackPool free and flushLocalCache support reuse across tiers" {
     try std.testing.expectEqual(@as(usize, fm.STANDARD_STACK_SIZE), standard2.len);
     try std.testing.expectEqual(@as(usize, fm.LARGE_STACK_SIZE), large2.len);
 }
+
+test "StackPool alloc propagates allocation failure for every tier" {
+    const sizes = [_]fc.StackSize{ .Micro, .Standard, .Large, .Xl, .Huge };
+
+    for (sizes) |size_class| {
+        var failing = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
+        var pool = fm.StackPool.init(failing.allocator());
+        defer pool.deinit();
+
+        try std.testing.expectError(error.OutOfMemory, pool.alloc(size_class));
+    }
+}

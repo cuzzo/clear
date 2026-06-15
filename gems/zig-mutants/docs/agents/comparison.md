@@ -12,6 +12,11 @@ core architecture that matters most:
 - scratch-copy mutation
 - killed/survived/timeout/unviable outcomes
 - `mutant-facts/v1` output for existing CLEAR reports
+- checked-in runtime subject manifest
+- process-level sharding
+- survivor reproduction artifacts
+- function-level attribution
+- survivor-ID ratcheting
 
 It deliberately does not try to be a full ecosystem-grade mutation-testing
 framework in the first pass.
@@ -30,8 +35,9 @@ Ruby `mutant` is mature and semantic:
 
 - mutates Zig source files only
 - runs a caller-provided shell test command
-- currently attributes facts at file level with `method: "*"`
-- has a small operator set
+- attributes facts by source file and enclosing function where Zig AST spans
+  allow it
+- has a small runtime-focused operator set
 - has no Ruby-style expression/type semantics or test selection
 
 The key difference is maturity. Ruby `mutant` is a production-grade testing
@@ -68,39 +74,40 @@ Cargo-mutants has much more:
 - `if`/`while` condition negation
 - `std.debug.assert` weakening
 - `defer`/`errdefer` removal
-- sequential scratch-copy execution
+- `try` / `catch` weakening
+- cleanup and lock call removal
+- atomic ordering weakening
+- error-return and bounds-guard weakening
+- process-level sharding
+- survivor artifacts
+- runtime subject manifest
+- ratchet mode for reviewed alive mutants
 - optional `mutant-facts/v1` output
 
 ## Current Gaps
 
-The most important missing pieces are operational, not more mutators:
+The most important remaining operational gaps are:
 
-- parallel workers
-- sharding
-- a manifest of high-value Zig subjects
-- durable per-mutant logs/diffs
-- function-level attribution
+- in-process worker pools
+- import graph or test-target narrowing
 - allowlist support for reviewed equivalent mutants
+- richer HTML or terminal reports
 
 The most important semantic gaps are:
 
 - no type-directed function-body replacement
-- no import graph or test-target narrowing
 - no awareness of Zig comptime equivalence
-- no mutation of `try`, allocator choices, atomics, or lock APIs
+- no broad allocator-choice mutation beyond cleanup call removal
+- no integer literal perturbation
 
 ## Recommendation
 
-This is good enough for a side quest unless it starts finding valuable
-survivors regularly.
-
-Do next only if we plan to run it repeatedly:
-
-1. Add sharding/parallel workers.
-2. Add a small subject manifest for `zig/lib` and `zig/runtime`.
-3. Add durable logs/diffs for survivors.
+This is now good enough to run repeatedly against the CLEAR Zig runtime as an
+advisory safety signal. The next investment should be driven by survivor
+quality, not by trying to match `cargo-mutants` feature-for-feature.
 
 Do not invest heavily yet in broad mutator families or deep semantic analysis.
 If the Zig community eventually produces a mature cargo-mutants equivalent, we
-should consider adopting it. Until then, this package gives CLEAR a credible,
-AST-backed mutation-testing baseline without turning into a major project.
+should consider adopting it. Until then, this package gives CLEAR an
+AST-backed, runtime-focused mutation-testing baseline without turning into a
+major project.
