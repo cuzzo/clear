@@ -37,6 +37,11 @@
   const setFoldRows = (input) => {
     const foldId = input.dataset.foldId;
     const sourceView = input.closest(".source-view");
+    const row = input.closest(".row");
+    if (row) {
+      row.classList.toggle("comment-fold-collapsed", input.checked);
+      row.classList.toggle("comment-fold-expanded", !input.checked);
+    }
     if (!foldId || !sourceView) return;
     sourceView
       .querySelectorAll(`[data-comment-fold-child="${foldId}"]`)

@@ -7033,6 +7033,9 @@ mod tests {
         assert!(STYLE.contains("#layer-gutter-icons:not(:checked) ~ .viewer .line-icon"));
         assert!(STYLE.contains("#layer-blame:checked ~ .viewer .blame-cell"));
         assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden"));
+        assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln .comment-fold-arrow::before"));
+        assert!(STYLE.contains(".row.comment-fold-expanded .comment-fold-arrow::before"));
+        assert!(STYLE.contains(".comment-fold-control:hover"));
         assert!(STYLE.contains("justify-content: space-between"));
         assert!(STYLE.contains("margin-left: auto"));
         assert!(!STYLE.contains("branch-path-summary"));
@@ -7118,6 +7121,7 @@ mod tests {
         assert!(html.contains("Dismiss warning"));
         assert!(js.contains("warning-dismiss"));
         assert!(js.contains("write(key, \"true\")"));
+        assert!(js.contains("comment-fold-expanded"));
     }
 
     #[test]

@@ -627,12 +627,12 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 8px 100px 48px minmax(760px, 1fr) 0;
+    grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 0;
     min-height: 20px;
     scroll-margin-top: 88px;
   }
   #layer-blame:checked ~ .viewer .row {
-    grid-template-columns: 8px 100px 48px minmax(760px, 1fr) 320px;
+    grid-template-columns: 8px 100px 56px minmax(760px, 1fr) 320px;
   }
   .row:target {
     outline: 1px solid rgba(37, 99, 235, 0.56);
@@ -649,10 +649,10 @@
   .ln {
     color: #8b95a5;
     display: grid;
-    grid-template-columns: 14px 4ch;
+    grid-template-columns: 18px 4ch;
     gap: 2px;
     justify-content: end;
-    padding-right: 6px;
+    padding-right: 7px;
     user-select: none;
   }
   .line-number {
@@ -663,7 +663,7 @@
   }
   .comment-fold-slot {
     display: inline-block;
-    inline-size: 14px;
+    inline-size: 18px;
   }
   .hazard-rail {
     min-width: 8px;
@@ -700,25 +700,44 @@
   }
   .comment-fold-toggle { display: none; }
   .comment-fold-control {
+    border-radius: 3px;
     color: #475569;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    inline-size: 14px;
+    inline-size: 18px;
+    min-height: 18px;
+  }
+  .comment-fold-control *,
+  .comment-fold-arrow,
+  .comment-fold-arrow::before,
+  .comment-fold-control::before,
+  .comment-fold-control::after {
+    cursor: pointer;
+  }
+  .comment-fold-control:hover,
+  .comment-fold-control:focus-visible {
+    background: rgba(71, 85, 105, 0.14);
+    color: #0f172a;
+    outline: 1px solid rgba(71, 85, 105, 0.28);
   }
   .comment-fold-arrow::before {
     content: ">";
     display: inline-block;
     inline-size: 12px;
     text-align: center;
+    transform: rotate(0deg);
+    transition: transform 120ms ease;
   }
   .fold-collapsed-source { display: none; }
   #layer-comment-folding:not(:checked) ~ .viewer .comment-fold-control { display: none; }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text .fold-full-source { display: none; }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text .fold-collapsed-source { display: inline; }
-  #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:not(:checked) ~ .ln .comment-fold-arrow::before { transform: rotate(90deg); }
+  #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln .comment-fold-arrow::before { transform: rotate(0deg); }
+  #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:not(:checked) ~ .ln .comment-fold-arrow::before,
+  #layer-comment-folding:checked ~ .viewer .row.comment-fold-expanded .comment-fold-arrow::before { transform: rotate(90deg); }
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln,
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .gutter,
   #layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .source-text,
