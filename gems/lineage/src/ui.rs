@@ -4988,8 +4988,12 @@ fn render_code_line(
 
     let bug_id = format!("L{line_no}-fixes");
     let meta_id = format!("L{line_no}-details");
+    let decomplex_id = format!("L{line_no}-decomplex");
     let has_bug_history = annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false);
     let has_line_details = annotation.map(line_has_details).unwrap_or(false);
+    let has_decomplex_findings = annotation
+        .map(|annotation| !decomplex_findings(annotation).is_empty())
+        .unwrap_or(false);
     let fold_input_id = comment_fold
         .filter(|fold| fold.is_start)
         .map(|fold| format!("comment-fold-{}", fold.id));
@@ -5026,6 +5030,11 @@ fn render_code_line(
         out.push_str(&meta_id);
         out.push_str("\">");
     }
+    if has_decomplex_findings {
+        out.push_str("<input class=\"line-toggle decomplex-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&decomplex_id);
+        out.push_str("\">");
+    }
     out.push_str("<span class=\"hazard-rail\"");
     out.push_str(&hazard_title);
     out.push_str("></span><span class=\"gutter\"");
@@ -5055,7 +5064,9 @@ fn render_code_line(
                 html_escape(&title)
             ));
         }
-        out.push_str(&render_decomplex_link(annotation));
+        if has_decomplex_findings {
+            out.push_str(&render_decomplex_control(annotation, &decomplex_id));
+        }
         if has_bug_history {
             out.push_str(&render_bug_history_control(annotation, &bug_id));
         }
@@ -5112,6 +5123,9 @@ fn render_code_line(
         }
         if has_line_details {
             out.push_str(&render_line_details_panel(annotation));
+        }
+        if has_decomplex_findings {
+            out.push_str(&render_decomplex_panel(annotation));
         }
     }
     out.push_str("</div>");
@@ -5421,14 +5435,13 @@ fn test_type_rank(test_type: &str) -> usize {
     }
 }
 
-fn render_decomplex_link(annotation: &UiLineAnnotation) -> String {
+fn render_decomplex_control(annotation: &UiLineAnnotation, decomplex_id: &str) -> String {
     let findings = decomplex_findings(annotation);
     if findings.is_empty() {
         return String::new();
     }
 
-    let finding = findings[0];
-    let mut title = format!("{} Decomplex finding(s)", findings.len());
+    let mut title = format!("{} Decomplex SARIF signal(s)", findings.len());
     let rules = findings
         .iter()
         .map(|finding| finding.rule_id.as_str())
@@ -5439,11 +5452,43 @@ fn render_decomplex_link(annotation: &UiLineAnnotation) -> String {
     }
 
     let mut out = String::new();
-    out.push_str("<a class=\"decomplex-finding line-icon\" href=\"");
-    out.push_str(&html_escape(&decomplex_doc_url(finding)));
-    out.push_str("\" target=\"_blank\" rel=\"noopener\" title=\"");
+    out.push_str("<label class=\"decomplex-finding line-icon\" for=\"");
+    out.push_str(&html_escape(decomplex_id));
+    out.push_str("\" title=\"");
     out.push_str(&html_escape(&title));
-    out.push_str("\"><i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i></a>");
+    out.push_str("\" aria-label=\"Decomplex SARIF signals\"><i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
+    let findings = decomplex_findings(annotation);
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel decomplex-panel\">");
+    for finding in findings {
+        out.push_str("<p><a href=\"");
+        out.push_str(&html_escape(&decomplex_doc_url(finding)));
+        out.push_str("\" target=\"_blank\" rel=\"noopener\">");
+        out.push_str(&html_escape(&finding.rule_id));
+        out.push_str("</a>");
+        if !finding.level.is_empty() {
+            out.push_str(" ");
+            out.push_str(&html_escape(&finding.level));
+        }
+        if !finding.category.is_empty() {
+            out.push_str(" [");
+            out.push_str(&html_escape(&finding.category));
+            out.push(']');
+        }
+        out.push_str(": ");
+        out.push_str(&html_escape(&finding.message));
+        if !finding.source.is_empty() {
+            out.push_str(" (");
+            out.push_str(&html_escape(&finding.source));
+            out.push(')');
+        }
+        out.push_str("</p>");
+    }
+    out.push_str("</div>");
     out
 }
 
@@ -7034,6 +7079,10 @@ mod tests {
             html.contains("<i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i>")
         );
         assert!(html.contains("<i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("class=\"line-toggle decomplex-toggle\""));
+        assert!(html.contains("class=\"decomplex-finding line-icon\""));
+        assert!(html.contains("class=\"line-panel decomplex-panel\""));
+        assert!(html.contains("Decomplex SARIF signals"));
         assert!(html.contains("gems/decomplex/docs/false-simplicity.md"));
         assert!(html.contains("tests by type: fuzz (2), integration (1), unit (6) - 9 total"));
         let newer_fix = "fedcba987654 1970-01-02 weight 0.25: new noisy commit body";
@@ -7065,6 +7114,7 @@ mod tests {
         assert!(STYLE.contains("max-width: 120ch"));
         assert!(STYLE.contains(".bug-toggle:checked ~ .bug-panel"));
         assert!(STYLE.contains(".meta-toggle:checked ~ .meta-panel"));
+        assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
         assert!(STYLE.contains(".row:target"));
         assert!(STYLE.contains(".history-drawer[open]"));
         assert!(!html.contains("&#128027;"));

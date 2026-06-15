@@ -804,7 +804,8 @@
     text-align: left;
   }
   .bug-toggle:checked ~ .bug-panel,
-  .meta-toggle:checked ~ .meta-panel { display: block; }
+  .meta-toggle:checked ~ .meta-panel,
+  .decomplex-toggle:checked ~ .decomplex-panel { display: block; }
   .line-panel p {
     margin: 0 0 4px;
     overflow: hidden;
@@ -816,6 +817,16 @@
     color: #7f1d1d;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  .decomplex-panel {
+    color: #312e81;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .decomplex-panel a {
+    color: #6d28d9;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .decomplex-panel a:hover { text-decoration: underline; }
   .blame-cell {
     display: none;
     grid-template-columns: 92px 82px minmax(0, 1fr);
