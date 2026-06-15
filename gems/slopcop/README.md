@@ -8,8 +8,16 @@ SlopCop classifies every dark branch arm, filters out arms that are not
 good test targets, and ranks the remaining genuine gaps by churn and
 structural risk.
 
-It is used by the CLEAR compiler and runtime to focus LLM-assisted test
-work on the highest-value missing coverage.
+Typical Code Coverage UIs only show you that a line was hit. That means
+little, as only parts of a line may have been hit or tested. SlopCop
+gives you two unique insights:
+
+1. Is a line fully covered or only partially covered?
+2. Is it part of a historically buggy line or method?
+
+It is used by the CLEAR compiler to help focus attention on fixing the
+buggiest parts of the codebase and putting the most care into review for
+those parts as well.
 
 - See [Design Notes](docs/agents/design.md) for category definitions,
   caveats, and boundary details.
@@ -181,8 +189,9 @@ ship a CLEAR-specific lexicon.
 
 ## Supported Languages Roadmap
 
-SlopCop relies on Boobytrap for branch-arm normalization and Decomplex
-language lexicons for classifying type/null guards and diagnostic paths.
+SlopCop relies on [Boobytrap](../boobytrap/README.md) for branch-arm
+normalization and [Decomplex](../decomplex/README.md) language lexicons
+for classifying type/null guards and diagnostic paths.
 Ruby support has been battle tested to develop the CLEAR compiler. Zig
 support is currently being used for CLEAR runtime hazard coverage. Other
 languages are currently experimental.
