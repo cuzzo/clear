@@ -3,14 +3,14 @@
 ![Decomplex](docs/assets/decomplex.png)
 
 Decomplex is a set of metrics that help identify complex code and ways
-to mitigate it. It is used in the development of the CLEAR compiler and
-runtime to have LLMs write quality code at scale with high velocity.
+to mitigate it. It is used by the CLEAR compiler to produce
+LLM-assisted **working** code with both high velocity *and* high
+quality.
 
-- See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
-  for a deeper understanding of what complexity is, and how Decomplex
-  helps you identify and eliminate it.
 - See [Metrics Expo](docs/agents/metrics-expo.md) for concrete examples
   of what Decomplex measures.
+- See [What Is Complexity Anyway?](https://cuzzo.github.io/clear/blog/what-even-is-complexity-anyway/)
+  for a better understanding of what makes code "complex".
 
 ## Getting Started
 
@@ -44,6 +44,13 @@ bundle exec gems/decomplex/exe/decomplex implicit-control-flow src --output=/tmp
 
 ## Outputs
 
+Decomplex can output metrics in SARIF format like a linter, a json dump
+for an LLM, or a Markdown document for easy human review.
+
+> [!NOTE]
+> Decomplex also integrates with [Lineage](../lineage/README.md),
+> CLEAR's experimental UI to review LLM-assisted code at scale.
+
 ### Markdown Report
 
 The main output is a Markdown report:
@@ -55,11 +62,6 @@ bundle exec gems/decomplex/exe/decomplex report src --output=report.md
 The report opens with cross-detector convergence and root-cause
 clusters, then lists each detector section by signal tier. See
 [report.md](report.md) for a generated example over CLEAR.
-
-CLEAR uses [Lineage](../lineage/README.md) to review code at scale.
-Lineage includes an experimental local UI that you can run on localhost
-to inspect source, coverage, mutation evidence, systems hazards, and
-quality-tool output together.
 
 ### Baseline And Delta
 
@@ -94,7 +96,7 @@ SARIF is generated from the same structured report findings used by
 Markdown and delta, so downstream tools do not re-run or re-derive
 detectors.
 
-### CI Integration
+## CI Integration
 
 The current CI-ready path is:
 
@@ -103,16 +105,17 @@ The current CI-ready path is:
 3. run `decomplex delta` on PRs;
 4. fail or warn only on new/growing high-confidence findings.
 
-GitHub Actions can upload the generated SARIF with
-`github/codeql-action/upload-sarif`. The generalized gem SARIF workflow
-is implemented in the
-[`generalized-gems-sarif` CI job](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A).
+- See
+  [CLEAR's GitHub Config](https://github.com/cuzzo/clear/blob/lineage-complexity-ui/.github/workflows/ci.yml#:~:text=generalized-gems-sarif%3A)
+  for how to include it as Pull Request review helper, or part of your
+  Continuous Integration workflow.
 
 ## Supported Languages Roadmap
 
-Decomplex uses a normalized Tree-sitter syntax facade. Parser support is
-not the same thing as equal metric quality: Ruby has the strongest
-dogfood coverage today, while other languages are still experimental.
+Decomplex uses [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)
+to support multiple languages. Ruby support has been battle tested to
+develop the CLEAR compiler. Zig support is currently being used for the
+CLEAR runtime. Other languages are currently experimental.
 
 - [x] Ruby: fully supported.
 - [ ] Python: experimentally supported.
@@ -140,8 +143,8 @@ that already exist in every language.
 
 ## Links
 
-- [Metrics expo](docs/agents/metrics-expo.md)
-- [Design notes](docs/agents/design.md)
-- [Cross-language notes](docs/agents/cross-language.md)
-- [False simplicity](docs/agents/false-simplicity.md)
-- [Generated CLEAR report](report.md)
+- [CLEAR compiler](../../README.md)
+- [SlopCop](../slopcop/README.md): categorizes uncovered branches and
+  ranks the true test gaps.
+- [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
+  to its source.
