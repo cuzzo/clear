@@ -159,3 +159,6 @@ transpile-tests/fuzz/*.cht
 
 # Generated architecture reports
 gems/espalier/architecture.yml
+
+# Decomplex native Rust build artifacts
+gems/decomplex/rust/target/
