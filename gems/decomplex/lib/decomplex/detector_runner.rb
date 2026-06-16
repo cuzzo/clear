@@ -2,7 +2,11 @@
 
 require "json"
 require_relative "co_update"
-require_relative "native/state_writes"
+require_relative "flay_similarity"
+require_relative "native/co_update"
+require_relative "native/predicate_aliases"
+require_relative "native/flay_similarity"
+require_relative "predicate_alias"
 
 module Decomplex
   # Runs one detector in isolation and emits deterministic machine output.
@@ -12,31 +16,39 @@ module Decomplex
   # timing, SARIF metadata, and other nondeterministic details.
   module DetectorRunner
     DETECTORS = {
-      "co-update" => :co_update
+      "co-update" => :co_update,
+      "predicate-alias" => :predicate_alias,
+      "predicate-aliases" => :predicate_alias,
+      "flay-similarity" => :flay_similarity,
+      "structural-similarity" => :flay_similarity
     }.freeze
     ENGINES = %w[ruby rust].freeze
 
     module_function
 
-    def run(detector, files, engine: "ruby")
+    def run(detector, files, engine: "ruby", mass: FlaySimilarity::DEFAULT_MASS, fuzzy: FlaySimilarity::DEFAULT_FUZZY)
       canonical = canonical_detector(detector)
       validate_engine!(engine)
 
       case canonical
       when :co_update
         co_update(files, engine: engine)
+      when :predicate_alias
+        predicate_alias(files, engine: engine)
+      when :flay_similarity
+        flay_similarity(files, engine: engine, mass: mass, fuzzy: fuzzy)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
     end
 
-    def canonical_json(detector, files, engine: "ruby")
-      JSON.generate(canonicalize(run(detector, files, engine: engine))) << "\n"
+    def canonical_json(detector, files, engine: "ruby", **options)
+      JSON.generate(canonicalize(run(detector, files, engine: engine, **options))) << "\n"
     end
 
-    def compare(detector, files)
-      ruby_json = canonical_json(detector, files, engine: "ruby")
-      rust_json = canonical_json(detector, files, engine: "rust")
+    def compare(detector, files, **options)
+      ruby_json = canonical_json(detector, files, engine: "ruby", **options)
+      rust_json = canonical_json(detector, files, engine: "rust", **options)
       [ruby_json == rust_json, ruby_json, rust_json]
     end
 
@@ -57,17 +69,33 @@ module Decomplex
     end
 
     private_class_method def self.co_update(files, engine:)
-      report =
-        if engine.to_s == "rust"
-          CoUpdate::Report.new(Native::StateWrites.extract(files))
-        else
-          CoUpdate.scan(files)
-        end
+      return Native::CoUpdate.scan(files) if engine.to_s == "rust"
+
+      report = CoUpdate.scan(files)
 
       {
         "co_written_pairs" => report.co_written_pairs,
         "neglected_updates" => report.neglected_updates
       }
+    end
+
+    private_class_method def self.predicate_alias(files, engine:)
+      return Native::PredicateAliases.scan(files) if engine.to_s == "rust"
+
+      report = PredicateAlias.scan(files)
+
+      { "alias_clusters" => report.alias_clusters }
+    end
+
+    private_class_method def self.flay_similarity(files, engine:, mass:, fuzzy:)
+      findings =
+        if engine.to_s == "rust"
+          Native::FlaySimilarity.scan(files, mass: mass, fuzzy: fuzzy)
+        else
+          FlaySimilarity.scan(files, mass: mass, fuzzy: fuzzy)
+        end
+
+      { "findings" => findings }
     end
 
     private_class_method def self.canonicalize(value)
