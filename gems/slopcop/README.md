@@ -130,8 +130,9 @@ This is the format Lineage uses for gutter and source overlays.
 
 ## Concurrency Hazard Detection / Constraint Reports
 
-`constraints` checks changed files against named coverage constraints,
-currently used by CLEAR for Loom and VOPR hazard coverage:
+`constraints` checks changed files against named coverage constraints.
+It currently supports first-party hazard providers for Zig, Go, Rust,
+C, C++, and C#:
 
 ```bash
 bundle exec gems/slopcop/exe/slopcop constraints \
@@ -139,11 +140,14 @@ bundle exec gems/slopcop/exe/slopcop constraints \
   --base=origin/master \
   --coverage=loom:zig/zig-out/coverage-loom/merged/kcov-merged/cobertura.xml \
   --coverage=vopr:zig/zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml \
+  --language=zig \
   --markdown=/tmp/slopcop-constraints.md \
   --json=/tmp/slopcop-constraints.json \
   --sarif=/tmp/slopcop-constraints.sarif
 ```
 
+Common evidence tags are `loom`, `vopr`, `race`, `concurrency`,
+`tsan`, `asan`, `lsan`, `ubsan`, `miri`, and `unsafe`.
 Findings are advisory unless `--strict` is supplied.
 
 ## CI Integration
@@ -187,16 +191,19 @@ SlopCop relies on [Boobytrap](../boobytrap/README.md) for branch-arm
 normalization and [Decomplex](../decomplex/README.md) language lexicons
 for classifying type/null guards and diagnostic paths.
 Ruby support has been battle tested to develop the CLEAR compiler. Zig
-support is currently being used for CLEAR runtime hazard coverage. Other
-languages are currently experimental.
+support is currently being used for CLEAR runtime hazard coverage. Go,
+Rust, C, C++, and C# hazard providers are experimental.
 
 - [x] Ruby: fully supported.
 - [ ] Python: experimentally supported.
 - [ ] JavaScript: experimentally supported.
 - [ ] TypeScript: experimentally supported.
-- [ ] Go: experimentally supported.
-- [ ] Rust: experimentally supported.
 - [ ] Zig: experimentally supported.
+- [ ] Go: experimentally supported, including concurrency hazards.
+- [ ] Rust: experimentally supported, including Loom and unsafe hazards.
+- [ ] C: experimentally supported, including sanitizer hazards.
+- [ ] C++: experimentally supported, including sanitizer hazards.
+- [ ] C#: experimentally supported, including concurrency/unsafe hazards.
 
 ## Boundaries
 

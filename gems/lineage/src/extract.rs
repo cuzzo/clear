@@ -175,21 +175,12 @@ impl BoundaryExtractor for HeuristicExtractor {
 
         let ext = extension(&file.path).map(|value| normalize_extension(&value));
         let lines: Vec<&str> = file.contents.lines().collect();
-        let mut candidates = ext
-            .as_deref()
-            .and_then(|extension| tree_sitter_candidates(file, extension, &lines));
-
-        if candidates.as_ref().map(Vec::is_empty).unwrap_or(true) {
-            let mut detected = Vec::new();
-            for (index, line) in lines.iter().enumerate() {
-                if let Some(candidate) = detect_candidate(line, (index + 1) as u32, ext.as_deref()) {
-                    detected.push(candidate);
-                }
+        let candidates = match ext.as_deref() {
+            Some(extension) if TreeSitterAdapter::for_extension(extension).is_some() => {
+                tree_sitter_candidates(file, extension, &lines).unwrap_or_default()
             }
-            candidates = Some(detected);
-        }
-
-        let candidates = candidates.unwrap_or_default();
+            _ => heuristic_candidates(&lines, ext.as_deref()),
+        };
         candidates
             .iter()
             .enumerate()
@@ -249,16 +240,44 @@ fn detect_candidate(line: &str, line_number: u32, extension: Option<&str>) -> Op
     }
 }
 
+fn heuristic_candidates(lines: &[&str], extension: Option<&str>) -> Vec<Candidate> {
+    let mut detected = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if let Some(candidate) = detect_candidate(line, (index + 1) as u32, extension) {
+            detected.push(candidate);
+        }
+    }
+    detected
+}
+
 #[derive(Debug, Clone, Copy)]
 enum TreeSitterAdapter {
+    C,
+    Cpp,
+    CSharp,
+    Go,
+    JavaScript,
+    Python,
+    Ruby,
     Rust,
+    Tsx,
+    TypeScript,
     Zig,
 }
 
 impl TreeSitterAdapter {
     fn for_extension(extension: &str) -> Option<Self> {
         match extension {
+            "c" | "h" => Some(Self::C),
+            "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => Some(Self::Cpp),
+            "cs" => Some(Self::CSharp),
+            "go" => Some(Self::Go),
+            "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
+            "py" | "pyi" => Some(Self::Python),
+            "rb" => Some(Self::Ruby),
             "rs" => Some(Self::Rust),
+            "tsx" => Some(Self::Tsx),
+            "ts" => Some(Self::TypeScript),
             "zig" => Some(Self::Zig),
             _ => None,
         }
@@ -266,7 +285,16 @@ impl TreeSitterAdapter {
 
     fn language(self) -> Language {
         match self {
+            Self::C => tree_sitter_c::LANGUAGE.into(),
+            Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+            Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
+            Self::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Python => tree_sitter_python::LANGUAGE.into(),
+            Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Self::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Self::Zig => tree_sitter_zig::LANGUAGE.into(),
         }
     }
@@ -278,7 +306,15 @@ impl TreeSitterAdapter {
         lines: &[&str],
     ) -> Option<Candidate> {
         match self {
+            Self::C => c_candidate_for_node(node, source, lines),
+            Self::Cpp => cpp_candidate_for_node(node, source, lines),
+            Self::CSharp => csharp_candidate_for_node(node, source, lines),
+            Self::Go => go_candidate_for_node(node, source, lines),
+            Self::JavaScript => javascript_candidate_for_node(node, source, lines),
+            Self::Python => python_candidate_for_node(node, source, lines),
+            Self::Ruby => ruby_candidate_for_node(node, source, lines),
             Self::Rust => rust_candidate_for_node(node, source, lines),
+            Self::Tsx | Self::TypeScript => typescript_candidate_for_node(node, source, lines),
             Self::Zig => zig_candidate_for_node(node, source, lines),
         }
     }
@@ -291,14 +327,44 @@ fn tree_sitter_candidates(
 ) -> Option<Vec<Candidate>> {
     let adapter = TreeSitterAdapter::for_extension(extension)?;
     let mut parser = Parser::new();
-    parser.set_language(&adapter.language()).ok()?;
-    let tree = parser.parse(&file.contents, None)?;
+    if let Err(error) = parser.set_language(&adapter.language()) {
+        if std::env::var("LINEAGE_DEBUG_EXTRACT").is_ok() {
+            eprintln!(
+                "tree-sitter language setup failed in {} ({extension}): {error:?}",
+                file.path
+            );
+        }
+        return None;
+    }
+    let tree = match parser.parse(&file.contents, None) {
+        Some(tree) => tree,
+        None => {
+            if std::env::var("LINEAGE_DEBUG_EXTRACT").is_ok() {
+                eprintln!("tree-sitter produced no tree in {} ({extension})", file.path);
+            }
+            return None;
+        }
+    };
     if tree.root_node().has_error() {
+        if std::env::var("LINEAGE_DEBUG_EXTRACT").is_ok() {
+            eprintln!(
+                "tree-sitter parse error in {} ({extension}): {}",
+                file.path,
+                tree.root_node().to_sexp()
+            );
+        }
         return None;
     }
 
     let mut candidates = Vec::new();
     collect_tree_sitter_candidates(tree.root_node(), adapter, &file.contents, lines, &mut candidates);
+    if candidates.is_empty() && std::env::var("LINEAGE_DEBUG_EXTRACT").is_ok() {
+        eprintln!(
+            "tree-sitter found no units in {} ({extension}): {}",
+            file.path,
+            tree.root_node().to_sexp()
+        );
+    }
     Some(candidates)
 }
 
@@ -317,6 +383,202 @@ fn collect_tree_sitter_candidates(
         if let Some(child) = node.named_child(index) {
             collect_tree_sitter_candidates(child, adapter, source, lines, candidates);
         }
+    }
+}
+
+fn ruby_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "class" => tree_sitter_named_candidate(node, UnitKind::Class, source, lines),
+        "module" => tree_sitter_named_candidate(node, UnitKind::Module, source, lines),
+        "method" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(node, name, source, &["class", "module", "method", "singleton_method"]),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "singleton_method" => {
+            let object = field_text(node, "object", source)?;
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(
+                    node,
+                    &format!("{}.{}", clean_owner_name(object), name),
+                    source,
+                    &["class", "module", "method", "singleton_method"],
+                ),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn python_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "class_definition" => tree_sitter_named_candidate(node, UnitKind::Class, source, lines),
+        "function_definition" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(node, name, source, &["class_definition", "function_definition"]),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "type_alias_statement" => {
+            let name = field_text(node, "name", source)
+                .or_else(|| first_identifier_child(node, source))?;
+            Some(tree_sitter_candidate(
+                node,
+                name.to_string(),
+                UnitKind::Class,
+                source,
+                lines,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn javascript_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "class_declaration" => tree_sitter_named_candidate(node, UnitKind::Class, source, lines),
+        "function_declaration" | "generator_function_declaration" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(node, name, source, &["class_declaration", "function_declaration"]),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "method_definition" => javascript_method_candidate(node, source, lines),
+        "variable_declarator" => javascript_variable_callable_candidate(node, source, lines),
+        _ => None,
+    }
+}
+
+fn typescript_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "abstract_class_declaration" | "class_declaration" | "enum_declaration"
+        | "interface_declaration" | "internal_module" | "type_alias_declaration" => {
+            tree_sitter_named_candidate(node, UnitKind::Class, source, lines)
+        }
+        "function_declaration" | "generator_function_declaration" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(node, name, source, &["class_declaration", "abstract_class_declaration", "function_declaration"]),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "method_definition" => javascript_method_candidate(node, source, lines),
+        "variable_declarator" => javascript_variable_callable_candidate(node, source, lines),
+        "public_field_definition" => javascript_field_callable_candidate(node, source, lines),
+        _ => None,
+    }
+}
+
+fn go_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "function_declaration" => tree_sitter_named_candidate(node, UnitKind::Function, source, lines),
+        "method_declaration" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                go_qualified_method_name(node, name, source),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "type_spec" | "type_alias" => {
+            let name = field_text(node, "name", source)?;
+            Some(tree_sitter_candidate(
+                node,
+                name.to_string(),
+                UnitKind::Class,
+                source,
+                lines,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn c_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "function_definition" => {
+            let name = c_like_function_name(node, source)?;
+            Some(tree_sitter_candidate(node, name, UnitKind::Function, source, lines))
+        }
+        "struct_specifier" | "union_specifier" | "enum_specifier" => c_like_type_candidate(node, source, lines),
+        "type_definition" => c_like_typedef_candidate(node, source, lines),
+        _ => None,
+    }
+}
+
+fn cpp_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "function_definition" => {
+            let name = c_like_function_name(node, source)?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(node, &name, source, &["class_specifier", "namespace_definition"]),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "class_specifier" | "struct_specifier" | "union_specifier" | "enum_specifier" => {
+            c_like_type_candidate(node, source, lines)
+        }
+        "namespace_definition" => tree_sitter_named_candidate(node, UnitKind::Module, source, lines),
+        "type_definition" => c_like_typedef_candidate(node, source, lines),
+        _ => None,
+    }
+}
+
+fn csharp_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "class_declaration" | "struct_declaration" | "interface_declaration" | "enum_declaration"
+        | "record_declaration" => tree_sitter_named_candidate(node, UnitKind::Class, source, lines),
+        "namespace_declaration" => tree_sitter_named_candidate(node, UnitKind::Module, source, lines),
+        "method_declaration" | "constructor_declaration" => {
+            let name = field_text(node, "name", source)
+                .map(str::to_string)
+                .or_else(|| nearest_owner_name(node, source, &["class_declaration", "struct_declaration", "record_declaration"]))?;
+            Some(tree_sitter_candidate(
+                node,
+                qualified_name(
+                    node,
+                    &name,
+                    source,
+                    &[
+                        "class_declaration",
+                        "struct_declaration",
+                        "interface_declaration",
+                        "record_declaration",
+                        "namespace_declaration",
+                    ],
+                ),
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        _ => None,
     }
 }
 
@@ -374,6 +636,68 @@ fn tree_sitter_named_candidate(
     Some(tree_sitter_candidate(node, name.to_string(), kind, source, lines))
 }
 
+fn javascript_method_candidate(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    let name = field_text(node, "name", source)?;
+    Some(tree_sitter_candidate(
+        node,
+        qualified_name(
+            node,
+            name,
+            source,
+            &["class_declaration", "abstract_class_declaration", "function_declaration"],
+        ),
+        UnitKind::Function,
+        source,
+        lines,
+    ))
+}
+
+fn javascript_variable_callable_candidate(
+    node: Node<'_>,
+    source: &str,
+    lines: &[&str],
+) -> Option<Candidate> {
+    let value = node.child_by_field_name("value")?;
+    if !matches!(
+        value.kind(),
+        "arrow_function" | "function" | "function_expression" | "generator_function" | "class"
+    ) {
+        return None;
+    }
+    let name = field_text(node, "name", source)?;
+    let kind = if value.kind() == "class" {
+        UnitKind::Class
+    } else {
+        UnitKind::Function
+    };
+    Some(tree_sitter_candidate(
+        node,
+        qualified_name(node, name, source, &["class_declaration", "abstract_class_declaration"]),
+        kind,
+        source,
+        lines,
+    ))
+}
+
+fn javascript_field_callable_candidate(
+    node: Node<'_>,
+    source: &str,
+    lines: &[&str],
+) -> Option<Candidate> {
+    let value = node.child_by_field_name("value")?;
+    if !matches!(value.kind(), "arrow_function" | "function" | "function_expression") {
+        return None;
+    }
+    let name = field_text(node, "name", source)?;
+    Some(tree_sitter_candidate(
+        node,
+        qualified_name(node, name, source, &["class_declaration", "abstract_class_declaration"]),
+        UnitKind::Function,
+        source,
+        lines,
+    ))
+}
+
 fn tree_sitter_candidate(
     node: Node<'_>,
     name: String,
@@ -425,6 +749,155 @@ fn first_identifier_child<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str
         }
     }
     None
+}
+
+fn qualified_name(node: Node<'_>, base: &str, source: &str, owner_kinds: &[&str]) -> String {
+    let mut owners = Vec::new();
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if owner_kinds.contains(&parent.kind()) {
+            if let Some(owner) = owner_name(parent, source) {
+                owners.push(owner);
+            }
+        }
+        current = parent;
+    }
+    owners.reverse();
+    owners.push(clean_owner_name(base));
+    owners.join(".")
+}
+
+fn nearest_owner_name(mut node: Node<'_>, source: &str, owner_kinds: &[&str]) -> Option<String> {
+    while let Some(parent) = node.parent() {
+        if owner_kinds.contains(&parent.kind()) {
+            return owner_name(parent, source);
+        }
+        node = parent;
+    }
+    None
+}
+
+fn owner_name(node: Node<'_>, source: &str) -> Option<String> {
+    match node.kind() {
+        "class" | "module" | "class_definition" | "class_declaration" | "abstract_class_declaration"
+        | "interface_declaration" | "record_declaration" | "struct_declaration" | "enum_declaration"
+        | "namespace_definition" | "namespace_declaration" | "internal_module" => {
+            field_text(node, "name", source).map(clean_owner_name)
+        }
+        "function_definition" | "function_declaration" | "method" | "method_definition"
+        | "method_declaration" | "singleton_method" => {
+            field_text(node, "name", source).map(clean_owner_name)
+        }
+        "function_item" => field_text(node, "name", source).map(clean_owner_name),
+        "type_spec" | "type_alias" => field_text(node, "name", source).map(clean_owner_name),
+        "class_specifier" | "struct_specifier" | "union_specifier" | "enum_specifier" => {
+            c_like_type_name(node, source)
+        }
+        _ => None,
+    }
+}
+
+fn go_qualified_method_name(node: Node<'_>, name: &str, source: &str) -> String {
+    let Some(receiver) = node.child_by_field_name("receiver") else {
+        return name.to_string();
+    };
+    let receiver_text = receiver.utf8_text(source.as_bytes()).unwrap_or_default();
+    let receiver_type = receiver_text
+        .split_whitespace()
+        .last()
+        .unwrap_or(receiver_text)
+        .trim_matches(|ch: char| matches!(ch, '*' | '(' | ')' | '[' | ']'));
+    if receiver_type.is_empty() {
+        name.to_string()
+    } else {
+        format!("{receiver_type}.{name}")
+    }
+}
+
+fn c_like_function_name(node: Node<'_>, source: &str) -> Option<String> {
+    let declarator = node.child_by_field_name("declarator")?;
+    declarator_name(declarator, source).map(|name| clean_owner_name(&name))
+}
+
+fn c_like_type_candidate(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    let name = c_like_type_name(node, source)?;
+    Some(tree_sitter_candidate(node, name, UnitKind::Class, source, lines))
+}
+
+fn c_like_typedef_candidate(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    let name = node
+        .child_by_field_name("declarator")
+        .and_then(|declarator| declarator_name(declarator, source))
+        .or_else(|| last_descendant_text(node, source, &["type_identifier", "identifier"]))?;
+    Some(tree_sitter_candidate(
+        node,
+        clean_owner_name(&name),
+        UnitKind::Class,
+        source,
+        lines,
+    ))
+}
+
+fn c_like_type_name(node: Node<'_>, source: &str) -> Option<String> {
+    field_text(node, "name", source)
+        .map(clean_owner_name)
+        .or_else(|| first_descendant_text(node, source, &["type_identifier", "identifier"]).map(|text| clean_owner_name(&text)))
+}
+
+fn declarator_name(node: Node<'_>, source: &str) -> Option<String> {
+    if let Some(name) = field_text(node, "name", source) {
+        return Some(name.to_string());
+    }
+    if matches!(
+        node.kind(),
+        "identifier" | "field_identifier" | "type_identifier" | "qualified_identifier" | "scoped_identifier"
+    ) {
+        return node.utf8_text(source.as_bytes()).ok().map(str::to_string);
+    }
+    if let Some(child) = node.child_by_field_name("declarator") {
+        return declarator_name(child, source);
+    }
+    first_descendant_text(
+        node,
+        source,
+        &[
+            "field_identifier",
+            "identifier",
+            "qualified_identifier",
+            "scoped_identifier",
+            "type_identifier",
+        ],
+    )
+}
+
+fn first_descendant_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
+    if kinds.contains(&node.kind()) {
+        return node.utf8_text(source.as_bytes()).ok().map(str::to_string);
+    }
+    for index in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(index) {
+            if let Some(text) = first_descendant_text(child, source, kinds) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn last_descendant_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
+    let mut found = if kinds.contains(&node.kind()) {
+        node.utf8_text(source.as_bytes()).ok().map(str::to_string)
+    } else {
+        None
+    };
+    for index in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(index) {
+            if let Some(text) = last_descendant_text(child, source, kinds) {
+                found = Some(text);
+            }
+        }
+    }
+    found
 }
 
 fn rust_method_owner(node: Node<'_>, source: &str) -> Option<String> {
@@ -877,7 +1350,7 @@ mod tests {
         assert_eq!(units.len(), 2);
         assert_eq!(units[0].name, "Worker");
         assert_eq!(units[0].kind, UnitKind::Class);
-        assert_eq!(units[1].name, "run");
+        assert_eq!(units[1].name, "Worker.run");
         assert_eq!(units[1].kind, UnitKind::Function);
     }
 
@@ -893,12 +1366,12 @@ mod tests {
         };
 
         let extractor = HeuristicExtractor::default();
-        assert_eq!(extractor.extract_units(&go)[0].name, "Run");
+        assert_eq!(extractor.extract_units(&go)[0].name, "Worker.Run");
         assert_eq!(extractor.extract_units(&zig)[0].name, "run");
     }
 
     #[test]
-    fn extracts_typescript_symbols_with_heuristics() {
+    fn extracts_typescript_symbols_with_tree_sitter() {
         let file = BlobFile {
             path: "packages/zod/src/demo.ts".into(),
             contents: r#"
@@ -1038,8 +1511,81 @@ pub fn StringMap(comptime Value: type) type {
         let units = HeuristicExtractor::default().extract_units(&file);
         let names: Vec<_> = units.iter().map(|unit| unit.name.as_str()).collect();
 
-        assert!(names.contains(&"self.build!"));
-        assert!(names.contains(&"value="));
+        assert!(names.contains(&"Worker.self.build!"));
+        assert!(names.contains(&"Worker.value="));
+    }
+
+    #[test]
+    fn tree_sitter_extraction_handles_nested_and_multiline_boundaries() {
+        let python = BlobFile {
+            path: "src/service.py".into(),
+            contents: r#"
+class Worker:
+    def run(
+        self,
+        value: int,
+    ) -> int:
+        def normalize(next_value: int) -> int:
+            return next_value + 1
+        return normalize(value)
+"#
+            .into(),
+        };
+        let typescript = BlobFile {
+            path: "src/service.ts".into(),
+            contents: r#"
+export class Worker {
+  async run(
+    value: number,
+  ): Promise<number> {
+    return value + 1;
+  }
+}
+"#
+            .into(),
+        };
+
+        let extractor = HeuristicExtractor::default();
+        let python_names: Vec<_> = extractor
+            .extract_units(&python)
+            .into_iter()
+            .map(|unit| (unit.name, unit.start_line, unit.end_line))
+            .collect();
+        assert!(python_names.contains(&("Worker".to_string(), 2, 9)));
+        assert!(python_names.contains(&("Worker.run".to_string(), 3, 9)));
+        assert!(python_names.contains(&("Worker.run.normalize".to_string(), 7, 8)));
+
+        let typescript_names: Vec<_> = extractor
+            .extract_units(&typescript)
+            .into_iter()
+            .map(|unit| (unit.name, unit.start_line, unit.end_line))
+            .collect();
+        assert!(typescript_names.contains(&("Worker".to_string(), 2, 8)));
+        assert!(typescript_names.contains(&("Worker.run".to_string(), 3, 7)));
+    }
+
+    #[test]
+    fn tree_sitter_extraction_ignores_strings_comments_and_parse_errors() {
+        let ruby = BlobFile {
+            path: "src/demo.rb".into(),
+            contents: "class Real\n  TEXT = \"def fake\\nend\"\n  # def also_fake\n  def run\n  end\nend\n".into(),
+        };
+        let invalid_go = BlobFile {
+            path: "broken.go".into(),
+            contents: "func RegexWouldHaveMatched() {\n".into(),
+        };
+
+        let extractor = HeuristicExtractor::default();
+        let ruby_names: Vec<_> = extractor
+            .extract_units(&ruby)
+            .into_iter()
+            .map(|unit| unit.name)
+            .collect();
+        assert!(ruby_names.contains(&"Real".to_string()));
+        assert!(ruby_names.contains(&"Real.run".to_string()));
+        assert!(!ruby_names.contains(&"fake".to_string()));
+        assert!(!ruby_names.contains(&"also_fake".to_string()));
+        assert!(extractor.extract_units(&invalid_go).is_empty());
     }
 
     #[test]
