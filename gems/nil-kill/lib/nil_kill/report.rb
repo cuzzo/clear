@@ -271,7 +271,14 @@ module NilKill
 
       methods = Array(evidence.dig("static", "methods")).flat_map { |method| static_method_findings(method) }
       fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
-      methods + fields
+      aliases = static_alias_recommendations(evidence).map { |recommendation| static_alias_finding(recommendation) }
+      methods + fields + aliases
+    end
+
+    def static_alias_recommendations(evidence)
+      facts = evidence.dig("static", "facts")
+      facts = evidence.dig("static", "language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+      Array(facts && facts["alias_recommendations"])
     end
 
     def static_method_findings(method)
@@ -325,6 +332,28 @@ module NilKill
         "owner" => field["owner"],
         "name" => field["name"] || field["field"],
         "signature" => type,
+      }
+    end
+
+    def static_alias_finding(recommendation)
+      alias_name = recommendation["alias"].to_s
+      target = recommendation["target"].to_s
+      {
+        "kind" => "alias_recommendation",
+        "level" => "note",
+        "message" => recommendation["message"].to_s.empty? ?
+          "use #{alias_name} for #{target} in static type slots" :
+          recommendation["message"].to_s,
+        "path" => recommendation["path"] || recommendation.dig("definition", "path"),
+        "line" => recommendation["line"] || recommendation.dig("definition", "line"),
+        "static_kind" => "type_alias",
+        "language" => recommendation["language"],
+        "type_system" => recommendation["type_system"],
+        "alias" => alias_name,
+        "target" => target,
+        "definition" => recommendation["definition"],
+        "slot_count" => recommendation["slot_count"],
+        "slots" => recommendation["slots"],
       }
     end
 

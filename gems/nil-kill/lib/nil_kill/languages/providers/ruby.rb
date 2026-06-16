@@ -75,6 +75,7 @@ module NilKill
             provider: self
           )
           definitions.concat(ruby_struct_type_definitions(document, rel_path))
+          definitions.concat(ruby_type_alias_definitions(document, rel_path))
           definitions
         end
 
@@ -140,6 +141,90 @@ module NilKill
             end
           end
           definitions
+        end
+
+        def ruby_type_alias_definitions(document, rel_path)
+          definitions = []
+          owner_stack = []
+          pending = nil
+          document.lines.each_with_index do |line, index|
+            line_no = index + 1
+            stripped = line.strip
+            next if stripped.empty? || stripped.start_with?("#")
+
+            if pending
+              if stripped == "end" && line_indent(line) <= pending[:indent]
+                target = normalize_alias_body(pending[:body].join(" "))
+                definitions << ruby_type_alias_definition(
+                  rel_path: rel_path,
+                  owner: pending[:owner],
+                  name: pending[:name],
+                  target: target,
+                  line: pending[:line]
+                ) unless target.empty?
+                pending = nil
+              else
+                pending[:body] << stripped
+              end
+              next
+            end
+
+            if (match = stripped.match(/\A(?:class|module)\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+              owner_stack << qualified_owner_name(owner_stack, match[1])
+              next
+            end
+
+            if stripped == "end"
+              owner_stack.pop
+              next
+            end
+
+            if (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*(.+)\s*\}\s*(?:#.*)?\z/))
+              definitions << ruby_type_alias_definition(
+                rel_path: rel_path,
+                owner: owner_stack.last.to_s,
+                name: match[1],
+                target: normalize_alias_body(match[2]),
+                line: line_no
+              )
+            elsif (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s+do\b/))
+              pending = {
+                owner: owner_stack.last.to_s,
+                name: match[1],
+                line: line_no,
+                indent: line_indent(line),
+                body: [],
+              }
+            end
+          end
+          definitions
+        end
+
+        def ruby_type_alias_definition(rel_path:, owner:, name:, target:, line:)
+          {
+            "id" => ["ruby", rel_path, owner, "type_alias", name, line, "sorbet"].map(&:to_s).join("\u0000"),
+            "language" => "ruby",
+            "type_system" => "sorbet",
+            "kind" => "type_alias",
+            "path" => rel_path,
+            "owner" => owner.to_s,
+            "name" => name.to_s,
+            "line" => line,
+            "target" => target.to_s,
+            "source" => "T.type_alias",
+          }
+        end
+
+        def normalize_alias_body(body)
+          body.to_s.gsub(/\s+/, " ").strip.sub(/,\z/, "")
+        end
+
+        def line_indent(line)
+          line[/\A\s*/].to_s.length
+        end
+
+        def qualified_owner_name(stack, name)
+          name.to_s.include?("::") ? name.to_s : qualified_name(stack, name)
         end
 
         def ruby_t_struct_field(stripped)

@@ -55,6 +55,7 @@ module NilKill
         [definition["language"], definition["path"], definition["owner"], definition["kind"],
           definition["name"], definition["line"], definition["type_system"]]
       end
+      alias_recommendations = AliasRecommendations.build(type_definitions: type_definitions)
       typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
 
       {
@@ -76,6 +77,7 @@ module NilKill
           "state_param_origins" => state_param_origins,
           "signatures" => Hash[signatures.sort],
           "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
+          "alias_recommendations" => alias_recommendations,
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -89,6 +91,7 @@ module NilKill
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
           "type_definitions" => type_definitions.size,
+          "alias_recommendations" => alias_recommendations.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },

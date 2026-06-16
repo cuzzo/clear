@@ -271,6 +271,24 @@ RSpec.describe NilKill do
               "declared_type" => "String",
             },
           ],
+          "facts" => {
+            "alias_recommendations" => [
+              {
+                "kind" => "alias_recommendation",
+                "language" => "ruby",
+                "type_system" => "sorbet",
+                "alias" => "AST::RawBody",
+                "target" => "T::Array[AST::Node]",
+                "path" => "src/demo.rb",
+                "line" => 10,
+                "slot_count" => 1,
+                "definition" => {"path" => "src/ast/ast.rb", "line" => 15},
+                "slots" => [
+                  {"path" => "src/demo.rb", "line" => 10, "slot_kind" => "param", "slot" => "body"},
+                ],
+              },
+            ],
+          },
         },
         "runtime" => {},
         "actions" => [],
@@ -285,6 +303,7 @@ RSpec.describe NilKill do
         "nil-kill.static.untyped-signature",
         "nil-kill.static.nullable-signature",
         "nil-kill.static.untyped-field",
+        "nil-kill.static.alias-recommendation",
       )
       expect(results).not_to include(a_hash_including(
         "ruleId" => "nil-kill.static.untyped-field",

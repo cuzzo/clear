@@ -171,6 +171,7 @@ module NilKill
           end
 
           definitions.concat(python_stub_type_definitions(document, rel_path))
+          definitions.concat(python_type_alias_definitions(document, rel_path))
           definitions
         end
 
@@ -301,6 +302,37 @@ module NilKill
             end
           end
           definitions
+        end
+
+        def python_type_alias_definitions(document, rel_path)
+          document.lines.each_with_index.filter_map do |line, idx|
+            stripped = line.strip
+            next if stripped.empty? || stripped.start_with?("#")
+
+            name = nil
+            target = nil
+            if (match = stripped.match(/\A([A-Z]\w*)\s*:\s*TypeAlias\s*=\s*(.+?)\s*(?:#.*)?\z/))
+              name = match[1]
+              target = match[2].strip
+            elsif (match = stripped.match(/\Atype\s+([A-Z]\w*)\s*=\s*(.+?)\s*(?:#.*)?\z/))
+              name = match[1]
+              target = match[2].strip
+            end
+            next unless name && target
+
+            {
+              "id" => ["python", rel_path, "", "type_alias", name, idx + 1, "python-typing"].map(&:to_s).join("\u0000"),
+              "language" => "python",
+              "type_system" => "python-typing",
+              "kind" => "type_alias",
+              "path" => rel_path,
+              "owner" => "",
+              "name" => name,
+              "line" => idx + 1,
+              "target" => target,
+              "source" => "TypeAlias",
+            }
+          end
         end
       end
     end
