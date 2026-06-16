@@ -336,9 +336,9 @@ module NilKill
       text = signature.to_s
       text.match?(/\bT\.nilable\b/) ||
         text.match?(/\bOptional\s*\[/) ||
-        text.match?(/\bNone\b/) ||
         text.match?(/\bnull\b/) ||
         text.match?(/\bundefined\b/) ||
+        text.match?(/\bNone\s*\|/) ||
         text.match?(/\|\s*(?:None|null|undefined)\b/)
     end
 

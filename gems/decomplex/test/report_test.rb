@@ -73,6 +73,34 @@ class ReportTest < Minitest::Test
     assert result.fetch("partialFingerprints").fetch("decomplexFinding")
   end
 
+  def test_sarif_message_includes_detector_specific_derived_state_context
+    r = Decomplex::Report.allocate
+    message = r.send(:sarif_message, "Derived-State Staleness", {
+      derived: "style",
+      source: "options",
+      derived_at: 12,
+      source_reassigned_at: 30
+    }, {})
+
+    assert_includes message, "`style` derived from `options` at line 12"
+    assert_includes message, "`options` reassigned at line 30"
+    assert_includes message, "`style` is not recomputed"
+  end
+
+  def test_sarif_message_includes_detector_specific_protocol_context
+    r = Decomplex::Report.allocate
+    message = r.send(:sarif_message, "Broken Protocols", {
+      has: "lock",
+      missing: "unlock",
+      support: 8,
+      confidence: 0.89
+    }, {})
+
+    assert_includes message, "does `lock` without co-called `unlock`"
+    assert_includes message, "support=8"
+    assert_includes message, "confidence=0.89"
+  end
+
   def test_markdown_orders_sections_by_signal_tier_not_volume
     md = report.to_markdown
     prio = md[/## Project Prioritization.*?\n\n(.*?)\n\n/m, 1].to_s

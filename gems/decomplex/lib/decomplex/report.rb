@@ -432,10 +432,94 @@ module Decomplex
     end
 
     def sarif_message(title, finding, location)
+      detail = sarif_message_detail(title, finding)
+      return "#{title}: #{detail}" unless detail.to_s.empty?
+
       subject = location[:method] || finding[:method] || finding[:name] ||
                 finding[:field] || finding[:contract] || finding[:owner] ||
                 finding[:token] || finding[:kind]
       [title, subject].compact.join(": ")
+    end
+
+    def sarif_message_detail(title, finding)
+      case title
+      when "Decision Pressure"
+        "`#{finding[:contract]}` creates #{finding[:decisions]} eliminable guard decision(s) across " \
+          "#{finding[:methods]} method(s)"
+      when "Redundant Nil Guards"
+        "`#{finding[:local]}` is nil-guarded by `#{finding[:guard]}` after proof `#{finding[:proof]}`"
+      when "Missing Abstractions"
+        "guard tuple `#{Array(finding[:members]).join(' | ')}` repeats in #{finding[:support]} site(s) " \
+          "with scatter=#{finding[:scatter]}"
+      when "State-Based Branch Density"
+        refs = Array(finding[:state_refs]).first(8).join(" | ")
+        "#{finding[:decisions]} state-based branch decision(s) over `#{refs}`; " \
+          "example predicate `#{finding[:predicate]}`"
+      when "Temporal Ordering Pressure"
+        "`#{finding[:owner]}` exposes mutable lifecycle pressure score=#{finding[:score]} " \
+          "(public=#{finding[:public_methods]}, state_methods=#{finding[:state_methods]}, " \
+          "writers=#{finding[:writers]})"
+      when "Neglected Conditions", "Neglected Path Conditions"
+        "missing condition `#{finding[:missing]}` from `#{Array(finding[:pattern] || finding[:guards]).join(' | ')}` " \
+          "(support=#{finding[:support]})"
+      when "Oversized Predicates"
+        "#{finding[:count]} condition atoms in predicate `#{finding[:predicate]}`"
+      when "Neglected Updates"
+        "writes `.#{finding[:has]}` but not co-written `.#{finding[:missing]}` on receiver `#{finding[:recv]}` " \
+          "(support=#{finding[:support]})"
+      when "Semantic Predicate Aliases", "Exact Predicate Aliases"
+        "predicate aliases `#{Array(finding[:names]).join(' = ')}` for `#{finding[:canon] || finding[:body]}`"
+      when "Reification Misses"
+        "predicate `#{finding[:predicate]}` is reinvented inline as `#{finding[:raw]}`"
+      when "Broken Protocols"
+        "does `#{finding[:has]}` without co-called `#{finding[:missing]}` " \
+          "(support=#{finding[:support]}, confidence=#{finding[:confidence]})"
+      when "Implicit Control Flow"
+        sarif_implicit_control_flow_detail(finding)
+      when "Weighted Inlined Cognitive Complexity"
+        "inlined=#{finding[:inlined]} (local=#{finding[:local]}, hidden=#{finding[:hidden]}, " \
+          "depth=#{finding[:depth]}); chain `#{Array(finding[:call_chain]).join(' -> ')}`"
+      when "Locality Drag"
+        "`#{finding[:variable]}` is initialized at line #{finding[:defined_at]} but first used at line " \
+          "#{finding[:used_at]} after #{finding[:unrelated_statements]} unrelated statement(s)"
+      when "Function LCOM"
+        mode = finding[:mode] == :late_join ? "late_join" : "disjoint"
+        "#{mode} local data-flow: score=#{finding[:score]}, components=#{finding[:components]}, " \
+          "locals=#{finding[:locals]}, statements=#{finding[:statements]}"
+      when "Operational Discontinuity", "Operational Discontinuity (High Confidence)"
+        "score=#{finding[:score]}, reset_boundaries=#{finding[:resets]}, dead=#{finding[:dead_total]}, " \
+          "new=#{finding[:new_total]}, confidence=#{finding[:confidence] || :review}"
+      when "False Simplicity"
+        "[#{finding[:kind]}] `#{finding[:detail]}` support=#{finding[:support]}, scatter=#{finding[:scatter]}"
+      when "Fat Unions"
+        "union `#{Array(finding[:variant_set]).join(' | ')}` has #{Array(finding[:common]).size} common and " \
+          "#{Array(finding[:variant]).size} variant member(s), scatter=#{finding[:scatter]}"
+      when "Derived-State Staleness"
+        "`#{finding[:derived]}` derived from `#{finding[:source]}` at line #{finding[:derived_at]}; " \
+          "`#{finding[:source]}` reassigned at line #{finding[:source_reassigned_at]} but " \
+          "`#{finding[:derived]}` is not recomputed"
+      when "Inconsistent Rename Clones"
+        "clone of #{finding[:ref_at]}: reference variable `#{finding[:ref_name]}` diverges as " \
+          "#{Array(finding[:divergent]).inspect}"
+      when "Structural Similarity (Type-2/3)"
+        "[#{finding[:clone_type]}] mass=#{finding[:mass]} node=`#{finding[:node]}` across " \
+          "#{Array(finding[:sites]).size} site(s)"
+      else
+        nil
+      end
+    end
+
+    def sarif_implicit_control_flow_detail(finding)
+      protocol = Array(finding[:protocol]).join(" -> ")
+      dependency = Array(finding[:dependency]).join("|")
+      states = Array(finding[:states]).join(" | ")
+      if finding[:kind] == :order_drift
+        observed = Array(finding[:observed]).join(" -> ")
+        return "[order_drift] observed `#{observed}` against protocol `#{protocol}` " \
+               "(#{dependency} state=`#{states}`)"
+      end
+
+      "[protocol_pressure] protocol `#{protocol}` (#{dependency} state=`#{states}`), support=#{finding[:support]}"
     end
 
     def sarif_locations_for_finding(finding)
