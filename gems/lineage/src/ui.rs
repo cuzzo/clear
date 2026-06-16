@@ -4360,7 +4360,6 @@ fn render_index_page(
     )?;
     let child_directories = directory_index(&files, &current_directory);
     let child_files = files_in_directory(&files, &current_directory);
-    let table_files = sorted_table_files(&files, filter, &current_directory, sort);
     let filtered = filtered_files_in_directory(&files, filter, &current_directory);
     let branch_context = branch_context(repo);
     let payload = selected_path
@@ -4388,7 +4387,7 @@ fn render_index_page(
             &dashboard,
             &current_directory,
             &child_directories,
-            &table_files,
+            &child_files,
             filter,
             sort,
             &branch_context,
@@ -4521,38 +4520,6 @@ fn filtered_files_in_directory<'a>(
         .collect()
 }
 
-fn sorted_table_files<'a>(
-    files: &'a [UiFile],
-    filter: &str,
-    directory: &str,
-    sort: CoverageSort,
-) -> Vec<&'a UiFile> {
-    let mut files = filtered_files_in_directory(files, filter, directory);
-    files.sort_by(|left, right| match sort {
-        CoverageSort::Path => left.path.cmp(&right.path),
-        CoverageSort::Total => right
-            .tracked_lines
-            .cmp(&left.tracked_lines)
-            .then_with(|| left.path.cmp(&right.path)),
-        CoverageSort::Covered => right
-            .covered_lines
-            .cmp(&left.covered_lines)
-            .then_with(|| left.path.cmp(&right.path)),
-        CoverageSort::Partial => partial_line_count(right.covered_lines, right.dark_arm_findings)
-            .cmp(&partial_line_count(left.covered_lines, left.dark_arm_findings))
-            .then_with(|| left.path.cmp(&right.path)),
-        CoverageSort::Missed => missed_line_count(right.tracked_lines, right.covered_lines)
-            .cmp(&missed_line_count(left.tracked_lines, left.covered_lines))
-            .then_with(|| left.path.cmp(&right.path)),
-        CoverageSort::Percent => right
-            .line_coverage
-            .partial_cmp(&left.line_coverage)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left.path.cmp(&right.path)),
-    });
-    files
-}
-
 fn files_in_directory<'a>(files: &'a [UiFile], directory: &str) -> Vec<&'a UiFile> {
     let directory = normalize_directory(directory);
     files
@@ -4656,44 +4623,277 @@ fn render_source_outline(payload: &UiSourcePayload) -> String {
         return String::new();
     }
 
+    let containers = outline_containers(&payload.symbols);
+    let functions = outline_functions(&payload.symbols, &containers);
     let mut out = String::new();
     out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div>");
-    for symbol in &payload.symbols {
-        out.push_str("<a href=\"#L");
-        out.push_str(&symbol.start_line.to_string());
-        out.push_str("\"");
-        let effect_title = outline_effect_title(symbol);
-        if !effect_title.is_empty() {
-            out.push_str(" title=\"");
-            out.push_str(&html_escape(&effect_title));
-            out.push('"');
-        }
-        out.push_str(" class=\"");
-        if symbol.impure {
-            out.push_str("impure-symbol");
-        } else if symbol.effect_known {
-            out.push_str("pure-symbol");
-        } else {
-            out.push_str("unknown-symbol");
-        }
-        out.push_str(" hotspot-");
-        out.push_str(&html_escape(&symbol.hotspot_level));
-        out.push_str("\"><span class=\"outline-rail\"><span class=\"outline-impure\" aria-label=\"");
-        out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
-        out.push_str("\">");
-        if symbol.impure {
-            out.push_str("<i class=\"fa-solid fa-link\" aria-hidden=\"true\"></i>");
-        }
-        out.push_str("</span><span class=\"outline-hotspot\" title=\"");
-        out.push_str(&html_escape(&outline_hotspot_title(symbol)));
-        out.push_str("\"></span></span><span class=\"outline-kind\">");
-        out.push_str(&html_escape(&outline_kind_label(symbol)));
-        out.push_str("</span><span class=\"outline-name\">");
-        out.push_str(&html_escape(&symbol.name));
-        out.push_str("</span></a>");
+    for entry in root_outline_entries(&containers, &functions) {
+        render_outline_entry(&mut out, entry, &containers, &functions);
     }
     out.push_str("</nav>");
     out
+}
+
+#[derive(Debug, Clone)]
+struct OutlineContainer<'a> {
+    symbol: &'a UiSourceSymbol,
+    full_name: String,
+    display_name: String,
+    parent: Option<String>,
+    depth: usize,
+}
+
+#[derive(Debug, Clone)]
+struct OutlineFunction<'a> {
+    symbol: &'a UiSourceSymbol,
+    owner: Option<String>,
+    display_name: String,
+    depth: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OutlineEntry<'a> {
+    Container(&'a OutlineContainer<'a>),
+    Function(&'a OutlineFunction<'a>),
+}
+
+impl OutlineEntry<'_> {
+    fn start_line(self) -> u32 {
+        match self {
+            OutlineEntry::Container(container) => container.symbol.start_line,
+            OutlineEntry::Function(function) => function.symbol.start_line,
+        }
+    }
+
+    fn kind_rank(self) -> u8 {
+        match self {
+            OutlineEntry::Container(_) => 0,
+            OutlineEntry::Function(_) => 1,
+        }
+    }
+}
+
+fn outline_containers(symbols: &[UiSourceSymbol]) -> Vec<OutlineContainer<'_>> {
+    let mut containers = Vec::new();
+    for symbol in symbols.iter().filter(|symbol| is_outline_container(symbol)) {
+        let parent = containers
+            .iter()
+            .filter(|container: &&OutlineContainer<'_>| outline_contains(container.symbol, symbol))
+            .max_by_key(|container| container.symbol.start_line);
+        let display_name = outline_short_name(&symbol.name);
+        let full_name = parent
+            .map(|container| format!("{}.{}", container.full_name, display_name))
+            .unwrap_or_else(|| normalize_outline_owner(&symbol.name));
+        containers.push(OutlineContainer {
+            symbol,
+            full_name,
+            display_name,
+            parent: parent.map(|container| container.full_name.clone()),
+            depth: parent.map(|container| container.depth + 1).unwrap_or(0),
+        });
+    }
+    containers
+}
+
+fn outline_functions<'a>(
+    symbols: &'a [UiSourceSymbol],
+    containers: &[OutlineContainer<'a>],
+) -> Vec<OutlineFunction<'a>> {
+    symbols
+        .iter()
+        .filter(|symbol| !is_outline_container(symbol))
+        .map(|symbol| {
+            let (qualified_owner, display_name) = outline_function_owner_and_name(symbol);
+            let owner = qualified_owner
+                .and_then(|owner| resolve_outline_owner(&owner, containers))
+                .or_else(|| containing_outline_owner(symbol, containers));
+            let depth = owner
+                .as_ref()
+                .and_then(|owner| containers.iter().find(|container| &container.full_name == owner))
+                .map(|container| container.depth + 1)
+                .unwrap_or(0);
+            OutlineFunction {
+                symbol,
+                owner,
+                display_name,
+                depth,
+            }
+        })
+        .collect()
+}
+
+fn is_outline_container(symbol: &UiSourceSymbol) -> bool {
+    matches!(symbol.kind.as_str(), "module" | "class")
+}
+
+fn outline_contains(container: &UiSourceSymbol, child: &UiSourceSymbol) -> bool {
+    container.start_line <= child.start_line
+        && container.end_line >= child.end_line
+        && (container.start_line, container.end_line) != (child.start_line, child.end_line)
+}
+
+fn outline_function_owner_and_name(symbol: &UiSourceSymbol) -> (Option<String>, String) {
+    let normalized = normalize_outline_owner(&symbol.name);
+    if let Some((owner, name)) = normalized.rsplit_once('.') {
+        if owner == "self" {
+            return (None, name.to_string());
+        }
+        return (Some(owner.to_string()), name.to_string());
+    }
+    (None, outline_short_name(&symbol.name))
+}
+
+fn outline_short_name(name: &str) -> String {
+    normalize_outline_owner(name)
+        .rsplit('.')
+        .next()
+        .unwrap_or(name)
+        .trim_start_matches("self.")
+        .to_string()
+}
+
+fn normalize_outline_owner(name: &str) -> String {
+    name.replace("::", ".")
+}
+
+fn resolve_outline_owner(owner: &str, containers: &[OutlineContainer<'_>]) -> Option<String> {
+    let normalized = normalize_outline_owner(owner);
+    containers
+        .iter()
+        .find(|container| container.full_name == normalized)
+        .or_else(|| {
+            containers
+                .iter()
+                .find(|container| container.full_name.ends_with(&format!(".{normalized}")))
+        })
+        .or_else(|| containers.iter().find(|container| container.display_name == normalized))
+        .map(|container| container.full_name.clone())
+}
+
+fn containing_outline_owner(
+    symbol: &UiSourceSymbol,
+    containers: &[OutlineContainer<'_>],
+) -> Option<String> {
+    containers
+        .iter()
+        .filter(|container| outline_contains(container.symbol, symbol))
+        .max_by_key(|container| container.depth)
+        .map(|container| container.full_name.clone())
+}
+
+fn root_outline_entries<'a>(
+    containers: &'a [OutlineContainer<'a>],
+    functions: &'a [OutlineFunction<'a>],
+) -> Vec<OutlineEntry<'a>> {
+    sorted_outline_entries(
+        containers
+            .iter()
+            .filter(|container| container.parent.is_none())
+            .map(OutlineEntry::Container)
+            .chain(
+                functions
+                    .iter()
+                    .filter(|function| function.owner.is_none())
+                    .map(OutlineEntry::Function),
+            ),
+    )
+}
+
+fn child_outline_entries<'a>(
+    owner: &str,
+    containers: &'a [OutlineContainer<'a>],
+    functions: &'a [OutlineFunction<'a>],
+) -> Vec<OutlineEntry<'a>> {
+    sorted_outline_entries(
+        containers
+            .iter()
+            .filter(|container| container.parent.as_deref() == Some(owner))
+            .map(OutlineEntry::Container)
+            .chain(
+                functions
+                    .iter()
+                    .filter(|function| function.owner.as_deref() == Some(owner))
+                    .map(OutlineEntry::Function),
+            ),
+    )
+}
+
+fn sorted_outline_entries<'a>(
+    entries: impl Iterator<Item = OutlineEntry<'a>>,
+) -> Vec<OutlineEntry<'a>> {
+    let mut entries = entries.collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.start_line()
+            .cmp(&right.start_line())
+            .then_with(|| left.kind_rank().cmp(&right.kind_rank()))
+    });
+    entries
+}
+
+fn render_outline_entry(
+    out: &mut String,
+    entry: OutlineEntry<'_>,
+    containers: &[OutlineContainer<'_>],
+    functions: &[OutlineFunction<'_>],
+) {
+    match entry {
+        OutlineEntry::Container(container) => {
+            render_outline_symbol_link(out, container.symbol, &container.display_name, container.depth);
+            for child in child_outline_entries(&container.full_name, containers, functions) {
+                render_outline_entry(out, child, containers, functions);
+            }
+        }
+        OutlineEntry::Function(function) => {
+            render_outline_symbol_link(
+                out,
+                function.symbol,
+                &function.display_name,
+                function.depth,
+            );
+        }
+    }
+}
+
+fn render_outline_symbol_link(
+    out: &mut String,
+    symbol: &UiSourceSymbol,
+    display_name: &str,
+    depth: usize,
+) {
+    out.push_str("<a href=\"#L");
+    out.push_str(&symbol.start_line.to_string());
+    out.push_str("\"");
+    let effect_title = outline_effect_title(symbol);
+    if !effect_title.is_empty() {
+        out.push_str(" title=\"");
+        out.push_str(&html_escape(&effect_title));
+        out.push('"');
+    }
+    out.push_str(" class=\"");
+    if symbol.impure {
+        out.push_str("impure-symbol");
+    } else if symbol.effect_known {
+        out.push_str("pure-symbol");
+    } else {
+        out.push_str("unknown-symbol");
+    }
+    out.push_str(" hotspot-");
+    out.push_str(&html_escape(&symbol.hotspot_level));
+    out.push_str(" outline-depth-");
+    out.push_str(&depth.min(4).to_string());
+    out.push_str("\"><span class=\"outline-rail\"><span class=\"outline-impure\" aria-label=\"");
+    out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
+    out.push_str("\">");
+    if symbol.impure {
+        out.push_str("<i class=\"fa-solid fa-link\" aria-hidden=\"true\"></i>");
+    }
+    out.push_str("</span><span class=\"outline-hotspot\" title=\"");
+    out.push_str(&html_escape(&outline_hotspot_title(symbol)));
+    out.push_str("\"></span></span><span class=\"outline-kind\">");
+    out.push_str(&html_escape(&outline_kind_label(symbol)));
+    out.push_str("</span><span class=\"outline-name\">");
+    out.push_str(&html_escape(display_name));
+    out.push_str("</span></a>");
 }
 
 fn outline_kind_label(symbol: &UiSourceSymbol) -> String {
@@ -4892,7 +5092,7 @@ fn line_quality_segments(bar: LineQualityBar) -> LineQualitySegments {
 fn render_dashboard(
     dashboard: &UiDashboard,
     directory: &str,
-    _directories: &[UiDirectory],
+    directories: &[UiDirectory],
     files: &[&UiFile],
     filter: &str,
     sort: CoverageSort,
@@ -4915,12 +5115,15 @@ fn render_dashboard(
         &render_architecture_risks(&dashboard.top_architecture_risks, filter),
     );
     let code_tree_heading = format!(
-        "Code tree ({} files - {} SARIF findings)",
-        dashboard.files, dashboard.sarif_findings
+        "Directory entries ({} dirs - {} files - {} SARIF findings)",
+        directories.len(),
+        files.len(),
+        dashboard.sarif_findings
     );
     let code_tree = render_code_tree_table(
         dashboard,
         &directory,
+        directories,
         files,
         filter,
         sort,
@@ -5232,20 +5435,22 @@ fn render_path_breadcrumb(path: &str, filter: &str) -> String {
 fn render_code_tree_table(
     dashboard: &UiDashboard,
     directory: &str,
+    directories: &[UiDirectory],
     files: &[&UiFile],
     filter: &str,
     sort: CoverageSort,
 ) -> String {
-    let name_header = render_sort_link("File list", CoverageSort::Path, sort, directory, filter);
+    let name_header = render_sort_link("Name", CoverageSort::Path, sort, directory, filter);
     let total_header = render_sort_link("Total", CoverageSort::Total, sort, directory, filter);
     let covered_header = render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter);
     let partial_header = render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter);
     let missed_header = render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter);
     let percent_header = render_sort_link("%", CoverageSort::Percent, sort, directory, filter);
     let mut rows = String::new();
-    for file in files {
-        rows.push_str(&render_file_coverage_row(file, directory, filter));
+    for entry in sorted_code_tree_entries(directories, files, sort) {
+        rows.push_str(&render_code_tree_row(&entry, directory, filter));
     }
+    let empty = directories.is_empty() && files.is_empty();
     let partial = files
         .iter()
         .map(|file| partial_line_count(file.covered_lines, file.dark_arm_findings))
@@ -5253,6 +5458,7 @@ fn render_code_tree_table(
     let partial = partial.clamp(0, dashboard.covered_lines);
     let subtotal = render_coverage_table_row(
         None,
+        "",
         "Subtotal",
         "",
         dashboard.tracked_lines,
@@ -5271,11 +5477,119 @@ fn render_code_tree_table(
             missed_header: &missed_header,
             percent_header: &percent_header,
             rows: &rows,
-            empty: files.is_empty(),
+            empty,
             subtotal: &subtotal,
         },
         "coverage table template",
     )
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum CodeTreeEntry<'a> {
+    Directory(&'a UiDirectory),
+    File(&'a UiFile),
+}
+
+impl CodeTreeEntry<'_> {
+    fn name(&self) -> &str {
+        match self {
+            CodeTreeEntry::Directory(directory) => &directory.path,
+            CodeTreeEntry::File(file) => &file.path,
+        }
+    }
+
+    fn tracked_lines(&self) -> i64 {
+        match self {
+            CodeTreeEntry::Directory(directory) => directory.tracked_lines,
+            CodeTreeEntry::File(file) => file.tracked_lines,
+        }
+    }
+
+    fn covered_lines(&self) -> i64 {
+        match self {
+            CodeTreeEntry::Directory(directory) => directory.covered_lines,
+            CodeTreeEntry::File(file) => file.covered_lines,
+        }
+    }
+
+    fn partial_findings(&self) -> i64 {
+        match self {
+            CodeTreeEntry::Directory(directory) => directory.dark_arm_findings,
+            CodeTreeEntry::File(file) => file.dark_arm_findings,
+        }
+    }
+
+    fn missed_lines(&self) -> i64 {
+        missed_line_count(self.tracked_lines(), self.covered_lines())
+    }
+
+    fn line_coverage(&self) -> f64 {
+        match self {
+            CodeTreeEntry::Directory(directory) => directory.line_coverage,
+            CodeTreeEntry::File(file) => file.line_coverage,
+        }
+    }
+
+    fn path_for_tiebreak(&self) -> &str {
+        self.name()
+    }
+}
+
+fn sorted_code_tree_entries<'a>(
+    directories: &'a [UiDirectory],
+    files: &'a [&'a UiFile],
+    sort: CoverageSort,
+) -> Vec<CodeTreeEntry<'a>> {
+    let mut entries = directories
+        .iter()
+        .map(CodeTreeEntry::Directory)
+        .chain(files.iter().copied().map(CodeTreeEntry::File))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| match sort {
+        CoverageSort::Path => code_tree_entry_kind_rank(left)
+            .cmp(&code_tree_entry_kind_rank(right))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Total => right
+            .tracked_lines()
+            .cmp(&left.tracked_lines())
+            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Covered => right
+            .covered_lines()
+            .cmp(&left.covered_lines())
+            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Partial => partial_line_count(right.covered_lines(), right.partial_findings())
+            .cmp(&partial_line_count(left.covered_lines(), left.partial_findings()))
+            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Missed => right
+            .missed_lines()
+            .cmp(&left.missed_lines())
+            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Percent => right
+            .line_coverage()
+            .partial_cmp(&left.line_coverage())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
+            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+    });
+    entries
+}
+
+fn code_tree_entry_kind_rank(entry: &CodeTreeEntry<'_>) -> u8 {
+    match entry {
+        CodeTreeEntry::Directory(_) => 0,
+        CodeTreeEntry::File(_) => 1,
+    }
+}
+
+fn render_code_tree_row(entry: &CodeTreeEntry<'_>, directory: &str, filter: &str) -> String {
+    match entry {
+        CodeTreeEntry::Directory(child) => render_directory_coverage_row(child, directory, filter),
+        CodeTreeEntry::File(file) => render_file_coverage_row(file, directory, filter),
+    }
 }
 
 fn render_sort_link(
@@ -5316,6 +5630,7 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
     );
     render_coverage_table_row(
         Some(&page_href(&file.path, None, filter)),
+        "fa-regular fa-file-lines",
         &display_path,
         &detail,
         file.tracked_lines,
@@ -5324,6 +5639,34 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         file.multi_type_covered_lines,
         file.mutant_verified_covered_lines,
         file.line_coverage,
+    )
+}
+
+fn render_directory_coverage_row(directory: &UiDirectory, parent: &str, filter: &str) -> String {
+    let mut display_path = file_display_path(&directory.path, parent);
+    if !display_path.ends_with('/') {
+        display_path.push('/');
+    }
+    let detail = format!(
+        "{} files, {} units, {} hazards, {} SARIF, {} tests, {} mutant killed",
+        directory.files,
+        directory.units,
+        directory.hazards,
+        directory.sarif_findings,
+        directory.distinct_tests,
+        directory.mutant_killed_tests
+    );
+    render_coverage_table_row(
+        Some(&directory_href(&directory.path, filter)),
+        "fa-regular fa-folder",
+        &display_path,
+        &detail,
+        directory.tracked_lines,
+        directory.covered_lines,
+        directory.dark_arm_findings,
+        0,
+        0,
+        directory.line_coverage,
     )
 }
 
@@ -5398,6 +5741,7 @@ fn unit_kind_label(kind: &str, name: &str) -> String {
 
 fn render_coverage_table_row(
     href: Option<&str>,
+    icon_class: &str,
     name: &str,
     detail: &str,
     tracked_lines: i64,
@@ -5421,9 +5765,11 @@ fn render_coverage_table_row(
     if let Some(href) = href {
         out.push_str("<a href=\"");
         out.push_str(&html_escape(href));
-        out.push_str("\">");
+        out.push_str("\" class=\"coverage-name-link\"><i class=\"");
+        out.push_str(&html_escape(icon_class));
+        out.push_str("\" aria-hidden=\"true\"></i><span>");
         out.push_str(&html_escape(name));
-        out.push_str("</a>");
+        out.push_str("</span></a>");
     } else {
         out.push_str("<span>");
         out.push_str(&html_escape(name));
@@ -7392,6 +7738,44 @@ mod tests {
     }
 
     #[test]
+    fn source_outline_groups_qualified_methods_under_containers() {
+        let payload = UiSourcePayload {
+            path: "gems/slopcop/lib/slopcop/dark_arm_overlay.rb".into(),
+            commit: None,
+            lines: Vec::new(),
+            versions: Vec::new(),
+            symbols: vec![
+                empty_source_symbol("module", "SlopCop", 1, 20),
+                empty_source_symbol("class", "DarkArmOverlay", 3, 19),
+                empty_source_symbol("function", "SlopCop.DarkArmOverlay.build", 4, 5),
+                empty_source_symbol("function", "SlopCop.DarkArmOverlay.to_json", 7, 8),
+                empty_source_symbol("function", "SlopCop.DarkArmOverlay.to_sarif", 11, 12),
+            ],
+            blame: Vec::new(),
+            annotations: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let outline = render_source_outline(&payload);
+
+        assert!(outline.contains("outline-depth-0"));
+        assert!(outline.contains("outline-depth-1"));
+        assert!(outline.contains("outline-depth-2"));
+        assert!(outline.contains("<span class=\"outline-name\">SlopCop</span>"));
+        assert!(outline.contains("<span class=\"outline-name\">DarkArmOverlay</span>"));
+        assert!(outline.contains("<span class=\"outline-name\">build</span>"));
+        assert!(outline.contains("<span class=\"outline-name\">to_json</span>"));
+        assert!(outline.contains("<span class=\"outline-name\">to_sarif</span>"));
+        assert!(!outline.contains("SlopCop.DarkArmOverlay.build"));
+        assert!(
+            outline.find(">build</span>").unwrap() < outline.find(">to_json</span>").unwrap()
+        );
+        assert!(
+            outline.find(">to_json</span>").unwrap() < outline.find(">to_sarif</span>").unwrap()
+        );
+    }
+
+    #[test]
     fn source_payload_includes_persisted_sarif_findings() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -8447,7 +8831,8 @@ mod tests {
         assert!(!html.contains(">8 covered lines</span>"));
         assert!(html.contains("4 mutant-backed / 1 stochastic / 2 invariant"));
         assert!(html.contains("class=\"ratio-bar hazard-bar\""));
-        assert!(html.contains("Code tree (2 files - 7 SARIF findings)"));
+        assert!(html.contains("Directory entries (0 dirs - 1 files - 7 SARIF findings)"));
+        assert!(html.contains("class=\"coverage-name-link\"><i class=\"fa-regular fa-file-lines\""));
         assert!(!html.contains("class=\"metric\""));
         assert!(!html.contains("class=\"dashboard-bars\""));
         assert!(!html.contains("dashboard-line-quality"));
@@ -8461,7 +8846,7 @@ mod tests {
             "mutant detail should live in the top branch-context bar, not between dashboard sections"
         );
         assert!(
-            html.find("Active Hazards").unwrap() < html.find("Code tree").unwrap(),
+            html.find("Active Hazards").unwrap() < html.find("Directory entries").unwrap(),
             "hazards should render above code tree"
         );
         assert!(
@@ -8824,44 +9209,32 @@ mod tests {
     }
 
     #[test]
-    fn sorted_table_files_includes_descendant_files_and_sorts_by_metrics() {
+    fn sorted_code_tree_entries_list_immediate_directories_before_files() {
         let files = vec![
             ui_file_for_sort("src/a.rb", 10, 9, 1),
             ui_file_for_sort("src/internal/b.rb", 20, 10, 2),
             ui_file_for_sort("src/internal/deeper/c.rb", 4, 4, 0),
             ui_file_for_sort("zig/runtime/a.zig", 8, 1, 0),
         ];
+        let directories = directory_index(&files, "src");
+        let files = files_in_directory(&files, "src");
 
-        let by_path = sorted_table_files(&files, "", "src", CoverageSort::Path)
+        let by_path = sorted_code_tree_entries(&directories, &files, CoverageSort::Path)
             .into_iter()
-            .map(|file| file.path.as_str())
+            .map(|entry| entry.name().to_string())
             .collect::<Vec<_>>();
-        let by_missed = sorted_table_files(&files, "", "src", CoverageSort::Missed)
+        let by_missed = sorted_code_tree_entries(&directories, &files, CoverageSort::Missed)
             .into_iter()
-            .map(|file| file.path.as_str())
+            .map(|entry| entry.name().to_string())
             .collect::<Vec<_>>();
-        let by_percent = sorted_table_files(&files, "", "src", CoverageSort::Percent)
+        let by_percent = sorted_code_tree_entries(&directories, &files, CoverageSort::Percent)
             .into_iter()
-            .map(|file| file.path.as_str())
-            .collect::<Vec<_>>();
-        let filtered = sorted_table_files(&files, "deeper", "src", CoverageSort::Path)
-            .into_iter()
-            .map(|file| file.path.as_str())
+            .map(|entry| entry.name().to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            by_path,
-            vec!["src/a.rb", "src/internal/b.rb", "src/internal/deeper/c.rb"]
-        );
-        assert_eq!(
-            by_missed,
-            vec!["src/internal/b.rb", "src/a.rb", "src/internal/deeper/c.rb"]
-        );
-        assert_eq!(
-            by_percent,
-            vec!["src/internal/deeper/c.rb", "src/a.rb", "src/internal/b.rb"]
-        );
-        assert_eq!(filtered, vec!["src/internal/deeper/c.rb"]);
+        assert_eq!(by_path, vec!["src/internal", "src/a.rb"]);
+        assert_eq!(by_missed, vec!["src/internal", "src/a.rb"]);
+        assert_eq!(by_percent, vec!["src/a.rb", "src/internal"]);
     }
 
     #[test]
