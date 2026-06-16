@@ -101,6 +101,35 @@ class ReportTest < Minitest::Test
     assert_includes message, "confidence=0.89"
   end
 
+  def test_sarif_includes_actionable_state_heatmap_context
+    f = Tempfile.new(["rep_state_sarif", ".rb"])
+    f.write(<<~RB)
+      class BillingService
+        def set_user(user); @user = user; end
+        def set_cart(cart); @cart = cart; end
+        def process
+          charge(@user) if @cart
+          audit(@user)
+        end
+      end
+    RB
+    f.close
+
+    sarif = JSON.parse(Decomplex::Report.new([f.path]).to_sarif)
+    result = sarif.fetch("runs").first.fetch("results").find do |entry|
+      entry.fetch("ruleId") == "decomplex.state-heatmap"
+    end
+
+    refute_nil result
+    message = result.fetch("message").fetch("text")
+    assert_includes message, "state `"
+    assert_includes message, "writes="
+    assert_includes message, "reads="
+    assert_includes message, "writers"
+  ensure
+    f&.unlink
+  end
+
   def test_markdown_orders_sections_by_signal_tier_not_volume
     md = report.to_markdown
     prio = md[/## Project Prioritization.*?\n\n(.*?)\n\n/m, 1].to_s
