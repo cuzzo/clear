@@ -1,0 +1,31 @@
+<section class="branch-context" aria-label="branch coverage context">
+  <div class="branch-context-head">
+    <div>
+      <div class="context-kicker">Branch Context</div>
+      <strong>{{ branch }}</strong>
+      <span>Source: latest commit <code>{{ commit }}</code></span>
+    </div>
+    <div class="coverage-on-branch">
+      <span>Coverage on branch</span>
+      <strong>{{ coverage_percent }}%</strong>
+      <small>{{ covered_lines }} of {{ tracked_lines }} lines covered; {{ partial_lines }} partial, {{ missed_lines }} missed</small>
+      <span class="branch-summary-bar">
+        {{ line_quality_bar|safe }}
+      </span>
+      <div class="branch-summary-foot">
+        <span>{{ mutant_backed_lines }} mutant-backed / {{ stochastic_mutant_backed_lines }} stochastic / {{ invariant_mutant_backed_lines }} invariant</span>
+      </div>
+    </div>
+  </div>
+  <div class="branch-context-body">
+    <div class="branch-crumbs">
+      {{ breadcrumbs|safe }}
+    </div>
+    <div class="coverage-legend" aria-label="coverage legend">
+      <span><i class="legend-swatch legend-multi"></i>Multi-covered</span>
+      <span><i class="legend-swatch legend-covered"></i>covered</span>
+      <span><i class="legend-swatch legend-partial"></i>partial</span>
+      <span><i class="legend-swatch legend-missed"></i>missed</span>
+    </div>
+  </div>
+</section>

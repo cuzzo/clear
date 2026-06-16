@@ -555,6 +555,8 @@ mod tests {
             distinct_tests: 2,
             mutant_verified_tests: 1,
             mutant_killed_tests: 1,
+            stochastic_mutant_verified_tests: 1,
+            invariant_mutant_verified_tests: 0,
             line_hits: Some(4),
             line_coverage: None,
             mutant_coverage: None,
