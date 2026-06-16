@@ -1,4 +1,4 @@
-use super::{Document, FunctionDef, Language, PredicateAlias, StateWrite};
+use super::{ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite};
 use crate::decomplex::ast::{line, node_text, normalize_text, span, RawNode};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -10,8 +10,11 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
     let parsed = ParsedRuby::parse(file)?;
     let mut function_defs = Vec::new();
     let mut state_writes = Vec::new();
+    let mut decision_sites = Vec::new();
     let mut predicate_aliases = Vec::new();
+    let mut comparison_uses = Vec::new();
     let mut seen_writes = HashSet::new();
+    let mut seen_decisions = HashSet::new();
     let context = ContextState::new(file_owner(&parsed.file));
 
     collect_facts(
@@ -21,8 +24,11 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
         &context,
         &mut function_defs,
         &mut state_writes,
+        &mut decision_sites,
         &mut predicate_aliases,
+        &mut comparison_uses,
         &mut seen_writes,
+        &mut seen_decisions,
     );
 
     Ok(Document {
@@ -33,7 +39,9 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
         root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
         function_defs,
         state_writes,
+        decision_sites,
         predicate_aliases,
+        comparison_uses,
     })
 }
 
@@ -98,13 +106,18 @@ fn collect_facts(
     context: &ContextState,
     function_defs: &mut Vec<FunctionDef>,
     state_writes: &mut Vec<StateWrite>,
+    decision_sites: &mut Vec<DecisionSite>,
     predicate_aliases: &mut Vec<PredicateAlias>,
+    comparison_uses: &mut Vec<ComparisonUse>,
     seen_writes: &mut HashSet<String>,
+    seen_decisions: &mut HashSet<String>,
 ) {
     let next_context = push_function_context(node, push_owner_context(node, source, context), source);
     record_function_def(node, source, file, &next_context, function_defs);
     record_state_write(node, source, file, &next_context, state_writes, seen_writes);
+    record_decision_site(node, source, file, &next_context, decision_sites, seen_decisions);
     record_predicate_alias(node, source, file, predicate_aliases);
+    record_comparison_use(node, source, file, &next_context, comparison_uses);
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -115,8 +128,11 @@ fn collect_facts(
             &next_context,
             function_defs,
             state_writes,
+            decision_sites,
             predicate_aliases,
+            comparison_uses,
             seen_writes,
+            seen_decisions,
         );
     }
 }
@@ -177,6 +193,142 @@ fn record_predicate_alias(
         line: line(node),
         span: span(node),
     });
+}
+
+fn record_comparison_use(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<ComparisonUse>,
+) {
+    if !comparison_node(node, source) {
+        return;
+    }
+    let raw = normalize_text(node_text(node, source));
+    out.push(ComparisonUse {
+        canon_source: raw.clone(),
+        raw,
+        file: file.to_string_lossy().to_string(),
+        function: context.current_function(),
+        line: line(node),
+        span: span(node),
+    });
+}
+
+fn comparison_node(node: Node<'_>, source: &str) -> bool {
+    if matches!(node.kind(), "binary" | "binary_expression") {
+        return matches!(direct_operator_from_source(node, source).as_str(), "==" | "!=");
+    }
+    if node.kind() != "call" {
+        return false;
+    }
+    node.child_by_field_name("method")
+        .map(|method| node_text(method, source) == "nil?")
+        .unwrap_or(false)
+}
+
+fn record_decision_site(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<DecisionSite>,
+    seen: &mut HashSet<String>,
+) {
+    if boolean_container(node) && boolean_and(node, source) {
+        record_conjunction_decision(node, source, file, context, out, seen);
+        return;
+    }
+
+    if case_node(node) || hidden_case(node) {
+        let decision_node = case_source_node(node);
+        if ruby_predicate_less_case(decision_node) {
+            return;
+        }
+        let patterns = case_patterns(decision_node, source);
+        if patterns.len() < 2 {
+            return;
+        }
+        push_decision_site(out, seen, DecisionSite {
+            kind: "case_dispatch".to_string(),
+            members: patterns,
+            file: file.to_string_lossy().to_string(),
+            function: context.current_function(),
+            line: line(decision_node),
+            span: span(decision_node),
+            predicate: decision_predicate(decision_node, source),
+        });
+    }
+}
+
+fn record_conjunction_decision(
+    mut node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<DecisionSite>,
+    seen: &mut HashSet<String>,
+) {
+    let from_wrapper = parenthesized_wrapper(node);
+    if from_wrapper
+        && node
+            .parent()
+            .map(|parent| boolean_container(parent) && boolean_and(parent, source))
+            .unwrap_or(false)
+    {
+        return;
+    }
+
+    if from_wrapper {
+        if let Some(child) = first_named_child(node) {
+            node = child;
+        }
+    }
+
+    if !from_wrapper
+        && node
+            .parent()
+            .map(|parent| boolean_container(parent) && boolean_and(parent, source) && span(parent) != span(node))
+            .unwrap_or(false)
+    {
+        return;
+    }
+
+    let mut members = flatten_boolean_and(node, source)
+        .into_iter()
+        .map(|child| decision_member_text(child, source))
+        .collect::<Vec<_>>();
+    members.sort();
+    members.dedup();
+    if members.len() < 2 {
+        return;
+    }
+
+    push_decision_site(out, seen, DecisionSite {
+        kind: "conjunction".to_string(),
+        members,
+        file: file.to_string_lossy().to_string(),
+        function: context.current_function(),
+        line: conjunction_span(node)[0],
+        span: conjunction_span(node),
+        predicate: normalize_text(node_text(node, source)),
+    });
+}
+
+fn push_decision_site(out: &mut Vec<DecisionSite>, seen: &mut HashSet<String>, site: DecisionSite) {
+    let key = format!(
+        "{}\0{}\0{}\0{}\0{:?}\0{}",
+        site.file,
+        site.function,
+        site.kind,
+        site.line,
+        site.span,
+        site.members.join("\0")
+    );
+    if seen.insert(key) {
+        out.push(site);
+    }
 }
 
 fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
@@ -517,6 +669,313 @@ fn member_field_text(field: Node<'_>, source: &str) -> Option<String> {
 
 fn strip_assignment_suffix(text: &str) -> String {
     text.strip_suffix('=').unwrap_or(text).to_string()
+}
+
+fn case_node(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "case" | "when_expression" | "switch_statement" | "switch_expression" | "match_statement" | "match_expression"
+    )
+}
+
+fn hidden_case(node: Node<'_>) -> bool {
+    matches!(node.kind(), "body_statement" | "block_body" | "argument_list")
+        && first_child_kind(node) == Some("case")
+}
+
+fn case_source_node(node: Node<'_>) -> Node<'_> {
+    if !hidden_case(node) {
+        return node;
+    }
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == "case")
+        .unwrap_or(node);
+    result
+}
+
+fn ruby_predicate_less_case(node: Node<'_>) -> bool {
+    (node.kind() == "case" || hidden_case(node)) && decision_subject(node).is_none()
+}
+
+fn case_patterns(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut out = case_arms(node)
+        .into_iter()
+        .flat_map(|arm| case_arm_patterns(arm, source))
+        .filter(|pattern| !default_case_pattern(pattern))
+        .collect::<Vec<_>>();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn case_arms(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut arms = Vec::new();
+    let mut stack = named_children(node);
+    while let Some(child) = stack.pop() {
+        if matches!(
+            child.kind(),
+            "when"
+                | "switch_case"
+                | "case_clause"
+                | "expression_case"
+                | "case_statement"
+                | "switch_section"
+                | "switch_block_statement_group"
+                | "switch_entry"
+                | "when_entry"
+                | "match_arm"
+        ) {
+            arms.push(child);
+        } else if !matches!(
+            child.kind(),
+            "method"
+                | "function_definition"
+                | "function_declaration"
+                | "method_definition"
+                | "method_declaration"
+                | "function_item"
+                | "class"
+                | "module"
+                | "class_definition"
+                | "class_declaration"
+        ) {
+            stack.extend(named_children(child));
+        }
+    }
+    arms.reverse();
+    arms
+}
+
+fn case_arm_patterns(child: Node<'_>, source: &str) -> Vec<String> {
+    match child.kind() {
+        "when" | "match_arm" => {
+            let mut patterns = named_children(child)
+                .into_iter()
+                .filter(|node| matches!(node.kind(), "pattern" | "case_pattern" | "match_pattern"))
+                .collect::<Vec<_>>();
+            if patterns.is_empty() {
+                patterns = child
+                    .child_by_field_name("pattern")
+                    .or_else(|| first_named_child(child))
+                    .into_iter()
+                    .collect();
+            }
+            ruby_when_pattern_texts(&patterns, source)
+        }
+        "switch_case"
+        | "case_clause"
+        | "expression_case"
+        | "case_statement"
+        | "switch_section"
+        | "switch_block_statement_group"
+        | "switch_entry"
+        | "when_entry" => {
+            if node_text(child, source).trim_start().starts_with("else") {
+                return Vec::new();
+            }
+            let value = child
+                .child_by_field_name("value")
+                .or_else(|| child.child_by_field_name("pattern"))
+                .or_else(|| named_children(child).into_iter().find(|candidate| candidate.kind() == "when_condition"))
+                .or_else(|| named_children(child).into_iter().find(|candidate| candidate.kind() == "switch_pattern"))
+                .or_else(|| first_named_child(child));
+            value
+                .filter(|node| !node.kind().contains("statement") && !node.kind().contains("block"))
+                .map(|node| vec![normalize_text(node_text(node, source))])
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn ruby_when_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {
+    if patterns.is_empty() {
+        return Vec::new();
+    }
+    let texts = patterns
+        .iter()
+        .map(|pattern| normalize_text(node_text(*pattern, source)))
+        .collect::<Vec<_>>();
+    if !texts.iter().any(|text| text.starts_with('*')) {
+        return texts;
+    }
+
+    let mut out = Vec::new();
+    let mut pending_plain = Vec::new();
+    for (index, text) in texts.iter().enumerate() {
+        if text.starts_with('*') {
+            if !pending_plain.is_empty() {
+                out.push(pending_plain.join(", "));
+                pending_plain.clear();
+            }
+            if texts.len() == 1 || index > 0 {
+                out.push(text.trim_start_matches('*').to_string());
+            } else {
+                out.push(text.clone());
+            }
+        } else {
+            pending_plain.push(text.clone());
+        }
+    }
+    if !pending_plain.is_empty() {
+        out.push(pending_plain.join(", "));
+    }
+    out
+}
+
+fn default_case_pattern(text: &str) -> bool {
+    matches!(text, "" | "_" | "default")
+}
+
+fn decision_predicate(node: Node<'_>, source: &str) -> String {
+    let target = decision_subject(node);
+    normalize_text(target.map(|child| node_text(child, source)).unwrap_or_else(|| node_text(node, source)))
+}
+
+fn decision_subject(node: Node<'_>) -> Option<Node<'_>> {
+    node.child_by_field_name("value")
+        .or_else(|| node.child_by_field_name("subject"))
+        .or_else(|| named_children(node).into_iter().find(|child| child.kind() == "when_subject"))
+        .or_else(|| node.child_by_field_name("condition"))
+        .or_else(|| {
+            named_children(node).into_iter().find(|child| {
+                !matches!(
+                    child.kind(),
+                    "when"
+                        | "switch_case"
+                        | "case_clause"
+                        | "expression_case"
+                        | "case_statement"
+                        | "switch_section"
+                        | "switch_block_statement_group"
+                        | "switch_entry"
+                        | "when_entry"
+                        | "match_arm"
+                        | "else"
+                        | "then"
+                        | "comment"
+                )
+            })
+        })
+}
+
+fn boolean_container(node: Node<'_>) -> bool {
+    if matches!(node.kind(), "binary" | "binary_expression" | "boolean_operator") {
+        return true;
+    }
+    if parenthesized_wrapper(node) {
+        return first_named_child(node).map(boolean_container).unwrap_or(false);
+    }
+    if !matches!(node.kind(), "body_statement" | "block_body" | "statement" | "pattern" | "argument_list") {
+        return false;
+    }
+    if !matches!(direct_operator(node).as_str(), "&&" | "and") {
+        return false;
+    }
+    if named_children(node).len() < 2 {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .all(|child| child.is_named() || matches!(child.kind(), "&&" | "and" | "(" | ")"));
+    result
+}
+
+fn boolean_and(node: Node<'_>, source: &str) -> bool {
+    if parenthesized_wrapper(node) {
+        return first_named_child(node)
+            .map(|child| boolean_and(child, source))
+            .unwrap_or(false);
+    }
+    matches!(direct_operator_from_source(node, source).as_str(), "&&" | "and")
+}
+
+fn flatten_boolean_and<'tree>(node: Node<'tree>, source: &str) -> Vec<Node<'tree>> {
+    if !(boolean_container(node) && boolean_and(node, source)) {
+        return vec![node];
+    }
+    if parenthesized_wrapper(node) {
+        return first_named_child(node)
+            .map(|child| flatten_boolean_and(child, source))
+            .unwrap_or_else(|| vec![node]);
+    }
+    named_children(node)
+        .into_iter()
+        .flat_map(|child| flatten_boolean_and(child, source))
+        .collect()
+}
+
+fn parenthesized_wrapper(node: Node<'_>) -> bool {
+    matches!(node.kind(), "parenthesized_statements" | "parenthesized_expression")
+        && named_children(node).len() == 1
+}
+
+fn conjunction_span(node: Node<'_>) -> [usize; 4] {
+    let mut base = span(node);
+    if node.kind() == "pattern" && node.start_position().column > 0 {
+        base[1] += 1;
+    }
+    base
+}
+
+fn decision_member_text(node: Node<'_>, source: &str) -> String {
+    normalize_text(&strip_enclosing_parentheses(node_text(node, source)))
+}
+
+fn strip_enclosing_parentheses(text: &str) -> String {
+    let mut value = text.trim().to_string();
+    loop {
+        if !(value.starts_with('(') && value.ends_with(')')) {
+            break value;
+        }
+        if !enclosing_parentheses_wrap_all(&value) {
+            break value;
+        }
+        value = value[1..value.len() - 1].trim().to_string();
+    }
+}
+
+fn enclosing_parentheses_wrap_all(text: &str) -> bool {
+    let mut depth = 0isize;
+    for (index, ch) in text.chars().enumerate() {
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth -= 1;
+        }
+        if depth == 0 && index < text.len() - 1 {
+            return false;
+        }
+        if depth < 0 {
+            return false;
+        }
+    }
+    depth == 0
+}
+
+fn direct_operator(node: Node<'_>) -> String {
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .find(|child| !child.is_named() && !matches!(child.kind(), "(" | ")"))
+        .map(|child| child.kind().to_string())
+        .unwrap_or_default()
+    ;
+    result
+}
+
+fn direct_operator_from_source(node: Node<'_>, source: &str) -> String {
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .find(|child| !child.is_named() && !matches!(node_text(*child, source), "(" | ")"))
+        .map(|child| node_text(child, source).to_string())
+        .unwrap_or_default()
+    ;
+    result
 }
 
 #[cfg(test)]

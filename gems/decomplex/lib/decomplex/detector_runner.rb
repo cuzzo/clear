@@ -4,9 +4,15 @@ require "json"
 require_relative "co_update"
 require_relative "flay_similarity"
 require_relative "native/co_update"
+require_relative "native/decision_pressure"
 require_relative "native/predicate_aliases"
 require_relative "native/flay_similarity"
+require_relative "native/miner"
+require_relative "native/semantic_aliases"
+require_relative "miner"
+require_relative "decision_pressure"
 require_relative "predicate_alias"
+require_relative "semantic_alias"
 
 module Decomplex
   # Runs one detector in isolation and emits deterministic machine output.
@@ -17,8 +23,17 @@ module Decomplex
   module DetectorRunner
     DETECTORS = {
       "co-update" => :co_update,
+      "decision-pressure" => :decision_pressure,
       "predicate-alias" => :predicate_alias,
       "predicate-aliases" => :predicate_alias,
+      "miner" => :miner,
+      "decision-miner" => :miner,
+      "missing-abstractions" => :miner,
+      "neglected-conditions" => :miner,
+      "semantic-alias" => :semantic_alias,
+      "semantic-aliases" => :semantic_alias,
+      "semantic-predicate-aliases" => :semantic_alias,
+      "reification-misses" => :semantic_alias,
       "flay-similarity" => :flay_similarity,
       "structural-similarity" => :flay_similarity
     }.freeze
@@ -33,8 +48,14 @@ module Decomplex
       case canonical
       when :co_update
         co_update(files, engine: engine, jobs: jobs)
+      when :decision_pressure
+        decision_pressure(files, engine: engine, jobs: jobs)
       when :predicate_alias
         predicate_alias(files, engine: engine, jobs: jobs)
+      when :miner
+        miner(files, engine: engine, jobs: jobs)
+      when :semantic_alias
+        semantic_alias(files, engine: engine, jobs: jobs)
       when :flay_similarity
         flay_similarity(files, engine: engine, mass: mass, fuzzy: fuzzy, jobs: jobs)
       else
@@ -79,12 +100,40 @@ module Decomplex
       }
     end
 
+    private_class_method def self.decision_pressure(files, engine:, jobs:)
+      return Native::DecisionPressure.scan(files, jobs: jobs) if engine.to_s == "rust"
+
+      DecisionPressure.scan(files).ranked
+    end
+
     private_class_method def self.predicate_alias(files, engine:, jobs:)
       return Native::PredicateAliases.scan(files, jobs: jobs) if engine.to_s == "rust"
 
       report = PredicateAlias.scan(files)
 
       { "alias_clusters" => report.alias_clusters }
+    end
+
+    private_class_method def self.miner(files, engine:, jobs:)
+      return Native::Miner.scan(files, jobs: jobs) if engine.to_s == "rust"
+
+      report = Miner.scan(files)
+
+      {
+        "missing_abstractions" => report.missing_abstractions,
+        "neglected_conditions" => report.neglected_conditions
+      }
+    end
+
+    private_class_method def self.semantic_alias(files, engine:, jobs:)
+      return Native::SemanticAliases.scan(files, jobs: jobs) if engine.to_s == "rust"
+
+      report = SemanticAlias.scan(files)
+
+      {
+        "alias_clusters" => report.alias_clusters,
+        "reification_misses" => report.reification_misses
+      }
     end
 
     private_class_method def self.flay_similarity(files, engine:, mass:, fuzzy:, jobs:)

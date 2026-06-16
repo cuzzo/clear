@@ -30,7 +30,9 @@ pub struct Document {
     pub root: RawNode,
     pub function_defs: Vec<FunctionDef>,
     pub state_writes: Vec<StateWrite>,
+    pub decision_sites: Vec<DecisionSite>,
     pub predicate_aliases: Vec<PredicateAlias>,
+    pub comparison_uses: Vec<ComparisonUse>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +62,27 @@ pub struct PredicateAlias {
     pub body: String,
     pub file: String,
     pub defn: String,
+    pub line: usize,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DecisionSite {
+    pub kind: String,
+    pub members: Vec<String>,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
+    pub predicate: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ComparisonUse {
+    pub canon_source: String,
+    pub raw: String,
+    pub file: String,
+    pub function: String,
     pub line: usize,
     pub span: Span,
 }

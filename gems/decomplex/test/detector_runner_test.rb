@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "open3"
+require "tempfile"
 require_relative "../lib/decomplex"
 
 class DetectorRunnerTest < Minitest::Test
@@ -22,6 +23,119 @@ class DetectorRunnerTest < Minitest::Test
 
     assert ok, diff_message(ruby_json, rust_json)
     assert_equal ruby_json, rust_json
+  end
+
+  def test_miner_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-miner", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def one(a, b, c)
+          a && b && c
+        end
+
+        def two(a, b, c)
+          a && b && c
+        end
+
+        def three(a, b, c)
+          a && b && c
+        end
+
+        def broken(a, b)
+          a && b
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("miner", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_semantic_alias_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-semantic-alias", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def frame?; @provenance == :frame; end
+        def is_frame?; provenance == :frame; end
+        def heap?; @provenance == :heap; end
+        def somewhere(node)
+          return 1 if node.provenance == :frame
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("semantic-alias", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_predicate_alias_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-predicate-alias", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def first?; true; end
+        def second?; true; end
+
+        def nil_body; nil; end
+        def other_nil_body; nil; end
+
+        def setup
+          super
+          self[:type_params] ||= []
+        end
+
+        def type_params
+          self[:type_params] ||= []
+        end
+
+        def emit_one
+          <<~ZIG.chomp
+            hi
+          ZIG
+        end
+
+        def emit_two
+          <<~ZIG.chomp
+            bye
+          ZIG
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("predicate-alias", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_decision_pressure_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-decision-pressure", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def scan(node)
+          value = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+          value.nil?
+        ensure
+          node&.cleanup
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("decision-pressure", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
   end
 
   def test_detector_cli_compare_engines_outputs_canonical_json

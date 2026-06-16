@@ -1,7 +1,9 @@
 mod decomplex;
 
 use anyhow::{bail, Context, Result};
-use decomplex::detectors::{co_update, flay_similarity, predicate_alias};
+use decomplex::detectors::{
+    co_update, decision_pressure, flay_similarity, miner, predicate_alias, semantic_alias,
+};
 use decomplex::parallel;
 use decomplex::syntax::Language;
 use std::path::PathBuf;
@@ -26,6 +28,24 @@ fn main() -> Result<()> {
             let language = Language::parse(&language)?;
             let report = predicate_alias::scan_files(&files, language)
                 .with_context(|| "failed to scan predicate-alias facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::Miner { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = miner::scan_files(&files, language)
+                .with_context(|| "failed to scan decision-site miner facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::SemanticAliases { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = semantic_alias::scan_files(&files, language)
+                .with_context(|| "failed to scan semantic-alias facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::DecisionPressure { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = decision_pressure::scan_files(&files, language)
+                .with_context(|| "failed to scan decision-pressure facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
         Command::FlaySimilarity {
@@ -60,6 +80,21 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    Miner {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    SemanticAliases {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    DecisionPressure {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
     FlaySimilarity {
         language: String,
         mass: usize,
@@ -75,6 +110,9 @@ impl Command {
             Self::StateWrites { jobs, .. }
             | Self::CoUpdate { jobs, .. }
             | Self::PredicateAliases { jobs, .. }
+            | Self::Miner { jobs, .. }
+            | Self::SemanticAliases { jobs, .. }
+            | Self::DecisionPressure { jobs, .. }
             | Self::FlaySimilarity { jobs, .. } => *jobs,
         }
     }
@@ -114,6 +152,39 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 bail!("predicate-aliases requires at least one file");
             }
             Ok(Command::PredicateAliases {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "miner" | "decision-miner" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("miner requires at least one file");
+            }
+            Ok(Command::Miner {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "semantic-aliases" | "semantic-alias" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("semantic-aliases requires at least one file");
+            }
+            Ok(Command::SemanticAliases {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "decision-pressure" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("decision-pressure requires at least one file");
+            }
+            Ok(Command::DecisionPressure {
                 language,
                 files,
                 jobs,
