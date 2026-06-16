@@ -575,7 +575,7 @@ module MIRHoistLowering
       ti.resource?
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def mir_allocates?(node)
     return false unless node
     return false unless node.is_a?(MIR::Emittable)
@@ -729,14 +729,15 @@ module MIRHoistLowering
   sig { params(mir: MIR::BlockExpr).returns(T.nilable(Type)) }
   def block_expr_result_type(mir)
     marks = T.let([], T::Array[MIR::AllocMark])
-    mir.body&.each { |stmt| marks << stmt if stmt.is_a?(MIR::AllocMark) }
-    break_stmt = mir.body&.reverse&.find { |stmt| stmt.is_a?(MIR::BreakStmt) }
+    body = mir.body
+    body.each { |stmt| marks << stmt if stmt.is_a?(MIR::AllocMark) }
+    break_stmt = body.reverse.grep(MIR::BreakStmt).first
     value = break_stmt&.value
     case value
     when MIR::StructInit
       return Type.new(value.zig_type.to_s)
     when MIR::Ident
-      let = mir.body&.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == value.name.to_s }
+      let = body.grep(MIR::Let).find { |stmt| stmt.name.to_s == value.name.to_s }
       init = let&.init
       return Type.new(init.zig_type.to_s) if init.is_a?(MIR::StructInit)
       return Type.new(init.zig_type.to_s) if init.is_a?(MIR::ContainerInit)
@@ -884,7 +885,12 @@ module MIRHoistLowering
         prefix.concat(cond_prefix)
       end
     when MIR::DeferStmt, MIR::ErrDeferStmt
-      prefix.concat(normalize_allocating_mir_stmt!(stmt.body))
+      defer_body = stmt.body
+      if defer_body.is_a?(Array)
+        stmt.body = normalize_allocating_mir_body(T.cast(defer_body, T::Array[MIR::Node]))
+      else
+        prefix.concat(normalize_allocating_mir_stmt!(defer_body))
+      end
     when MIR::BatchWindowPush
       prefix.concat(normalize_used_expr_attr!(stmt, :item_expr))
       prefix.concat(normalize_used_expr_attr!(stmt, :value_expr))
@@ -1282,7 +1288,7 @@ module MIRHoistLowering
       # block-local names.
       transferred = effect.target_var
       if transferred
-        let = mir.body&.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == transferred.to_s }
+        let = mir.body.grep(MIR::Let).find { |stmt| stmt.name.to_s == transferred.to_s }
         return hoist_cleanup_entry(let.init, nil) if let
       end
     end
@@ -1323,7 +1329,7 @@ module MIRHoistLowering
       transferred_names = node.body.each_with_object(Set.new) do |stmt, names|
         names << stmt.name.to_s if stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result
       end
-      last = node.body.reverse.find { |s| s.is_a?(MIR::BreakStmt) }
+      last = node.body.reverse.grep(MIR::BreakStmt).first
       last ? mir_ident_names(last.value).reject { |name|
         local_names.include?(name.to_s) || transferred_names.include?(name.to_s)
       } : []

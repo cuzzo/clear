@@ -2024,7 +2024,7 @@ module MIRLoweringFunctions
     body_mir = []
     body_mir << MIR::Suppress.new("_rt")
     params_list.each { |p| body_mir << MIR::Suppress.new(p.name) }
-    body_mir << MIR::ReturnStmt.new(lower(node.body))
+    body_mir << MIR::ReturnStmt.new(lower(T.must(node.body.last)))
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     captures = node.captures&.map { |c|

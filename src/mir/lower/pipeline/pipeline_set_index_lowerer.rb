@@ -59,7 +59,7 @@ class PipelineSetIndexLowerer < T::Struct
     elem_zig = self.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
     set_zig = "CheatLib.Set(#{elem_zig})"
     alloc = :heap
-    expr_mir = self.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), "it")
+    expr_mir = self.visit_mir_with_placeholder.call(distinct_node.expression, "it")
 
     range_chain = self.range_chain.call(list_node)
     return lower_range_distinct(range_chain, distinct_node, set_zig, alloc) if range_chain
@@ -136,7 +136,7 @@ class PipelineSetIndexLowerer < T::Struct
   def lower_range_distinct(range_chain, distinct_node, set_zig, alloc)
     prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
     item_var = prefix.item_var
-    key_expr_mir = self.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), item_var)
+    key_expr_mir = self.visit_mir_with_placeholder.call(distinct_node.expression, item_var)
     label = self.next_label.call
     source_type = range_chain.source.full_type!
     defer_deinit = source_type.bounded_stream? ? prefix.deinit_stmt : nil

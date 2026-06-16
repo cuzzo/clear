@@ -2,6 +2,21 @@
 require "sorbet-runtime"
 require_relative "../../ast/ast"
 
+AutoInferenceWalkNode = T.type_alias do
+  T.nilable(T.any(
+    AST::Node,
+    AST::RawBody,
+    T::Hash[BasicObject, BasicObject],
+    Symbol,
+    String,
+    Numeric,
+    TrueClass,
+    FalseClass,
+    Type,
+  ))
+end
+AutoInferenceDeclBlock = T.type_alias { T.proc.params(decl: T.any(AST::BindExpr, AST::VarDecl)).void }
+
 class AutoSlotId
     extend T::Sig
 
@@ -211,7 +226,7 @@ class AutoConstraintCollector
   # FunctionDef entry, resets @local_decls (per-function map of
   # local-name → slot-id) so reassignments only match decls in the
   # same function body.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
+  sig { params(node: AutoInferenceWalkNode, current_fn: T.nilable(AST::FunctionDef)).void }
   def walk(node, current_fn:)
     return if node.nil?
     case node
@@ -230,7 +245,7 @@ class AutoConstraintCollector
         @local_decls = {}
       end
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk(v, current_fn: next_fn) }
+        T.unsafe(node).each_pair { |_, v| walk(v, current_fn: next_fn) }
       end
       @local_decls = saved_local_decls if node.is_a?(AST::FunctionDef)
     end
@@ -238,7 +253,7 @@ class AutoConstraintCollector
 
   # Per-node-type constraint recording. Each branch corresponds to
   # one of the constraint sources from §4.1 of the spec.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
+  sig { params(node: AutoInferenceWalkNode, current_fn: T.nilable(AST::FunctionDef)).void }
   def record_constraint(node, current_fn)
     case node
     when AST::FuncCall
@@ -737,7 +752,7 @@ class ShapeEvidenceCollector
     map
   end
 
-  sig { params(node: T.untyped, block: T.untyped).void }
+  sig { params(node: AutoInferenceWalkNode, block: AutoInferenceDeclBlock).void }
   def walk_for_shape_decls(node, &block)
     return if node.nil?
     case node
@@ -752,13 +767,13 @@ class ShapeEvidenceCollector
       node.each_value { |v| walk_for_shape_decls(v, &block) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_for_shape_decls(v, &block) }
+        T.unsafe(node).each_pair { |_, v| walk_for_shape_decls(v, &block) }
       end
     end
   end
 
   # Walk the body and record evidence into shape slots.
-  sig { params(node: T.untyped, name_map: NameShapeMap).void }
+  sig { params(node: AutoInferenceWalkNode, name_map: NameShapeMap).void }
   def walk(node, name_map)
     return if node.nil?
     case node
@@ -777,7 +792,7 @@ class ShapeEvidenceCollector
       node.each_value { |v| walk(v, name_map) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk(v, name_map) }
+        T.unsafe(node).each_pair { |_, v| walk(v, name_map) }
       end
     end
   end
@@ -892,7 +907,7 @@ class OperatorEvidenceCollector
   end
 
   # Walk for Auto-typed BindExpr / VarDecl, yielding each one.
-  sig { params(node: T.untyped, block: T.untyped).void }
+  sig { params(node: AutoInferenceWalkNode, block: AutoInferenceDeclBlock).void }
   def walk_for_local_decls(node, &block)
     return if node.nil?
     case node
@@ -907,7 +922,7 @@ class OperatorEvidenceCollector
       node.each_value { |v| walk_for_local_decls(v, &block) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_for_local_decls(v, &block) }
+        T.unsafe(node).each_pair { |_, v| walk_for_local_decls(v, &block) }
       end
     end
   end
@@ -915,7 +930,7 @@ class OperatorEvidenceCollector
   # Walk for BinaryOp expressions; record `op` per slot whose
   # binding appears as an Identifier operand. Returns also recorded
   # for return-Auto when the RETURN value is a BinaryOp.
-  sig { params(node: T.untyped, name_to_slot: NameSlotMap, fn: AST::FunctionDef).void }
+  sig { params(node: AutoInferenceWalkNode, name_to_slot: NameSlotMap, fn: AST::FunctionDef).void }
   def walk_binops(node, name_to_slot, fn)
     return if node.nil?
     case node
@@ -937,7 +952,7 @@ class OperatorEvidenceCollector
       node.each_value { |v| walk_binops(v, name_to_slot, fn) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_binops(v, name_to_slot, fn) }
+        T.unsafe(node).each_pair { |_, v| walk_binops(v, name_to_slot, fn) }
       end
     end
   end

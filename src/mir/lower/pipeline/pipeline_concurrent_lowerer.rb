@@ -1385,7 +1385,7 @@ class PipelineConcurrentLowerer < T::Struct
     op = conc_op.op
     case op
     when AST::AverageOp, AST::CountOp, AST::MaxOp, AST::MinOp, AST::SelectOp, AST::SumOp, AST::WhereOp
-      T.cast(op.expression, AST::Node)
+      op.expression
     else
       raise "concurrent callback expression expected expression op, got #{op.class}"
     end

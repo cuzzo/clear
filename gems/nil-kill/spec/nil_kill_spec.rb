@@ -3480,6 +3480,34 @@ RSpec.describe NilKill do
       expect(rows.map { |row| row["name"] }).not_to include("payload")
     end
 
+    it "reports static typed distributions for repeated untyped slot names when available" do
+      report = described_class.allocate
+      evidence = {
+        "facts" => {
+          "top_untyped_slot_names" => [
+            {
+              "name" => "token",
+              "count" => 2,
+              "categories" => { "param" => 1, "ivar" => 1 },
+              "examples" => ["src/a.rb:1 token"],
+              "typed_total" => 4,
+              "typed_hints" => [
+                { "type" => "Token", "count" => 3, "percent" => 75.0 },
+                { "type" => "Other", "count" => 1, "percent" => 25.0 },
+              ],
+            },
+          ],
+        },
+      }
+
+      rows = report.send(:untyped_slot_name_pressure, evidence)
+      lines = []
+      report.send(:append_untyped_slot_name_pressure, lines, evidence)
+
+      expect(rows.first.fetch("typed_hints").first).to include("type" => "Token", "percent" => 75.0)
+      expect(lines.join("\n")).to include("`Token` 3 (75.0%)")
+    end
+
     it "splits addressed return fixability by type strength" do
       report = described_class.allocate
 

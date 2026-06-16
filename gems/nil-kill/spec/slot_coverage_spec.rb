@@ -38,6 +38,115 @@ RSpec.describe NilKill::SlotCoverage do
     end
   end
 
+  it "reports static type distributions for repeated untyped slot names" do
+    path, = repo_tmp_file("slot_coverage_hint_fixture.rb", <<~RUBY)
+      class SlotCoverageHintFixture
+        sig { params(node: AST::Node, payload: Alpha).void }
+        def first(node, payload); end
+
+        sig { params(node: AST::Node, payload: Beta).void }
+        def second(node, payload); end
+
+        sig { params(node: MIR::Node, payload: Gamma).void }
+        def third(node, payload); end
+
+        sig { params(node: ExtraNode, payload: Delta).void }
+        def fourth(node, payload); end
+
+        sig { params(node: MIR::Node, payload: Epsilon).void }
+        def fifth(node, payload); end
+
+        def missing_one(node, payload); end
+        def missing_two(node, payload); end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+    node = rows.find { |row| row["name"] == "node" }
+    payload = rows.find { |row| row["name"] == "payload" }
+
+    expect(node).to include("count" => 2, "typed_total" => 5)
+    expect(node.fetch("typed_hints")).to eq([
+      { "type" => "AST::Node", "count" => 2, "percent" => 40.0 },
+      { "type" => "MIR::Node", "count" => 2, "percent" => 40.0 },
+      { "type" => "Other", "count" => 1, "percent" => 20.0 },
+    ])
+    expect(payload).to include("count" => 2, "typed_total" => 5)
+    expect(payload).not_to have_key("typed_hints")
+  end
+
+  it "qualifies Ruby struct owners under modules without popping on method ends" do
+    path, = repo_tmp_file("slot_coverage_nested_structs.rb", <<~RUBY)
+      module Sample
+        def self.helper
+          :ok
+        end
+
+        module Nested
+          Item = Struct.new(:token)
+        end
+
+        Item = Struct.new(:token) do
+          extend T::Sig
+
+          sig { returns(String) }
+          def token
+            self[:token].to_s
+          end
+        end
+
+        class Record < T::Struct
+          const :value, String
+
+          def helper
+            :ok
+          end
+
+          prop :after_method, Integer
+        end
+      end
+    RUBY
+
+    type_definitions = NilKill::StaticEvidence.build([path], root: NilKill::ROOT)
+                                             .dig("facts", "type_definitions")
+
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Item",
+      "name" => "token",
+      "type_system" => "ruby-struct"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Nested::Item",
+      "name" => "token",
+      "type_system" => "ruby-struct"
+    ))
+    expect(type_definitions).not_to include(a_hash_including(
+      "owner" => "Sample::Sample::Nested::Item"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "method_signature",
+      "owner" => "Sample::Item",
+      "name" => "token",
+      "return_type" => "String"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Record",
+      "name" => "value",
+      "declared_type" => "String",
+      "type_system" => "sorbet"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Record",
+      "name" => "after_method",
+      "declared_type" => "Integer",
+      "type_system" => "sorbet"
+    ))
+  end
+
   it "counts typed, weak, and untyped slots per file without regex source scanning" do
     path, rel = repo_tmp_file("slot_coverage_fixture.rb", <<~RUBY)
       class CoverageFixture

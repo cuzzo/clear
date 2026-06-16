@@ -219,7 +219,7 @@ module Annotator
           error!(match_node, :MATCH_NEEDS_STRUCT_TYPE, got: expr_type)
         end
 
-        schema = lookup_type_schema(expr_type)
+        schema = lookup_type_schema(T.must(expr_type))
 
         pat.fields.each do |f|
           next if f.wildcard?
@@ -407,14 +407,15 @@ module Annotator
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def consume_match_subject_if_takes!(node, plan)
         T.bind(self, SemanticAnnotator)
-        return unless node.takes && plan.union? && node.expr.is_a?(AST::Identifier)
+        expr = node.expr
+        return unless node.takes && plan.union? && expr.is_a?(AST::Identifier)
 
-        source_name = node.expr.name
+        source_name = expr.name
         graph_node = ownership_graph[source_name]
         return unless graph_node && graph_node.kind != :borrowed
 
-        node.expr.was_moved = true
-        og_set_moved(source_name, at_token: node.expr.token, action: :takes)
+        expr.was_moved = true
+        og_set_moved(source_name, at_token: expr.token, action: :takes)
       end
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Array[T.proc.returns(BasicObject)]) }

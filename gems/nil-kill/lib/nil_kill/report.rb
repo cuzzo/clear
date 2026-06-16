@@ -2474,17 +2474,24 @@ module NilKill
       end
 
       lines << ""
-      lines << "| Name | Slots | Categories | Example sites |"
-      lines << "|---|---:|---|---|"
+      lines << "| Name | Slots | Categories | Type hints | Example sites |"
+      lines << "|---|---:|---|---|---|"
       rows.first(20).each do |row|
         categories = row["categories"].sort.map { |kind, count| "#{kind} #{count}" }.join(", ")
+        hints = Array(row["typed_hints"]).map do |hint|
+          "`#{hint["type"]}` #{hint["count"]} (#{hint["percent"]}%)"
+        end.join(", ")
+        hints = "-" if hints.empty?
         examples = row["examples"].first(3).join("; ")
-        lines << "| `#{row["name"]}` | #{row["count"]} | #{categories} | #{examples} |"
+        lines << "| `#{row["name"]}` | #{row["count"]} | #{categories} | #{hints} | #{examples} |"
       end
       lines << "- ... #{rows.size - 20} more repeated name(s)" if rows.size > 20
     end
 
     def untyped_slot_name_pressure(evidence)
+      static_rows = Array(evidence.dig("facts", "top_untyped_slot_names"))
+      return static_rows unless static_rows.empty?
+
       rows = Hash.new do |hash, name|
         hash[name] = {"name" => name, "count" => 0, "categories" => Hash.new(0), "examples" => []}
       end

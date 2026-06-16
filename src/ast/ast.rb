@@ -14,6 +14,9 @@ module AST
 
   RawBody = T.type_alias { T::Array[AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
+  ScalarLiteralCandidate = T.type_alias do
+    T.nilable(T.any(AST::Node, RawBody, Struct, Type, String, Symbol, Numeric, TrueClass, FalseClass))
+  end
   StructKwargs = T.type_alias { BasicObject }
 
   class BodySlot
@@ -567,7 +570,7 @@ module AST
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: ScalarLiteralCandidate).returns(T::Boolean) }
   def self.scalar_literal_value?(node)
     node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
       node.is_a?(TrueClass) || node.is_a?(FalseClass)
@@ -877,6 +880,15 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies
       []
+    end
+  end
+
+  module HasExpression
+    extend T::Sig
+
+    sig { returns(AST::Node) }
+    def expression
+      T.unsafe(self)[:expression]
     end
   end
 
@@ -1760,6 +1772,9 @@ module AST
     extend T::Sig
     include Locatable
 
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+
     sig { returns(Type) }
     def full_type
       Type.new(type_info)
@@ -1799,6 +1814,16 @@ module AST
     sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
     def params=(val)
       self[:params] = val || []
+    end
+
+    sig { returns(RawBody) }
+    def body
+      self[:body]
+    end
+
+    sig { params(val: RawBody).returns(RawBody) }
+    def body=(val)
+      self[:body] = val
     end
   end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
@@ -2011,14 +2036,14 @@ module AST
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
-  SelectOp     = Struct.new(:token, :expression) { include Locatable }
-  WhereOp      = Struct.new(:token, :expression) { include Locatable }
-  IndexOp      = Struct.new(:token, :expression) { include Locatable }
-  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
-  OrderByOp    = Struct.new(:token, :expression) { include Locatable }
+  SelectOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
+  OrderByOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   LimitOp      = Struct.new(:token, :count) { include Locatable }
-  UnnestOp     = Struct.new(:token, :expression) { include Locatable }
-  DistinctOp   = Struct.new(:token, :expression) { include Locatable }
+  UnnestOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  DistinctOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   # EachOp: side-effect iteration over a collection.
   # Uses `_` as the implicit item binding. Body is a list of statements.
   # Syntax: collection |> EACH { _.field = value; };
@@ -2035,28 +2060,28 @@ module AST
   # to `lhs.next()` (same shape as NEXT for ~T promises).
   CollectOp    = Struct.new(:token) { include Locatable }
   # TAKE_WHILE: take elements from the front while predicate is true.
-  TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
+  TakeWhileOp = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
-  WindowOp = Struct.new(:token, :size, :expression) { include Locatable }
+  WindowOp = Struct.new(:token, :size, :expression) { include Locatable; include HasExpression }
   # WINDOW(size: N, time: 'Xms'): batch/tumbling window. _ is a T[] batch.
   # options = { "size" => size_node, "time" => time_node } (at least one required)
-  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable }
+  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable; include HasExpression }
   # JOIN(right_source) key_expr_or_lambda
   # Equi-join: shared key applied to both sides, or lambda(a, b) -> Bool.
   # Result: anonymous struct { left: L, right: ?R } for each left element.
   JoinOp = Struct.new(:token, :right_source, :key_expr) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
-  FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
-  AnyOp    = Struct.new(:token, :expression) { include Locatable } # Bool
-  AllOp    = Struct.new(:token, :expression) { include Locatable } # Bool
-  CountOp  = Struct.new(:token, :expression) { include Locatable } # Int64
+  FindOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression } # ?ElemType
+  AnyOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
+  AllOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
+  CountOp  = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Int64
   # Phase 4 numeric aggregation operators — expression must be numeric.
   # SUM/AVERAGE return 0 for empty list; MIN/MAX panic on empty list.
-  SumOp     = Struct.new(:token, :expression) { include Locatable } # Number
-  AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
-  MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
-  MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  SumOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
+  AverageOp = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
+  MinOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
+  MaxOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
   # ShardOp: route items to owning schedulers by key hash.
   # Syntax: collection |> SHARD(key_expr, target_map) |> CONCURRENT EACH { body }
   # key_expr uses `_` as the implicit item binding (consistent with SELECT/WHERE).
@@ -2557,13 +2582,25 @@ module AST
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
   # Only valid inside a BgStreamBlock body. expr: the value to yield.
   YieldExpr         = Struct.new(:token, :expr) do
+    extend T::Sig
     include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
     end
+  end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
   NextExpr          = Struct.new(:token, :expr) do
+    extend T::Sig
     include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
+    end
   end
 
   # MatchStatement: pattern-matching on a value.
@@ -2585,6 +2622,11 @@ module AST
     sig { params(val: T::Array[AST::MatchCase]).void }
     def cases=(val)
       self[:cases] = val
+    end
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
     end
 
     sig { returns(T::Array[RawBody]) }
@@ -2678,7 +2720,15 @@ module AST
   # top of every TEST THAT in the enclosing block, so each test sees
   # an independent value. WHEN-level LETs override TEST-level LETs of
   # the same name (the inner declaration wins).
-  LetBinding = Struct.new(:token, :name, :expr) { include Locatable }
+  LetBinding = Struct.new(:token, :name, :expr) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
+    end
+  end
 
   # TEST THAT "description" DO body... END
   TestThat = Struct.new(:token, :description, :body) do
@@ -2697,16 +2747,127 @@ module AST
   end
 
   # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr
-  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable }
+  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable; include HasExpression }
 
   # BENCHMARK expr x<N>
-  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable }
+  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable; include HasExpression }
 
   # SMASH expr
-  SmashStmt = Struct.new(:token, :expression) { include Locatable }
+  SmashStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
 
   # PROFILE expr
-  ProfileStmt = Struct.new(:token, :expression) { include Locatable }
+  ProfileStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+
+  class SelectOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class WhereOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class IndexOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class ReduceOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class OrderByOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class UnnestOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class DistinctOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class TakeWhileOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class WindowOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class BatchWindowOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class FindOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AnyOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AllOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class CountOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class SumOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AverageOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class MinOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class MaxOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AssertRaises
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class BenchmarkStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class SmashStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class ProfileStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
 
   # STUB fn RETURNS value | STUB fn CAPTURES var | STUB fn SEQUENCE [...] | STUB fn WITH lambda
   StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }

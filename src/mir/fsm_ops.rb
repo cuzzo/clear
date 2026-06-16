@@ -155,11 +155,32 @@ module FsmOps
   BinOp = Struct.new(:op, :left, :right)
 
   Expr = T.type_alias do
-    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp)
+    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp, MIR::Emittable)
   end
   Stmt = T.type_alias do
     T.any(AssignField, LetConst, ErrDeferCall, ErrDeferFreeField, DeferFreeField, StmtCall, IoSubmit,
       IfFieldSubLtZeroReturnCall)
+  end
+  WalkValue = T.type_alias do
+    T.nilable(T.any(Stmt, Expr, FunctionPath, T::Array[BasicObject], String, Symbol, Integer, TrueClass, FalseClass))
+  end
+
+  class AddrOf
+    extend T::Sig
+
+    sig { returns(FsmOps::Expr) }
+    def expr
+      self[:expr]
+    end
+  end
+
+  class IntCast
+    extend T::Sig
+
+    sig { returns(FsmOps::Expr) }
+    def expr
+      self[:expr]
+    end
   end
 
   # =====================================================================
@@ -284,19 +305,19 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, arg_mirs: T::Array[T.untyped]).void }
+    sig { params(ctx_id: Integer, arg_mirs: T::Array[MIR::Emittable]).void }
     def initialize(ctx_id:, arg_mirs:)
       @ctx_id = ctx_id
       @arg_mirs = arg_mirs
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
-    sig { params(ops: T::Array[Stmt]).returns(T::Array[T.untyped]) }
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[MIR::Emittable]) }
     def lower_stmts(ops)
       ops.map { |op| lower_stmt(op) }
     end
 
-    sig { params(op: T.untyped).returns(T.untyped) }
+    sig { params(op: Stmt).returns(MIR::Emittable) }
     def lower_stmt(op)
       case op
       when AssignField
@@ -344,7 +365,7 @@ module FsmOps
       end
     end
 
-    sig { params(expr: T.untyped).returns(T.untyped) }
+    sig { params(expr: Expr).returns(MIR::Emittable) }
     def lower_expr(expr)
       case expr
       when ArgRef
@@ -352,7 +373,9 @@ module FsmOps
         unless idx >= 0 && idx < @arg_mirs.length
           raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_mirs.length} args)"
         end
-        @arg_mirs[idx]
+        T.must(@arg_mirs[idx])
+      when MIR::Emittable
+        expr
       when StateField
         state_ref(expr.name)
       when SubField
@@ -483,15 +506,15 @@ end
     refs.any? { |name| finalized.include?(name) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: WalkValue, block: T.proc.params(node: WalkValue).void).void }
   def self.walk(node, &block)
     return unless node
     if node.is_a?(Array)
-      node.each { |n| walk(n, &block) }
+      node.each { |n| walk(T.cast(n, WalkValue), &block) }
       return
     end
     yield node
-    node.each_pair do |_, v|
+    T.unsafe(node).each_pair do |_, v|
       walk(v, &block)
     end if node.respond_to?(:each_pair)
   end

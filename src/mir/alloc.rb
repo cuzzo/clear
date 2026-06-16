@@ -10,9 +10,11 @@ require "sorbet-runtime"
 module AllocHelper
   extend T::Sig
 
+  AllocDeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+
   # Downgrade :frame to :stack for struct literals inside loop bodies.
   # The OS stack reclaims them each iteration; LLVM can SROA the fields.
-  sig { params(node: T.untyped, storage: Symbol).returns(Symbol) }
+  sig { params(node: AllocDeclarationNode, storage: Symbol).returns(Symbol) }
   def downgrade_frame_to_stack(node, storage)
     T.bind(self, SemanticAnnotator)
     return storage unless storage == :frame && current_loop_depth.positive?
@@ -25,10 +27,10 @@ module AllocHelper
   end
 
   # Finalize storage tier (stack/frame/heap) and record allocation effects.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(Symbol) }
+  sig { params(node: AllocDeclarationNode, final_type: T.any(Symbol, Type)).returns(Symbol) }
   def finalize_decl_storage!(node, final_type)
     T.bind(self, SemanticAnnotator)
-    storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
+    storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n.to_sym) }
     storage = downgrade_frame_to_stack(node, storage)
     current_fn_ctx&.record_frame_use! if storage == :frame
     if storage == :heap

@@ -61,7 +61,17 @@ class MIRLowering
   TransferMark = T.type_alias { T.any(MIR::TransferMark, MIR::MoveMark) }
   FnSigMap = T.type_alias { T::Hash[T.any(String, Symbol), FunctionSignature] }
   LoweredMir = T.type_alias { T.any(MIR::Node, T::Array[MIR::Node]) }
-  LowerableStmt = T.type_alias { T.any(AST::Node, MIR::Node) }
+  LowerableMarker = T.type_alias do
+    T.any(
+      MIR::Drop,
+      MIR::AllocMark,
+      MIR::SuppressCleanup,
+      MIR::Return,
+      MIR::ReassignCleanup,
+      MIR::FieldCleanup,
+    )
+  end
+  LowerableStmt = T.type_alias { T.any(AST::Node, LowerableMarker) }
   BackgroundDispatch = T.type_alias { T.any(Symbol, T::Boolean) }
   UnionVariantPayload = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
 
@@ -914,7 +924,7 @@ class MIRLowering
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: LowerableStmt).returns(T.untyped) }
   def lower(node)
     mir = case node
 
@@ -2102,7 +2112,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(MIR::OwnershipContract)) }
+  sig { params(node: T.nilable(MIR::Node)).returns(T.nilable(MIR::OwnershipContract)) }
   def ownership_contract_for_node(node)
     node.is_a?(MIR::Emittable) ? node.explicit_ownership_contract : nil
   end
@@ -2482,7 +2492,7 @@ class MIRLowering
     return lower_body(stmts) unless last_user_idx
 
     prefix_lowered = lower_body(stmts[0...last_user_idx] || [])
-    result_mir = lower(stmts[last_user_idx])
+    result_mir = lower(T.must(stmts[last_user_idx]))
     pending = flush_pending
     suffix_lowered = lower_body(stmts.drop(last_user_idx + 1))
 

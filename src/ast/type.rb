@@ -383,9 +383,10 @@ class TypeId < T::Struct
 end
 
 class Type
-    extend T::Sig
+  extend T::Sig
 
   TypeInput = T.type_alias { T.any(Type, Symbol, String) }
+  TypeNodeInput = T.type_alias { T.nilable(T.any(TypeInput, AST::Locatable, Struct)) }
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
 
   sig { returns(TypeShape) }
@@ -3091,10 +3092,10 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
-  sig { params(node: T.untyped).returns(T.nilable(Type)) }
+  sig { params(node: TypeNodeInput).returns(T.nilable(Type)) }
   def self.from_node(node)
     return nil unless node
-    t = node.respond_to?(:full_type) ? node.full_type : node
+    t = node.respond_to?(:full_type) ? T.unsafe(node).full_type : node
     return nil unless t
     return t if t.is_a?(Type)
     begin
@@ -3104,7 +3105,7 @@ class Type
     end
   end
 
-  sig { params(node: T.untyped, context: String).returns(Type) }
+  sig { params(node: TypeNodeInput, context: String).returns(Type) }
   def self.from_node!(node, context: "post-annotation MIR")
     t = from_node(node)
     raise "#{context}: missing type info for #{node.class}" unless t
@@ -3673,8 +3674,10 @@ module TypeHelper
   # Called after coercion context is known for integer literals and constant-foldable
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
   # target type. No-op for non-integer or non-literal nodes.
-  sig { params(node: T.untyped, effective_type: T.untyped).returns(NilClass) }
+  sig { params(node: AST::Node, effective_type: T.nilable(Type::TypeInput)).returns(NilClass) }
   def check_prefixed_int_range!(node, effective_type)
+    return if effective_type.nil?
+
     T.bind(self, SemanticAnnotator) rescue nil
     val = integer_literal_range_value(node)
     return if val.nil?
@@ -3687,7 +3690,7 @@ module TypeHelper
     min = Type::INT_TYPE_MIN[t] || 0
 
     if val < min || val > max
-      if respond_to?(:emit_int_overflow_error!)
+      if node.is_a?(AST::Literal) && respond_to?(:emit_int_overflow_error!)
         emit_int_overflow_error!(node, val, t, min, max)
       else
         error!(node, :INT_LITERAL_OVERFLOW, val: val, type: t, min: min, max: max)
@@ -3695,30 +3698,36 @@ module TypeHelper
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(Integer)) }
+  sig { params(node: AST::Node).returns(T.nilable(Integer)) }
   def integer_literal_range_value(node)
     if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
       node.value
     elsif AST.negative_integer_literal?(node)
-      -node.right.value
+      unary = T.cast(node, AST::UnaryOp)
+      -unary.right.value
     else
       nil
     end
   end
 
-  sig { params(effective_type: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(effective_type: Type::TypeInput).returns(T.nilable(Symbol)) }
   def integer_range_target_type(effective_type)
     # Unwrap error unions so fallible integer returns range-check against the
     # underlying payload type.
-    if effective_type.respond_to?(:error_union?) && effective_type.error_union? &&
-       effective_type.respond_to?(:payload_type)
-      effective_type = effective_type.payload_type
+    if effective_type.is_a?(Type) && effective_type.error_union?
+      payload_type = effective_type.payload_type
+      return nil unless payload_type
+      effective_type = payload_type
     end
 
-    return effective_type.resolved if effective_type.respond_to?(:resolved)
-    return effective_type.to_sym if effective_type.respond_to?(:to_sym)
-
-    nil
+    case effective_type
+    when Type
+      effective_type.resolved
+    when Symbol
+      effective_type
+    when String
+      effective_type.to_sym
+    end
   end
 
   private :integer_literal_range_value, :integer_range_target_type

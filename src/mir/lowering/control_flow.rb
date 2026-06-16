@@ -713,7 +713,7 @@ module MIRLoweringControlFlow
                             [c.value, *(c.extra_values || [])].all? { |p|
                               p.is_a?(AST::Literal) && (p.type == :INT64 || p.type == :NUMBER)
                             } })
-    is_enum_match = !!(!is_union && !node.string_match && enum_schemas.key?(expr_type_sym) &&
+    is_enum_match = !!(!is_union && !node.string_match && expr_type_sym && enum_schemas.key?(expr_type_sym) &&
       node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
                             [c.value, *(c.extra_values || [])].all? { |p| p.is_a?(AST::GetField) } })
     MatchLoweringFacts.new(

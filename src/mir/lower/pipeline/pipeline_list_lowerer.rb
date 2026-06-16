@@ -48,13 +48,13 @@ class PipelineListLowerer < T::Struct
   def lower(site, op)
     case op
     when AST::WhereOp
-      lower_where(site, T.cast(op.expression, AST::Node))
+      lower_where(site, op.expression)
     when AST::SelectOp
-      lower_select(site, T.cast(op.expression, AST::Node))
+      lower_select(site, op.expression)
     when AST::LimitOp
       lower_limit(site, op)
     when AST::TakeWhileOp
-      lower_take_while(site, T.cast(op.expression, AST::Node))
+      lower_take_while(site, op.expression)
     when AST::SkipOp
       lower_skip(site, op)
     when AST::UnnestOp
@@ -250,7 +250,7 @@ class PipelineListLowerer < T::Struct
     inner_elem_type = T.must(unnest_node.full_type!.element_type).resolved.to_s
     inner_zig = self.transpile_type.call(inner_elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    expr_mir = visit_pipeline_expr_mir(list_node, T.cast(unnest_node.expression, AST::Node))
+    expr_mir = visit_pipeline_expr_mir(list_node, unnest_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
@@ -276,7 +276,7 @@ class PipelineListLowerer < T::Struct
     list_node = site.list
     acc_zig = self.transpile_type.call(reduce_node.full_type!)
     init_mir = self.visit_mir.call(T.cast(reduce_node.initial_value, AST::Node))
-    expr_mir = self.visit_reduce_expr.call(T.cast(reduce_node.expression, AST::Node), "it", "acc")
+    expr_mir = self.visit_reduce_expr.call(reduce_node.expression, "it", "acc")
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
@@ -296,7 +296,7 @@ class PipelineListLowerer < T::Struct
     res_zig = self.transpile_type.call(expr_type_str)
     alloc = self.pipeline_alloc.call(smooth_node)
     size_mir = self.visit_mir.call(T.cast(window_node.size, AST::Node))
-    expr_mir = self.visit_expr.call(list_node, T.cast(window_node.expression, AST::Node), "window_slice")
+    expr_mir = self.visit_expr.call(list_node, window_node.expression, "window_slice")
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
@@ -347,7 +347,7 @@ class PipelineListLowerer < T::Struct
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
     elem_zig = self.transpile_type.call(elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    key_expr = T.cast(order_node.expression, AST::Node)
+    key_expr = order_node.expression
     key_a = self.visit_expr.call(list_node, key_expr, "a")
     key_b = self.visit_expr.call(list_node, key_expr, "b")
     self.pipeline_block.call(list_node, lambda do |items, label|

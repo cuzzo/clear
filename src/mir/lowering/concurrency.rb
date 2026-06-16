@@ -488,7 +488,7 @@ module MIRLoweringConcurrency
     do_block
   end
 
-  sig { params(expr: T.untyped, mir: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(expr: AST::Node, mir: MIR::Node).returns(T::Array[MIR::Node]) }
   def do_branch_stmt_nodes(expr, mir)
     T.bind(self, MIRLowering) rescue nil
     if mir.is_a?(MIR::BgBlock)
@@ -509,7 +509,7 @@ module MIRLoweringConcurrency
       ]
     end
 
-    [wrap_step_as_stmt(AST::ThenStep.new(expr: expr, binding: nil), mir)]
+    [T.must(wrap_step_as_stmt(AST::ThenStep.new(expr: expr, binding: nil), mir))]
   end
 
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }

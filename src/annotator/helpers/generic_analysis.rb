@@ -24,6 +24,7 @@ module GenericAnalysis
   GenericCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
   GenericCallArgs = T.type_alias { T::Array[AST::Locatable] }
   AnnotationNode = T.type_alias { T.any(AST::Locatable, Struct) }
+  GenericDeclarationNode = T.type_alias { T.any(AST::FunctionDef, AST::StructDef, AST::UnionDef) }
   GenericBinding = T.type_alias { T.any(Type, Symbol) }
   GenericSubstitution = T.type_alias { T::Hash[Symbol, GenericBinding] }
 
@@ -50,7 +51,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
-  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).void }
+  sig { params(node: GenericDeclarationNode, type_params: T::Array[String], kind: String).void }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
@@ -512,7 +513,7 @@ module GenericAnalysis
   # ==========================================
 
   # Validate stream type annotations on variable declarations.
-  sig { params(node: T.untyped).returns(NilClass) }
+  sig { params(node: DeclarationNode).returns(NilClass) }
   def validate_stream_type!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type&.future?
@@ -588,7 +589,7 @@ module GenericAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(node: AnnotationNode).returns(T.nilable(Symbol)) }
   def propagate_call_flags!(node)
     _ = node
     nil
@@ -597,14 +598,14 @@ module GenericAnalysis
 
   # Register container borrow in the OG when a binding receives a value
   # from container access (HashMap/Pool/List indexing, through OR).
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: DeclarationNode).returns(T.nilable(T::Boolean)) }
   def register_container_borrow!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
     ownership_graph[var_name]&.kind = :borrowed
-    node.symbol.mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
+    T.must(node.symbol).mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
     node.storage = :borrow if node.respond_to?(:storage=)
     true
@@ -613,14 +614,18 @@ module GenericAnalysis
   # Walk through OR/OR_RESCUE to find the root container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
-  sig { params(expr: T.untyped).returns(T.nilable(String)) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def find_container_source(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
     if expr.respond_to?(:container_borrow) && expr.container_borrow
-      receiver = expr.respond_to?(:object) ? expr.object : (expr.respond_to?(:target) ? expr.target : nil)
+      receiver = if expr.respond_to?(:object)
+        T.unsafe(expr).object
+      elsif expr.respond_to?(:target)
+        T.unsafe(expr).target
+      end
       return root_variable_name(receiver) if receiver
     end
     if expr.is_a?(AST::GetIndex)

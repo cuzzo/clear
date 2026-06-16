@@ -28,6 +28,7 @@ module TestLowering
     extend T::Sig
 
   MirBody = T.type_alias { T::Array[MIR::Emittable] }
+  AstIdentifierSearchNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
   TestDefs = T.type_alias { T::Array[MIR::TestDef] }
   LetAstMap = T.type_alias { T::Hash[String, AST::LetBinding] }
   StubInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, String)] }
@@ -303,7 +304,7 @@ module TestLowering
 
   # Walk an AST subtree gathering names from AST::Identifier nodes
   # whose name appears in `name_set`. Adds to the `out` set.
-  sig { params(node: T.untyped, name_set: LetAstMap, out: T::Set[String]).void }
+  sig { params(node: AstIdentifierSearchNode, name_set: LetAstMap, out: T::Set[String]).void }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
     return if node.nil? || AST.scalar_literal_value?(node)
@@ -314,7 +315,7 @@ module TestLowering
     if node.is_a?(AST::Identifier) && name_set.key?(node.name)
       out << node.name
     end
-    node.each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
+    T.unsafe(node).each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
   end
 
   sig { params(node: AST::AssertRaises).returns(MIR::AssertRaisesCheck) }

@@ -54,7 +54,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, count_node: AST::CountOp).returns(MIR::BlockExpr) }
   def lower_count(site, count_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, T.cast(count_node.expression, AST::Node))
+    pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
@@ -72,7 +72,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, sum_node: AST::SumOp).returns(MIR::BlockExpr) }
   def lower_sum(site, sum_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, T.cast(sum_node.expression, AST::Node))
+    expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new("f64"), nil),
@@ -88,7 +88,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, avg_node: AST::AverageOp).returns(MIR::BlockExpr) }
   def lower_average(site, avg_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, T.cast(avg_node.expression, AST::Node))
+    expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
@@ -110,7 +110,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, min_node: AST::MinOp).returns(MIR::BlockExpr) }
   def lower_min(site, min_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, T.cast(min_node.expression, AST::Node))
+    expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
@@ -136,7 +136,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, max_node: AST::MaxOp).returns(MIR::BlockExpr) }
   def lower_max(site, max_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, T.cast(max_node.expression, AST::Node))
+    expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
@@ -162,7 +162,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, any_node: AST::AnyOp).returns(MIR::BlockExpr) }
   def lower_any(site, any_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, T.cast(any_node.expression, AST::Node))
+    pred_mir = visit_pipeline_expr_mir(list_node, any_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
@@ -180,7 +180,7 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, all_node: AST::AllOp).returns(MIR::BlockExpr) }
   def lower_all(site, all_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, T.cast(all_node.expression, AST::Node))
+    pred_mir = visit_pipeline_expr_mir(list_node, all_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
@@ -199,7 +199,7 @@ class PipelineScalarLowerer < T::Struct
   def lower_find(site, find_node)
     list_node = site.list
     elem_zig_type = self.transpile_type.call(T.must(list_node.full_type!.element_type).resolved.to_s)
-    pred_mir = visit_pipeline_expr_mir(list_node, T.cast(find_node.expression, AST::Node))
+    pred_mir = visit_pipeline_expr_mir(list_node, find_node.expression)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("find_result",

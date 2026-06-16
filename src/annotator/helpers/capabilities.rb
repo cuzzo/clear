@@ -17,6 +17,8 @@ require_relative "../../semantic/capability_plan"
 module Capabilities
     extend T::Sig
 
+  CaptureSiteNode = T.type_alias { T.any(AST::MoveNode, AST::CopyNode, AST::Copy, AST::CloneNode) }
+
   # Capabilities that are mutually exclusive with each other.
   Conflict = Struct.new(:set_a, :set_b, :message)
   CONFLICTS = T.let([
@@ -37,7 +39,7 @@ module Capabilities
     errors
   end
 
-  sig { params(node: T.untyped, type: Type, error_handler: T.untyped).returns(NilClass) }
+  sig { params(node: AST::Node, type: Type, error_handler: T.untyped).returns(NilClass) }
   def self.validate!(node, type, &error_handler)
     errs = errors_for(type)
     return if errs.empty?
@@ -1129,7 +1131,7 @@ module CapabilityHelper
     current_capture_context&.locals&.add(name) if name
   end
 
-  sig { params(node: T.untyped, copied: T::Boolean).void }
+  sig { params(node: Capabilities::CaptureSiteNode, copied: T::Boolean).void }
   def record_capture_site!(node, copied:)
     ctx = current_capture_context
     return unless ctx

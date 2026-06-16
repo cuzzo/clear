@@ -406,8 +406,10 @@ class MIRChecker
       when MIR::ErrDeferStmt
         # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
-        if node.body.is_a?(MIR::DestroyPtr) && node.body.ptr.is_a?(MIR::Ident)
-          errdefer_destroy_names << node.body.ptr.name
+        body = node.body
+        ptr = body.ptr if body.is_a?(MIR::DestroyPtr)
+        if ptr.is_a?(MIR::Ident)
+          errdefer_destroy_names << ptr.name
         end
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
@@ -685,10 +687,11 @@ class MIRChecker
       states << linear_project_branch_state(check_linear_stmts!(stmt.default_body || [], state.copy), state, "if-chain")
       linear_merge_branch_states!(states, state, "if-chain")
     when MIR::DeferStmt, MIR::ErrDeferStmt
-      if stmt.body.is_a?(Array)
-        check_linear_stmts!(stmt.body, state)
+      body = stmt.body
+      if body.is_a?(Array)
+        check_linear_stmts!(body, state)
       else
-        check_linear_stmt!(stmt.body, state)
+        check_linear_stmt!(body, state)
       end
     when MIR::StreamSpawn, MIR::FnDef, MIR::TestDef
       check_linear_stmts!(stmt.body, LinearOwnershipState.new)
@@ -2706,7 +2709,8 @@ class MIRChecker
     found = T.let(false, T::Boolean)
     each_loop_local_node(stmts) do |node|
       next unless node.is_a?(MIR::DeferStmt)
-      found = true if node.body.is_a?(MIR::MethodCall) && node.body.method == "restoreLoopMark"
+      body = node.body
+      found = true if body.is_a?(MIR::MethodCall) && body.method == "restoreLoopMark"
     end
     found
   end

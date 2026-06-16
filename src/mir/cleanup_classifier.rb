@@ -620,7 +620,10 @@ module CleanupClassifier
         next unless variant_type
 
         e = match_as_entry_for(variant_type, union_lookup, variant_name)
-        src_entry = bindings[node.expr.name.to_s]
+        expr = node.expr
+        next unless expr.is_a?(AST::Identifier)
+
+        src_entry = bindings[expr.name.to_s]
         e.set_alloc!(src_entry.alloc) if e && src_entry
         bindings[c.binding] = e if e
       end

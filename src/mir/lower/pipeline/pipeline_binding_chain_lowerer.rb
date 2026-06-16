@@ -86,7 +86,7 @@ class PipelineBindingChainLowerer < T::Struct
     rhs = cursor.right
     return nil unless rhs.is_a?(AST::UnnestOp)
 
-    unnest_expr = T.let(T.cast(rhs.expression, AST::Node), AST::Node)
+    unnest_expr = T.let(rhs.expression, AST::Node)
     inner_binding = T.let(nil, T.nilable(String))
     if unnest_expr.is_a?(AST::BinaryOp) && unnest_expr.op == :BIND_VAR
       inner_binding = unnest_expr.right.name.to_s
@@ -177,7 +177,7 @@ class PipelineBindingChainLowerer < T::Struct
 
     chain.stages.any? do |stage|
       stage.is_a?(AST::WhereOp) &&
-        self.ast_uses_placeholder.call(T.cast(stage.expression, AST::Node))
+        self.ast_uses_placeholder.call(stage.expression)
     end
   end
 
@@ -185,7 +185,7 @@ class PipelineBindingChainLowerer < T::Struct
   def fold_expression(fold)
     case fold
     when AST::SumOp, AST::CountOp, AST::AverageOp, AST::MinOp, AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp
-      T.cast(fold.expression, AST::Node)
+      fold.expression
     end
   end
 
@@ -193,19 +193,19 @@ class PipelineBindingChainLowerer < T::Struct
   def lower_binding_fold(fold, stages, placeholder, smooth_node, names)
     case fold
     when AST::SumOp
-      expr = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      expr = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator, MIR::Lit.new("0"), true, Type.new("f64"), nil)]
       accum = [MIR::Set.new(MIR::Ident.new(names.accumulator),
         MIR::BinOp.new("+", MIR::Ident.new(names.accumulator), expr))]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::CountOp
-      pred = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      pred = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator, MIR::Lit.new("0"), true, Type.new("i64"), nil)]
       accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new(names.accumulator),
         MIR::BinOp.new("+", MIR::Ident.new(names.accumulator), MIR::Lit.new("1")))], nil)]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::AverageOp
-      expr = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      expr = visit_placeholder_expr(fold.expression, placeholder)
       init = [
         MIR::Let.new(names.sum, MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::Let.new(names.count, MIR::Lit.new("0.0"), true, Type.new("f64"), nil),
@@ -222,7 +222,7 @@ class PipelineBindingChainLowerer < T::Struct
         MIR::BinOp.new("/", MIR::Ident.new(names.sum), MIR::Ident.new(names.count)))
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], result)
     when AST::MinOp
-      expr = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      expr = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator,
         MIR::TypeSentinel.new(:max, "f64"), true, Type.new("f64"), nil)]
       accum = [
@@ -233,7 +233,7 @@ class PipelineBindingChainLowerer < T::Struct
       ]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::MaxOp
-      expr = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      expr = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator,
         MIR::TypeSentinel.new(:min, "f64"), true, Type.new("f64"), nil)]
       accum = [
@@ -244,7 +244,7 @@ class PipelineBindingChainLowerer < T::Struct
       ]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::AnyOp
-      pred = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      pred = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator, MIR::Lit.new("false"), true, nil, nil)]
       accum = [MIR::IfStmt.new(pred, [
         MIR::Set.new(MIR::Ident.new(names.accumulator), MIR::Lit.new("true")),
@@ -252,7 +252,7 @@ class PipelineBindingChainLowerer < T::Struct
       ], nil)]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::AllOp
-      pred = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      pred = visit_placeholder_expr(fold.expression, placeholder)
       init = [MIR::Let.new(names.accumulator, MIR::Lit.new("true"), true, nil, nil)]
       accum = [MIR::IfStmt.new(MIR::UnaryOp.new("!", pred), [
         MIR::Set.new(MIR::Ident.new(names.accumulator), MIR::Lit.new("false")),
@@ -262,7 +262,7 @@ class PipelineBindingChainLowerer < T::Struct
     when AST::FindOp
       result_ft = Type.new(smooth_node.full_type!)
       find_zig = result_ft.optional? ? self.transpile_type.call(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
-      pred = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
+      pred = visit_placeholder_expr(fold.expression, placeholder)
       init = [
         MIR::Let.new(names.result, MIR::Undef.new(nil), true, Type.new(find_zig), nil),
         MIR::Let.new(names.found, MIR::Lit.new("false"), true, nil, nil),
@@ -301,7 +301,7 @@ class PipelineBindingChainLowerer < T::Struct
       end
       next unless stage.is_a?(AST::WhereOp)
 
-      pred = visit_placeholder_expr(T.cast(stage.expression, AST::Node), placeholder)
+      pred = visit_placeholder_expr(stage.expression, placeholder)
       body = [MIR::IfStmt.new(pred, body, nil)]
     end
     body

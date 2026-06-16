@@ -31,6 +31,9 @@ require_relative "zig_type"
 class MIREmitter
     extend T::Sig
 
+  EmitInput = T.type_alias { T.nilable(T.any(String, MIR::Node)) }
+  ShardedMapNode = T.type_alias { T.any(MIR::ShardedMapPut, MIR::ShardedMapGet) }
+
   sig { returns(String) }
   attr_accessor :rt_name
 
@@ -51,7 +54,7 @@ class MIREmitter
   end
 
   # Emit Zig code from a typed MIR node. Returns a String.
-  sig { params(node: T.untyped).returns(T.nilable(String)) }
+  sig { params(node: EmitInput).returns(T.nilable(String)) }
   def emit(node)
     case node
     when nil    then ""
@@ -480,14 +483,14 @@ class MIREmitter
   # Pick the Zig template the lowering committed to. template_kind is
   # set on the node by mir_lowering after inspecting shard_context and
   # the receiver type.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: ShardedMapNode).returns(T.untyped) }
   def sharded_map_template(node)
     op = node.stdlib_def
-    kind = node.template_kind || IntrinsicTemplateKind::Zig
+    kind = T.cast(node.template_kind || IntrinsicTemplateKind::Zig, IntrinsicTemplateKind)
     op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind.serialize} template (contract=#{op.intrinsic_contract.inspect})"
   end
 
-  sig { params(pattern: String, node: T.untyped).returns(String) }
+  sig { params(pattern: String, node: ShardedMapNode).returns(String) }
   def sharded_map_substitute_common(pattern, node)
     if node.shard_idx
       pattern = pattern
@@ -2132,12 +2135,17 @@ class MIREmitter
 
   sig { params(node: MIR::DeferStmt).returns(String) }
   def emit_defer(node)
-    emit_defer_like("defer", emit(node.body))
+    emit_defer_like("defer", emit_defer_body(node.body))
   end
 
   sig { params(node: MIR::ErrDeferStmt).returns(String) }
   def emit_errdefer(node)
-    emit_defer_like("errdefer", emit(node.body))
+    emit_defer_like("errdefer", emit_defer_body(node.body))
+  end
+
+  sig { params(body: MIR::DeferBody).returns(String) }
+  def emit_defer_body(body)
+    body.is_a?(Array) ? "{\n#{indent_block(emit_body(body), 4)}\n}" : T.must(emit(body))
   end
 
   sig { params(keyword: String, body: T.nilable(String)).returns(String) }
@@ -2691,9 +2699,11 @@ class MIREmitter
     @discard_counter += 1
     name = "__discard_#{@discard_counter}"
 
-    if discard_success_only?(node.expr)
+    discard_expr = node.expr
+    if discard_success_only?(discard_expr)
+      success_expr = T.cast(discard_expr, MIR::TryCatch)
       opt = "#{name}_opt"
-      expr = emit(node.expr.expr)
+      expr = emit(success_expr.expr)
       body = [
         "{",
         "const #{opt}: ?#{node.zig_type} = (#{expr} catch null);",
@@ -2714,7 +2724,7 @@ class MIREmitter
     ].join("\n")
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: MIR::Node).returns(T::Boolean) }
   def discard_success_only?(expr)
     expr.is_a?(MIR::TryCatch) &&
       expr.capture.nil? &&
@@ -2786,7 +2796,7 @@ class MIREmitter
     end
   end
 
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::HasField).returns(String) }
   def emit_has_field(node)
     "@hasField(@TypeOf(#{emit(node.expr)}), \"#{node.field}\")"
   end

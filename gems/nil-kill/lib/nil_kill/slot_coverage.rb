@@ -10,6 +10,8 @@ module NilKill
     STRUCTURAL_CATEGORIES = %w[params returns ivars struct_fields].freeze
     COLLECTION_CATEGORIES = %w[arrays hashes].freeze
     COUNT_KEYS = %w[total strong weak untyped nilable weak_collection].freeze
+    NODE_LIKE_SLOT_NAMES = %w[node expr expression stmt statement ast_node ast_expr mir_node mir_expr].freeze
+    NON_NODE_AST_TYPES = %w[AST::RawBody AST::SyntheticTypeInput AST::TypeInput].freeze
 
     class << self
       def files_for(inputs)
@@ -20,6 +22,10 @@ module NilKill
 
       def scan(inputs = ["src"])
         new(inputs.empty? ? ["src"] : inputs).summaries
+      end
+
+      def analyze(inputs = ["src"])
+        new(inputs.empty? ? ["src"] : inputs).analysis
       end
 
       def totals(summaries)
@@ -67,15 +73,34 @@ module NilKill
     end
 
     def summaries
+      analysis.fetch("files")
+    end
+
+    def analysis
+      @analysis ||= build_analysis
+    end
+
+    private
+
+    def build_analysis
       evidence = StaticEvidence.build(@targets, root: ROOT)
       summaries = evidence.fetch("files", []).to_h do |file|
         [file.fetch("path"), self.class.empty_summary(file.fetch("path"))]
       end
+      name_pressure = Hash.new do |hash, name|
+        hash[name] = {
+          "name" => name,
+          "count" => 0,
+          "categories" => Hash.new(0),
+          "examples" => [],
+        }
+      end
+      typed_name_counts = Hash.new { |hash, name| hash[name] = Hash.new(0) }
 
       method_signatures = method_signature_index(evidence)
       evidence.fetch("methods", []).each do |method|
         summary = summaries[method.fetch("path")] ||= self.class.empty_summary(method.fetch("path"))
-        add_method_slots!(summary, method, method_signatures[method_key(method)])
+        add_method_slots!(summary, method, method_signatures[method_key(method)], name_pressure, typed_name_counts)
       end
 
       field_types = field_type_index(evidence)
@@ -84,6 +109,7 @@ module NilKill
         summary = summaries[field.fetch("path")] ||= self.class.empty_summary(field.fetch("path"))
         type = field["declared_type"] || field_type_for(field_types, field)
         add_slot!(summary, field_category(field), type)
+        record_name_slot!(name_pressure, typed_name_counts, field["name"], field_category(field).delete_suffix("s"), type, field_site(field))
         field_keys(field).each { |key| seen_fields.add(key) }
       end
       type_definitions(evidence).each do |definition|
@@ -94,14 +120,18 @@ module NilKill
         summary = summaries[definition.fetch("path")] ||= self.class.empty_summary(definition.fetch("path"))
         type = definition["declared_type"] || field_type_for(field_types, definition)
         add_slot!(summary, field_category(definition), type)
+        record_name_slot!(name_pressure, typed_name_counts, definition["name"], field_category(definition).delete_suffix("s"), type, field_site(definition))
       end
 
-      summaries.values.sort_by { |summary| summary.fetch("path") }.map do |summary|
+      files = summaries.values.sort_by { |summary| summary.fetch("path") }.map do |summary|
         self.class.finalize_summary!(summary)
       end
+      {
+        "files" => files,
+        "totals" => self.class.totals(files),
+        "top_untyped_slot_names" => finalize_name_pressure(name_pressure, typed_name_counts),
+      }
     end
-
-    private
 
     def method_signature_index(evidence)
       type_definitions(evidence).each_with_object({}) do |definition, index|
@@ -151,13 +181,15 @@ module NilKill
       Array(evidence.dig("facts", "type_definitions"))
     end
 
-    def add_method_slots!(summary, method, signature)
+    def add_method_slots!(summary, method, signature, name_pressure, typed_name_counts)
       param_types = Array(signature && signature["params"]).to_h do |param|
         [param["name"].to_s, param["type"]]
       end
       Array(method["params"]).each do |param|
         name = param.is_a?(Hash) ? param["name"] : param.to_s
-        add_slot!(summary, "params", param_types[name])
+        type = param_types[name]
+        add_slot!(summary, "params", type)
+        record_name_slot!(name_pressure, typed_name_counts, name, "param", type, method_site(method, name))
       end
       add_slot!(summary, "returns", return_type_for(signature))
     end
@@ -301,6 +333,105 @@ module NilKill
 
     def field_category(field)
       field["name"].to_s.start_with?("@") ? "ivars" : "struct_fields"
+    end
+
+    def record_name_slot!(name_pressure, typed_name_counts, name, category, type, site)
+      clean_name = name.to_s.delete_prefix("@")
+      return if clean_name.empty?
+
+      if slot_strength(type) == "untyped"
+        row = name_pressure[clean_name]
+        row["count"] += 1
+        row["categories"][category] += 1
+        row["examples"] << site if row["examples"].size < 3
+      else
+        typed_name_counts[clean_name][distribution_type(type, clean_name)] += 1
+      end
+    end
+
+    def finalize_name_pressure(name_pressure, typed_name_counts)
+      name_pressure.values
+        .select { |row| row["count"] > 1 }
+        .map do |row|
+          typed_hints = typed_hints_for(typed_name_counts[row.fetch("name")])
+          out = row.merge(
+            "categories" => Hash[row.fetch("categories").sort],
+            "typed_total" => typed_name_counts[row.fetch("name")].values.sum
+          )
+          out["typed_hints"] = typed_hints unless typed_hints.empty?
+          out
+        end
+        .sort_by { |row| [-row["count"], row["name"]] }
+    end
+
+    def typed_hints_for(type_counts)
+      total = type_counts.values.sum
+      return [] if total.zero?
+
+      prominent = type_counts.sort_by { |type, count| [-count, type] }.select do |_type, count|
+        (100.0 * count / total) > 25.0
+      end
+      return [] if prominent.empty?
+
+      prominent_total = prominent.sum { |_type, count| count }
+      hints = prominent.map do |type, count|
+        {
+          "type" => type,
+          "count" => count,
+          "percent" => (100.0 * count / total).round(1),
+        }
+      end
+      other = total - prominent_total
+      if other.positive?
+        hints << {
+          "type" => "Other",
+          "count" => other,
+          "percent" => (100.0 * other / total).round(1),
+        }
+      end
+      hints
+    end
+
+    def method_site(method, param_name)
+      owner = method["owner"].to_s
+      member = [owner, method["name"]].reject(&:empty?).join("#")
+      "#{method["path"]}:#{method["line"]} #{member} param #{param_name}"
+    end
+
+    def field_site(field)
+      owner = field["owner"].to_s
+      member = [owner, field["name"]].reject(&:empty?).join(".")
+      "#{field["path"]}:#{field["line"]} #{member}"
+    end
+
+    def distribution_type(type, slot_name)
+      normalized = normalize_slot_type(type)
+      inner = strip_nilable_type(normalized)
+      family = node_family_type(inner, slot_name)
+      return normalized unless family
+
+      nilable_slot_type?(normalized) ? "T.nilable(#{family})" : family
+    end
+
+    def node_family_type(type, slot_name)
+      return nil unless NODE_LIKE_SLOT_NAMES.include?(slot_name.to_s)
+
+      if ast_node_type?(type)
+        "AST::Node"
+      elsif mir_node_type?(type)
+        "MIR::Node"
+      end
+    end
+
+    def ast_node_type?(type)
+      type == "AST::Node" ||
+        (type.match?(/\AAST::[A-Z]\w+\z/) && !NON_NODE_AST_TYPES.include?(type))
+    end
+
+    def mir_node_type?(type)
+      type == "MIR::Node" ||
+        type == "MIR::Emittable" ||
+        type.match?(/\AMIR::[A-Z]\w+\z/)
     end
 
     def add_slot!(summary, category, type)

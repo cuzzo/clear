@@ -999,8 +999,7 @@ module EscapeAnalysis
     node.captures.each { |capture| names << capture.name.to_s }
     return if names.empty?
 
-    body = node.body.is_a?(Array) ? node.body : [node.body]
-    walk_body(body) do |child|
+    walk_body(node.body) do |child|
       next unless child.is_a?(AST::Identifier)
       next unless names.include?(child.name.to_s)
       mark_symbol_heap!(child.symbol, bg_heap, child.name.to_s)

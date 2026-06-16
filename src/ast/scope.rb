@@ -402,7 +402,7 @@ class Scope
     @bindings[name] = local
   end
 
-  sig { params(node: T.untyped).returns(T::Array[Symbol]) }
+  sig { params(node: AST::Node).returns(T::Array[Symbol]) }
   def get_path_to_root(node)
     path = []
     curr = T.let(node, T.untyped)

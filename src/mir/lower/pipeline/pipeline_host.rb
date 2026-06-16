@@ -652,7 +652,7 @@ class PipelineHost
     when PipelineExecutionKind::BatchWindow
       lower_batch_window(plan.site, T.cast(plan.rhs, AST::BatchWindowOp))
     when PipelineExecutionKind::SetIndex
-      lower_index(plan.site, T.cast(T.cast(plan.rhs, AST::IndexOp).expression, AST::Node))
+      lower_index(plan.site, T.cast(plan.rhs, AST::IndexOp).expression)
     when PipelineExecutionKind::Each
       lower_each(plan.site, T.cast(plan.rhs, AST::EachOp))
     when PipelineExecutionKind::Concurrent

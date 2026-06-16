@@ -95,13 +95,13 @@ class FixableFinding
 
   attr_reader :level, :message, :token, :category, :fixes
 
-  sig { params(level: Symbol, message: String, token: T.untyped, category: Symbol, fixes: T::Array[Fix]).void }
+  sig { params(level: Symbol, message: String, token: DiagnosticToken, category: Symbol, fixes: T::Array[Fix]).void }
   def initialize(level:, message:, token:, category:, fixes:)
     raise ArgumentError, "bad level #{level.inspect}" unless LEVELS.include?(level)
     raise ArgumentError, "bad category #{category.inspect}" unless CATEGORIES.include?(category)
     @level = T.let(level, Symbol)
     @message = T.let(message, String)
-    @token = T.let(token, T.untyped)
+    @token = T.let(token, DiagnosticToken)
     @category = T.let(category, Symbol)
     @fixes = T.let(Array(fixes), T::Array[Fix])
     # An empty `fixes` is permitted for diagnostic-only findings (e.g.

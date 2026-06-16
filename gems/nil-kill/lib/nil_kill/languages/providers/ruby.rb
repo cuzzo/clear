@@ -108,25 +108,26 @@ module NilKill
 
         def ruby_struct_type_definitions(document, rel_path)
           definitions = []
-          class_stack = []
+          owner_stack = []
           document.lines.each_with_index do |line, index|
             line_no = index + 1
             stripped = line.strip
-            if (match = stripped.match(/\Aclass\s+([A-Z]\w*)\s*<\s*T::Struct\b/))
-              class_stack << { name: qualified_name(class_stack, match[1]), t_struct: true }
+            indent = line_indent(line)
+            if (match = stripped.match(/\Amodule\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+              owner_stack << { name: qualified_owner_name(owner_stack, match[1]), t_struct: false, indent: indent }
               next
-            elsif (match = stripped.match(/\Aclass\s+([A-Z]\w*)\b/))
-              class_stack << { name: qualified_name(class_stack, match[1]), t_struct: false }
-              if (struct_match = stripped.match(/\Aclass\s+([A-Z]\w*)\s*=\s*Struct\.new\((.*)\)/))
-                definitions.concat(ruby_struct_new_fields(rel_path, qualified_name(class_stack[0...-1], struct_match[1]), struct_match[2], line_no))
-              end
+            elsif (match = stripped.match(/\Aclass\s+([A-Z]\w*(?:::[A-Z]\w*)*)\s*<\s*T::Struct\b/))
+              owner_stack << { name: qualified_owner_name(owner_stack, match[1]), t_struct: true, indent: indent }
+              next
+            elsif (match = stripped.match(/\Aclass\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+              owner_stack << { name: qualified_owner_name(owner_stack, match[1]), t_struct: false, indent: indent }
               next
             elsif stripped == "end"
-              class_stack.pop
+              owner_stack.pop while owner_stack.last && indent <= owner_stack.last.fetch(:indent)
               next
             end
 
-            owner = class_stack.last
+            owner = owner_stack.last
             if owner&.fetch(:t_struct) && (field = ruby_t_struct_field(stripped))
               definitions << ruby_state_field_definition(
                 rel_path: rel_path,
@@ -137,7 +138,7 @@ module NilKill
                 source: "sorbet"
               )
             elsif (match = stripped.match(/\A([A-Z]\w*)\s*=\s*Struct\.new\((.*)\)/))
-              definitions.concat(ruby_struct_new_fields(rel_path, qualified_name(class_stack, match[1]), match[2], line_no))
+              definitions.concat(ruby_struct_new_fields(rel_path, qualified_name(owner_stack, match[1]), match[2], line_no))
             end
           end
           definitions
@@ -265,8 +266,14 @@ module NilKill
         end
 
         def qualified_name(stack, name)
-          parents = Array(stack).map { |entry| entry.is_a?(Hash) ? entry[:name] : entry.to_s }.reject(&:empty?)
-          (parents + [name]).join("::")
+          return name.to_s if name.to_s.include?("::")
+
+          parent = Array(stack).reverse.find do |entry|
+            value = entry.is_a?(Hash) ? entry[:name] : entry.to_s
+            !value.to_s.empty?
+          end
+          parent_name = parent.is_a?(Hash) ? parent[:name].to_s : parent.to_s
+          parent_name.empty? ? name.to_s : "#{parent_name}::#{name}"
         end
 
         def self_receiver_names

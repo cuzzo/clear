@@ -5,6 +5,8 @@ require_relative "../ast/ast"
 require_relative "../mir/cleanup_entry"
 
 module MIR
+  LocalBindingBody = T.type_alias { T::Array[T.any(AST::Node, Struct)] }
+
   class LocalBindingFacts < T::Struct
     const :names, T::Set[String]
     const :entries, T::Hash[String, CleanupEntry]
@@ -15,7 +17,7 @@ module MIR
   module LocalBindingAnalysis
     extend T::Sig
 
-    sig { params(body: T::Array[T.untyped]).returns(LocalBindingFacts) }
+    sig { params(body: LocalBindingBody).returns(LocalBindingFacts) }
     def self.direct_loop_body_facts(body)
       names = T.let(::Set.new, T::Set[String])
       entries = T.let({}, T::Hash[String, CleanupEntry])
@@ -43,7 +45,7 @@ module MIR
       )
     end
 
-    sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: AST::Node).void).void }
+    sig { params(body: LocalBindingBody, block: T.proc.params(arg0: AST::Node).void).void }
     def self.each_direct_loop_node(body, &block)
       raise TypeError, "body must be an Array" unless body.is_a?(Array)
 
@@ -63,7 +65,7 @@ module MIR
           each_direct_loop_node(node.body, &block)
         when AST::DoBlock
           node.branches.each do |branch|
-            each_direct_loop_node(T.cast(branch.fetch(:body), T::Array[T.untyped]), &block)
+            each_direct_loop_node(T.cast(branch.fetch(:body), LocalBindingBody), &block)
           end
         end
       end

@@ -42,6 +42,8 @@ module FsmTransform
 
     extend T::Sig
 
+    AstIdentWalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+
     # Returns a Result. ctx provides captured-name set + any
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
@@ -254,7 +256,7 @@ module FsmTransform
     # under the AST module -- avoids descending into Type objects
     # or other unrelated Struct-shaped values that happen to
     # respond to each_pair.
-    sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+    sig { params(node: AstIdentWalkNode, block: T.proc.params(name: String).void).void }
     def self.walk_idents(node, &block)
       return if node.nil?
       if node.is_a?(Array)
@@ -269,7 +271,7 @@ module FsmTransform
       # Only recurse into AST Structs (skip Type, MIR nodes, etc.).
       return unless node.class.name.to_s.start_with?("AST::")
       return unless node.respond_to?(:each_pair)
-      node.each_pair { |_, v| walk_idents(v, &block) }
+      T.unsafe(node).each_pair { |_, v| walk_idents(v, &block) }
     end
     private_class_method :collect_defs
     private_class_method :collect_tail_uses

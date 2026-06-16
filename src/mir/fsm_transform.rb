@@ -254,7 +254,7 @@ module FsmTransform
     out
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(PromotedLocalFact)) }
+  sig { params(node: AST::Node).returns(T.nilable(PromotedLocalFact)) }
   def self.local_entry_for_node(node)
     T.bind(self, T.untyped) rescue nil
     case node

@@ -844,30 +844,31 @@ module Annotator
 
         record_effect(EffectTracker::YIELD)
         visit(node.expr)
-        promise_type = node.expr.full_type!(context: "NEXT expression")
+        expr = node.expr
+        promise_type = expr.full_type!(context: "NEXT expression")
 
         unless promise_type.future?
-          error!(node, :NEXT_NEEDS_FUTURE, got: node.expr.full_type!(context: "NEXT non-future expression"))
+          error!(node, :NEXT_NEEDS_FUTURE, got: expr.full_type!(context: "NEXT non-future expression"))
         end
 
         # NEXT awaits a promise/stream — always a fiber suspension point.
         record_effect(EffectTracker::SUSPENDS)
 
-        async_shape = node.expr.is_a?(AST::Identifier) ? node.expr.symbol&.async_result_shape : nil
+        async_shape = expr.is_a?(AST::Identifier) ? expr.symbol&.async_result_shape : nil
 
         if async_shape&.promise?
-          if node.expr.is_a?(AST::Identifier) && !async_shape.shared_promise?
-            og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
+          if expr.is_a?(AST::Identifier) && !async_shape.shared_promise?
+            og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
           stamp_type!(node, async_shape.payload_type)
           node.storage = :heap if async_next_result_requires_heap?(async_shape.payload_type)
         elsif promise_type.promise_list?
           # NEXT on ~T[]@list: await all promises, return T[]@list.
           # The promise list is linearly consumed — each inner promise is freed by its next() call.
-          if node.expr.is_a?(AST::Identifier)
-            og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
+          if expr.is_a?(AST::Identifier)
+            og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
-          elem_sym = promise_type.tense_type.element_type.to_sym
+          elem_sym = T.must(promise_type.tense_type.element_type).to_sym
           stamp_type!(node, Type.new(:"#{elem_sym}[]", collection: :list))
         elsif promise_type.observable_array_future?
           # NEXT on ~T[]@set:observable: wait for the producer fiber, then
@@ -882,17 +883,17 @@ module Annotator
           # done after the first call, so a second NEXT would just
           # re-take the same snapshot, violating the consume-or-transfer
           # semantics. Match scalar-NEXT behavior: linearly consume.
-          og_set_moved(node.expr.name, at_token: node.expr.token, action: :next) if node.expr.is_a?(AST::Identifier)
-          elem_sym = promise_type.tense_type.element_type.to_sym
+          og_set_moved(expr.name, at_token: expr.token, action: :next) if expr.is_a?(AST::Identifier)
+          elem_sym = T.must(promise_type.tense_type.element_type).to_sym
           stamp_type!(node, Type.new(:"#{elem_sym}[]"))
           node.storage   = :heap
         elsif promise_type.dynamic_stream?
-          elem_sym = promise_type.tense_type.element_type.to_sym
+          elem_sym = T.must(promise_type.tense_type.element_type).to_sym
           stamp_type!(node, Type.new(:"?#{elem_sym}"))
         elsif promise_type.bounded_stream?
           # NEXT on ~T[N]: returns T (the element type).
           # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
-          stamp_type!(node, promise_type.stream_element_type.to_sym)
+          stamp_type!(node, T.must(promise_type.stream_element_type).to_sym)
         elsif promise_type.shared_promise?
           # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
           # Does NOT mark as moved; multiple consumers may hold their own handles.
@@ -901,16 +902,16 @@ module Annotator
           # NEXT on open streams returns ?T — null signals stream exhaustion.
           # Split stream handles advance independently through shared memoized sequence state.
           # Does NOT mark as moved — stream is a resource cleaned up via deinit.
-          elem_sym = promise_type.open_stream_element_type.to_sym
+          elem_sym = T.must(promise_type.open_stream_element_type).to_sym
           stamp_type!(node, Type.new(:"?#{elem_sym}"))
         elsif promise_type.inf_stream?
           # NEXT on ~T[INF]: returns T (never nil — stream is infinite, rendezvous-style).
           # Does NOT mark as moved — stream is a resource cleaned up via deinit.
-          stamp_type!(node, promise_type.inf_stream_element_type.to_sym)
+          stamp_type!(node, T.must(promise_type.inf_stream_element_type).to_sym)
         else
           # NEXT on ~T: returns T, marks the promise as linearly consumed.
-          if node.expr.is_a?(AST::Identifier)
-            og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
+          if expr.is_a?(AST::Identifier)
+            og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
           stamp_type!(node, promise_type.tense_type.to_sym)
         end

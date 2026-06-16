@@ -31,6 +31,7 @@ module FsmLowering
 
   FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, CapabilityPlan::CapabilityTransition) }
   FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
+  FsmAstResultNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
   class FsmLockErrorArmSplit < T::Struct
     const :body_stmts, T::Array[MIR::Node]
     const :exit_kind, Symbol
@@ -258,7 +259,7 @@ module FsmLowering
     facts
   end
 
-  sig { params(node: T.untyped).returns(T::Array[String]) }
+  sig { params(node: FsmAstResultNode).returns(T::Array[String]) }
   def fsm_ast_result_consumed_roots(node)
     names = T.let([], T::Array[String])
     case node

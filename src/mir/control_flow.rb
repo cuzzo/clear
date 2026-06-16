@@ -805,9 +805,9 @@ class OwnershipDataflow
     until stack.empty?
       frame = T.must(stack.pop)
       frame.body.each do |stmt|
-        if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
-           stmt.expr.is_a?(AST::Identifier)
-          match_takes_vars << stmt.expr.name.to_s
+        if stmt.is_a?(AST::MatchStatement) && stmt.takes
+          expr = stmt.expr
+          match_takes_vars << expr.name.to_s if expr.is_a?(AST::Identifier)
         end
 
         if frame.loop_depth.positive? && (stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr))
