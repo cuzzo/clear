@@ -8,13 +8,14 @@ module Decomplex
     module FlaySimilarity
       module_function
 
-      def scan(files, mass:, fuzzy:)
+      def scan(files, mass:, fuzzy:, jobs: nil)
         paths = Array(files).map(&:to_s)
         validate_ruby_files!(paths)
         JSON.parse(
           Command.run(
             "flay-similarity",
             "--language", "ruby",
+            *Command.jobs_args(jobs),
             "--mass", mass.to_i.to_s,
             "--fuzzy", fuzzy.to_i.to_s,
             *paths

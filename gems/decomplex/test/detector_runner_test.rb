@@ -40,6 +40,23 @@ class DetectorRunnerTest < Minitest::Test
     assert_equal Decomplex::DetectorRunner.canonical_json("co-update", [FIXTURE], engine: "ruby"), stdout
   end
 
+  def test_detector_cli_compare_engines_accepts_jobs
+    skip "cargo is not available" unless cargo_available?
+
+    stdout, stderr, status = Open3.capture3(
+      "ruby",
+      "gems/decomplex/exe/decomplex",
+      "detector",
+      "co-update",
+      "--compare-engines",
+      "--jobs=2",
+      FIXTURE
+    )
+
+    assert status.success?, stderr
+    assert_equal Decomplex::DetectorRunner.canonical_json("co-update", [FIXTURE], engine: "ruby"), stdout
+  end
+
   def test_detector_cli_benchmark_keeps_json_stdout_canonical
     stdout, stderr, status = Open3.capture3(
       "ruby",

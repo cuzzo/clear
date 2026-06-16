@@ -8,10 +8,10 @@ module Decomplex
     module PredicateAliases
       module_function
 
-      def scan(files)
+      def scan(files, jobs: nil)
         paths = Array(files).map(&:to_s)
         validate_ruby_files!(paths)
-        JSON.parse(Command.run("predicate-aliases", "--language", "ruby", *paths))
+        JSON.parse(Command.run("predicate-aliases", "--language", "ruby", *Command.jobs_args(jobs), *paths))
       end
 
       private_class_method def self.validate_ruby_files!(paths)
