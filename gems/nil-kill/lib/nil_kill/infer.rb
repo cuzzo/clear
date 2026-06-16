@@ -28,6 +28,11 @@ module NilKill
     end
 
     def index_sources
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "ruby") == "rust"
+        index_sources_from_native_bundle
+        return
+      end
+
       SourceIndex.reset_global_shape_indexes
       files = NilKill.target_files
       warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
@@ -95,6 +100,60 @@ module NilKill
         @store.facts["ivar_param_origins"][key] ||= []
         @store.facts["ivar_param_origins"][key] = (@store.facts["ivar_param_origins"][key] + sources.to_a).uniq
       end
+    end
+
+    def index_sources_from_native_bundle
+      bundle = native_source_index_bundle
+      facts = bundle.fetch("facts")
+      facts.each do |key, value|
+        case @store.facts[key]
+        when Array
+          @store.facts[key].concat(Array(value))
+        when Hash
+          @store.facts[key].merge!(value || {})
+        else
+          @store.facts[key] = value
+        end
+      end
+
+      Array(bundle["methods"]).each do |method|
+        source = method["source"] || method
+        key = method["key"] || [
+          source["class"],
+          source["method"],
+          source["kind"],
+          File.expand_path(source["path"], ROOT),
+          source["line"],
+        ]
+        rec = @store.method_record(key)
+        rec["source"] = source
+        rec["has_sig"] = source["has_sig"] || method["has_sig"]
+      end
+    end
+
+    def native_source_index_bundle
+      bin = native_source_index_binary
+      unless File.executable?(bin)
+        abort "nil-kill: missing native SourceIndexer #{NilKill.rel(bin)}; build with `cargo build --release --manifest-path gems/nil-kill/rust/Cargo.toml`"
+      end
+
+      args = ["source-index", "--root", ROOT]
+      NilKill.target_dirs.each { |dir| args.concat(["--target-dir", NilKill.rel(dir)]) }
+      NilKill.target_exclude_dirs.each { |dir| args.concat(["--exclude-dir", NilKill.rel(dir)]) }
+      (NilKill.usage_scan_files - NilKill.target_files).each { |path| args.concat(["--usage-file", path]) }
+      args.concat(NilKill.target_files)
+
+      out, err, status = Open3.capture3(bin, *args)
+      abort "nil-kill native SourceIndexer failed: #{err}" unless status.success?
+
+      JSON.parse(out)
+    end
+
+    def native_source_index_binary
+      release = File.join(ROOT, "gems", "nil-kill", "rust", "target", "release", "nil-kill-rust")
+      return release if File.executable?(release)
+
+      File.join(ROOT, "gems", "nil-kill", "rust", "target", "debug", "nil-kill-rust")
     end
 
     def load_sorbet
