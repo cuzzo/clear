@@ -29,6 +29,15 @@ module Decomplex
         File.expand_path("../../../rust", __dir__)
       end
 
+      def jobs_args(jobs)
+        return [] if jobs.nil?
+
+        count = Integer(jobs)
+        raise ArgumentError, "jobs must be greater than zero" if count <= 0
+
+        ["--jobs", count.to_s]
+      end
+
       private_class_method def self.native_command(args)
         if fresh_binary?(binary_path)
           [binary_path, *args]

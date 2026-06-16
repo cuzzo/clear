@@ -26,17 +26,17 @@ module Decomplex
 
     module_function
 
-    def run(detector, files, engine: "ruby", mass: FlaySimilarity::DEFAULT_MASS, fuzzy: FlaySimilarity::DEFAULT_FUZZY)
+    def run(detector, files, engine: "ruby", mass: FlaySimilarity::DEFAULT_MASS, fuzzy: FlaySimilarity::DEFAULT_FUZZY, jobs: nil)
       canonical = canonical_detector(detector)
       validate_engine!(engine)
 
       case canonical
       when :co_update
-        co_update(files, engine: engine)
+        co_update(files, engine: engine, jobs: jobs)
       when :predicate_alias
-        predicate_alias(files, engine: engine)
+        predicate_alias(files, engine: engine, jobs: jobs)
       when :flay_similarity
-        flay_similarity(files, engine: engine, mass: mass, fuzzy: fuzzy)
+        flay_similarity(files, engine: engine, mass: mass, fuzzy: fuzzy, jobs: jobs)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
@@ -68,8 +68,8 @@ module Decomplex
       raise ArgumentError, "unsupported decomplex detector engine: #{engine}"
     end
 
-    private_class_method def self.co_update(files, engine:)
-      return Native::CoUpdate.scan(files) if engine.to_s == "rust"
+    private_class_method def self.co_update(files, engine:, jobs:)
+      return Native::CoUpdate.scan(files, jobs: jobs) if engine.to_s == "rust"
 
       report = CoUpdate.scan(files)
 
@@ -79,18 +79,18 @@ module Decomplex
       }
     end
 
-    private_class_method def self.predicate_alias(files, engine:)
-      return Native::PredicateAliases.scan(files) if engine.to_s == "rust"
+    private_class_method def self.predicate_alias(files, engine:, jobs:)
+      return Native::PredicateAliases.scan(files, jobs: jobs) if engine.to_s == "rust"
 
       report = PredicateAlias.scan(files)
 
       { "alias_clusters" => report.alias_clusters }
     end
 
-    private_class_method def self.flay_similarity(files, engine:, mass:, fuzzy:)
+    private_class_method def self.flay_similarity(files, engine:, mass:, fuzzy:, jobs:)
       findings =
         if engine.to_s == "rust"
-          Native::FlaySimilarity.scan(files, mass: mass, fuzzy: fuzzy)
+          Native::FlaySimilarity.scan(files, mass: mass, fuzzy: fuzzy, jobs: jobs)
         else
           FlaySimilarity.scan(files, mass: mass, fuzzy: fuzzy)
         end

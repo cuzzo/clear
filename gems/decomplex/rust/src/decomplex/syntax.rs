@@ -1,6 +1,7 @@
 pub mod ruby;
 
 use crate::decomplex::ast::{RawNode, Span};
+use crate::decomplex::parallel;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -81,8 +82,35 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
 }
 
 pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document>> {
-    files
-        .iter()
-        .map(|file| parse_file(file.clone(), language))
-        .collect()
+    parallel::map_ordered(files, |file| parse_file(file.clone(), language))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decomplex::parallel;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn parallel_parse_files_preserves_input_order() {
+        parallel::set_jobs_for_process(Some(4)).expect("jobs");
+        let mut first = NamedTempFile::new().expect("first");
+        let mut second = NamedTempFile::new().expect("second");
+        first
+            .write_all(b"def first\n  1\nend\n")
+            .expect("write first");
+        second
+            .write_all(b"def second\n  2\nend\n")
+            .expect("write second");
+
+        let files = vec![first.path().to_path_buf(), second.path().to_path_buf()];
+        let docs = parse_files(&files, Language::Ruby).expect("parse files");
+
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].file, first.path().to_string_lossy());
+        assert_eq!(docs[1].file, second.path().to_string_lossy());
+        assert_eq!(docs[0].function_defs[0].name, "first");
+        assert_eq!(docs[1].function_defs[0].name, "second");
+    }
 }
