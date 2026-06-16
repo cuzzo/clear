@@ -13,6 +13,7 @@ module MIRLoweringFunctions
   BindingTypeMap = T.type_alias { T::Hash[String, Type] }
   BoolNameMap = T.type_alias { T::Hash[String, T::Boolean] }
   DeclNameMap = T.type_alias { T::Hash[Integer, String] }
+  CallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
 
   class FunctionParamFact < T::Struct
     extend T::Sig
@@ -573,7 +574,7 @@ module MIRLoweringFunctions
     base_zig
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
   def body_has_faulting_alloc?(body)
     found = T.let(false, T::Boolean)
     MIR.each_node(body) do |mir|
@@ -610,7 +611,7 @@ module MIRLoweringFunctions
     params(
       node: AST::FunctionDef,
       fn_needs_rt: T::Boolean,
-      mutable_scalar_params: T::Set[T.untyped],
+      mutable_scalar_params: NameSet,
       used_names: T::Set[String],
     ).returns(FunctionEntryPlan)
   }
@@ -783,7 +784,7 @@ module MIRLoweringFunctions
   # Build the inner function for a POST-having FunctionDef. Holds the
   # original body verbatim. Marked :private so callers go through the
   # outer wrapper (which validates).
-  sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, prologue: T::Array[T.untyped], body_mir: T::Array[T.untyped], comptime_params: T::Array[T.untyped]).returns(MIR::FnDef) }
+  sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, prologue: T::Array[MIR::Node], body_mir: T::Array[MIR::Node], comptime_params: T::Array[String]).returns(MIR::FnDef) }
   def build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params)
     T.bind(self, MIRLowering) rescue nil
     inner_name = "__#{zig_safe_name(node.name)}_post_body"
@@ -794,7 +795,7 @@ module MIRLoweringFunctions
   # Build the outer wrapper for a POST-having FunctionDef. Calls the
   # inner, captures the result, evaluates each POST predicate inside a
   # debug-mode `if` block, panics on violation, returns the result.
-  sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, fn_needs_rt: T::Boolean, vis: Symbol, comptime_params: T::Array[T.untyped]).returns(MIR::FnDef) }
+  sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, fn_needs_rt: T::Boolean, vis: Symbol, comptime_params: T::Array[String]).returns(MIR::FnDef) }
   def build_post_outer_fn(node, params_mir, return_type_str, fn_needs_rt, vis, comptime_params)
     T.bind(self, MIRLowering) rescue nil
     inner_name = "__#{zig_safe_name(node.name)}_post_body"
@@ -956,7 +957,7 @@ module MIRLoweringFunctions
     end
   end
 
-  sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     T.bind(self, MIRLowering) rescue nil
     return nil unless expr
@@ -985,10 +986,10 @@ module MIRLoweringFunctions
   # callee_param is nilable only because intrinsic/extern call paths can
   # arrive without a signature; the helper degrades to "pass as-is".
   sig do
-    params(arg: T.untyped, a: T.untyped,
+    params(arg: MIR::Node, a: AST::Node,
            callee_param: T.nilable(AST::Param),
            callee_param_type: Type,
-           callee_sig: T.untyped, idx: Integer).returns(T.untyped)
+           callee_sig: T.nilable(FunctionSignature), idx: Integer).returns(MIR::Node)
   end
   def cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     T.bind(self, MIRLowering) rescue nil
@@ -1035,7 +1036,7 @@ module MIRLoweringFunctions
       !callee_param_type.collection?
   end
 
-  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[T.untyped]).returns(T.nilable(MIR::CallableContract)) }
+  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[AST::Node]).returns(T.nilable(MIR::CallableContract)) }
   def callable_contract_for(sig, ast_args)
     T.bind(self, MIRLowering) rescue nil
     return nil unless sig
@@ -1044,7 +1045,7 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
-  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[T.untyped], mir_args: T::Array[T.untyped]).returns(T.nilable(MIR::CallableContract)) }
+  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node]).returns(T.nilable(MIR::CallableContract)) }
   def callable_contract_for_lowered_args(sig, ast_args, mir_args)
     T.bind(self, MIRLowering) rescue nil
     return nil unless sig
@@ -1075,7 +1076,7 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
-  sig { params(arg: T.untyped).returns(T::Array[String]) }
+  sig { params(arg: T.nilable(MIR::Node)).returns(T::Array[String]) }
   def ownership_consumed_arg_names(arg)
     T.bind(self, MIRLowering) rescue nil
     case arg
@@ -1113,7 +1114,7 @@ module MIRLoweringFunctions
     )
   end
 
-  sig { params(sig: FunctionSignature, ast_args: T::Array[T.untyped]).returns(CallOwnershipFacts) }
+  sig { params(sig: FunctionSignature, ast_args: T::Array[AST::Node]).returns(CallOwnershipFacts) }
   def call_ownership_facts_for_signature(sig, ast_args)
     T.bind(self, MIRLowering) rescue nil
     takes_indices = T.let(Set.new, T::Set[Integer])
@@ -1143,7 +1144,7 @@ module MIRLoweringFunctions
     CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq, consumed_operands: operands)
   end
 
-  sig { params(arg: T.untyped).returns(T::Boolean) }
+  sig { params(arg: AST::Node).returns(T::Boolean) }
   def borrowed_ownership_operand?(arg)
     return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
 
@@ -1205,7 +1206,7 @@ module MIRLoweringFunctions
     )
   end
 
-  sig { params(type_info: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(type_info: Type::TypeInput).returns(T.nilable(Symbol)) }
   def stdlib_coerce_type(type_info)
     ti = Type.from_node(type_info)
     return nil unless ti
@@ -1214,7 +1215,7 @@ module MIRLoweringFunctions
     resolved.is_a?(Symbol) ? resolved : nil
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(FunctionSignature)) }
+  sig { params(node: CallNode).returns(T.nilable(FunctionSignature)) }
   def matched_call_signature(node)
     return nil unless node.respond_to?(:matched_signature)
 
@@ -1226,7 +1227,7 @@ module MIRLoweringFunctions
     nil
   end
 
-  sig { params(facts: CallArgFacts).returns(T.untyped) }
+  sig { params(facts: CallArgFacts).returns(MIR::Node) }
   def lower_call_arg_from_facts(facts)
     T.bind(self, MIRLowering) rescue nil
     raw_arg = with_decl_alloc(facts.arg_alloc) do
@@ -1253,15 +1254,15 @@ module MIRLoweringFunctions
 
   sig do
     params(
-      node: T.untyped,
+      node: CallNode,
       callee: String,
-      args: T::Array[T.untyped],
+      args: T::Array[MIR::Node],
       can_fail: T::Boolean,
       owned_return: T::Boolean,
       contract: T.nilable(MIR::CallableContract),
-      ast_args: T::Array[T.untyped],
-      mir_args: T::Array[T.untyped],
-    ).returns(T.untyped)
+      ast_args: T::Array[AST::Node],
+      mir_args: T::Array[MIR::Node],
+    ).returns(MIR::Node)
   end
   def finalize_call_result(node, callee, args, can_fail, owned_return, contract, ast_args = [], mir_args = [])
     call = MIR::Call.new(callee, args, can_fail, owned_return, contract)
@@ -1276,7 +1277,7 @@ module MIRLoweringFunctions
     MIR::DupeSlice.new(call, :heap)
   end
 
-  sig { params(call: MIR::Call, ast_args: T::Array[T.untyped], mir_args: T::Array[T.untyped], source: String).void }
+  sig { params(call: MIR::Call, ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node], source: String).void }
   def attach_explicit_move_consumption!(call, ast_args, mir_args, source)
     T.bind(self, MIRLowering) rescue nil
     operands = T.let([], T::Array[MIR::OwnershipOperandFact])
@@ -1299,10 +1300,10 @@ module MIRLoweringFunctions
   end
 
   sig do
-    params(a: T.untyped, ti: T.untyped,
+    params(a: AST::Node, ti: Type,
            callee_param: T.nilable(AST::Param),
            callee_param_type: Type,
-           callee_sig: T.untyped, idx: Integer).returns(T::Boolean)
+           callee_sig: T.nilable(FunctionSignature), idx: Integer).returns(T::Boolean)
   end
   private def wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
     T.bind(self, MIRLowering) rescue nil
@@ -1319,7 +1320,7 @@ module MIRLoweringFunctions
     !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly)
   end
 
-  sig { params(a: T.untyped).returns(T::Boolean) }
+  sig { params(a: AST::Node).returns(T::Boolean) }
   private def arg_already_pointer_shaped?(a)
     T.bind(self, MIRLowering) rescue nil
     return false unless a.is_a?(AST::Identifier)
@@ -1327,7 +1328,7 @@ module MIRLoweringFunctions
        capture_state.current_bg_pointer_captures&.include?(a.name))
   end
 
-  sig { params(node: AST::FuncCall).returns(T.untyped) }
+  sig { params(node: AST::FuncCall).returns(MIR::Node) }
   def lower_func_call(node)
     T.bind(self, MIRLowering) rescue nil
     if (intercept = stub_intercept_for(node.name, nil, node.args))
@@ -1384,7 +1385,7 @@ module MIRLoweringFunctions
     )
   end
 
-  sig { params(node: AST::MethodCall).returns(T.untyped) }
+  sig { params(node: AST::MethodCall).returns(MIR::Node) }
   def lower_method_call(node)
     T.bind(self, MIRLowering) rescue nil
     # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
@@ -1438,7 +1439,7 @@ module MIRLoweringFunctions
     )
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.any(AST::FunctionDef, CallNode)).returns(T::Boolean) }
   def call_owned_return?(node)
     T.bind(self, MIRLowering) rescue nil
     sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
@@ -1455,14 +1456,16 @@ module MIRLoweringFunctions
       return concrete_call_type_owned_return?(node_ti, sig)
     end
 
-    dep = call_owned_return_from_args?(node, sig)
-    return dep unless dep.nil?
+    unless node.is_a?(AST::FunctionDef)
+      dep = call_owned_return_from_args?(node, sig)
+      return dep unless dep.nil?
+    end
     raw_ti = sig&.return_type
     ti = T.let(raw_ti.is_a?(Type) ? raw_ti : (raw_ti ? Type.new(raw_ti) : nil), T.nilable(Type))
     call_type_owned_return?(ti, sig)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: CallNode).returns(T::Boolean) }
   def call_never_returns_success?(node)
     T.bind(self, MIRLowering) rescue nil
     return false unless node.respond_to?(:name)
@@ -1474,28 +1477,23 @@ module MIRLoweringFunctions
     !function_body_has_value_return?(fn.body)
   end
 
-  sig { params(nodes: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(nodes: AST::RawBody).returns(T::Boolean) }
   def function_body_has_value_return?(nodes)
     nodes.any? do |stmt|
       if stmt.is_a?(AST::ReturnNode)
         !stmt.value.nil?
-      elsif stmt.respond_to?(:body) && stmt.body.is_a?(Array)
-        function_body_has_value_return?(stmt.body)
-      elsif stmt.respond_to?(:then_body) || stmt.respond_to?(:else_body)
-        function_body_has_value_return?(Kernel.Array(stmt.respond_to?(:then_body) ? stmt.then_body : [])) ||
-          function_body_has_value_return?(Kernel.Array(stmt.respond_to?(:else_body) ? stmt.else_body : []))
       else
-        false
+        AST.body_slots(stmt).any? { |slot| function_body_has_value_return?(slot.body) }
       end
     end
   end
 
-  sig { params(ti: Type, sig_obj: T.untyped).returns(T::Boolean) }
+  sig { params(ti: Type, sig_obj: T.nilable(FunctionSignature)).returns(T::Boolean) }
   def concrete_call_type_owned_return?(ti, sig_obj)
     call_type_owned_return?(ti, sig_obj)
   end
 
-  sig { params(ti: T.nilable(Type), sig_obj: T.untyped).returns(T::Boolean) }
+  sig { params(ti: T.nilable(Type), sig_obj: T.nilable(FunctionSignature)).returns(T::Boolean) }
   def call_type_owned_return?(ti, sig_obj)
     T.bind(self, MIRLowering) rescue nil
     return false unless ti
@@ -1521,7 +1519,7 @@ module MIRLoweringFunctions
       ti.resource? || ti.recursive_cleanup_shape?(mir_schema_lookup)
   end
 
-  sig { params(node: T.untyped, sig_obj: T.nilable(FunctionSignature)).returns(T.nilable(T::Boolean)) }
+  sig { params(node: CallNode, sig_obj: T.nilable(FunctionSignature)).returns(T.nilable(T::Boolean)) }
   def call_owned_return_from_args?(node, sig_obj)
     T.bind(self, MIRLowering) rescue nil
     return nil unless sig_obj
@@ -1547,7 +1545,7 @@ module MIRLoweringFunctions
     nil
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: AST::Node).returns(T::Boolean) }
   def ast_expr_produces_heap?(expr)
     T.bind(self, MIRLowering) rescue nil
     node = expr
@@ -1568,7 +1566,7 @@ module MIRLoweringFunctions
 
   # Safe navigation for method calls: expr?.method(args)
   # Wraps the call in (if (expr) |_snav_N| call_with_N_as_receiver else null).
-  sig { params(node: T.untyped).returns(MIR::IfOptional) }
+  sig { params(node: AST::MethodCall).returns(MIR::IfOptional) }
   def lower_safe_nav_method_call(node)
     T.bind(self, MIRLowering) rescue nil
     snav_var = "_snav_#{lowering_counters.next_safe_nav_id}"
@@ -1684,7 +1682,7 @@ module MIRLoweringFunctions
     val_alloc_placeholder = arg_materialization.val_alloc_placeholder
     mir_args = mir_args.each_with_index.map do |arg_mir, index|
       ast_arg = intrinsic_ast_arg(node, stdlib_facts, index)
-      mir_allocates?(arg_mir) ? T.cast(hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index)), MIR::Node) : arg_mir
+      mir_allocates?(arg_mir) ? hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index)) : arg_mir
     end
 
     result_type = Type.from_node!(node, context: "intrinsic result")
@@ -1772,7 +1770,7 @@ module MIRLoweringFunctions
     end
 
     materialized_args = materialized_args.each_with_index.map do |arg_mir, index|
-      T.cast(hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index)), MIR::Node)
+      hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index))
     end if stdlib_facts.args.any?
 
     consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
@@ -1852,7 +1850,7 @@ module MIRLoweringFunctions
     Type.from_node!(node.object, context: "intrinsic receiver")
   end
 
-  sig { params(node: AST::FuncCall).returns(T.untyped) }
+  sig { params(node: AST::FuncCall).returns(MIR::Node) }
   def lower_extern_call(node)
     T.bind(self, MIRLowering) rescue nil
     return lower_extern_direct_call(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
@@ -1898,7 +1896,7 @@ module MIRLoweringFunctions
   # *const [N:0]u8, which coerces to both []const u8 AND [*:0]const u8.
   # Without this, string literals passed to C-string params would fail with
   # "expected [*:0]const u8, found []const u8".
-  sig { params(ast_arg: T.untyped).returns(T.untyped) }
+  sig { params(ast_arg: AST::Node).returns(MIR::Node) }
   def lower_extern_arg(ast_arg)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(ast_arg)
@@ -1920,9 +1918,9 @@ module MIRLoweringFunctions
     # Comptime args can't be struct fields; the emitter renders them directly
     # at the call site after MIRChecker has seen the expression children.
     comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
-    comptime_mir = comptime_args.map { |a| T.cast(lower_extern_arg(a), MIR::Emittable) }
+    comptime_mir = comptime_args.map { |a| lower_extern_arg(a) }
 
-    args = runtime_ast_args.map { |a| T.cast(lower_extern_arg(a), MIR::Emittable) }
+    args = runtime_ast_args.map { |a| lower_extern_arg(a) }
 
     # Use declared scalar param types for struct fields to avoid comptime_int
     # (e.g. @TypeOf(19876)). For module externs, keep non-scalars inferred:
@@ -1962,7 +1960,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_extern_id
     obj = T.cast(lower(node.object), MIR::Emittable)
-    args = node.args.map { |a| MIR::ExternTrampolineArg.new(expr: T.cast(lower_extern_arg(a), MIR::Emittable)) }
+    args = node.args.map { |a| MIR::ExternTrampolineArg.new(expr: lower_extern_arg(a)) }
     MIR::ExternTrampoline.new(
       id: id.value,
       callee_name: node.name.to_s,

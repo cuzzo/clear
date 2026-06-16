@@ -687,7 +687,7 @@ class OwnershipDataflow
         return stmts[(idx + 1)..].to_a.any? { |s| stmt_moves_name?(s, var) }
       end
 
-      nested = T.cast(AST.child_bodies(stmt).flatten, T::Array[AST::Node])
+      nested = AST.child_bodies(stmt).flatten
       return true if !nested.empty? && linear_scope_decl_always_moves?(nested, var)
     end
     false
@@ -814,7 +814,7 @@ class OwnershipDataflow
 
         child_depth = frame.loop_depth + (AST.loop_node?(stmt) ? 1 : 0)
         AST.child_bodies(stmt).each do |child_body|
-          stack << CleanupDecisionFrame.new(body: T.cast(child_body, T::Array[AST::Node]), loop_depth: child_depth)
+          stack << CleanupDecisionFrame.new(body: child_body, loop_depth: child_depth)
         end
       end
     end
@@ -1552,8 +1552,8 @@ module LoopFrameAnalysis
   sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
   def self.walk_stmt!(stmt, schema_lookup = nil, fn_nodes = {})
     child_bodies = AST.child_bodies(stmt)
-    child_bodies.each { |body| walk_stmts!(T.cast(body, T::Array[AST::Node]), schema_lookup, fn_nodes) }
-    process_loop!(T.cast(stmt, LoopNode), T.cast(child_bodies.first || [], T::Array[AST::Node]), schema_lookup, fn_nodes) if AST.loop_node?(stmt)
+    child_bodies.each { |body| walk_stmts!(body, schema_lookup, fn_nodes) }
+    process_loop!(T.cast(stmt, LoopNode), child_bodies.first || [], schema_lookup, fn_nodes) if AST.loop_node?(stmt)
     nil
   end
 
@@ -1911,9 +1911,9 @@ class BorrowChecker
           check_borrowed_move(name, stmt.token, state)
         end
       end
-      AST.child_bodies(stmt).each { |body| check_stmts(T.cast(body, T::Array[AST::Node]), state) }
+      AST.child_bodies(stmt).each { |body| check_stmts(body, state) }
     else
-      AST.child_bodies(stmt).each { |body| check_stmts(T.cast(body, T::Array[AST::Node]), state) }
+      AST.child_bodies(stmt).each { |body| check_stmts(body, state) }
     end
   end
 

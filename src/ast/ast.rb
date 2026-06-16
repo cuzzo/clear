@@ -12,19 +12,23 @@ require_relative "../annotator/helpers/intrinsic_registry"
 module AST
   extend T::Sig
 
+  RawBody = T.type_alias { T::Array[AST::Node] }
+  BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
+  StructKwargs = T.type_alias { BasicObject }
+
   class BodySlot
     extend T::Sig
 
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(RawBody) }
     attr_reader :body
 
-    sig { params(body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    sig { params(body: RawBody, writer: T.proc.params(body: RawBody).void).void }
     def initialize(body, writer)
-      @body = T.let(body, T::Array[T.untyped])
-      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+      @body = T.let(body, RawBody)
+      @writer = T.let(writer, T.proc.params(body: RawBody).void)
     end
 
-    sig { params(body: T::Array[T.untyped]).void }
+    sig { params(body: RawBody).void }
     def replace(body)
       @body = body
       @writer.call(body)
@@ -114,7 +118,7 @@ module AST
                      keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       t = self[:type]
@@ -141,7 +145,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       # mutable/takes/comptime arrive from match! (a Token when the
@@ -191,7 +195,7 @@ module AST
                          keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:body] = [] if self[:body].nil?
@@ -250,7 +254,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
@@ -303,7 +307,7 @@ module AST
                           keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
@@ -380,7 +384,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: T.untyped, visitor: T.proc.params(node: T.untyped).void).void }
+  sig { params(body: T.nilable(T.any(AST::Node, T::Array[AST::Node])), visitor: T.proc.params(node: AST::Node).void).void }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -393,11 +397,12 @@ module AST
   # Walk every AST Locatable reachable from a root object. This is the
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
-  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
+  sig { params(root: BasicObject, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
   def self.each_locatable(root, descend_functions: false, &visitor)
-    stack = root.is_a?(Array) ? root.reverse : [root]
+    raw_root = T.unsafe(root)
+    stack = raw_root.is_a?(Array) ? raw_root.reverse : [raw_root]
     until stack.empty?
-      node = stack.pop
+      node = T.unsafe(stack.pop)
       next unless node
       if node.is_a?(Array)
         node.reverse_each { |child| stack << child }
@@ -609,7 +614,7 @@ module AST
       node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[T::Array[T.any(AST::Node, Struct)]]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[RawBody]) }
   def self.child_bodies(node)
     node.is_a?(AST::HasBodies) ? node.child_bodies : []
   end
@@ -659,7 +664,7 @@ module AST
   # recursion, and those drifted apart — e.g. one handled UnionVariantLit
   # and another didn't (docs/agents/bug9-forensic.md). Add a new wrapper
   # shape here once and every consumer descends it consistently.
-  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T::Array[AST::Node]) }
   def self.wrapped_children(expr)
     case expr
     when StructLit, UnionVariantLit
@@ -676,7 +681,7 @@ module AST
 
   # Immediate expression children for semantic expression walks. This excludes
   # statement bodies; callers that need bodies should use child_bodies/walk_body.
-  sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct)), skip_copy: T::Boolean).returns(T::Array[AST::Node]) }
   def self.expression_children(node, skip_copy: false)
     return [] unless node
 
@@ -716,14 +721,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).void }
+  sig { params(body: T.nilable(T.any(AST::Node, T::Array[AST::Node])), block: T.proc.params(node: BgNode).void).void }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).void }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -741,7 +746,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).void }
+  sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -773,7 +778,7 @@ module AST
   # gets its own transform_body call which handles its BGs separately;
   # nested BGs capture from their parent BG body's scope, not this
   # stmt's scope.
-  sig { params(stmt: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(stmt: T.nilable(T.any(AST::Node, Object)), block: T.proc.params(node: BgNode).void).void }
   def self.each_bg_block_in_stmt(stmt, &block)
     case stmt
     when BgBlock, BgStreamBlock
@@ -788,7 +793,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._expr_each_bg_block_shallow(expr, &block)
     return unless expr
     case expr
@@ -820,7 +825,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T::Array[Object], block: T.proc.params(analysis: Object).void).void }
+  sig { params(body: RawBody, block: T.proc.params(analysis: Object).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -835,7 +840,7 @@ module AST
     end
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: Object).void).void }
   def self._expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
@@ -866,7 +871,7 @@ module AST
     # Override in including classes. Returns Array of stmt lists (each
     # itself an Array of statements). Nil/empty entries are filtered by
     # the walker via `Array(...)`/`.compact`.
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       []
     end
@@ -1338,7 +1343,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
 
     # Seam: a function's declared/inferred return is always a Type
@@ -1381,7 +1386,7 @@ module AST
       self[:return_type] || Type.new(:Void)
     end
 
-    sig { params(val: T::Array[T.untyped]).void }
+    sig { params(val: T::Array[AST::Param]).void }
     def params=(val)
       self[:params] = val
     end
@@ -1546,7 +1551,7 @@ module AST
   StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:borrowed] = false if self[:borrowed].nil?
@@ -1798,7 +1803,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
@@ -1828,7 +1833,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
@@ -1838,7 +1843,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -1954,7 +1959,7 @@ module AST
       self[:capabilities] = val
     end
 
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
@@ -2498,7 +2503,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
@@ -2536,7 +2541,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
@@ -2579,7 +2584,7 @@ module AST
       self[:cases] = val
     end
 
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       bodies = cases.map(&:body)
       bodies << default_case if default_case
@@ -2598,7 +2603,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :tight
   end
@@ -2609,7 +2614,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -2622,7 +2627,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       bodies = []
       bodies << setup if setup

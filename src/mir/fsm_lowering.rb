@@ -106,7 +106,8 @@ module FsmLowering
         expr_type = last_step.expr.full_type!
         expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
         result_alloc = escaping_value_alloc(expr_t)
-        last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
+        raw_last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
+        last_mir = T.let(raw_last_mir.is_a?(MIR::Emittable) ? raw_last_mir : nil, T.nilable(MIR::Node))
         last_mir = place_value_for_destination(last_mir, last_step.expr, result_alloc, expr_t) if last_mir
         last_mir = hoist_alloc(last_mir, last_step.expr, err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
@@ -115,7 +116,7 @@ module FsmLowering
         last_is_assign = last_step.expr.is_a?(AST::Assignment)
         is_step_void = ast_void_type?(expr_type)
 
-        if last_is_assign || is_step_void
+        if last_mir && (last_is_assign || is_step_void)
           stmt_mir = wrap_step_as_stmt(AST::ThenStep.new(expr: last_step.expr, binding: nil), last_mir)
           result_mir << stmt_mir if stmt_mir
         elsif last_mir

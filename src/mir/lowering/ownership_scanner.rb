@@ -49,7 +49,7 @@ class MIRLoweringOwnershipScanner < T::Struct
     end, T.proc.params(root: ScanRoot).void)
     collect.call(node)
     AST.each_bg_block_in_stmt(node) do |bg|
-      collect.call(T.cast(bg.body, ScanRoot)) if bg.respond_to?(:body) && bg.body
+      collect.call(bg.body) if bg.body
     end
     names.uniq
   end

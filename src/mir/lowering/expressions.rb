@@ -10,6 +10,7 @@ module MIRLoweringExpressions
   StructLitFieldType = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
   StructLitTypeSubst = T.type_alias { T::Hash[Symbol, Type::TypeInput] }
   UnionVariantFieldTypes = T.type_alias { T::Hash[String, Type::TypeInput] }
+  EqualityHelper = T.type_alias { [String, T::Array[String]] }
 
   class OptionalOperandSide < T::Enum
     enums do
@@ -190,7 +191,7 @@ module MIRLoweringExpressions
     standard: :emit_standard_binary_plan,
   }.freeze, T::Hash[Symbol, Symbol])
 
-  sig { params(node: AST::Literal).returns(T.untyped) }
+  sig { params(node: AST::Literal).returns(MIR::Node) }
   def lower_literal(node)
     T.bind(self, MIRLowering) rescue nil
     case node.type
@@ -224,13 +225,13 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(value: T.untyped).returns(String) }
+  sig { params(value: Object).returns(String) }
   def float_literal_text(value)
     s = value.to_s
-    value == value.to_i && !s.include?('.') ? "#{s}.0" : s
+    value == T.unsafe(value).to_i && !s.include?('.') ? "#{s}.0" : s
   end
 
-  sig { params(node: AST::Identifier).returns(T.untyped) }
+  sig { params(node: AST::Identifier).returns(MIR::Node) }
   def lower_identifier(node)
     T.bind(self, MIRLowering) rescue nil
     # Pipeline bindings ($u, $v, $item, ...) are substituted by PipelineHost
@@ -328,7 +329,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
   def lower_binary_op(node)
     T.bind(self, MIRLowering) rescue nil
     # Pipeline operator: x |> f -> f(x), or complex pipeline ops
@@ -339,14 +340,14 @@ module MIRLoweringExpressions
 
     # Named pipeline binding (AS $v): passthrough to LHS value.
     # The $v registration is handled by the pipeline host at the binding point.
-    return lower(node.left) if node.op == :BIND_VAR
+    return T.cast(lower(node.left), MIR::Node) if node.op == :BIND_VAR
 
     return lower_lazy_boolean_op(node) if node.op == :AND || node.op == :OR
 
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
-      left = hoist_alloc(lower(node.left), node.left)
-      right = hoist_alloc(lower(node.right), node.right)
+      left = hoist_alloc(T.cast(lower(node.left), MIR::Node), node.left)
+      right = hoist_alloc(T.cast(lower(node.right), MIR::Node), node.right)
       alloc = alloc_for_node(node)
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
@@ -654,7 +655,7 @@ module MIRLoweringExpressions
   # access on a known union (e.g. `Status.Active` -> [:Status, "Active"]),
   # otherwise nil. Used by lower_binary_op to lower
   # `union_value == Type.Variant` to std.meta.activeTag.
-  sig { params(node: T.untyped).returns(T.nilable(UnitVariantAccess)) }
+  sig { params(node: AST::Node).returns(T.nilable(UnitVariantAccess)) }
   def unit_variant_access(node)
     T.bind(self, MIRLowering) rescue nil
     return nil unless node.is_a?(AST::GetField)
@@ -695,7 +696,7 @@ module MIRLoweringExpressions
   # Pipeline (SMOOTH) operator
   # ================================================================
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
   def lower_smooth(node)
     T.bind(self, MIRLowering) rescue nil
     function_state.current_decl_alloc = T.let(function_state.current_decl_alloc, T.nilable(Symbol))
@@ -800,8 +801,8 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp, rhs: AST::RecoverOp).returns(MIR::TryCatch) }
   def lower_recover_smooth(node, rhs)
     T.bind(self, MIRLowering) rescue nil
-    left = lower(node.left)
-    default_val = lower(rhs.default_expr)
+    left = T.cast(lower(node.left), MIR::Node)
+    default_val = T.cast(lower(rhs.default_expr), MIR::Node)
     out = MIR::TryCatch.new(strip_try(left), default_val, nil)
     out.result_type = Type.new(node.full_type!(context: "RECOVER result"))
     out
@@ -859,7 +860,7 @@ module MIRLoweringExpressions
     AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
     synthetic.storage = node.storage
     synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
-    T.cast(lower_func_call(synthetic), MIR::Node)
+    lower_func_call(synthetic)
   end
 
   sig { params(node: AST::BinaryOp, rhs: AST::FuncCall).returns(MIR::Node) }
@@ -870,19 +871,19 @@ module MIRLoweringExpressions
     synthetic.storage = node.storage
     synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
     synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
-    T.cast(lower_func_call(synthetic), MIR::Node)
+    lower_func_call(synthetic)
   end
 
   # ================================================================
   # OR_RESCUE error chain
   # ================================================================
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
   def lower_or_rescue(node)
     T.bind(self, MIRLowering) rescue nil
     facts = or_rescue_facts(node)
 
-    left = lower(node.left)
+    left = T.cast(lower(node.left), MIR::Node)
 
     # OR RAISE: bubble up error (Zig's try)
     if node.right.is_a?(AST::OrRaise)
@@ -905,7 +906,7 @@ module MIRLoweringExpressions
         # via the bc error-union (EGUARD / inline-exit).
         ex = node.right
         exit_facts = or_exit_facts(ex, facts.line)
-        msg_mir = ex.message ? lower(ex.message) : nil
+        msg_mir = ex.message ? T.cast(lower(ex.message), MIR::Node) : nil
         catch_block = MIR::ScopeBlock.new([
           MIR::ExprStmt.new(or_exit_bc_reassign(exit_facts, msg_mir), false),
           MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
@@ -916,7 +917,7 @@ module MIRLoweringExpressions
       if facts.left_is_error
         ex = node.right
         exit_facts = or_exit_facts(ex, facts.line)
-        msg_mir = ex.message ? lower(ex.message) : nil
+        msg_mir = ex.message ? T.cast(lower(ex.message), MIR::Node) : nil
         catch_block = or_exit_scope(exit_facts, msg_mir, MIR::Ident.new("__exit_err"))
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
@@ -952,7 +953,7 @@ module MIRLoweringExpressions
     fallback_type = or_fallback_expected_type(node)
     right = lower_scoped do
       with_expected_type(fallback_type) do
-        materialize_or_fallback_value(lower(node.right), node.right)
+        materialize_or_fallback_value(T.cast(lower(node.right), MIR::Node), node.right)
       end
     end
 
@@ -966,7 +967,7 @@ module MIRLoweringExpressions
     out
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(Type) }
   def or_fallback_expected_type(node)
     T.bind(self, MIRLowering) rescue nil
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
@@ -984,7 +985,7 @@ module MIRLoweringExpressions
     function_state.current_expected_type || node.full_type!(context: "OR fallback expected type")
   end
 
-  sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(value: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
   def materialize_or_fallback_value(value, ast_node)
     T.bind(self, MIRLowering) rescue nil
     return hoist_alloc(value, ast_node, err_cleanup: false) if mir_allocates?(value)
@@ -999,7 +1000,7 @@ module MIRLoweringExpressions
     hoist_alloc(copied, ast_node, err_cleanup: false)
   end
 
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(ast_node: AST::Node).returns(T::Boolean) }
   def or_fallback_access_path?(ast_node)
     ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
   end
@@ -1022,7 +1023,7 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(node: T.untyped).returns(MIR::DefaultValue) }
+  sig { params(node: AST::Node).returns(MIR::DefaultValue) }
   def or_pass_fallback(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")
@@ -1032,7 +1033,7 @@ module MIRLoweringExpressions
     MIR::DefaultValue.new(kind: :undefined)
   end
 
-  sig { params(node: AST::GetField).returns(T.untyped) }
+  sig { params(node: AST::GetField).returns(MIR::Node) }
   def lower_get_field(node)
     T.bind(self, MIRLowering) rescue nil
     constructor = unit_variant_constructor(node)
@@ -1042,7 +1043,7 @@ module MIRLoweringExpressions
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
     if target_node.is_a?(AST::OptionalUnwrap)
-      inner_mir = lower(target_node.target)
+      inner_mir = T.cast(lower(target_node.target), MIR::Node)
       plan = field_access_plan(node, MIR::Ident.new("_r"))
       return MIR::IfOptional.new(
         inner_mir, "_r",
@@ -1124,7 +1125,7 @@ module MIRLoweringExpressions
     :direct
   end
 
-  sig { params(ex: AST::OrExit, line: T.untyped).returns(OrExitFacts) }
+  sig { params(ex: AST::OrExit, line: Integer).returns(OrExitFacts) }
   def or_exit_facts(ex, line)
     kind = T.let(nil, T.nilable(String))
     error_name = T.let(nil, T.nilable(String))
@@ -1161,10 +1162,10 @@ module MIRLoweringExpressions
     MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new(runtime_binding_name), "__error"), field)
   end
 
-  sig { params(facts: OrExitFacts).returns(T::Array[T.untyped]) }
+  sig { params(facts: OrExitFacts).returns(T::Array[MIR::Stmt]) }
   def or_exit_error_update_stmts(facts)
     T.bind(self, MIRLowering) rescue nil
-    stmts = T.let([], T::Array[T.untyped])
+    stmts = T.let([], T::Array[MIR::Stmt])
     if facts.kind
       stmts << MIR::Set.new(runtime_error_field("kind"), MIR::EnumTag.new(variant: T.must(facts.kind)))
       if facts.error_name
@@ -1213,7 +1214,7 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(node: T.untyped, ti: T.nilable(Type)).returns(T::Boolean) }
+  sig { params(node: AST::Node, ti: T.nilable(Type)).returns(T::Boolean) }
   def comptime_number_literal?(node, ti)
     return false unless node.is_a?(AST::Literal)
     return false unless node.type == :NUMBER
@@ -1495,10 +1496,10 @@ module MIRLoweringExpressions
     ), MIR::OwnedSlice)
   end
 
-  sig { params(node: AST::StructLit).returns(T.untyped) }
+  sig { params(node: AST::StructLit).returns(MIR::Node) }
   def lower_struct_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    hoisted = []
+    hoisted = T.let([], T::Array[MIR::Node])
     field_types = struct_lit_field_types(node)
     struct_alloc = alloc_for_node(node)
 
@@ -1587,11 +1588,11 @@ module MIRLoweringExpressions
     wrap_indirect_field_hoists(hoisted, result)
   end
 
-  sig { params(node: AST::UnionVariantLit).returns(T.untyped) }
+  sig { params(node: AST::UnionVariantLit).returns(MIR::Node) }
   def lower_union_variant_lit(node)
     T.bind(self, MIRLowering) rescue nil
     # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
-    hoisted = []
+    hoisted = T.let([], T::Array[MIR::Node])
     variant_alloc = alloc_for_node(node)
     variant_field_types = union_variant_lit_field_types(node)
 
@@ -1892,8 +1893,8 @@ module MIRLoweringExpressions
     # first, actual second. CLEAR doesn't distinguish, so we use
     # left=expected, right=actual.
     args_mir = T.let(extra_args.map { |arg| MIR::Ident.new(arg) }, T::Array[MIR::Emittable])
-    args_mir << T.cast(left_mir, MIR::Emittable)
-    args_mir << T.cast(right_mir, MIR::Emittable)
+    args_mir << left_mir
+    args_mir << right_mir
     params = args_mir.each_index.map do |idx|
       AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
     end
@@ -1919,7 +1920,7 @@ module MIRLoweringExpressions
   # Type info comes from the annotator's stamps; if neither operand
   # has resolved type info we fall back to expectEqualDeep, which
   # works on any equatable value.
-  sig { params(left: T.untyped, right: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(left: AST::Node, right: AST::Node).returns(EqualityHelper) }
   def pick_equality_helper(left, right)
     T.bind(self, MIRLowering) rescue nil
     lt = type_info_for(left)
@@ -1938,7 +1939,7 @@ module MIRLoweringExpressions
     ["expectEqualDeep", []]
   end
 
-  sig { params(ast_node: T.untyped).returns(Type) }
+  sig { params(ast_node: AST::Node).returns(Type) }
   def type_info_for(ast_node)
     T.bind(self, MIRLowering) rescue nil
     Type.from_node!(ast_node, context: "equality helper")
@@ -2028,7 +2029,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(source: T.untyped).returns(Type) }
+  sig { params(source: AST::Node).returns(Type) }
   def copy_source_type_info(source)
     if source.respond_to?(:typed?) && source.typed?
       return source.full_type!(context: "COPY value")
@@ -2048,7 +2049,7 @@ module MIRLoweringExpressions
     Type.from_node!(source, context: "COPY value")
   end
 
-  sig { params(source: T.untyped, source_type: Type, dest_type: Type).returns(String) }
+  sig { params(source: AST::Node, source_type: Type, dest_type: Type).returns(String) }
   def copy_source_zig_type(source, source_type, dest_type)
     if source_type.non_string_array? && source.is_a?(AST::Identifier) && source.symbol&.is_param
       return source_type.zig_type(is_param: true)
@@ -2078,7 +2079,7 @@ module MIRLoweringExpressions
   # binding placed in a field transfers ownership, so its guarded
   # cleanup must be suppressed via MoveMark -- the same mechanism
   # element stores and TAKES args use (INV-13/14).
-  sig { params(v: T.untyped).void }
+  sig { params(v: AST::Node).void }
   def move_mark_field!(v)
     T.bind(self, MIRLowering) rescue nil
     return unless v.is_a?(AST::Identifier)
@@ -2108,7 +2109,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(node: AST::ShareNode).returns(T.untyped) }
+  sig { params(node: AST::ShareNode).returns(MIR::Node) }
   def lower_share(node)
     T.bind(self, MIRLowering) rescue nil
     source_ti = node.value.full_type!
@@ -2224,7 +2225,7 @@ module MIRLoweringExpressions
     ::FiberCtxBuilder.rc_payload_zig_type(ti)
   end
 
-  sig { params(type: T.untyped).returns(String) }
+  sig { params(type: Type::TypeInput).returns(String) }
   def generic_type_arg_zig(type)
     T.bind(self, MIRLowering) rescue nil
     if type.is_a?(Type) && type.generic_payload_type_arg?

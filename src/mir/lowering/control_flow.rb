@@ -11,14 +11,15 @@ module MIRLoweringControlFlow
   MatchDefaultBody = T.type_alias { T::Array[AST::Node] }
   IfBindAliasAllocMap = T.type_alias { T::Hash[String, T.nilable(Symbol)] }
   IfBindAliasOwnerMap = T.type_alias { T::Hash[String, String] }
+  MatchTypeKey = T.type_alias { Symbol }
 
   class MatchLoweringFacts < T::Struct
     const :expr_label, T.nilable(String)
-    const :subject, T.untyped
+    const :subject, MIR::Node
     const :is_union, T::Boolean
     const :is_int_match, T::Boolean
     const :is_enum_match, T::Boolean
-    const :expr_type_sym, T.untyped
+    const :expr_type_sym, MatchTypeKey
   end
 
   class UnionMatchArmPlan < T::Struct
@@ -29,11 +30,11 @@ module MIRLoweringControlFlow
 
   class ForEachPlan < T::Struct
     const :var, String
-    const :body, T::Array[T.untyped]
+    const :body, T::Array[MIR::Node]
     const :rt, MIR::Ident
-    const :collection, T.untyped
+    const :collection, MIR::Node
     const :collection_type, Type
-    const :collection_setup, T::Array[T.untyped]
+    const :collection_setup, T::Array[MIR::Node]
     const :mutable, T::Boolean
     const :mark_per_iter, T.nilable(T::Boolean)
     const :tight, T::Boolean
@@ -41,9 +42,9 @@ module MIRLoweringControlFlow
 
   class ForRangePlan < T::Struct
     const :var, String
-    const :start_value, T.untyped
-    const :end_value, T.untyped
-    const :body, T::Array[T.untyped]
+    const :start_value, MIR::Node
+    const :end_value, MIR::Node
+    const :body, T::Array[MIR::Node]
     const :rt, MIR::Ident
     const :comparison, String
     const :iter_var, String
@@ -54,7 +55,7 @@ module MIRLoweringControlFlow
   class ReturnOwnershipPlan < T::Struct
     extend T::Sig
 
-    prop :value, T.untyped
+    prop :value, T.nilable(MIR::Node)
     const :explicit_return_names, T::Set[String]
     const :moved_root_names, T::Set[String]
     const :consumed_root_names, T::Set[String]
@@ -96,13 +97,13 @@ module MIRLoweringControlFlow
 	    end
   end
 
-  sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(cond: MIR::Node, pending: T::Array[MIR::Node]).returns(MIR::Node) }
   def loop_condition_expr(cond, pending)
     T.bind(self, MIRLowering) rescue nil
     return cond if pending.empty?
 
     label = "__while_cond_#{lowering_counters.next_block_expr_id}"
-    body = T.let([], T::Array[T.untyped])
+    body = T.let([], T::Array[MIR::Node])
     pending.each do |stmt|
       body << stmt
       body.concat(ownership_facts_for_mir_surface(stmt))
@@ -110,7 +111,7 @@ module MIRLoweringControlFlow
     MIR::BlockExpr.new(label, body + [MIR::BreakStmt.new(label, cond)])
   end
 
-  sig { params(ast_node: T.untyped, transfers_to_capture: T::Boolean).returns(T.untyped) }
+  sig { params(ast_node: AST::Node, transfers_to_capture: T::Boolean).returns(MIR::Node) }
   def lower_control_condition(ast_node, transfers_to_capture: false)
     lowerer = T.unsafe(self)
     lowered = lowerer.lower(ast_node)
@@ -121,7 +122,7 @@ module MIRLoweringControlFlow
     end
   end
 
-  sig { params(node: AST::IfStatement).returns(T.untyped) }
+  sig { params(node: AST::IfStatement).returns(MIR::Node) }
   def lower_if(node)
     T.bind(self, MIRLowering) rescue nil
     cond, cond_pending = lower_head { lower_control_condition(node.condition) }
@@ -205,7 +206,7 @@ module MIRLoweringControlFlow
   # to the pre-body high-water mark. `after_mark` is interposed between
   # the marker pair and the body (lower_for_range uses it for the
   # iteration-variable decl).
-  sig { params(body: T.untyped, mark_per_iter: T.untyped, tight: T.untyped, after_mark: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(body: T::Array[MIR::Node], mark_per_iter: T.nilable(T::Boolean), tight: T::Boolean, after_mark: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def prepend_loop_mark(body, mark_per_iter:, tight:, after_mark: [])
     T.bind(self, MIRLowering) rescue nil
     suffix = after_mark + body
@@ -218,7 +219,7 @@ module MIRLoweringControlFlow
     [save, restore] + suffix
   end
 
-  sig { params(stmts: T::Array[T.untyped], scope: Symbol).void }
+  sig { params(stmts: T::Array[MIR::Node], scope: Symbol).void }
   def stamp_loop_frame_alloc_scopes!(stmts, scope)
     stmts.each do |s|
       case s
@@ -242,7 +243,7 @@ module MIRLoweringControlFlow
     nil
   end
 
-  sig { params(stmts: T::Array[T.untyped], mark_per_iter: T.untyped).void }
+  sig { params(stmts: T::Array[MIR::Node], mark_per_iter: T.nilable(T::Boolean)).void }
   def finalize_loop_frame_alloc_scopes!(stmts, mark_per_iter)
     stamp_loop_frame_alloc_scopes!(stmts, mark_per_iter == true ? :iteration : :function)
   end
@@ -293,14 +294,14 @@ module MIRLoweringControlFlow
 
   # Returns true when the last reachable statement in a loop body is an
   # unconditional exit (break/continue/return), making any trailing code unreachable.
-  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
   def loop_body_exits?(body)
     T.bind(self, MIRLowering) rescue nil
     return false unless body.is_a?(Array) && !body.empty?
     body.last.is_a?(MIR::BreakStmt) || body.last.is_a?(MIR::ContinueStmt) || body.last.is_a?(MIR::ReturnStmt)
   end
 
-  sig { params(node: AST::ForEach).returns(T.untyped) }
+  sig { params(node: AST::ForEach).returns(MIR::Node) }
   def lower_for_each(node)
     T.bind(self, MIRLowering) rescue nil
     plan = for_each_plan(node)
@@ -319,7 +320,7 @@ module MIRLoweringControlFlow
     coll = lower(node.collection)
     coll_type = node.collection.full_type!
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
-    collection_setup = T.let([], T::Array[T.untyped])
+    collection_setup = T.let([], T::Array[MIR::Node])
     if for_each_owned_collection_source?(coll)
       source_name = "__for_src_#{lowering_counters.next_tmp_id}"
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
@@ -357,7 +358,7 @@ module MIRLoweringControlFlow
     )
   end
 
-  sig { params(node: AST::ForEach, plan: ForEachPlan).returns(T.untyped) }
+  sig { params(node: AST::ForEach, plan: ForEachPlan).returns(MIR::Node) }
   def for_each_loop_stmt(node, plan)
     T.bind(self, MIRLowering) rescue nil
     var = plan.var
@@ -366,7 +367,7 @@ module MIRLoweringControlFlow
     ct = plan.collection_type
     mark_per_iter = plan.mark_per_iter
     tight = plan.tight
-    loop_stmt = T.let(nil, T.untyped)
+    loop_stmt = T.let(nil, T.nilable(MIR::Node))
     if ct.map?
       for_id = lowering_counters.next_for_loop_id
       iter_var = "__kit_#{for_id}"
@@ -543,7 +544,7 @@ module MIRLoweringControlFlow
     )
   end
 
-  sig { params(node: AST::MatchStatement).returns(T.untyped) }
+  sig { params(node: AST::MatchStatement).returns(MIR::Node) }
   def lower_match(node)
     T.bind(self, MIRLowering) rescue nil
     facts = match_lowering_facts(node)
@@ -721,7 +722,7 @@ module MIRLoweringControlFlow
       is_union: is_union,
       is_int_match: is_int_match,
       is_enum_match: is_enum_match,
-      expr_type_sym: is_union ? union_lookup : expr_type_sym
+      expr_type_sym: T.cast(is_union ? union_lookup : expr_type_sym, Symbol)
     )
   end
 
@@ -882,7 +883,7 @@ module MIRLoweringControlFlow
     end
   end
 
-  sig { params(node: AST::ReturnNode).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode).returns(MIR::NodeRoot) }
   def lower_return(node)
     T.bind(self, MIRLowering) rescue nil
     plan = return_lowering_plan(node)
@@ -890,7 +891,7 @@ module MIRLoweringControlFlow
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
-    if tail_call_return?(value)
+    if value.is_a?(MIR::Call) && tail_call_return?(value)
       return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args, value.callable_contract))
     end
 
@@ -908,14 +909,14 @@ module MIRLoweringControlFlow
     end
   end
 
-  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
   def finalize_return_value(node, value)
     value = return_payload_pointer_value(node, value)
     value = heap_carry_return_value(node, value)
     heap_carry_recursive_param_value(node, value)
   end
 
-  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
   def return_payload_pointer_value(node, value)
     T.bind(self, MIRLowering) rescue nil
     payload_zig = current_function_return_payload_zig
@@ -933,7 +934,7 @@ module MIRLoweringControlFlow
     )
   end
 
-  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
   def heap_carry_return_value(node, value)
     T.bind(self, MIRLowering) rescue nil
     return value unless current_function_heap_carry_return? && node.value && value
@@ -946,7 +947,7 @@ module MIRLoweringControlFlow
     escaping_value_alloc(ret_type) == :heap ? place_value_for_destination(value, node.value, :heap, ret_type) : value
   end
 
-  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
   def heap_carry_recursive_param_value(node, value)
     T.bind(self, MIRLowering) rescue nil
     return value unless current_function_heap_carry_return? && node.value && value.is_a?(MIR::Ident)
@@ -958,13 +959,13 @@ module MIRLoweringControlFlow
     ret_type.recursive_cleanup_shape?(mir_schema_lookup) ? MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap) : value
   end
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: T.nilable(MIR::Node)).returns(T::Boolean) }
   def tail_call_return?(value)
     T.bind(self, MIRLowering) rescue nil
     !!(current_function_tail_call? && !program_state.debug_mode && value.is_a?(MIR::Call) && value.callee == current_function_zig_name)
   end
 
-  sig { params(plan: ReturnOwnershipPlan, value: T.untyped, ret: MIR::ReturnStmt).returns(T.untyped) }
+  sig { params(plan: ReturnOwnershipPlan, value: T.nilable(MIR::Node), ret: MIR::ReturnStmt).returns(MIR::NodeRoot) }
   def return_with_transfer_marks(plan, value, ret)
     T.bind(self, MIRLowering) rescue nil
     names = plan.returned_names
@@ -1035,17 +1036,17 @@ module MIRLoweringControlFlow
   # Helpers
   # ================================================================
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: AST::Node).returns(T::Boolean) }
   def aggregate_return_literal?(expr)
-    node = T.let(expr, T.untyped)
+    node = T.let(expr, AST::Node)
     node = node.value while node.is_a?(AST::Cast)
     node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) || node.is_a?(AST::ListLit)
   end
 
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(ast_node: AST::Node).returns(T::Boolean) }
   def return_transfers_heap_binding?(ast_node)
     T.bind(self, MIRLowering) rescue nil
-    node = T.let(ast_node, T.untyped)
+    node = T.let(ast_node, AST::Node)
     node = node.value while node.is_a?(AST::Cast) || node.is_a?(AST::MoveNode)
     return false if node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
 
@@ -1074,7 +1075,7 @@ module MIRLoweringControlFlow
     declared
   end
 
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(ast_node: T.nilable(AST::Node)).returns(T::Boolean) }
   def return_value_already_payload_pointer?(ast_node)
     T.bind(self, MIRLowering) rescue nil
     payload_zig = current_function_return_payload_zig
@@ -1085,7 +1086,7 @@ module MIRLoweringControlFlow
     false
   end
 
-  sig { params(expr: T.untyped).returns(T::Set[String]) }
+  sig { params(expr: AST::Node).returns(T::Set[String]) }
   def returned_binding_names(expr)
     T.bind(self, MIRLowering) rescue nil
     names = T.let(Set.new, T::Set[String])
@@ -1161,7 +1162,7 @@ module MIRLoweringControlFlow
     !!(entry && entry.present? && !entry.needs_cleanup?)
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  sig { params(body: AST::RawBody).returns(T::Set[String]) }
   def collect_fn_returned_names(body)
     T.bind(self, MIRLowering) rescue nil
     names = T.let(Set.new, T::Set[String])
@@ -1171,7 +1172,7 @@ module MIRLoweringControlFlow
     names
   end
 
-  sig { params(expr: T.untyped, names: T::Set[String]).void }
+  sig { params(expr: T.nilable(AST::Node), names: T::Set[String]).void }
   def collect_returned_binding_names(expr, names)
     T.bind(self, MIRLowering) rescue nil
     return unless expr
@@ -1202,7 +1203,7 @@ module MIRLoweringControlFlow
   # heap_storage? misses these: unions like Value are stack-sized but own heap
   # memory (via @indirect fields). When returned inline as a non-TAKES argument,
   # they must be hoisted to a named let with a defer.
-  sig { params(expr: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(expr: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def call_union_return_needs_hoist?(expr, ast_node)
     T.bind(self, MIRLowering) rescue nil
     return false unless expr.is_a?(MIR::Call)
@@ -1217,7 +1218,7 @@ module MIRLoweringControlFlow
   # Detect call-site auto-borrow for universal polymorphism. Plain T args
   # need `&arg`; wrapped/sync args are already pointer-like or unwrapped by
   # the polymorphic helper.
-  sig { params(arg_node: T.untyped, callee_sig: T.untyped, idx: Integer).returns(T::Boolean) }
+  sig { params(arg_node: AST::Node, callee_sig: T.nilable(FunctionSignature), idx: Integer).returns(T::Boolean) }
   def universal_poly_arg_needs_addr?(arg_node, callee_sig, idx)
     T.bind(self, MIRLowering) rescue nil
     return false unless callee_sig.is_a?(FunctionSignature)

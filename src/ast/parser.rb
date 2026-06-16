@@ -91,7 +91,7 @@ class ClearParser
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
-    @last_requires_clauses = T.let({}, T::Hash[T.untyped, T.untyped])
+    @last_requires_clauses = T.let({}, T::Hash[String, Symbol])
     @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per
@@ -137,7 +137,7 @@ class ClearParser
     @tokens[@pos + 1] || Lexer::Token.new(:EOF, "", current.line, current.column)
   end
 
-  sig { params(n: Integer).returns(T.untyped) }
+  sig { params(n: Integer).returns(T.nilable(Lexer::Token)) }
   def peek_at(n)
     @tokens[@pos + n]
   end
@@ -484,7 +484,7 @@ class ClearParser
     end
   end
 
-  sig { params(type: Symbol, storage: Symbol).returns(T.untyped) }
+  sig { params(type: Symbol, storage: Symbol).returns(AST::Node) }
   def parse_literal(type, storage)
     token = consume(type)
     node = AST::Literal.new(token, type, T.must(token).value, storage)
@@ -706,16 +706,16 @@ class ClearParser
   end
 
   # Match and immediately eat
-  sig { params(type: Symbol, value: T.nilable(String)).returns(T.untyped) }
+  sig { params(type: Symbol, value: T.nilable(String)).returns(T.any(Lexer::Token, FalseClass)) }
   def match!(type, value=nil)
     if match?(type, value)
-      consume(type) # We already know it matches, so this is safe
+      T.must(consume(type)) # We already know it matches, so this is safe
     else
       false
     end
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_statement
     # Keywordless bind/assign: x = ..., x: Type = ..., x.field = ..., x[0] = ...
     if current.type == :VAR_ID
@@ -733,7 +733,7 @@ class ClearParser
   # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
   # Returns nil (and backtracks) if no `=` follows the target, so we fall through to
   # expression-statement parsing (e.g. method calls like `foo();`).
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::Node)) }
   def try_parse_bind_or_assign
     saved_pos = @pos
     target_token = current
@@ -866,7 +866,7 @@ class ClearParser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { params(as_param: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(as_param: T::Boolean).returns(T::Array[T.any(AST::Param, AST::Capture)]) }
   def parse_argument_list(as_param: true)
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
@@ -947,7 +947,7 @@ class ClearParser
     unless type_annotation
       error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
     end
-    value = synthesize_default_for_type(T.must(start_token), type_annotation)
+    value = synthesize_default_for_type(T.must(start_token), T.must(type_annotation))
     AST::VarDecl.new(start_token, name, type_annotation, value, true)
   end
 
@@ -955,13 +955,14 @@ class ClearParser
   # Used by `parse_mutable_var_decl` when no `= expr` was given. Restricted to
   # fixed-size raw arrays of element types with an obvious zero (primitives
   # and String); other types must be initialized explicitly.
-  sig { params(tok: Lexer::Token, type: T.untyped).returns(AST::DefaultArrayLit) }
+  sig { params(tok: Lexer::Token, type: Type).returns(AST::DefaultArrayLit) }
   def synthesize_default_for_type(tok, type)
     unless type.is_a?(Type) && type.fixed?
       error!(tok, :MUTABLE_BARE_NEEDS_FIXED, type: type.respond_to?(:resolved) ? type.resolved : type)
     end
     elem = type.element_type
-    elem_resolved = elem.respond_to?(:resolved) ? elem.resolved : elem
+    elem = T.must(elem)
+    elem_resolved = elem.resolved
     unless %i[Int64 Int32 Int16 Int8 Float64 Float32 String Bool Boolean].include?(elem_resolved)
       error!(tok, :MUTABLE_BARE_BAD_ELEMENT, type: elem_resolved.inspect)
     end
@@ -995,7 +996,7 @@ class ClearParser
     AST::RequireNode.new(tok, path, namespace, kind)
   end
 
-  sig { params(visibility: Symbol).returns(T.untyped) }
+  sig { params(visibility: Symbol).returns(AST::Node) }
   def parse_visibility_decl(visibility)
     consume(:KEYWORD)  # consume PUB or PRIVATE
     if match?(:KEYWORD, 'FN')
@@ -1210,7 +1211,7 @@ class ClearParser
         has_default_body = false
         if match?(:ARROW, '->')
           consume(:ARROW, '->')
-          default_body = T.cast(parse_block_body(['END']), T::Array[AST::Node])
+          default_body = parse_block_body(['END'])
           has_default_body = true
           consume(:KEYWORD, 'END')
         end
@@ -1719,20 +1720,20 @@ class ClearParser
     [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
   end
 
-  sig { params(stop_words: T::Array[String]).returns(T::Array[Object]) }
+  sig { params(stop_words: T::Array[String]).returns(AST::RawBody) }
   def parse_block_body(stop_words = ['END'])
-    stmts = T.let([], T::Array[Object])
+    stmts = T.let([], AST::RawBody)
     types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
     stop_words = stop_words.zip(types)
     # Keep going until we hit a stop word (END, ELSE, CATCH, }, etc)
     until stop_words.any? { |w, t| match?(T.must(t), w) } || match?(:EOF)
       stmt = parse_statement()
-      stmts << T.cast(stmt, Object) if stmt
+      stmts << stmt if stmt
     end
     stmts
   end
 
-  sig { params(type: Symbol, open: String, close: String).returns(T::Array[Object]) }
+  sig { params(type: Symbol, open: String, close: String).returns(AST::RawBody) }
   def parse_statement_block(type, open, close)
     consume(type, open)
     body = parse_block_body([close])
@@ -1740,17 +1741,17 @@ class ClearParser
     body
   end
 
-  sig { params(open: String, terminator: String).returns(T::Array[Object]) }
+  sig { params(open: String, terminator: String).returns(AST::RawBody) }
   def parse_keyword_block(open, terminator: 'END')
     parse_statement_block(:KEYWORD, open, terminator)
   end
 
-  sig { returns(T::Array[Object]) }
+  sig { returns(AST::RawBody) }
   def parse_brace_block
     parse_statement_block(:CHAR, '{', '}')
   end
 
-  sig { params(precedence: Integer).returns(T.untyped) }
+  sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
     lhs = parse_unary
 
@@ -1786,7 +1787,7 @@ class ClearParser
     end
   end
 
-  sig { params(lhs: T.untyped, op_token: Lexer::Token, op_prec: Integer).returns(T.untyped) }
+  sig { params(lhs: AST::Node, op_token: Lexer::Token, op_prec: Integer).returns(AST::Node) }
   def parse_binary_op(lhs, op_token, op_prec)
     op_val = op_token.value
     
@@ -1829,7 +1830,7 @@ class ClearParser
     AST::BinaryOp.new(op_token, lhs, op_sym, rhs)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_or_rescue
     # Syntax: ... OR RETURN
     if match!(:KEYWORD, 'RETURN')
@@ -1907,7 +1908,7 @@ class ClearParser
     end
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_unary
     v = current.value
     if current.type == :CHAR && AST::UNARY_OPS.include?(v)
@@ -1938,7 +1939,7 @@ class ClearParser
   # to the current lhs — stop processing without consuming any tokens."
   SUFFIX_DECLINE = T.let(Object.new.freeze, Object)
 
-  sig { params(lhs: T.untyped).returns(T.untyped) }
+  sig { params(lhs: AST::Node).returns(AST::Node) }
   def parse_suffixes(lhs)
     loop do
       rule = @@suffix_rules[[current.type, current.value]]
@@ -1948,12 +1949,12 @@ class ClearParser
       # the suffix loop should stop (leaving the token for the caller).
       result = instance_exec(lhs, &rule)
       break if result.equal?(SUFFIX_DECLINE)
-      lhs = result
+      lhs = T.cast(result, AST::Node)
     end
     lhs
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_var_id
     var_token = consume(:VAR_ID)
     name = T.must(var_token).value
@@ -1973,13 +1974,13 @@ class ClearParser
     return parse_suffixes(node)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.any(AST::IfStatement, AST::IfBind)) }
   def parse_if_statement
     if_token = consume(:KEYWORD, 'IF')
     parse_if_chain(T.must(if_token))
   end
 
-  sig { params(if_token: Lexer::Token).returns(T.untyped) }
+  sig { params(if_token: Lexer::Token).returns(T.any(AST::IfStatement, AST::IfBind)) }
   def parse_if_chain(if_token)
     condition = parse_expression
 
@@ -2051,7 +2052,7 @@ class ClearParser
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
   # Returns [] if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T::Array[AST::Binding]) }
+  sig { params(node: AST::Node, if_token: Lexer::Token).returns(T::Array[AST::Binding]) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
@@ -2180,7 +2181,7 @@ class ClearParser
   # FOR var IN (start ..= end) DO body END   — range iteration
   # FOR var IN (start ..< end) DO body END   — range iteration
   # FOR var IN collection DO body END         — collection iteration
-  sig { returns(T.untyped) }
+  sig { returns(T.any(AST::ForRange, AST::ForEach)) }
   def parse_for_range
     tok = consume(:KEYWORD, 'FOR')
     var_name = T.must(consume(:VAR_ID)).value
@@ -2404,7 +2405,7 @@ class ClearParser
     AST::Raise.new(tok, kind, error_name, message)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.any(AST::WhileLoop, AST::WhileBindLoop)) }
   def parse_while_loop
     tok = consume(:KEYWORD, 'WHILE')
     condition = parse_expression
@@ -2469,7 +2470,7 @@ class ClearParser
     error!(anchor, :AUTO_NOT_ALLOWED_IN_FIELD, context: context_label, field: field_name)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_primary
     rule = @@primary_rules[[current.type, current.value]]
     rule ||= @@primary_rules[[current.type, nil]]
@@ -2514,7 +2515,7 @@ class ClearParser
     peek_generic_angle_params?('{')
   end
 
-  sig { params(storage: Symbol).returns(T.untyped) }
+  sig { params(storage: Symbol).returns(T.nilable(AST::Node)) }
   def parse_lit(storage)
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
@@ -2987,7 +2988,7 @@ class ClearParser
     else
       # Short form: TAP func -> becomes TAP { func(_); }
       expr = parse_expression(1)  # parse_pipe_expression
-      AST::TapOp.new(token, [AST::FuncCall.new(token, expr.respond_to?(:name) ? expr.name : expr.to_s, [AST::Identifier.new(token, "_")])])
+      AST::TapOp.new(token, [AST::FuncCall.new(token, expr.respond_to?(:name) ? T.unsafe(expr).name : expr.to_s, [AST::Identifier.new(token, "_")])])
     end
   end
 
@@ -3098,7 +3099,7 @@ class ClearParser
     return false unless token_char?(next_tok, ':')
 
     sync_tok = peek_at(2)
-    token_var?(sync_tok) && ELEMENT_SYNC_TOKENS.include?(sync_tok.value) && token_char?(peek_at(3), '[')
+    token_var?(sync_tok) && ELEMENT_SYNC_TOKENS.include?(T.must(sync_tok).value) && token_char?(peek_at(3), '[')
   end
 
   sig { params(result: T::Hash[Symbol, T.untyped], value: String).void }
@@ -3571,7 +3572,7 @@ class ClearParser
     elsif match?(:ARROW, '->')
       tok = consume(:ARROW, '->')
       body = parse_brace_block
-      AST::ErrorAction.new(action: AST::ErrorActionKind::Block, body: T.cast(body, T::Array[AST::Node]), token: tok)
+      AST::ErrorAction.new(action: AST::ErrorActionKind::Block, body: body, token: tok)
     else
       error!(current, :EXPECTED_AFTER_ERROR_CLAUSE)
     end
@@ -3827,7 +3828,7 @@ class ClearParser
     )
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::BgNode) }
   def parse_bg_block
     bg_token = consume(:KEYWORD, 'BG')
     if match?(:KEYWORD, 'STREAM')
@@ -3845,7 +3846,7 @@ class ClearParser
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(AST::RawBody) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)
@@ -3857,7 +3858,7 @@ class ClearParser
 
   # Parse one statement from a BG block body.
   # If the expression is followed by AS or THEN, builds a ThenChain node.
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_bg_body_stmt
     # Keywordless bind/assign: x = ..., x.field = ..., x[0] = ...
     if current.type == :VAR_ID
