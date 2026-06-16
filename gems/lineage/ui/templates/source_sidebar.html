@@ -1,0 +1,13 @@
+<header>
+  <h1>Lineage</h1>
+  <div class="subtle">{{ path }}</div>
+  {{ nav|safe }}
+</header>
+{% if show_empty_outline %}
+  <nav class="outline" aria-label="source outline">
+    <div class="outline-title">Outline</div>
+    <div class="empty">No functions, methods, classes, or modules found.</div>
+  </nav>
+{% else %}
+  {{ outline|safe }}
+{% endif %}

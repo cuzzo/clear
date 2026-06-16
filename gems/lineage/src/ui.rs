@@ -95,7 +95,33 @@ struct UiCoverageContext {
     covered_lines: i64,
     partial_lines: i64,
     missed_lines: i64,
+    multi_type_lines: i64,
+    mutant_backed_lines: i64,
+    stochastic_mutant_backed_lines: i64,
+    invariant_mutant_backed_lines: i64,
     coverage_percent: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LineQualityBar {
+    tracked_lines: i64,
+    covered_lines: i64,
+    partial_lines: i64,
+    multi_type_lines: i64,
+    mutant_backed_lines: i64,
+    coverage_percent: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LineQualitySegments {
+    multi: f64,
+    covered: f64,
+    partial: f64,
+    missed: f64,
+    mutant_multi: f64,
+    mutant_covered: f64,
+    mutant_partial: f64,
+    mutant_gap: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +345,8 @@ pub struct UiLineAnnotation {
     pub distinct_tests: i64,
     pub mutant_verified_tests: i64,
     pub mutant_killed_tests: i64,
+    pub stochastic_mutant_verified_tests: i64,
+    pub invariant_mutant_verified_tests: i64,
     pub line_hits: Option<u32>,
     pub line_coverage: Option<f64>,
     pub mutant_coverage: Option<f64>,
@@ -467,6 +495,168 @@ struct IndexPageTemplate<'a> {
     body: &'a str,
 }
 
+#[derive(Template)]
+#[template(path = "app.html")]
+struct AppTemplate<'a> {
+    source_sidebar: bool,
+    sidebar: &'a str,
+    main: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard_sidebar.html")]
+struct DashboardSidebarTemplate<'a> {
+    summary: &'a str,
+    nav: &'a str,
+    current_directory: &'a str,
+    show_directory_input: bool,
+    filter: &'a str,
+    search_options: &'a str,
+    files: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "source_sidebar.html")]
+struct SourceSidebarTemplate<'a> {
+    path: &'a str,
+    nav: &'a str,
+    outline: &'a str,
+    show_empty_outline: bool,
+}
+
+#[derive(Template)]
+#[template(path = "source_unavailable.html")]
+struct SourceUnavailableTemplate<'a> {
+    error: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard.html")]
+struct DashboardTemplate<'a> {
+    branch_context: &'a str,
+    warnings: &'a str,
+    active_hazards: &'a str,
+    highest_hazard_files: &'a str,
+    highest_risk_units: &'a str,
+    highest_architecture_risks: &'a str,
+    code_tree_heading: &'a str,
+    code_tree: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard_disclosure.html")]
+struct DashboardDisclosureTemplate<'a> {
+    title: &'a str,
+    open: bool,
+    body: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard_ratio_bar.html")]
+struct DashboardRatioBarTemplate<'a> {
+    label: &'a str,
+    detail: &'a str,
+    bar: &'a str,
+    total: i64,
+    total_label: &'a str,
+    covered: i64,
+    covered_label: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard_hazard_files.html")]
+struct DashboardHazardFilesTemplate<'a> {
+    files: &'a [DashboardHazardFileItem],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DashboardHazardFileItem {
+    href: String,
+    path: String,
+    detail: String,
+    hazards: i64,
+}
+
+#[derive(Template)]
+#[template(path = "hotspot_list.html")]
+struct HotspotListTemplate<'a> {
+    wrapper_class: &'a str,
+    empty_message: &'a str,
+    items: &'a [HotspotItem],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct HotspotItem {
+    href: String,
+    kind: String,
+    name: String,
+    path: String,
+    detail: String,
+    score: String,
+}
+
+#[derive(Template)]
+#[template(path = "coverage_table.html")]
+struct CoverageTableTemplate<'a> {
+    name_header: &'a str,
+    total_header: &'a str,
+    covered_header: &'a str,
+    partial_header: &'a str,
+    missed_header: &'a str,
+    percent_header: &'a str,
+    rows: &'a str,
+    empty: bool,
+    subtotal: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "branch_context.html")]
+struct BranchContextTemplate<'a> {
+    branch: &'a str,
+    commit: &'a str,
+    coverage_percent: &'a str,
+    covered_lines: i64,
+    tracked_lines: i64,
+    partial_lines: i64,
+    missed_lines: i64,
+    mutant_backed_lines: i64,
+    stochastic_mutant_backed_lines: i64,
+    invariant_mutant_backed_lines: i64,
+    line_quality_bar: &'a str,
+    breadcrumbs: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "source_view.html")]
+struct SourceViewTemplate<'a> {
+    path: &'a str,
+    summary: &'a str,
+    layers_menu: &'a str,
+    branch_context: &'a str,
+    warnings: &'a str,
+    code_lines: &'a str,
+    history: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "layers_menu.html")]
+struct LayersMenuTemplate;
+
+#[derive(Template)]
+#[template(path = "warning_banner.html")]
+struct WarningBannerTemplate<'a> {
+    warnings: &'a [WarningBannerItem],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WarningBannerItem {
+    input_id: String,
+    key: String,
+    level: String,
+    label: String,
+    detail: String,
+}
+
 #[derive(Clone)]
 struct UiServerState {
     db: Arc<PathBuf>,
@@ -502,6 +692,8 @@ struct AnnotationBuilder {
     distinct_tests: i64,
     mutant_verified_tests: i64,
     mutant_killed_tests: i64,
+    stochastic_mutant_verified_tests: i64,
+    invariant_mutant_verified_tests: i64,
     line_hits: Option<u32>,
     line_coverage: Option<f64>,
     mutant_coverage: Option<f64>,
@@ -1788,6 +1980,7 @@ fn dashboard_line_counts(
         )
         SELECT path,
                line,
+               latest_lines.hits,
                COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
                MAX(CASE WHEN is_verified = 1 AND is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
                MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
@@ -1832,12 +2025,14 @@ fn dashboard_line_counts(
             row.get::<_, i64>(6)?,
             row.get::<_, i64>(7)?,
             row.get::<_, i64>(8)?,
+            row.get::<_, i64>(9)?,
         ))
     })?;
     for row in rows {
         let (
             path,
             _line,
+            hits,
             verified_test_types,
             has_mutant_verified,
             has_mutant_killed,
@@ -1870,7 +2065,7 @@ fn dashboard_line_counts(
         if has_invariant_mutant_killed > 0 {
             counts.invariant_mutant_killed += 1;
         }
-        if verified_test_types >= 2 {
+        if verified_test_types >= 2 || hits > 1 {
             counts.multi_type += 1;
         }
     }
@@ -2921,6 +3116,8 @@ pub fn line_annotations(
             distinct_tests: builder.distinct_tests,
             mutant_verified_tests: builder.mutant_verified_tests,
             mutant_killed_tests: builder.mutant_killed_tests,
+            stochastic_mutant_verified_tests: builder.stochastic_mutant_verified_tests,
+            invariant_mutant_verified_tests: builder.invariant_mutant_verified_tests,
             line_hits: builder.line_hits,
             line_coverage: builder.line_coverage,
             mutant_coverage: builder.mutant_coverage,
@@ -3005,6 +3202,8 @@ fn empty_annotation(line: u32) -> UiLineAnnotation {
         distinct_tests: 0,
         mutant_verified_tests: 0,
         mutant_killed_tests: 0,
+        stochastic_mutant_verified_tests: 0,
+        invariant_mutant_verified_tests: 0,
         line_hits: None,
         line_coverage: None,
         mutant_coverage: None,
@@ -3196,7 +3395,7 @@ fn apply_test_exposure(
         r#"
         WITH ranked_exposure AS (
           SELECT path, line, branch_id, test_id, test_type, is_verified,
-                 is_mutation_verified, is_mutation_killed,
+                 is_mutation_verified, is_mutation_killed, mutation_kind,
                  ROW_NUMBER() OVER (
                    PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
                    ORDER BY timestamp DESC, id DESC
@@ -3211,7 +3410,17 @@ fn apply_test_exposure(
         )
         SELECT line, test_type, COUNT(DISTINCT test_id),
                COUNT(DISTINCT CASE WHEN is_mutation_verified = 1 THEN test_id END),
-               COUNT(DISTINCT CASE WHEN is_mutation_killed = 1 THEN test_id END)
+               COUNT(DISTINCT CASE WHEN is_mutation_killed = 1 THEN test_id END),
+               COUNT(DISTINCT CASE
+                 WHEN is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
+                 THEN test_id
+               END),
+               COUNT(DISTINCT CASE
+                 WHEN is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                 THEN test_id
+               END)
         FROM latest_exposure
         WHERE is_verified = 1
         GROUP BY line, test_type
@@ -3224,10 +3433,20 @@ fn apply_test_exposure(
             row.get::<_, i64>(2)?,
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
         ))
     })?;
     for row in rows {
-        let (line, test_type, tests, mutation_verified, mutation_killed) = row?;
+        let (
+            line,
+            test_type,
+            tests,
+            mutation_verified,
+            mutation_killed,
+            stochastic_mutation_verified,
+            invariant_mutation_verified,
+        ) = row?;
         let entry = lines.entry(line).or_default();
         if paint_line_coverage {
             entry.covered = true;
@@ -3237,6 +3456,8 @@ fn apply_test_exposure(
         entry.distinct_tests += tests;
         entry.mutant_verified_tests += mutation_verified;
         entry.mutant_killed_tests += mutation_killed;
+        entry.stochastic_mutant_verified_tests += stochastic_mutation_verified;
+        entry.invariant_mutant_verified_tests += invariant_mutation_verified;
         entry.mutant_tested |= mutation_verified > 0 || mutation_killed > 0;
     }
     Ok(())
@@ -4147,105 +4368,138 @@ fn render_index_page(
         .map(|path| source_payload_with_overlays(storage, repo, path, commit, overlays))
         .transpose();
 
-    let mut out = String::new();
-    out.push_str("<div class=\"app\"><aside");
-    if matches!(&payload, Ok(Some(_))) {
-        out.push_str(" class=\"source-sidebar\"");
+    let source_sidebar = matches!(&payload, Ok(Some(_)));
+    let sidebar = match &payload {
+        Ok(Some(payload)) => render_source_sidebar(payload, &current_directory, filter),
+        _ => render_dashboard_sidebar(DashboardSidebarArgs {
+            dashboard: &dashboard,
+            current_directory: &current_directory,
+            filter,
+            files: &files,
+            child_directories: &child_directories,
+            child_files: &child_files,
+            filtered_files: &filtered,
+            selected_path: selected_path.as_deref(),
+        }),
+    };
+    let main = match &payload {
+        Ok(Some(payload)) => render_source_view(payload, filter, &branch_context),
+        Ok(None) => render_dashboard(
+            &dashboard,
+            &current_directory,
+            &child_directories,
+            &table_files,
+            filter,
+            sort,
+            &branch_context,
+        ),
+        Err(error) => render_source_unavailable(&error.to_string()),
+    };
+    let app = AppTemplate {
+        source_sidebar,
+        sidebar: &sidebar,
+        main: &main,
     }
-    out.push('>');
-    match &payload {
-        Ok(Some(payload)) => {
-            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
-            out.push_str(&html_escape(&payload.path));
-            out.push_str("</div>");
-            out.push_str(&render_sidebar_navigation(&current_directory, filter));
-            out.push_str("</header>");
-            let outline = render_source_outline(payload);
-            if outline.is_empty() {
-                out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div><div class=\"empty\">No functions, methods, classes, or modules found.</div></nav>");
-            } else {
-                out.push_str(&outline);
-            }
-        }
-        _ => {
-            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
-            out.push_str(&format!(
-                "{} files{} | {:.1}% covered",
-                dashboard.files,
-                directory_label_suffix(&current_directory),
-                dashboard.coverage_percent
-            ));
-            out.push_str("</div>");
-            out.push_str(&render_sidebar_navigation(&current_directory, filter));
-            out.push_str("</header>");
-            out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
-            if !current_directory.is_empty() {
-                out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
-                out.push_str(&html_escape(&current_directory));
-                out.push_str("\">");
-            }
-            out.push_str("<input name=\"q\" list=\"lineage-search-options\" autocomplete=\"off\" placeholder=\"Filter files\" value=\"");
-            out.push_str(&html_escape(filter));
-            out.push_str("\"><button type=\"submit\">Filter</button>");
-            out.push_str(&render_search_options(&files, &child_directories, &current_directory));
-            out.push_str("</form>");
-            out.push_str("<nav class=\"files\">");
-            if filter.trim().is_empty() {
-                if !current_directory.is_empty() {
-                    out.push_str(&render_parent_directory_link(&current_directory, filter));
-                }
-                for directory in &child_directories {
-                    out.push_str(&render_directory_link(directory, false, filter));
-                }
-                for file in &child_files {
-                    let active = selected_path.as_deref() == Some(file.path.as_str());
-                    out.push_str(&render_file_link(file, active, filter));
-                }
-                if child_directories.is_empty() && child_files.is_empty() {
-                    out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
-                }
-            } else {
-                for file in &filtered {
-                    let active = selected_path.as_deref() == Some(file.path.as_str());
-                    out.push_str(&render_file_link(file, active, filter));
-                }
-                if filtered.is_empty() {
-                    out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
-                }
-            }
-            out.push_str("</nav>");
-        }
-    }
-    out.push_str("</aside><main>");
-    match payload {
-        Ok(Some(payload)) => out.push_str(&render_source_view(&payload, filter, &branch_context)),
-        Ok(None) => {
-            out.push_str(&render_dashboard(
-                &dashboard,
-                &current_directory,
-                &child_directories,
-                &table_files,
-                filter,
-                sort,
-                &branch_context,
-            ));
-        }
-        Err(error) => {
-            out.push_str("<div class=\"topbar\"><div><div class=\"title\">Source unavailable</div>");
-            out.push_str("<div class=\"subtle\">");
-            out.push_str(&html_escape(&error.to_string()));
-            out.push_str("</div></div></div>");
-            out.push_str("<div class=\"viewer\"><div class=\"empty\">The selected path is not available in the current checkout. Regenerate coverage for HEAD or open a historical commit view.</div></div>");
-        }
-    }
-    out.push_str("</main></div>");
-    render_page("Lineage", &out)
+    .render()
+    .context("render lineage app template")?;
+    render_page("Lineage", &app)
 }
 
 fn render_page(title: &str, body: &str) -> Result<String> {
     IndexPageTemplate { title, body }
         .render()
         .context("render lineage index template")
+}
+
+struct DashboardSidebarArgs<'a> {
+    dashboard: &'a UiDashboard,
+    current_directory: &'a str,
+    filter: &'a str,
+    files: &'a [UiFile],
+    child_directories: &'a [UiDirectory],
+    child_files: &'a [&'a UiFile],
+    filtered_files: &'a [&'a UiFile],
+    selected_path: Option<&'a str>,
+}
+
+fn render_dashboard_sidebar(args: DashboardSidebarArgs<'_>) -> String {
+    let summary = format!(
+        "{} files{} | {:.1}% covered",
+        args.dashboard.files,
+        directory_label_suffix(args.current_directory),
+        args.dashboard.coverage_percent
+    );
+    let nav = render_sidebar_navigation(args.current_directory, args.filter);
+    let search_options =
+        render_search_options(args.files, args.child_directories, args.current_directory);
+    let file_links = render_sidebar_file_links(&args);
+    render_template_string(
+        DashboardSidebarTemplate {
+            summary: &summary,
+            nav: &nav,
+            current_directory: args.current_directory,
+            show_directory_input: !args.current_directory.is_empty(),
+            filter: args.filter,
+            search_options: &search_options,
+            files: &file_links,
+        },
+        "dashboard sidebar template",
+    )
+}
+
+fn render_sidebar_file_links(args: &DashboardSidebarArgs<'_>) -> String {
+    let mut out = String::new();
+    if args.filter.trim().is_empty() {
+        if !args.current_directory.is_empty() {
+            out.push_str(&render_parent_directory_link(
+                args.current_directory,
+                args.filter,
+            ));
+        }
+        for directory in args.child_directories {
+            out.push_str(&render_directory_link(directory, false, args.filter));
+        }
+        for file in args.child_files {
+            let active = args.selected_path == Some(file.path.as_str());
+            out.push_str(&render_file_link(file, active, args.filter));
+        }
+        if args.child_directories.is_empty() && args.child_files.is_empty() {
+            out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
+        }
+    } else {
+        for file in args.filtered_files {
+            let active = args.selected_path == Some(file.path.as_str());
+            out.push_str(&render_file_link(file, active, args.filter));
+        }
+        if args.filtered_files.is_empty() {
+            out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
+        }
+    }
+    out
+}
+
+fn render_source_sidebar(payload: &UiSourcePayload, current_directory: &str, filter: &str) -> String {
+    let nav = render_sidebar_navigation(current_directory, filter);
+    let outline = render_source_outline(payload);
+    render_template_string(
+        SourceSidebarTemplate {
+            path: &payload.path,
+            nav: &nav,
+            outline: &outline,
+            show_empty_outline: outline.is_empty(),
+        },
+        "source sidebar template",
+    )
+}
+
+fn render_source_unavailable(error: &str) -> String {
+    render_template_string(SourceUnavailableTemplate { error }, "source unavailable template")
+}
+
+fn render_template_string<T: Template>(template: T, name: &str) -> String {
+    template.render().unwrap_or_else(|error| {
+        panic!("failed to render {name}: {error}");
+    })
 }
 
 fn filtered_files<'a>(files: &'a [UiFile], filter: &str) -> Vec<&'a UiFile> {
@@ -4556,55 +4810,83 @@ fn render_directory_link(directory: &UiDirectory, active: bool, filter: &str) ->
     out
 }
 
-fn render_coverage_bar(
-    tracked_lines: i64,
-    covered_lines: i64,
-    line_coverage: f64,
-    mutant_killed_covered_lines: i64,
-    dark_arm_findings: i64,
-) -> String {
-    let (strong, weak) = coverage_bar_widths(
-        tracked_lines,
-        covered_lines,
-        line_coverage,
-        mutant_killed_covered_lines,
-        dark_arm_findings,
-    );
+fn render_line_quality_bar(bar: LineQualityBar) -> String {
+    let segments = line_quality_segments(bar);
     let title = format!(
-        "{:.1}% covered; {:.1}% mutant-killed/no-partial confidence; {:.1}% weak covered tail",
-        (strong + weak).min(100.0),
-        strong,
-        weak
+        "{:.1}% covered; {} total, {} covered, {} multi-covered, {} partial, {} missed, {} mutant-backed",
+        bar.coverage_percent.clamp(0.0, 100.0),
+        bar.tracked_lines.max(0),
+        bar.covered_lines.clamp(0, bar.tracked_lines.max(0)),
+        bar.multi_type_lines.max(0),
+        bar.partial_lines.max(0),
+        missed_line_count(bar.tracked_lines, bar.covered_lines),
+        bar.mutant_backed_lines.max(0)
     );
     format!(
-        "<span class=\"coverage-bar\" title=\"{}\"><span class=\"coverage-strong\" style=\"width:{:.3}%\"></span><span class=\"coverage-weak\" style=\"width:{:.3}%\"></span></span>",
+        concat!(
+            "<span class=\"coverage-bar line-quality-bar\" title=\"{}\">",
+            "<span class=\"coverage-track\">",
+            "<span class=\"coverage-multi\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-covered\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-partial\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-missed\" style=\"width:{:.3}%\"></span>",
+            "</span><span class=\"mutant-track\">",
+            "<span class=\"coverage-multi\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-covered\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-partial\" style=\"width:{:.3}%\"></span>",
+            "<span class=\"coverage-missed\" style=\"width:{:.3}%\"></span>",
+            "</span></span>"
+        ),
         html_escape(&title),
-        strong,
-        weak
+        segments.multi,
+        segments.covered,
+        segments.partial,
+        segments.missed,
+        segments.mutant_multi,
+        segments.mutant_covered,
+        segments.mutant_partial,
+        segments.mutant_gap
     )
 }
 
-fn coverage_bar_widths(
-    tracked_lines: i64,
-    covered_lines: i64,
-    line_coverage: f64,
-    mutant_killed_covered_lines: i64,
-    dark_arm_findings: i64,
-) -> (f64, f64) {
-    if tracked_lines <= 0 {
-        let covered = line_coverage.clamp(0.0, 100.0);
-        return (0.0, covered);
+fn line_quality_segments(bar: LineQualityBar) -> LineQualitySegments {
+    let tracked_lines = bar.tracked_lines.max(0);
+    if tracked_lines == 0 {
+        let covered: f64 = bar.coverage_percent.clamp(0.0, 100.0);
+        return LineQualitySegments {
+            multi: 0.0,
+            covered,
+            partial: 0.0,
+            missed: (100.0 - covered).max(0.0),
+            mutant_multi: 0.0,
+            mutant_covered: 0.0,
+            mutant_partial: 0.0,
+            mutant_gap: 100.0,
+        };
     }
-    let covered_lines = covered_lines.clamp(0, tracked_lines);
-    let dark_arm_lines = dark_arm_findings.clamp(0, covered_lines);
-    let missing_mutant_lines = covered_lines
-        .saturating_sub(mutant_killed_covered_lines.clamp(0, covered_lines));
-    let weak_lines = missing_mutant_lines.max(dark_arm_lines).min(covered_lines);
-    let strong_lines = covered_lines.saturating_sub(weak_lines);
-    (
-        percent(strong_lines, tracked_lines),
-        percent(weak_lines, tracked_lines),
-    )
+    let covered_lines = bar.covered_lines.clamp(0, tracked_lines);
+    let partial_lines = bar.partial_lines.clamp(0, covered_lines);
+    let full_covered_lines = covered_lines.saturating_sub(partial_lines);
+    let multi_type_lines = bar.multi_type_lines.clamp(0, full_covered_lines);
+    let covered_single_lines = full_covered_lines.saturating_sub(multi_type_lines);
+    let missed_lines = tracked_lines.saturating_sub(covered_lines);
+    let mutant_backed_lines = bar.mutant_backed_lines.clamp(0, covered_lines);
+    let mutant_multi_lines = mutant_backed_lines.min(multi_type_lines);
+    let remaining_mutant = mutant_backed_lines.saturating_sub(mutant_multi_lines);
+    let mutant_covered_lines = remaining_mutant.min(covered_single_lines);
+    let remaining_mutant = remaining_mutant.saturating_sub(mutant_covered_lines);
+    let mutant_partial_lines = remaining_mutant.min(partial_lines);
+    let mutant_painted_lines = mutant_multi_lines + mutant_covered_lines + mutant_partial_lines;
+    LineQualitySegments {
+        multi: percent(multi_type_lines, tracked_lines),
+        covered: percent(covered_single_lines, tracked_lines),
+        partial: percent(partial_lines, tracked_lines),
+        missed: percent(missed_lines, tracked_lines),
+        mutant_multi: percent(mutant_multi_lines, tracked_lines),
+        mutant_covered: percent(mutant_covered_lines, tracked_lines),
+        mutant_partial: percent(mutant_partial_lines, tracked_lines),
+        mutant_gap: percent(tracked_lines.saturating_sub(mutant_painted_lines), tracked_lines),
+    }
 }
 
 fn render_dashboard(
@@ -4617,163 +4899,136 @@ fn render_dashboard(
     branch_context: &UiBranchContext,
 ) -> String {
     let directory = normalize_directory(directory);
-    let mut out = String::new();
-    out.push_str("<div class=\"topbar\"><div><div class=\"title\">");
-    if directory.is_empty() {
-        out.push_str("Coverage Dashboard");
-    } else {
-        out.push_str("Directory: ");
-        out.push_str(&html_escape(&directory));
-        out.push('/');
-    }
-    out.push_str("</div><div class=\"subtle\">Current Lineage database snapshot");
-    if !directory.is_empty() {
-        out.push_str(" scoped to ");
-        out.push_str(&html_escape(&directory));
-        out.push('/');
-    }
-    out.push_str("</div></div>");
-    out.push_str("<div class=\"crumbs\"><a href=\"");
-    out.push_str(&html_escape(&directory_href("", filter)));
-    out.push_str("\">root</a>");
-    if !directory.is_empty() {
-        out.push_str("<a href=\"");
-        out.push_str(&html_escape(&directory_href(&parent_directory(&directory), filter)));
-        out.push_str("\">up</a>");
-    }
-    out.push_str("</div></div>");
-    out.push_str("<div class=\"viewer\"><section class=\"dashboard\">");
     let coverage_context = dashboard_coverage_context(dashboard, directory.as_str(), files);
-    out.push_str(&render_branch_context(branch_context, &coverage_context, filter));
-    out.push_str("<div class=\"metric-grid\">");
-    out.push_str(&render_metric(
-        "Line coverage",
-        &format!("{:.1}%", dashboard.coverage_percent),
-        &format!(
-            "{} / {} tracked lines covered",
-            dashboard.covered_lines, dashboard.tracked_lines
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Hazard evidence",
-        &format!("{:.1}%", dashboard.hazard_evidence_percent),
-        &format!(
-            "{} / {} active hazards have required systems evidence",
-            dashboard.evidence_covered_hazards, dashboard.active_hazards
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Hazard verification",
-        &format!("{:.1}%", dashboard.hazard_coverage_percent),
-        &format!(
-            "{} / {} active hazards have evidence plus invariant mutants",
-            dashboard.covered_hazards, dashboard.active_hazards
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Mutant-backed lines",
-        &format!("{:.1}%", dashboard.mutant_verified_covered_percent),
-        &format!(
-            "{} / {} covered lines have mutant-verified evidence",
-            dashboard.mutant_verified_covered_lines, dashboard.covered_lines
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Stochastic mutants",
-        &format!("{:.1}%", dashboard.stochastic_mutant_verified_covered_percent),
-        &format!(
-            "{} / {} covered lines are stochastic-mutant verified",
-            dashboard.stochastic_mutant_verified_covered_lines, dashboard.covered_lines
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Invariant mutants",
-        &format!("{:.1}%", dashboard.invariant_mutant_verified_covered_percent),
-        &format!(
-            "{} / {} covered lines are invariant-mutant verified",
-            dashboard.invariant_mutant_verified_covered_lines, dashboard.covered_lines
-        ),
-    ));
-    out.push_str(&render_metric(
-        "Multi-type lines",
-        &format!("{:.1}%", dashboard.multi_type_covered_percent),
-        &format!(
-            "{} / {} covered lines have multiple verified test types",
-            dashboard.multi_type_covered_lines, dashboard.covered_lines
-        ),
-    ));
-    out.push_str(&render_metric(
-        "SARIF findings",
-        &dashboard.sarif_findings.to_string(),
-        "persisted first-party and ecosystem analysis findings",
-    ));
-    out.push_str(&render_metric(
-        "Files",
-        &dashboard.files.to_string(),
-        &format!("{} files currently report coverage", dashboard.files_with_coverage),
-    ));
-    out.push_str("</div>");
-    out.push_str(&render_warning_banner(&dashboard.warnings));
-
-    out.push_str("<section class=\"dashboard-section\"><h2>Highest Risk Units</h2>");
-    out.push_str(&render_unit_hotspots(&dashboard.top_units, filter));
-    out.push_str("</section>");
-
-    out.push_str("<section class=\"dashboard-section\"><h2>Highest Architectural Risks</h2>");
-    out.push_str(&render_architecture_risks(
-        &dashboard.top_architecture_risks,
-        filter,
-    ));
-    out.push_str("</section>");
-
-    out.push_str("<section class=\"dashboard-section\"><h2>Code tree</h2>");
-    out.push_str(&render_code_tree_table(
+    let branch_context = render_branch_context(branch_context, &coverage_context, filter);
+    let warnings = render_warning_banner(&dashboard.warnings);
+    let active_hazards = render_active_hazards_section(dashboard);
+    let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
+    let highest_risk_units = render_dashboard_disclosure(
+        "Highest Risk Units",
+        false,
+        &render_unit_hotspots(&dashboard.top_units, filter),
+    );
+    let highest_architecture_risks = render_dashboard_disclosure(
+        "Highest Architectural Risks",
+        false,
+        &render_architecture_risks(&dashboard.top_architecture_risks, filter),
+    );
+    let code_tree_heading = format!(
+        "Code tree ({} files - {} SARIF findings)",
+        dashboard.files, dashboard.sarif_findings
+    );
+    let code_tree = render_code_tree_table(
         dashboard,
         &directory,
         files,
         filter,
         sort,
-    ));
-    out.push_str("</section>");
+    );
+    render_template_string(
+        DashboardTemplate {
+            branch_context: &branch_context,
+            warnings: &warnings,
+            active_hazards: &active_hazards,
+            highest_hazard_files: &highest_hazard_files,
+            highest_risk_units: &highest_risk_units,
+            highest_architecture_risks: &highest_architecture_risks,
+            code_tree_heading: &code_tree_heading,
+            code_tree: &code_tree,
+        },
+        "dashboard template",
+    )
+}
 
-    out.push_str("<section class=\"dashboard-section\"><h2>Active Hazards</h2>");
+fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
+    render_template_string(
+        DashboardDisclosureTemplate { title, open, body },
+        "dashboard disclosure template",
+    )
+}
+
+fn render_active_hazards_section(dashboard: &UiDashboard) -> String {
+    let mut body = String::new();
     if dashboard.active_hazards == 0 {
-        out.push_str("<p class=\"empty-inline\">No active systems hazards are recorded.</p>");
+        body.push_str("<p class=\"empty-inline\">No active systems hazards are recorded.</p>");
     } else {
-        out.push_str("<div class=\"hazard-bar\"><span style=\"width:");
-        out.push_str(&format!("{:.2}%", dashboard.hazard_coverage_percent));
-        out.push_str("\"></span></div>");
-        out.push_str("<p class=\"subtle\">");
-        out.push_str(&format!(
-            "{} hazards have required systems evidence; {} also have invariant-mutant proof.",
-            dashboard.evidence_covered_hazards,
+        body.push_str(&render_dashboard_ratio_bar_row(
+            "Hazard verification",
+            dashboard.active_hazards,
             dashboard.covered_hazards,
+            &format!(
+                "{} total hazards / {} covered / {} with required systems evidence",
+                dashboard.active_hazards,
+                dashboard.covered_hazards,
+                dashboard.evidence_covered_hazards
+            ),
+            "active hazards",
+            "covered hazards",
+            "hazard-bar",
         ));
-        out.push_str("</p>");
     }
-    out.push_str("</section>");
+    render_dashboard_disclosure("Active Hazards", dashboard.active_hazards > 0, &body)
+}
 
-    out.push_str("<section class=\"dashboard-section\"><h2>Highest Hazard Files</h2>");
-    if dashboard.top_hazard_files.is_empty() {
-        out.push_str("<p class=\"empty-inline\">No hazard-heavy files to show.</p>");
-    } else {
-        out.push_str("<div class=\"dashboard-files\">");
-        for file in &dashboard.top_hazard_files {
-            out.push_str("<a href=\"");
-            out.push_str(&html_escape(&page_href(&file.path, None, filter)));
-            out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
-            out.push_str(&html_escape(&file.path));
-            out.push_str("</span><small>");
-            out.push_str(&file_detail(file));
-            out.push_str("</small></span><strong class=\"hazard-value\">");
-            out.push_str(&file.hazards.to_string());
-            out.push_str("</strong></a>");
-        }
-        out.push_str("</div>");
-    }
-    out.push_str("</section>");
-    out.push_str("</section></div>");
-    out
+fn render_highest_hazard_files_section(dashboard: &UiDashboard, filter: &str) -> String {
+    let files = dashboard
+        .top_hazard_files
+        .iter()
+        .map(|file| DashboardHazardFileItem {
+            href: page_href(&file.path, None, filter),
+            path: file.path.clone(),
+            detail: file_detail_text(file),
+            hazards: file.hazards,
+        })
+        .collect::<Vec<_>>();
+    let body = render_template_string(
+        DashboardHazardFilesTemplate { files: &files },
+        "dashboard hazard files template",
+    );
+    render_dashboard_disclosure(
+        "Highest Hazard Files",
+        dashboard.active_hazards > 0 && !dashboard.top_hazard_files.is_empty(),
+        &body,
+    )
+}
+
+fn render_dashboard_ratio_bar_row(
+    label: &str,
+    total: i64,
+    covered: i64,
+    detail: &str,
+    total_label: &str,
+    covered_label: &str,
+    bar_class: &str,
+) -> String {
+    let bar = render_ratio_bar(total, covered, bar_class);
+    render_template_string(
+        DashboardRatioBarTemplate {
+            label,
+            detail,
+            bar: &bar,
+            total: total.max(0),
+            total_label,
+            covered: covered.max(0),
+            covered_label,
+        },
+        "dashboard ratio bar template",
+    )
+}
+
+fn render_ratio_bar(total: i64, covered: i64, bar_class: &str) -> String {
+    let total = total.max(0);
+    let covered = covered.clamp(0, total);
+    let covered_percent = percent(covered, total);
+    let missed_percent = 100.0 - covered_percent;
+    format!(
+        "<span class=\"ratio-bar {}\" title=\"{} of {} covered\"><span class=\"ratio-covered\" style=\"width:{:.3}%\"></span><span class=\"ratio-missed\" style=\"width:{:.3}%\"></span></span>",
+        html_escape(bar_class),
+        covered,
+        total,
+        covered_percent,
+        missed_percent.max(0.0)
+    )
 }
 
 fn dashboard_coverage_context(
@@ -4792,41 +5047,110 @@ fn dashboard_coverage_context(
         covered_lines: dashboard.covered_lines,
         partial_lines,
         missed_lines: missed_line_count(dashboard.tracked_lines, dashboard.covered_lines),
+        multi_type_lines: dashboard.multi_type_covered_lines,
+        mutant_backed_lines: dashboard.mutant_verified_covered_lines,
+        stochastic_mutant_backed_lines: dashboard.stochastic_mutant_verified_covered_lines,
+        invariant_mutant_backed_lines: dashboard.invariant_mutant_verified_covered_lines,
         coverage_percent: dashboard.coverage_percent,
     }
 }
 
 fn source_coverage_context(payload: &UiSourcePayload) -> UiCoverageContext {
+    let has_exact_line_hits = payload
+        .annotations
+        .iter()
+        .any(|annotation| annotation.line_hits.is_some());
     let tracked_lines = payload
         .annotations
         .iter()
         .filter(|annotation| {
-            annotation.line_hits.is_some()
-                || annotation.line_coverage.is_some()
-                || annotation.covered
-                || !annotation.test_types.is_empty()
-                || !annotation.findings.is_empty()
-                || !annotation.hazards.is_empty()
+            if has_exact_line_hits {
+                annotation.line_hits.is_some()
+            } else {
+                annotation.line_coverage.is_some()
+                    || annotation.covered
+                    || !annotation.test_types.is_empty()
+                    || !annotation.findings.is_empty()
+                    || !annotation.hazards.is_empty()
+            }
         })
         .count() as i64;
     let covered_lines = payload
         .annotations
         .iter()
-        .filter(|annotation| annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0)
+        .filter(|annotation| {
+            if has_exact_line_hits {
+                annotation.line_hits.unwrap_or(0) > 0
+            } else {
+                annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0
+            }
+        })
         .count() as i64;
     let partial_lines = payload
         .annotations
         .iter()
-        .filter(|annotation| annotation_has_dark_arms(annotation))
+        .filter(|annotation| {
+            (!has_exact_line_hits || annotation.line_hits.is_some())
+                && annotation_has_dark_arms(annotation)
+        })
         .count() as i64;
     let partial_lines = partial_lines.clamp(0, covered_lines);
+    let multi_type_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| {
+            annotation_counts_for_coverage_context(annotation, has_exact_line_hits)
+                && (annotation.line_hits.unwrap_or(0) > 1
+                    || annotation.test_types.len() >= 2
+                    || annotation.distinct_tests >= 2)
+        })
+        .count() as i64;
+    let mutant_backed_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| {
+            annotation_counts_for_coverage_context(annotation, has_exact_line_hits)
+                && annotation.mutant_verified_tests > 0
+        })
+        .count() as i64;
+    let stochastic_mutant_backed_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| {
+            annotation_counts_for_coverage_context(annotation, has_exact_line_hits)
+                && annotation.stochastic_mutant_verified_tests > 0
+        })
+        .count() as i64;
+    let invariant_mutant_backed_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| {
+            annotation_counts_for_coverage_context(annotation, has_exact_line_hits)
+                && annotation.invariant_mutant_verified_tests > 0
+        })
+        .count() as i64;
     UiCoverageContext {
         path: payload.path.clone(),
         tracked_lines,
         covered_lines,
         partial_lines,
         missed_lines: missed_line_count(tracked_lines, covered_lines),
+        multi_type_lines: multi_type_lines.clamp(0, covered_lines),
+        mutant_backed_lines: mutant_backed_lines.clamp(0, covered_lines),
+        stochastic_mutant_backed_lines: stochastic_mutant_backed_lines.clamp(0, covered_lines),
+        invariant_mutant_backed_lines: invariant_mutant_backed_lines.clamp(0, covered_lines),
         coverage_percent: percent(covered_lines, tracked_lines),
+    }
+}
+
+fn annotation_counts_for_coverage_context(
+    annotation: &UiLineAnnotation,
+    has_exact_line_hits: bool,
+) -> bool {
+    if has_exact_line_hits {
+        annotation.line_hits.unwrap_or(0) > 0
+    } else {
+        annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0
     }
 }
 
@@ -4843,41 +5167,33 @@ fn render_branch_context(
     coverage: &UiCoverageContext,
     filter: &str,
 ) -> String {
-    let mut out = String::new();
-    out.push_str("<section class=\"branch-context\" aria-label=\"branch coverage context\">");
-    out.push_str("<div class=\"branch-context-head\"><div><div class=\"context-kicker\">Branch Context</div><strong>");
-    out.push_str(&html_escape(&context.branch));
-    out.push_str("</strong><span>Source: latest commit <code>");
-    out.push_str(&html_escape(&context.commit));
-    out.push_str("</code></span></div><div class=\"coverage-on-branch\"><span>Coverage on branch</span><strong>");
-    out.push_str(&format!("{:.2}%", coverage.coverage_percent));
-    out.push_str("</strong><small>");
-    out.push_str(&format!(
-        "{} of {} lines covered; {} partial, {} missed",
-        coverage.covered_lines,
-        coverage.tracked_lines,
-        coverage.partial_lines,
-        coverage.missed_lines
-    ));
-    out.push_str("</small><span class=\"branch-summary-bar\">");
-    out.push_str(&render_coverage_bar(
-        coverage.tracked_lines,
-        coverage.covered_lines,
-        coverage.coverage_percent,
-        coverage.covered_lines.saturating_sub(coverage.partial_lines),
-        coverage.partial_lines,
-    ));
-    out.push_str("</span></div></div>");
-    out.push_str("<div class=\"branch-context-body\"><div class=\"branch-crumbs\">");
-    out.push_str(&render_path_breadcrumb(&coverage.path, filter));
-    out.push_str("</div><div class=\"coverage-legend\" aria-label=\"coverage legend\">");
-    out.push_str("<span><i class=\"legend-swatch legend-uncovered\"></i>uncovered</span>");
-    out.push_str("<span><i class=\"legend-swatch legend-partial\"></i>partial</span>");
-    out.push_str("<span><i class=\"legend-alert\">!</i>hazard</span>");
-    out.push_str("<span><i class=\"legend-swatch legend-covered\"></i>covered</span>");
-    out.push_str("</div></div>");
-    out.push_str("</section>");
-    out
+    let line_quality_bar = render_line_quality_bar(LineQualityBar {
+        tracked_lines: coverage.tracked_lines,
+        covered_lines: coverage.covered_lines,
+        partial_lines: coverage.partial_lines,
+        multi_type_lines: coverage.multi_type_lines,
+        mutant_backed_lines: coverage.mutant_backed_lines,
+        coverage_percent: coverage.coverage_percent,
+    });
+    let breadcrumbs = render_path_breadcrumb(&coverage.path, filter);
+    let coverage_percent = format!("{:.2}", coverage.coverage_percent);
+    render_template_string(
+        BranchContextTemplate {
+            branch: &context.branch,
+            commit: &context.commit,
+            coverage_percent: &coverage_percent,
+            covered_lines: coverage.covered_lines,
+            tracked_lines: coverage.tracked_lines,
+            partial_lines: coverage.partial_lines,
+            missed_lines: coverage.missed_lines,
+            mutant_backed_lines: coverage.mutant_backed_lines.max(0),
+            stochastic_mutant_backed_lines: coverage.stochastic_mutant_backed_lines.max(0),
+            invariant_mutant_backed_lines: coverage.invariant_mutant_backed_lines.max(0),
+            line_quality_bar: &line_quality_bar,
+            breadcrumbs: &breadcrumbs,
+        },
+        "branch context template",
+    )
 }
 
 fn render_path_breadcrumb(path: &str, filter: &str) -> String {
@@ -4920,48 +5236,46 @@ fn render_code_tree_table(
     filter: &str,
     sort: CoverageSort,
 ) -> String {
-    let mut out = String::new();
-    out.push_str("<table class=\"coverage-table\"><thead><tr>");
-    out.push_str("<th scope=\"col\" class=\"name-col\">");
-    out.push_str(&render_sort_link("File list", CoverageSort::Path, sort, directory, filter));
-    out.push_str("</th>");
-    out.push_str("<th scope=\"col\">");
-    out.push_str(&render_sort_link("Total", CoverageSort::Total, sort, directory, filter));
-    out.push_str("</th><th scope=\"col\">");
-    out.push_str(&render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter));
-    out.push_str("</th><th scope=\"col\">");
-    out.push_str(&render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter));
-    out.push_str("</th><th scope=\"col\">");
-    out.push_str(&render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter));
-    out.push_str("</th>");
-    out.push_str("<th scope=\"col\" class=\"coverage-col\">Coverage</th><th scope=\"col\">");
-    out.push_str(&render_sort_link("%", CoverageSort::Percent, sort, directory, filter));
-    out.push_str("</th>");
-    out.push_str("</tr></thead><tbody>");
+    let name_header = render_sort_link("File list", CoverageSort::Path, sort, directory, filter);
+    let total_header = render_sort_link("Total", CoverageSort::Total, sort, directory, filter);
+    let covered_header = render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter);
+    let partial_header = render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter);
+    let missed_header = render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter);
+    let percent_header = render_sort_link("%", CoverageSort::Percent, sort, directory, filter);
+    let mut rows = String::new();
     for file in files {
-        out.push_str(&render_file_coverage_row(file, directory, filter));
+        rows.push_str(&render_file_coverage_row(file, directory, filter));
     }
-    if files.is_empty() {
-        out.push_str("<tr><td colspan=\"7\" class=\"empty-table\">No tracked files in this directory.</td></tr>");
-    }
-    out.push_str("</tbody><tfoot>");
     let partial = files
         .iter()
         .map(|file| partial_line_count(file.covered_lines, file.dark_arm_findings))
         .sum::<i64>();
     let partial = partial.clamp(0, dashboard.covered_lines);
-    out.push_str(&render_coverage_table_row(
+    let subtotal = render_coverage_table_row(
         None,
         "Subtotal",
         "",
         dashboard.tracked_lines,
         dashboard.covered_lines,
         partial,
-        dashboard.mutant_killed_covered_lines,
+        dashboard.multi_type_covered_lines,
+        dashboard.mutant_verified_covered_lines,
         dashboard.coverage_percent,
-    ));
-    out.push_str("</tfoot></table>");
-    out
+    );
+    render_template_string(
+        CoverageTableTemplate {
+            name_header: &name_header,
+            total_header: &total_header,
+            covered_header: &covered_header,
+            partial_header: &partial_header,
+            missed_header: &missed_header,
+            percent_header: &percent_header,
+            rows: &rows,
+            empty: files.is_empty(),
+            subtotal: &subtotal,
+        },
+        "coverage table template",
+    )
 }
 
 fn render_sort_link(
@@ -5007,31 +5321,21 @@ fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> Str
         file.tracked_lines,
         file.covered_lines,
         file.dark_arm_findings,
-        file.mutant_killed_covered_lines,
+        file.multi_type_covered_lines,
+        file.mutant_verified_covered_lines,
         file.line_coverage,
     )
 }
 
 fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
-    if units.is_empty() {
-        return "<p class=\"empty-inline\">No function or class hotspots to show.</p>".to_string();
-    }
-
-    let mut out = String::new();
-    out.push_str("<div class=\"unit-hotspots\">");
-    for unit in units {
-        out.push_str("<a href=\"");
-        out.push_str(&html_escape(&page_href(&unit.path, None, filter)));
-        out.push_str("#L");
-        out.push_str(&unit.start_line.to_string());
-        out.push_str("\"><span class=\"unit-hotspot-kind\">");
-        out.push_str(&html_escape(&unit_kind_label(&unit.kind, &unit.name)));
-        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
-        out.push_str(&html_escape(&unit.name));
-        out.push_str("</strong><small>");
-        out.push_str(&html_escape(&unit.path));
-        out.push_str("</small><small>");
-        out.push_str(&format!(
+    let items = units
+        .iter()
+        .map(|unit| HotspotItem {
+            href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+            kind: unit_kind_label(&unit.kind, &unit.name),
+            name: unit.name.clone(),
+            path: unit.path.clone(),
+            detail: format!(
             "{} SARIF, {} partial, {} hazards, {} fixes, {} tests, {} killed",
             unit.sarif_findings,
             unit.dark_arms,
@@ -5039,48 +5343,47 @@ fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
             unit.fixes,
             unit.distinct_tests,
             unit.mutant_killed_tests
-        ));
-        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
-        out.push_str(&format!("{:.1}", unit.score));
-        out.push_str("</strong></a>");
-    }
-    out.push_str("</div>");
-    out
+            ),
+            score: format!("{:.1}", unit.score),
+        })
+        .collect::<Vec<_>>();
+    render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots",
+            empty_message: "No function or class hotspots to show.",
+            items: &items,
+        },
+        "unit hotspot template",
+    )
 }
 
 fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> String {
-    if risks.is_empty() {
-        return "<p class=\"empty-inline\">No Espalier architectural risks to show.</p>".to_string();
-    }
-
-    let mut out = String::new();
-    out.push_str("<div class=\"unit-hotspots architecture-hotspots\">");
-    for risk in risks {
-        out.push_str("<a href=\"");
-        out.push_str(&html_escape(&page_href(&risk.path, None, filter)));
-        out.push_str("#L");
-        out.push_str(&risk.start_line.to_string());
-        out.push_str("\"><span class=\"unit-hotspot-kind\">");
-        out.push_str(&html_escape(&unit_kind_label(&risk.owner_kind, &risk.owner)));
-        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
-        out.push_str(&html_escape(&risk.owner));
-        out.push_str("</strong><small>");
-        out.push_str(&html_escape(&risk.path));
-        out.push_str("</small><small>");
-        out.push_str(&format!(
+    let items = risks
+        .iter()
+        .map(|risk| HotspotItem {
+            href: format!("{}#L{}", page_href(&risk.path, None, filter), risk.start_line),
+            kind: unit_kind_label(&risk.owner_kind, &risk.owner),
+            name: risk.owner.clone(),
+            path: risk.path.clone(),
+            detail: format!(
             "{} Espalier, {} states, {} functions, {} impure, {} privacy",
             risk.findings,
             risk.states,
             risk.functions,
             risk.impure_functions,
             risk.privacy_candidates
-        ));
-        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
-        out.push_str(&format!("{:.1}", risk.score));
-        out.push_str("</strong></a>");
-    }
-    out.push_str("</div>");
-    out
+            ),
+            score: format!("{:.1}", risk.score),
+        })
+        .collect::<Vec<_>>();
+    render_template_string(
+        HotspotListTemplate {
+            wrapper_class: "unit-hotspots architecture-hotspots",
+            empty_message: "No Espalier architectural risks to show.",
+            items: &items,
+        },
+        "architecture hotspot template",
+    )
 }
 
 fn unit_kind_label(kind: &str, name: &str) -> String {
@@ -5100,7 +5403,8 @@ fn render_coverage_table_row(
     tracked_lines: i64,
     covered_lines: i64,
     partial_findings: i64,
-    mutant_killed_covered_lines: i64,
+    multi_type_lines: i64,
+    mutant_backed_lines: i64,
     line_coverage: f64,
 ) -> String {
     let partial = partial_line_count(covered_lines, partial_findings);
@@ -5139,13 +5443,14 @@ fn render_coverage_table_row(
     out.push_str("</td><td>");
     out.push_str(&missed.to_string());
     out.push_str("</td><td class=\"coverage-cell\">");
-    out.push_str(&render_coverage_bar(
+    out.push_str(&render_line_quality_bar(LineQualityBar {
         tracked_lines,
         covered_lines,
-        percent_value,
-        mutant_killed_covered_lines,
-        partial,
-    ));
+        partial_lines: partial,
+        multi_type_lines,
+        mutant_backed_lines,
+        coverage_percent: percent_value,
+    }));
     out.push_str("</td><td class=\"coverage-percent\">");
     out.push_str(&format!("{percent_value:.2}%"));
     out.push_str("</td></tr>");
@@ -5163,8 +5468,8 @@ fn file_display_path(path: &str, directory: &str) -> String {
     }
 }
 
-fn file_detail(file: &UiFile) -> String {
-    html_escape(&format!(
+fn file_detail_text(file: &UiFile) -> String {
+    format!(
         "{} units | {} / {} lines | {} hazards | {} SARIF | {} tests | {} mutant-killed tests",
         file.units,
         file.covered_lines,
@@ -5173,51 +5478,29 @@ fn file_detail(file: &UiFile) -> String {
         file.sarif_findings,
         file.distinct_tests,
         file.mutant_killed_tests
-    ))
-}
-
-fn render_metric(label: &str, value: &str, detail: &str) -> String {
-    let mut out = String::new();
-    out.push_str("<article class=\"metric\"><div>");
-    out.push_str(&html_escape(label));
-    out.push_str("</div><strong>");
-    out.push_str(&html_escape(value));
-    out.push_str("</strong><p>");
-    out.push_str(&html_escape(detail));
-    out.push_str("</p></article>");
-    out
+    )
 }
 
 fn render_warning_banner(warnings: &[UiWarning]) -> String {
-    if warnings.is_empty() {
-        return String::new();
-    }
-
-    let mut out = String::new();
-    out.push_str("<section class=\"warning-banner\" aria-label=\"verification warnings\">");
-    for (index, warning) in warnings.iter().enumerate() {
+    let items = warnings
+        .iter()
+        .enumerate()
+        .map(|(index, warning)| {
         let key = warning_dismiss_key(warning);
         let input_id = format!("warning-dismiss-{index}-{}", stable_slug(&key));
-        out.push_str("<input class=\"warning-dismiss-toggle\" type=\"checkbox\" id=\"");
-        out.push_str(&html_escape(&input_id));
-        out.push_str("\" data-dismiss-key=\"");
-        out.push_str(&html_escape(&key));
-        out.push_str("\"><article class=\"warning ");
-        out.push_str(&html_escape(&warning.level));
-        out.push_str("\" data-dismiss-key=\"");
-        out.push_str(&html_escape(&key));
-        out.push_str("\"><label class=\"warning-dismiss\" for=\"");
-        out.push_str(&html_escape(&input_id));
-        out.push_str("\" data-dismiss-key=\"");
-        out.push_str(&html_escape(&key));
-        out.push_str("\" aria-label=\"Dismiss warning\">x</label><strong>");
-        out.push_str(&html_escape(&warning.label));
-        out.push_str("</strong><p>");
-        out.push_str(&html_escape(&warning.detail));
-        out.push_str("</p></article>");
-    }
-    out.push_str("</section>");
-    out
+        WarningBannerItem {
+            input_id,
+            key,
+            level: warning.level.clone(),
+            label: warning.label.clone(),
+            detail: warning.detail.clone(),
+        }
+        })
+        .collect::<Vec<_>>();
+    render_template_string(
+        WarningBannerTemplate { warnings: &items },
+        "warning banner template",
+    )
 }
 
 fn warning_dismiss_key(warning: &UiWarning) -> String {
@@ -5280,43 +5563,21 @@ fn render_source_view(
         .map(|annotation| annotation.findings.len())
         .sum();
 
-    let mut out = String::new();
-    out.push_str("<section class=\"source-view\">");
-    out.push_str(
-        "<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-gutter-highlights\" checked data-persist-key=\"lineage.layer.gutter-highlights\">",
-    );
-    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-gutter-icons\" checked data-persist-key=\"lineage.layer.gutter-icons\">");
-    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-blame\" data-persist-key=\"lineage.layer.blame\">");
-    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-comment-folding\" checked data-persist-key=\"lineage.layer.comment-folding\">");
-    out.push_str(
-        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-coverage\" checked data-persist-key=\"lineage.view.mode\">",
-    );
-    out.push_str(
-        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-churn\" data-persist-key=\"lineage.view.mode\">",
-    );
-    out.push_str("<div class=\"topbar\"><div><div class=\"title\">");
-    out.push_str(&html_escape(&payload.path));
-    out.push_str("</div><div class=\"subtle\">");
-    out.push_str(&format!(
+    let summary = format!(
         "{} covered lines | {} mutant lines | {} hazards | {} partial | {} SARIF",
         covered, mutant, hazards, dark_arms, findings
-    ));
-    out.push_str("</div></div><div class=\"source-actions\">");
-    out.push_str(
-        "<div class=\"view-toggle\" aria-label=\"line color mode\"><label for=\"mode-coverage\">Coverage Quality</label><label for=\"mode-churn\">Churn Heat</label></div>",
     );
-    out.push_str(&render_layers_menu());
-    out.push_str("</div></div>");
-    out.push_str(&render_branch_context(
+    let layers_menu = render_layers_menu();
+    let branch_context = render_branch_context(
         branch_context,
         &source_coverage_context(payload),
         filter,
-    ));
-    out.push_str(&render_warning_banner(&payload.warnings));
-    out.push_str("<div class=\"viewer\"><div class=\"code\">");
+    );
+    let warnings = render_warning_banner(&payload.warnings);
+    let mut code_lines = String::new();
     for (index, line) in payload.lines.iter().enumerate() {
         let line_no = (index + 1) as u32;
-        out.push_str(&render_code_line(
+        code_lines.push_str(&render_code_line(
             &payload.path,
             line_no,
             line,
@@ -5325,21 +5586,23 @@ fn render_source_view(
             comment_fold_lines.get(&line_no),
         ));
     }
-    out.push_str("</div></div>");
-    out.push_str(&render_history(payload, filter));
-    out.push_str("</section>");
-    out
+    let history = render_history(payload, filter);
+    render_template_string(
+        SourceViewTemplate {
+            path: &payload.path,
+            summary: &summary,
+            layers_menu: &layers_menu,
+            branch_context: &branch_context,
+            warnings: &warnings,
+            code_lines: &code_lines,
+            history: &history,
+        },
+        "source view template",
+    )
 }
 
 fn render_layers_menu() -> String {
-    let mut out = String::new();
-    out.push_str("<details class=\"layers-menu\"><summary><i class=\"fa-solid fa-layer-group\" aria-hidden=\"true\"></i><span>Layers</span></summary><div class=\"layers-panel\">");
-    out.push_str("<label class=\"gutter-highlight-layer\" for=\"layer-gutter-highlights\"><span><span class=\"gutter-churn-label\">Gutter highlights (Churn)</span><span class=\"gutter-coverage-label\">Gutter highlights (Coverage)</span></span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
-    out.push_str("<label class=\"blame-layer\" for=\"layer-blame\"><span>Blame</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
-    out.push_str("<label class=\"gutter-icon-layer\" for=\"layer-gutter-icons\"><span>Gutter icons</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
-    out.push_str("<label class=\"comment-fold-layer\" for=\"layer-comment-folding\"><span>Expand/collapse comments</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
-    out.push_str("</div></details>");
-    out
+    render_template_string(LayersMenuTemplate, "layers menu template")
 }
 
 fn render_history(payload: &UiSourcePayload, filter: &str) -> String {
@@ -7463,7 +7726,7 @@ mod tests {
             .unwrap();
         storage
             .insert_event(&Event {
-                unit_id: unit.id,
+                unit_id: unit.id.clone(),
                 commit_hash: "abc".into(),
                 event_type: EventType::Change,
                 path: "src/demo.rb".into(),
@@ -7480,17 +7743,62 @@ mod tests {
             .record_coverage_line("abc", 10, "src/demo.rb", 1, 0)
             .unwrap();
         storage
-            .record_coverage_line("abc", 10, "src/demo.rb", 2, 1)
+            .record_coverage_line("abc", 10, "src/demo.rb", 2, 2)
             .unwrap();
-
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc".into(),
+                timestamp: 10,
+                path: "src/demo.rb".into(),
+                function: Some("run".into()),
+                line: Some(3),
+                branch_id: None,
+                test_id: "spec/demo_spec.rb:1".into(),
+                test_type: "unit".into(),
+                mutation_status: None,
+                mutation_kind: None,
+                is_mutation_verified: false,
+                is_mutation_killed: false,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc".into(),
+                timestamp: 10,
+                path: "src/demo.rb".into(),
+                function: Some("run".into()),
+                line: Some(2),
+                branch_id: None,
+                test_id: "spec/demo_spec.rb:2".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                mutation_kind: Some("invariant".into()),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
         let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
         let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let line_three = payload.annotations.iter().find(|line| line.line == 3).unwrap();
+        let coverage = source_coverage_context(&payload);
 
         assert!(!line_one.covered);
         assert_eq!(line_one.line_hits, Some(0));
         assert!(line_two.covered);
-        assert_eq!(line_two.line_hits, Some(1));
+        assert_eq!(line_two.line_hits, Some(2));
+        assert!(line_three.test_types.contains(&"unit".to_string()));
+        assert_eq!(coverage.tracked_lines, 2);
+        assert_eq!(coverage.covered_lines, 1);
+        assert_eq!(coverage.missed_lines, 1);
+        assert_eq!(coverage.multi_type_lines, 1);
+        assert_eq!(coverage.mutant_backed_lines, 1);
     }
 
     #[test]
@@ -7664,6 +7972,8 @@ mod tests {
                 distinct_tests: 9,
                 mutant_verified_tests: 0,
                 mutant_killed_tests: 0,
+                stochastic_mutant_verified_tests: 0,
+                invariant_mutant_verified_tests: 0,
                 line_hits: Some(3),
                 line_coverage: Some(100.0),
                 mutant_coverage: None,
@@ -8031,7 +8341,7 @@ mod tests {
         assert!(html.contains("<span class=\"outline-kind\">func</span>"));
         assert!(html.contains("class=\"outline-hotspot\""));
         assert!(html.contains("<span class=\"outline-name\">run</span>"));
-        assert!(html.contains("class=\"coverage-bar\""));
+        assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
     }
 
     #[test]
@@ -8043,16 +8353,165 @@ mod tests {
     }
 
     #[test]
-    fn coverage_bar_splits_strong_and_weak_covered_lines() {
-        let (strong, weak) = coverage_bar_widths(10, 8, 80.0, 5, 1);
+    fn line_quality_segments_split_coverage_and_mutant_backing() {
+        let segments = line_quality_segments(LineQualityBar {
+            tracked_lines: 10,
+            covered_lines: 8,
+            partial_lines: 2,
+            multi_type_lines: 3,
+            mutant_backed_lines: 4,
+            coverage_percent: 80.0,
+        });
 
-        assert_eq!(strong, 50.0);
-        assert_eq!(weak, 30.0);
+        assert_eq!(segments.multi, 30.0);
+        assert_eq!(segments.covered, 30.0);
+        assert_eq!(segments.partial, 20.0);
+        assert_eq!(segments.missed, 20.0);
+        assert_eq!(segments.mutant_multi, 30.0);
+        assert_eq!(segments.mutant_covered, 10.0);
+        assert_eq!(segments.mutant_partial, 0.0);
+        assert_eq!(segments.mutant_gap, 60.0);
 
-        let (strong, weak) = coverage_bar_widths(10, 8, 80.0, 8, 2);
+        let html = render_line_quality_bar(LineQualityBar {
+            tracked_lines: 10,
+            covered_lines: 8,
+            partial_lines: 2,
+            multi_type_lines: 3,
+            mutant_backed_lines: 4,
+            coverage_percent: 80.0,
+        });
 
-        assert_eq!(strong, 60.0);
-        assert_eq!(weak, 20.0);
+        assert!(html.contains("line-quality-bar"));
+        assert!(html.contains("coverage-track"));
+        assert!(html.contains("mutant-track"));
+        assert!(html.contains("coverage-partial"));
+    }
+
+    #[test]
+    fn dashboard_renders_collapsible_risks_hazards_first_and_stacked_bars() {
+        let dashboard = UiDashboard {
+            files: 2,
+            tracked_lines: 10,
+            covered_lines: 8,
+            coverage_percent: 80.0,
+            active_hazards: 2,
+            sarif_findings: 7,
+            evidence_covered_hazards: 2,
+            hazard_evidence_percent: 100.0,
+            covered_hazards: 1,
+            hazard_coverage_percent: 50.0,
+            mutant_verified_covered_lines: 4,
+            mutant_verified_covered_percent: 50.0,
+            mutant_killed_covered_lines: 4,
+            mutant_killed_covered_percent: 50.0,
+            stochastic_mutant_verified_covered_lines: 1,
+            stochastic_mutant_verified_covered_percent: 12.5,
+            stochastic_mutant_killed_covered_lines: 1,
+            stochastic_mutant_killed_covered_percent: 12.5,
+            invariant_mutant_verified_covered_lines: 2,
+            invariant_mutant_verified_covered_percent: 25.0,
+            invariant_mutant_killed_covered_lines: 2,
+            invariant_mutant_killed_covered_percent: 25.0,
+            multi_type_covered_lines: 3,
+            multi_type_covered_percent: 37.5,
+            files_with_coverage: 2,
+            top_hazard_files: vec![UiFile {
+                hazards: 2,
+                ..ui_file_for_sort("zig/runtime/a.zig", 10, 8, 1)
+            }],
+            top_units: Vec::new(),
+            top_architecture_risks: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let files = dashboard.top_hazard_files.iter().collect::<Vec<_>>();
+        let branch_context = UiBranchContext {
+            branch: "feature".to_string(),
+            commit: "abcdef123456".to_string(),
+        };
+        let html = render_dashboard(
+            &dashboard,
+            "",
+            &[],
+            &files,
+            "",
+            CoverageSort::Path,
+            &branch_context,
+        );
+
+        assert!(html.contains("<details class=\"dashboard-section dashboard-disclosure\" open>"));
+        assert!(html.contains("<h2>Active Hazards</h2>"));
+        assert!(html.contains("<h2>Highest Risk Units</h2>"));
+        assert!(html.contains("<h2>Highest Architectural Risks</h2>"));
+        assert!(html.contains("class=\"coverage-bar line-quality-bar\""));
+        assert!(html.contains("8 of 10 lines covered; 1 partial, 2 missed"));
+        assert!(!html.contains(">8 covered lines</span>"));
+        assert!(html.contains("4 mutant-backed / 1 stochastic / 2 invariant"));
+        assert!(html.contains("class=\"ratio-bar hazard-bar\""));
+        assert!(html.contains("Code tree (2 files - 7 SARIF findings)"));
+        assert!(!html.contains("class=\"metric\""));
+        assert!(!html.contains("class=\"dashboard-bars\""));
+        assert!(!html.contains("dashboard-line-quality"));
+        assert!(!html.contains("<strong>Lines</strong>"));
+        assert!(!html.contains("<strong>Mutants</strong>"));
+        assert_eq!(html.matches("class=\"ratio-bar hazard-bar\"").count(), 1);
+        assert_eq!(html.matches("class=\"ratio-bar mutant-bar\"").count(), 0);
+        assert!(
+            html.find("4 mutant-backed / 1 stochastic / 2 invariant").unwrap()
+                < html.find("Active Hazards").unwrap(),
+            "mutant detail should live in the top branch-context bar, not between dashboard sections"
+        );
+        assert!(
+            html.find("Active Hazards").unwrap() < html.find("Code tree").unwrap(),
+            "hazards should render above code tree"
+        );
+        assert!(
+            html.find("Highest Hazard Files").unwrap() < html.find("Highest Risk Units").unwrap(),
+            "hazard files should render above risk sections"
+        );
+
+        let no_hazard = UiDashboard {
+            active_hazards: 0,
+            covered_hazards: 0,
+            evidence_covered_hazards: 0,
+            top_hazard_files: Vec::new(),
+            ..dashboard
+        };
+        let hazards = render_active_hazards_section(&no_hazard);
+        assert!(hazards.contains("<details class=\"dashboard-section dashboard-disclosure\">"));
+        assert!(!hazards.contains(" open"));
+        assert!(hazards.contains("No active systems hazards are recorded."));
+    }
+
+    #[test]
+    fn branch_context_legend_lists_coverage_states_without_hazard_marker() {
+        let context = UiBranchContext {
+            branch: "feature".to_string(),
+            commit: "abcdef123456".to_string(),
+        };
+        let coverage = UiCoverageContext {
+            path: "src/demo.rb".to_string(),
+            tracked_lines: 4,
+            covered_lines: 3,
+            partial_lines: 1,
+            missed_lines: 1,
+            multi_type_lines: 1,
+            mutant_backed_lines: 1,
+            stochastic_mutant_backed_lines: 1,
+            invariant_mutant_backed_lines: 0,
+            coverage_percent: 75.0,
+        };
+        let html = render_branch_context(&context, &coverage, "");
+
+        assert!(html.contains("coverage-multi\" style=\"width:25.000%"));
+        assert!(html.contains("Multi-covered"));
+        assert!(html.contains(">covered</span>"));
+        assert!(html.contains(">partial</span>"));
+        assert!(html.contains(">missed</span>"));
+        assert!(!html.contains("legend-alert"));
+        assert!(!html.contains(">hazard</span>"));
+        assert!(html.find("Multi-covered").unwrap() < html.find(">covered</span>").unwrap());
+        assert!(html.find(">covered</span>").unwrap() < html.find(">partial</span>").unwrap());
+        assert!(html.find(">partial</span>").unwrap() < html.find(">missed</span>").unwrap());
     }
 
     #[test]
@@ -8446,7 +8905,7 @@ mod tests {
         );
         storage.upsert_logical_unit(&unit, 10).unwrap();
         storage
-            .record_coverage_line("abc", 10, "src/a.rb", 1, 1)
+            .record_coverage_line("abc", 10, "src/a.rb", 1, 2)
             .unwrap();
         storage
             .record_coverage_line("abc", 10, "src/a.rb", 2, 0)
@@ -8491,11 +8950,13 @@ mod tests {
         assert_eq!(files[0].tracked_lines, 2);
         assert_eq!(files[0].covered_lines, 1);
         assert_eq!(files[0].mutant_killed_covered_lines, 1);
+        assert_eq!(files[0].multi_type_covered_lines, 1);
 
         let dashboard = dashboard_summary(&storage).unwrap();
         assert_eq!(dashboard.files, 1);
         assert_eq!(dashboard.tracked_lines, 2);
         assert_eq!(dashboard.covered_lines, 1);
+        assert_eq!(dashboard.multi_type_covered_lines, 1);
         assert_eq!(dashboard.mutant_killed_covered_percent, 100.0);
     }
 
@@ -8565,6 +9026,8 @@ flags:
             distinct_tests: 0,
             mutant_verified_tests: 0,
             mutant_killed_tests: 0,
+            stochastic_mutant_verified_tests: 0,
+            invariant_mutant_verified_tests: 0,
             line_hits: Some(1),
             line_coverage: None,
             mutant_coverage: None,
@@ -8631,6 +9094,8 @@ flags:
             distinct_tests: 0,
             mutant_verified_tests: 0,
             mutant_killed_tests: 0,
+            stochastic_mutant_verified_tests: 0,
+            invariant_mutant_verified_tests: 0,
             line_hits: Some(1),
             line_coverage: None,
             mutant_coverage: None,

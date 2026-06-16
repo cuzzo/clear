@@ -1,0 +1,23 @@
+<table class="coverage-table">
+  <thead>
+    <tr>
+      <th scope="col" class="name-col">{{ name_header|safe }}</th>
+      <th scope="col">{{ total_header|safe }}</th>
+      <th scope="col">{{ covered_header|safe }}</th>
+      <th scope="col">{{ partial_header|safe }}</th>
+      <th scope="col">{{ missed_header|safe }}</th>
+      <th scope="col" class="coverage-col">Coverage</th>
+      <th scope="col">{{ percent_header|safe }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if empty %}
+      <tr><td colspan="7" class="empty-table">No tracked files in this directory.</td></tr>
+    {% else %}
+      {{ rows|safe }}
+    {% endif %}
+  </tbody>
+  <tfoot>
+    {{ subtotal|safe }}
+  </tfoot>
+</table>

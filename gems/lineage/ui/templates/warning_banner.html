@@ -1,0 +1,12 @@
+{% if warnings.len() > 0 %}
+  <section class="warning-banner" aria-label="verification warnings">
+    {% for warning in warnings %}
+      <input class="warning-dismiss-toggle" type="checkbox" id="{{ warning.input_id }}" data-dismiss-key="{{ warning.key }}">
+      <article class="warning {{ warning.level }}" data-dismiss-key="{{ warning.key }}">
+        <label class="warning-dismiss" for="{{ warning.input_id }}" data-dismiss-key="{{ warning.key }}" aria-label="Dismiss warning">x</label>
+        <strong>{{ warning.label }}</strong>
+        <p>{{ warning.detail }}</p>
+      </article>
+    {% endfor %}
+  </section>
+{% endif %}

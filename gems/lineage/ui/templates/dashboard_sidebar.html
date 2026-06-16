@@ -1,0 +1,16 @@
+<header>
+  <h1>Lineage</h1>
+  <div class="subtle">{{ summary }}</div>
+  {{ nav|safe }}
+</header>
+<form class="toolbar" method="get" action="/">
+  {% if show_directory_input %}
+    <input type="hidden" name="dir" value="{{ current_directory }}">
+  {% endif %}
+  <input name="q" list="lineage-search-options" autocomplete="off" placeholder="Filter files" value="{{ filter }}">
+  <button type="submit">Filter</button>
+  {{ search_options|safe }}
+</form>
+<nav class="files">
+  {{ files|safe }}
+</nav>
