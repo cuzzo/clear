@@ -290,40 +290,49 @@ module Decomplex
         node.named_children.find { |child| BODY_KINDS.include?(child.kind) }
     end
 
-    def fingerprint(node)
-      return ["", 0] unless ts_node?(node)
-      return ["", 0] if node.kind == "comment"
-      return fingerprint_call(node) if CALL_KINDS.include?(node.kind) && call_message(node)
+	    def fingerprint(node, active = nil)
+	      return ["", 0] unless ts_node?(node)
+	      active ||= Set.new
+	      key = node_key(node)
+	      return ["", 0] if active.include?(key)
 
-      if node.child_count.zero?
-        token = terminal_token(node)
-        return ["", 0] if token.empty?
+	      active << key
+	      begin
+	      return ["", 0] if node.kind == "comment"
+	      return fingerprint_call(node, active) if CALL_KINDS.include?(node.kind) && call_message(node)
+
+	      if node.child_count.zero?
+	        token = terminal_token(node)
+	        return ["", 0] if token.empty?
 
         return [token, 1]
       end
 
-      child_parts = []
-      mass = 1
-      node.children.each do |child|
-        child_fp, child_mass = fingerprint(child)
-        next if child_fp.empty?
+	      child_parts = []
+	      mass = 1
+	      node.children.each do |child|
+	        child_fp, child_mass = fingerprint(child, active)
+	        next if child_fp.empty?
 
-        child_parts << child_fp
-        mass += child_mass
+	        child_parts << child_fp
+	        mass += child_mass
       end
 
-      return [terminal_token(node), 1] if child_parts.empty?
+	      return [terminal_token(node), 1] if child_parts.empty?
 
-      ["#{node.kind}(#{child_parts.join(' ')})", mass]
-    end
+	      ["#{node.kind}(#{child_parts.join(' ')})", mass]
+	      ensure
+	        active.delete(key)
+	      end
+	    end
 
-    def fingerprint_call(node)
-      message = call_message(node)
-      child_parts = []
-      mass = 1
-      node.children.each do |child|
-        child_fp, child_mass = fingerprint(child)
-        next if child_fp.empty?
+	    def fingerprint_call(node, active)
+	      message = call_message(node)
+	      child_parts = []
+	      mass = 1
+	      node.children.each do |child|
+	        child_fp, child_mass = fingerprint(child, active)
+	        next if child_fp.empty?
 
         child_parts << child_fp
         mass += child_mass
@@ -414,12 +423,22 @@ module Decomplex
         MethodSpan.new(name: "(top-level)", first_line: line_no, last_line: line_no)
     end
 
-    def walk(node, &block)
-      return unless ts_node?(node)
+	    def walk(node, &block)
+	      return unless ts_node?(node)
 
-      yield node
-      node.children.each { |child| walk(child, &block) }
-    end
+	      pending = [node]
+	      seen = Set.new
+	      until pending.empty?
+	        current = pending.pop
+	        next unless ts_node?(current)
+	        key = node_key(current)
+	        next if seen.include?(key)
+
+	        seen << key
+	        yield current
+	        current.children.reverse_each { |child| pending << child }
+	      end
+	    end
 
     def named_field(node, name)
       node.child_by_field_name(name)
@@ -427,9 +446,15 @@ module Decomplex
       nil
     end
 
-    def ts_node?(node)
-      node && node.respond_to?(:kind) && node.respond_to?(:children)
-    end
+	    def ts_node?(node)
+	      node && node.respond_to?(:kind) && node.respond_to?(:children)
+	    end
+
+	    def node_key(node)
+	      [node.kind, node.start_byte, node.end_byte]
+	    rescue StandardError
+	      node.object_id
+	    end
 
     def span(node)
       [node.start_point.row + 1, node.start_point.column,

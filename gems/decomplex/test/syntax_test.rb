@@ -90,6 +90,36 @@ class SyntaxTest < Minitest::Test
     assert_equal [current], adapter.send(:platform_prebuilds, [other, current])
   end
 
+  def test_language_profiles_have_language_specific_lexicons
+    examples = {
+      lua: ["script.lua", "value == nil", "error('bad')"],
+      c: ["src/main.c", "ptr == NULL", "abort()"],
+      cpp: ["src/main.cpp", "value == nullptr", "throw Error{}"],
+      csharp: ["src/Program.cs", "value is string", "throw new Exception()"],
+      java: ["src/Main.java", "value instanceof String", "throw new RuntimeException()"],
+      swift: ["Sources/App.swift", "if let value = maybe", "fatalError()"],
+      kotlin: ["src/Main.kt", "value as? String", "require(value != null)"]
+    }
+
+    examples.each do |language, (path, type_guard, diagnostic)|
+      lexicon = Decomplex::Syntax.language_lexicon(language)
+
+      assert_equal language, Decomplex::Syntax.language_for(path)
+      assert_instance_of Decomplex::Syntax::LanguageLexicon, lexicon, language
+      assert lexicon.type_guard?(type_guard), language
+      assert lexicon.diagnostic?(diagnostic), language
+    end
+  end
+
+  def test_force_language_override_handles_ambiguous_headers
+    assert_equal :c, Decomplex::Syntax.language_for("include/demo.h")
+
+    with_env("DECOMPLEX_FORCE_LANGUAGE", "cpp") do
+      assert_equal :cpp, Decomplex::Syntax.language_for("include/demo.h")
+      assert_equal :cpp, Decomplex::Syntax.language_for("src/demo.c")
+    end
+  end
+
   def test_tree_sitter_ruby_adapter_extracts_portable_facts_when_grammar_is_available
     grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
     skip "set DECOMPLEX_TS_RUBY_PATH to run Tree-sitter adapter smoke test" unless grammar && File.file?(grammar)
@@ -258,6 +288,156 @@ class SyntaxTest < Minitest::Test
         ["Worker", "__init__", "self", "items", "items"]
       assert_includes doc.call_sites.map { |call| [call.owner, call.function, call.receiver, call.message] },
         ["Worker", "call", "self.items", "append"]
+    end
+  end
+
+  def test_tree_sitter_c_adapter_extracts_functions_branches_and_pointer_state
+    grammar = ENV["DECOMPLEX_TS_C_PATH"]
+    skip "set DECOMPLEX_TS_C_PATH to run C structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~C, ".c") do |path|
+      typedef struct Node { int storage; int ready; int enabled; int kind; } Node;
+      static int classify(Node* node) {
+        node->storage = 1;
+        if (node->ready && node->enabled) return 1;
+        switch (node->kind) { case 1: return 1; case 2: return 2; default: return 0; }
+      }
+    C
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :c)
+
+      assert_includes doc.function_defs.map(&:name), "classify"
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["node", "storage", "classify"]
+      assert_includes doc.decision_sites.map(&:kind), :conjunction
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_cpp_adapter_extracts_class_methods_and_pointer_state
+    grammar = ENV["DECOMPLEX_TS_CPP_PATH"]
+    skip "set DECOMPLEX_TS_CPP_PATH to run C++ structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~CPP, ".cpp") do |path|
+      class Parser {
+       public:
+        int parse(Node* node) {
+          node->storage = 1;
+          if (node == nullptr || node->ready) return 1;
+          switch (node->kind) { case 1: return 1; case 2: return 2; default: return 0; }
+        }
+      };
+    CPP
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :cpp)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["node", "storage", "parse"]
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_csharp_adapter_extracts_class_methods_and_member_state
+    grammar = ENV["DECOMPLEX_TS_CSHARP_PATH"]
+    skip "set DECOMPLEX_TS_CSHARP_PATH to run C# structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~CS, ".cs") do |path|
+      public sealed class Parser {
+        private int _storage;
+        public int Parse(Node node) {
+          this._storage = 1;
+          if (node == null || node.Ready) return 1;
+          switch (node.Kind) { case 1: return 1; case 2: return 2; default: return 0; }
+        }
+      }
+    CS
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :csharp)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "Parse"]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["this", "_storage", "Parse"]
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_java_adapter_extracts_class_methods_and_member_state
+    grammar = ENV["DECOMPLEX_TS_JAVA_PATH"]
+    skip "set DECOMPLEX_TS_JAVA_PATH to run Java structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~JAVA, ".java") do |path|
+      public final class Parser {
+        private int storage;
+        public int parse(Node node) {
+          this.storage = 1;
+          if (node == null || node.ready()) return 1;
+          switch (node.kind()) { case 1: return 1; case 2: return 2; default: return 0; }
+        }
+      }
+    JAVA
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :java)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["this", "storage", "parse"]
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_swift_adapter_extracts_class_methods_and_member_state
+    grammar = ENV["DECOMPLEX_TS_SWIFT_PATH"]
+    skip "set DECOMPLEX_TS_SWIFT_PATH to run Swift structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~SWIFT, ".swift") do |path|
+      final class Parser {
+        private var storage: Int = 0
+        func parse(_ node: Node) -> Int {
+          self.storage = 1
+          if node == nil || node.ready { return 1 }
+          switch node.kind {
+          case .one: return 1
+          case .two: return 2
+          default: return 0
+          }
+        }
+      }
+    SWIFT
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :swift)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["self", "storage", "parse"]
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_kotlin_adapter_extracts_class_methods_and_member_state
+    grammar = ENV["DECOMPLEX_TS_KOTLIN_PATH"]
+    skip "set DECOMPLEX_TS_KOTLIN_PATH to run Kotlin structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~KOTLIN, ".kt") do |path|
+      class Parser {
+        var storage: Int = 0
+        fun parse(node: Node): Int {
+          this.storage = 1
+          if (node == null || node.ready) return 1
+          return when (node.kind) {
+            Kind.ONE -> 1
+            Kind.TWO -> 2
+            else -> 0
+          }
+        }
+      }
+    KOTLIN
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :kotlin)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
+        ["this", "storage", "parse"]
+      assert_includes doc.decision_sites.map(&:kind), :case_dispatch
     end
   end
 

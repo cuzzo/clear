@@ -238,8 +238,8 @@ fn record_from_codecov_node(node: &Value) -> Option<CoverageRecord> {
     let line_coverage = node
         .get("totals")
         .and_then(|totals| totals.get("coverage"))
-        .and_then(Value::as_f64)
-        .or_else(|| node.get("coverage").and_then(Value::as_f64));
+        .and_then(finite_json_f64)
+        .or_else(|| node.get("coverage").and_then(finite_json_f64));
 
     Some(CoverageRecord {
         path,
@@ -359,7 +359,12 @@ fn record_from_generic_node(node: &Value) -> Option<CoverageRecord> {
 }
 
 fn metric_value(node: &Value, keys: &[&str]) -> Option<f64> {
-    keys.iter().find_map(|key| node.get(*key).and_then(Value::as_f64))
+    keys.iter()
+        .find_map(|key| node.get(*key).and_then(finite_json_f64))
+}
+
+fn finite_json_f64(value: &Value) -> Option<f64> {
+    value.as_f64().filter(|number| number.is_finite())
 }
 
 fn line_hits_from_generic_node(node: &Value) -> Vec<CoverageLineHit> {
@@ -436,6 +441,7 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
             class
                 .attribute("line-rate")
                 .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite())
                 .map(|value| value * 100.0)
         } else {
             let covered = line_hits.iter().filter(|hit| hit.hits > 0).count();
@@ -538,6 +544,9 @@ fn record_metric(
     let Some(new_value) = value else {
         return Ok(0);
     };
+    if !new_value.is_finite() {
+        return Ok(0);
+    }
     let recorded = storage.record_quality_metric(&QualityEvent {
         unit_id: unit_id.to_string(),
         commit_hash: commit_hash.to_string(),
@@ -641,6 +650,27 @@ mod tests {
         assert_eq!(records[0].line_coverage, Some(50.0));
         assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 3 });
         assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0 });
+    }
+
+    #[test]
+    fn ignores_non_finite_cobertura_line_rate() {
+        let payload = r#"
+          <!DOCTYPE coverage SYSTEM "http://cobertura.sourceforge.net/xml/coverage-04.dtd">
+          <coverage>
+            <packages><package><classes>
+              <class filename="src/generated.go" line-rate="NaN">
+                <lines></lines>
+              </class>
+            </classes></package></packages>
+          </coverage>
+        "#;
+
+        let records = parse_coverage_input(payload, "cobertura").unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, "src/generated.go");
+        assert_eq!(records[0].line_coverage, None);
+        assert!(records[0].line_hits.is_empty());
     }
 
     #[test]

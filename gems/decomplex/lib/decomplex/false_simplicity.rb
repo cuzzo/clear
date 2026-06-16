@@ -33,18 +33,10 @@ module Decomplex
     )
 
     EMPTY_PAIRS = {}.freeze
-    GENERIC_LEXICON = Lexicon.new(
-      dispatch_mids: %w[eval reflect Reflect Proxy getattr setattr].freeze,
-      meta_mids: %w[eval exec].freeze,
-      method_obj_mids: %i[method].freeze,
-      io_consts: %w[Console console fs process subprocess socket Deno Bun].freeze,
-      io_bare: %w[print println open system exec spawn sleep].freeze,
-      dir_context: [].freeze,
-      context_pairs: EMPTY_PAIRS,
-      context_bare: %w[rand random].freeze,
-      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
-      core_consts: [].freeze
-    ).freeze
+    COMMON_CALLBACK_SET = %w[
+      transaction synchronize lock with_lock unlock mutex atomic subscribe
+      callback hook
+    ].freeze
     RUBY_LEXICON = Lexicon.new(
       dispatch_mids: %w[send __send__ public_send const_get constantize
                         instance_variable_get].freeze,
@@ -91,7 +83,7 @@ module Decomplex
         "random" => %w[random randint randrange choice]
       }.freeze,
       context_bare: %w[random randint randrange].freeze,
-      callback_set: GENERIC_LEXICON.callback_set,
+      callback_set: COMMON_CALLBACK_SET,
       core_consts: [].freeze
     ).freeze
     JS_LEXICON = Lexicon.new(
@@ -107,14 +99,175 @@ module Decomplex
         "performance" => %w[now]
       }.freeze,
       context_bare: [].freeze,
-      callback_set: GENERIC_LEXICON.callback_set,
+      callback_set: COMMON_CALLBACK_SET,
+      core_consts: [].freeze
+    ).freeze
+    GO_LEXICON = Lexicon.new(
+      dispatch_mids: %w[Call CallSlice Method MethodByName ValueOf TypeOf].freeze,
+      meta_mids: %w[Call CallSlice MethodByName New MakeFunc].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[os io ioutil fs net http exec syscall].freeze,
+      io_bare: %w[panic print println recover].freeze,
+      dir_context: %w[Getwd UserHomeDir].freeze,
+      context_pairs: {
+        "time" => %w[Now Since Until],
+        "rand" => %w[Int Intn Float64 Read]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[Lock Unlock RLock RUnlock Do Go Add Done Wait]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    RUST_LEXICON = Lexicon.new(
+      dispatch_mids: %w[downcast downcast_ref downcast_mut call call_mut call_once].freeze,
+      meta_mids: %w[transmute from_raw_parts from_raw_parts_mut].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[std tokio fs env process net io].freeze,
+      io_bare: %w[panic todo unimplemented unreachable].freeze,
+      dir_context: %w[current_dir home_dir].freeze,
+      context_pairs: {
+        "SystemTime" => %w[now],
+        "Instant" => %w[now]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock read write spawn await]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    ZIG_LEXICON = Lexicon.new(
+      dispatch_mids: %w[field fieldParentPtr ptrCast alignCast call].freeze,
+      meta_mids: %w[typeInfo TypeOf ptrCast intFromPtr ptrFromInt].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[std os fs process net Thread Mutex Atomic].freeze,
+      io_bare: %w[panic unreachable].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "time" => %w[timestamp nanoTimestamp milliTimestamp]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock unlock spawn wait signal]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    LUA_LEXICON = Lexicon.new(
+      dispatch_mids: %w[load loadfile dofile require rawget rawset].freeze,
+      meta_mids: %w[setmetatable getmetatable debug eval load loadfile].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[io os debug package].freeze,
+      io_bare: %w[print error assert require collectgarbage].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "os" => %w[time clock date getenv],
+        "math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: COMMON_CALLBACK_SET,
+      core_consts: [].freeze
+    ).freeze
+    C_LEXICON = Lexicon.new(
+      dispatch_mids: %w[dlsym dlopen GetProcAddress].freeze,
+      meta_mids: %w[setjmp longjmp va_start va_arg].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[FILE DIR pthread mutex atomic].freeze,
+      io_bare: %w[printf fprintf fopen open read write close system exec abort exit assert].freeze,
+      dir_context: %w[getcwd getenv].freeze,
+      context_pairs: EMPTY_PAIRS,
+      context_bare: %w[rand time clock].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[pthread_mutex_lock pthread_mutex_unlock]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    CPP_LEXICON = Lexicon.new(
+      dispatch_mids: %w[dynamic_cast typeid any_cast get_if visit invoke].freeze,
+      meta_mids: %w[reinterpret_cast const_cast dlsym dlopen].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[std filesystem fstream iostream thread mutex atomic].freeze,
+      io_bare: %w[throw abort exit assert system].freeze,
+      dir_context: %w[current_path].freeze,
+      context_pairs: {
+        "chrono" => %w[now],
+        "random_device" => %w[operator()]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock unlock try_lock wait notify_one notify_all]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    CSHARP_LEXICON = Lexicon.new(
+      dispatch_mids: %w[Invoke GetMethod GetProperty GetField Activator CreateInstance].freeze,
+      meta_mids: %w[Invoke GetType Reflection Emit DynamicMethod].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[Console File Directory Path Process Socket HttpClient Environment].freeze,
+      io_bare: %w[throw].freeze,
+      dir_context: %w[CurrentDirectory GetEnvironmentVariable].freeze,
+      context_pairs: {
+        "DateTime" => %w[Now UtcNow Today],
+        "Guid" => %w[NewGuid],
+        "Random" => %w[Next NextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[Lock Monitor Enter Exit Wait Pulse]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    JAVA_LEXICON = Lexicon.new(
+      dispatch_mids: %w[invoke getMethod getDeclaredMethod getField getDeclaredField forName].freeze,
+      meta_mids: %w[invoke setAccessible newInstance Proxy].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Lock AtomicReference].freeze,
+      io_bare: %w[throw].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock unlock wait notify notifyAll submit execute]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    SWIFT_LEXICON = Lexicon.new(
+      dispatch_mids: %w[perform value setValue selector NSClassFromString].freeze,
+      meta_mids: %w[Mirror unsafeBitCast withUnsafePointer withUnsafeBytes].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[FileManager Process URLSession DispatchQueue Thread Lock NSLock].freeze,
+      io_bare: %w[print fatalError preconditionFailure assertionFailure].freeze,
+      dir_context: %w[currentDirectoryPath homeDirectoryForCurrentUser].freeze,
+      context_pairs: {
+        "Date" => %w[now],
+        "UUID" => %w[init]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock unlock async sync]).uniq.freeze,
+      core_consts: [].freeze
+    ).freeze
+    KOTLIN_LEXICON = Lexicon.new(
+      dispatch_mids: %w[invoke call callBy memberProperties declaredMemberFunctions].freeze,
+      meta_mids: %w[reflection javaClass Class forName setAccessible].freeze,
+      method_obj_mids: %i[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Mutex AtomicReference].freeze,
+      io_bare: %w[println print error check require TODO].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Random" => %w[nextInt nextLong nextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: (COMMON_CALLBACK_SET + %w[lock unlock synchronized launch async await]).uniq.freeze,
       core_consts: [].freeze
     ).freeze
     LANGUAGE_LEXICONS = {
       ruby: RUBY_LEXICON,
       python: PYTHON_LEXICON,
       javascript: JS_LEXICON,
-      typescript: JS_LEXICON
+      typescript: JS_LEXICON,
+      go: GO_LEXICON,
+      rust: RUST_LEXICON,
+      zig: ZIG_LEXICON,
+      lua: LUA_LEXICON,
+      c: C_LEXICON,
+      cpp: CPP_LEXICON,
+      csharp: CSHARP_LEXICON,
+      java: JAVA_LEXICON,
+      swift: SWIFT_LEXICON,
+      kotlin: KOTLIN_LEXICON
     }.freeze
 
     # Compatibility aliases for tests and downstream code that inspect
@@ -157,7 +310,7 @@ module Decomplex
     end
 
     def self.lexicon_for(language)
-      LANGUAGE_LEXICONS.fetch(language.to_sym, GENERIC_LEXICON)
+      LANGUAGE_LEXICONS.fetch(language.to_sym)
     end
 
     def walk(node, defs, cls)
