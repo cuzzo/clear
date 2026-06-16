@@ -3,8 +3,10 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use tree_sitter::{Language, Node, Parser};
 
-pub const DEFAULT_CODE_EXTENSIONS: &[&str] =
-    &["rb", "zig", "py", "js", "lua", "c", "go", "rs", "S"];
+pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
+    "rb", "zig", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "lua", "c", "h", "cc", "cpp",
+    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "S",
+];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
     ".zig-cache",
@@ -231,9 +233,15 @@ fn detect_candidate(line: &str, line_number: u32, extension: Option<&str>) -> Op
 
     match extension {
         Some("rb") | Some("py") => detect_ruby_python(trimmed, line_number),
-        Some("js") => detect_javascript(trimmed, line_number),
+        Some("js") | Some("jsx") | Some("mjs") | Some("cjs") | Some("ts") | Some("tsx") => {
+            detect_javascript_typescript(trimmed, line_number)
+        }
         Some("lua") => detect_lua(trimmed, line_number),
-        Some("c") => detect_c(trimmed, line_number),
+        Some("c") | Some("h") | Some("cc") | Some("cpp") | Some("cxx") | Some("hh")
+        | Some("hpp") | Some("hxx") => detect_c_family(trimmed, line_number),
+        Some("cs") | Some("java") => detect_csharp_java(trimmed, line_number),
+        Some("swift") => detect_swift(trimmed, line_number),
+        Some("kt") | Some("kts") => detect_kotlin(trimmed, line_number),
         Some("go") => detect_go(trimmed, line_number),
         Some("zig") => detect_rust_or_zig(trimmed, line_number),
         Some("S") => detect_assembly(trimmed, line_number),
@@ -528,14 +536,8 @@ fn ruby_python_def_rest(line: &str) -> Option<&str> {
     }
 }
 
-fn detect_javascript(line: &str, line_number: u32) -> Option<Candidate> {
-    let line = line
-        .strip_prefix("export default ")
-        .unwrap_or(line)
-        .strip_prefix("export ")
-        .unwrap_or(line)
-        .strip_prefix("async ")
-        .unwrap_or(line);
+fn detect_javascript_typescript(line: &str, line_number: u32) -> Option<Candidate> {
+    let line = strip_javascript_modifiers(line);
 
     if let Some(rest) = line.strip_prefix("function ") {
         return named_candidate(rest, UnitKind::Function, line, line_number);
@@ -543,7 +545,77 @@ fn detect_javascript(line: &str, line_number: u32) -> Option<Candidate> {
     if let Some(rest) = line.strip_prefix("class ") {
         return named_candidate(rest, UnitKind::Class, line, line_number);
     }
+    if let Some(rest) = line.strip_prefix("interface ") {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("type ") {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(name) = javascript_const_callable_name(line) {
+        return Some(Candidate {
+            name: name.to_string(),
+            kind: UnitKind::Function,
+            signature: line.trim().to_string(),
+            line: line_number,
+            end_line: None,
+        });
+    }
     None
+}
+
+fn strip_javascript_modifiers(mut line: &str) -> &str {
+    loop {
+        let next = line
+            .strip_prefix("export default ")
+            .or_else(|| line.strip_prefix("export "))
+            .or_else(|| line.strip_prefix("declare "))
+            .or_else(|| line.strip_prefix("abstract "))
+            .or_else(|| line.strip_prefix("async "))
+            .unwrap_or(line);
+        if next == line {
+            return line;
+        }
+        line = next;
+    }
+}
+
+fn javascript_const_callable_name(line: &str) -> Option<&str> {
+    let rest = line
+        .strip_prefix("const ")
+        .or_else(|| line.strip_prefix("let "))
+        .or_else(|| line.strip_prefix("var "))?;
+    let name = javascript_identifier(rest)?;
+    let after_name = rest[name.len()..].trim_start();
+    if after_name.starts_with('=') && after_name.contains("=>") {
+        return Some(name);
+    }
+    if after_name.starts_with(':') {
+        let type_annotation = after_name.split('=').next().unwrap_or(after_name);
+        if type_annotation.contains("=>") || type_annotation.contains('(') {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn javascript_identifier(input: &str) -> Option<&str> {
+    let input = input.trim_start();
+    let end = input
+        .char_indices()
+        .find_map(|(index, ch)| {
+            if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+                None
+            } else {
+                Some(index)
+            }
+        })
+        .unwrap_or(input.len());
+    let ident = &input[..end];
+    if ident.is_empty() {
+        None
+    } else {
+        Some(ident)
+    }
 }
 
 fn detect_lua(line: &str, line_number: u32) -> Option<Candidate> {
@@ -553,14 +625,20 @@ fn detect_lua(line: &str, line_number: u32) -> Option<Candidate> {
     named_candidate(rest, UnitKind::Function, line, line_number)
 }
 
-fn detect_c(line: &str, line_number: u32) -> Option<Candidate> {
+fn detect_c_family(line: &str, line_number: u32) -> Option<Candidate> {
+    if let Some(rest) = c_family_type_rest(line) {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
     if line.ends_with(';') || !line.contains('(') || !line.contains(')') || !line.contains('{') {
         return None;
     }
 
     let before_paren = line.split_once('(')?.0.trim_end();
     let name = before_paren.split_whitespace().last()?;
-    if matches!(name, "if" | "for" | "while" | "switch" | "return" | "sizeof") {
+    if matches!(
+        name,
+        "if" | "for" | "while" | "switch" | "return" | "sizeof" | "catch"
+    ) {
         return None;
     }
 
@@ -571,6 +649,128 @@ fn detect_c(line: &str, line_number: u32) -> Option<Candidate> {
         line: line_number,
         end_line: None,
     })
+}
+
+fn c_family_type_rest(line: &str) -> Option<&str> {
+    let line = strip_c_family_modifiers(line);
+    line.strip_prefix("class ")
+        .or_else(|| line.strip_prefix("struct "))
+        .or_else(|| line.strip_prefix("enum "))
+        .or_else(|| line.strip_prefix("namespace "))
+}
+
+fn strip_c_family_modifiers(mut line: &str) -> &str {
+    loop {
+        let next = line
+            .strip_prefix("template ")
+            .or_else(|| line.strip_prefix("export "))
+            .or_else(|| line.strip_prefix("public "))
+            .or_else(|| line.strip_prefix("private "))
+            .or_else(|| line.strip_prefix("protected "))
+            .or_else(|| line.strip_prefix("internal "))
+            .or_else(|| line.strip_prefix("static "))
+            .or_else(|| line.strip_prefix("inline "))
+            .or_else(|| line.strip_prefix("constexpr "))
+            .or_else(|| line.strip_prefix("sealed "))
+            .or_else(|| line.strip_prefix("abstract "))
+            .or_else(|| line.strip_prefix("partial "))
+            .or_else(|| line.strip_prefix("readonly "))
+            .unwrap_or(line);
+        if next == line {
+            return line;
+        }
+        line = next;
+    }
+}
+
+fn detect_csharp_java(line: &str, line_number: u32) -> Option<Candidate> {
+    let line = strip_c_family_modifiers(line);
+    if let Some(rest) = line
+        .strip_prefix("class ")
+        .or_else(|| line.strip_prefix("interface "))
+        .or_else(|| line.strip_prefix("struct "))
+        .or_else(|| line.strip_prefix("enum "))
+        .or_else(|| line.strip_prefix("record "))
+    {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    detect_c_family(line, line_number)
+}
+
+fn detect_swift(line: &str, line_number: u32) -> Option<Candidate> {
+    let line = strip_swift_modifiers(line);
+    if let Some(rest) = line
+        .strip_prefix("class ")
+        .or_else(|| line.strip_prefix("struct "))
+        .or_else(|| line.strip_prefix("enum "))
+        .or_else(|| line.strip_prefix("protocol "))
+        .or_else(|| line.strip_prefix("actor "))
+    {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("func ") {
+        return named_candidate(rest, UnitKind::Function, line, line_number);
+    }
+    None
+}
+
+fn strip_swift_modifiers(mut line: &str) -> &str {
+    loop {
+        let next = line
+            .strip_prefix("public ")
+            .or_else(|| line.strip_prefix("private "))
+            .or_else(|| line.strip_prefix("fileprivate "))
+            .or_else(|| line.strip_prefix("internal "))
+            .or_else(|| line.strip_prefix("open "))
+            .or_else(|| line.strip_prefix("final "))
+            .or_else(|| line.strip_prefix("static "))
+            .or_else(|| line.strip_prefix("mutating "))
+            .or_else(|| line.strip_prefix("async "))
+            .unwrap_or(line);
+        if next == line {
+            return line;
+        }
+        line = next;
+    }
+}
+
+fn detect_kotlin(line: &str, line_number: u32) -> Option<Candidate> {
+    let line = strip_kotlin_modifiers(line);
+    if let Some(rest) = line
+        .strip_prefix("class ")
+        .or_else(|| line.strip_prefix("interface "))
+        .or_else(|| line.strip_prefix("object "))
+        .or_else(|| line.strip_prefix("enum class "))
+        .or_else(|| line.strip_prefix("data class "))
+        .or_else(|| line.strip_prefix("sealed class "))
+    {
+        return named_candidate(rest, UnitKind::Class, line, line_number);
+    }
+    if let Some(rest) = line.strip_prefix("fun ") {
+        return named_candidate(rest, UnitKind::Function, line, line_number);
+    }
+    None
+}
+
+fn strip_kotlin_modifiers(mut line: &str) -> &str {
+    loop {
+        let next = line
+            .strip_prefix("public ")
+            .or_else(|| line.strip_prefix("private "))
+            .or_else(|| line.strip_prefix("protected "))
+            .or_else(|| line.strip_prefix("internal "))
+            .or_else(|| line.strip_prefix("open "))
+            .or_else(|| line.strip_prefix("final "))
+            .or_else(|| line.strip_prefix("abstract "))
+            .or_else(|| line.strip_prefix("suspend "))
+            .or_else(|| line.strip_prefix("inline "))
+            .or_else(|| line.strip_prefix("override "))
+            .unwrap_or(line);
+        if next == line {
+            return line;
+        }
+        line = next;
+    }
 }
 
 fn detect_go(line: &str, line_number: u32) -> Option<Candidate> {
@@ -698,6 +898,45 @@ mod tests {
     }
 
     #[test]
+    fn extracts_typescript_symbols_with_heuristics() {
+        let file = BlobFile {
+            path: "packages/zod/src/demo.ts".into(),
+            contents: r#"
+export interface ParseContext {
+  async?: boolean;
+}
+
+export type Result<T> = { value: T };
+
+export abstract class Parser {
+  abstract run(value: unknown): Result<unknown>;
+}
+
+export function parse(value: unknown): Result<unknown> {
+  return { value };
+}
+
+export const safeParse: (value: unknown) => Result<unknown> = (value) => {
+  return { value };
+};
+"#
+            .into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units
+            .iter()
+            .map(|unit| (unit.kind, unit.name.as_str()))
+            .collect();
+
+        assert!(names.contains(&(UnitKind::Class, "ParseContext")));
+        assert!(names.contains(&(UnitKind::Class, "Result")));
+        assert!(names.contains(&(UnitKind::Class, "Parser")));
+        assert!(names.contains(&(UnitKind::Function, "parse")));
+        assert!(names.contains(&(UnitKind::Function, "safeParse")));
+    }
+
+    #[test]
     fn extracts_rust_symbols_with_tree_sitter() {
         let file = BlobFile {
             path: "gems/lineage/src/demo.rs".into(),
@@ -811,6 +1050,13 @@ pub fn StringMap(comptime Value: type) type {
         assert!(filter.supports_path("zig/main.zig"));
         assert!(filter.supports_path("src/vm.S"));
         assert!(filter.supports_path("src/main.c"));
+        assert!(filter.supports_path("src/main.h"));
+        assert!(filter.supports_path("src/main.cpp"));
+        assert!(filter.supports_path("src/main.hpp"));
+        assert!(filter.supports_path("src/Program.cs"));
+        assert!(filter.supports_path("src/Main.java"));
+        assert!(filter.supports_path("Sources/App.swift"));
+        assert!(filter.supports_path("src/main.kt"));
         assert!(filter.supports_path("gems/lineage/src/ui.rs"));
         assert!(filter.supports_path("script/tool.lua"));
         assert!(!filter.supports_path("benchmarks/x/bench.profile/transpiled.zig"));
@@ -860,6 +1106,46 @@ pub fn StringMap(comptime Value: type) type {
         assert_eq!(extractor.extract_units(&lua)[0].name, "run");
         assert_eq!(extractor.extract_units(&c)[0].name, "run");
         assert_eq!(extractor.extract_units(&asm)[0].name, "boot");
+    }
+
+    #[test]
+    fn extracts_c_family_and_managed_language_units() {
+        let extractor = HeuristicExtractor::default();
+        let cpp = BlobFile {
+            path: "include/demo.hpp".into(),
+            contents: "class Parser {\n};\nstatic int parse_value(int x) { return x; }\n".into(),
+        };
+        let csharp = BlobFile {
+            path: "src/Program.cs".into(),
+            contents: "public sealed class Program {}\nprivate static int Run(int x) { return x; }\n".into(),
+        };
+        let java = BlobFile {
+            path: "src/Main.java".into(),
+            contents: "public interface Handler {}\npublic int handle(int x) { return x; }\n".into(),
+        };
+        let swift = BlobFile {
+            path: "Sources/App.swift".into(),
+            contents: "public struct App {}\npublic func run(_ x: Int) -> Int { x }\n".into(),
+        };
+        let kotlin = BlobFile {
+            path: "src/main.kt".into(),
+            contents: "data class Box(val value: Int)\nsuspend fun run(value: Int): Int = value\n".into(),
+        };
+
+        let cpp_names: Vec<_> = extractor
+            .extract_units(&cpp)
+            .into_iter()
+            .map(|unit| (unit.kind, unit.name))
+            .collect();
+        assert!(cpp_names.contains(&(UnitKind::Class, "Parser".to_string())));
+        assert!(cpp_names.contains(&(UnitKind::Function, "parse_value".to_string())));
+
+        assert_eq!(extractor.extract_units(&csharp)[0].name, "Program");
+        assert_eq!(extractor.extract_units(&java)[0].name, "Handler");
+        assert_eq!(extractor.extract_units(&swift)[0].name, "App");
+        assert_eq!(extractor.extract_units(&swift)[1].name, "run");
+        assert_eq!(extractor.extract_units(&kotlin)[0].name, "Box");
+        assert_eq!(extractor.extract_units(&kotlin)[1].name, "run");
     }
 
     #[test]

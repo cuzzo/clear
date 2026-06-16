@@ -51,11 +51,11 @@ module Decomplex
         method function_definition function_declaration method_definition
         method_declaration function_item singleton_method
       ].freeze
-      CLASS_KINDS = %w[class class_definition class_declaration].freeze
+      CLASS_KINDS = %w[class class_definition class_declaration class_specifier].freeze
       MODULE_KINDS = %w[module].freeze
       BLOCK_KINDS = %w[
         block body_statement statement_block statement_list class_body
-        switch_body match_block then block_body
+        switch_body match_block then block_body control_structure_body function_body
       ].freeze
       IF_KINDS = %w[if if_statement if_modifier unless unless_modifier if_expression conditional].freeze
       LOOP_KINDS = {
@@ -69,17 +69,22 @@ module Decomplex
       }.freeze
       CASE_KINDS = %w[
         case switch_statement expression_switch_statement switch_expression match_statement match_expression
+        when_expression
       ].freeze
-      WHEN_KINDS = %w[when switch_case case_clause expression_case match_arm].freeze
+      WHEN_KINDS = %w[
+        when switch_case case_clause expression_case case_statement switch_section
+        switch_block_statement_group switch_entry when_entry match_arm
+      ].freeze
       ASSIGNMENT_KINDS = %w[
         assignment assignment_expression assignment_statement augmented_assignment
       ].freeze
       MEMBER_KINDS = %w[
-        call attribute member_expression field selector_expression field_expression expression_list
+        call attribute member_expression member_access_expression field field_access selector_expression field_expression
+        navigation_expression directly_assignable_expression expression_list
       ].freeze
       CALL_KINDS = %w[call call_expression method_call method_call_expression].freeze
       IDENTIFIER_KINDS = %w[
-        identifier property_identifier field_identifier shorthand_property_identifier
+        identifier simple_identifier property_identifier field_identifier shorthand_property_identifier
       ].freeze
       CONST_KINDS = %w[constant scope_resolution type_identifier scoped_type_identifier].freeze
       STRING_KINDS = %w[
@@ -107,6 +112,7 @@ module Decomplex
       def initialize(document)
         @document = document
         @local_stack = []
+        @normalizing = Set.new
       end
 
       def normalize
@@ -123,118 +129,126 @@ module Decomplex
 
       def normalize_node(node)
         return nil unless ts_node?(node)
-        return nil if node.kind == "comment"
-        return normalize_assignment_lhs(node) if assignment_lhs?(node)
-        return normalize_infix_statement(node) if infix_statement?(node)
-        return normalize_dotted_expression(node) if dotted_expression?(node)
-        return normalize_unary_not_statement(node) if unary_not_statement?(node)
+        key = node_key(node)
+        return nil if @normalizing.include?(key)
 
-        if leading_function_statement?(node)
-          normalize_leading_function_statement(node)
-        elsif modifier_statement?(node)
-          normalize_modifier_statement(node)
-        elsif ternary_statement?(node)
-          normalize_ternary_statement(node)
-        elsif statement_call_with_block?(node)
-          normalize_statement_call_with_block(node)
-        elsif command_call_statement?(node)
-          normalize_command_call_statement(node)
-        elsif FUNCTION_KINDS.include?(node.kind)
-          normalize_function(node)
-        elsif class_node?(node)
-          normalize_class(node)
-        elsif module_node?(node)
-          normalize_module(node)
-        elsif node.kind == "impl_item"
-          normalize_impl(node)
-        elsif node.kind == "elsif"
-          normalize_elsif(node)
-        elsif IF_KINDS.include?(node.kind)
-          normalize_if(node)
-        elsif LOOP_KINDS.key?(node.kind)
-          normalize_loop(node)
-        elsif CASE_KINDS.include?(node.kind) || hidden_match?(node)
-          normalize_case(node)
-        elsif node.kind == "element_reference"
-          normalize_element_reference(node)
-        elsif node.kind == "rescue_modifier"
-          normalize_rescue_modifier(node)
-        elsif node.kind == "ensure"
-          normalize_ensure_clause(node)
-        elsif node.kind == "begin"
-          normalize_begin(node)
-        elsif node.kind == "operator_assignment"
-          normalize_operator_assignment(node)
-        elsif ASSIGNMENT_KINDS.include?(node.kind)
-          normalize_assignment(node)
-        elsif node.kind == "subshell"
-          normalize_subshell(node)
-        elsif node.kind == "block_argument"
-          normalize_block_argument(node)
-        elsif node.kind == "pair"
-          normalize_pair(node)
-        elsif node.kind == "singleton_class"
-          normalize_singleton_class(node)
-        elsif node.kind == "lambda"
-          normalize_lambda(node)
-        elsif node.kind == "yield"
-          normalize_yield(node)
-        elsif yield_argument_list?(node)
-          normalize_yield_argument_list(node)
-        elsif node.kind == "heredoc_beginning"
-          normalize_heredoc_beginning(node)
-        elsif node.kind == "chained_string"
-          normalize_chained_string(node)
-        elsif node.kind == "interpolation"
-          normalize_interpolation(node)
-        elsif unary_minus_expression?(node)
-          normalize_unary_minus(node)
-        elsif unary_not_expression?(node)
-          normalize_unary_not(node)
-        elsif boolean_expression?(node)
-          normalize_boolean(node)
-        elsif operator_call_expression?(node)
-          normalize_operator_call(node)
-        elsif comparison_expression?(node)
-          normalize_comparison(node)
-        elsif CALL_KINDS.include?(node.kind)
-          normalize_call(node)
-        elsif member_read_node?(node)
-          normalize_member_read(node)
-        elsif BLOCK_KINDS.include?(node.kind)
-          wrap(:BLOCK, children: normalize_children(node), source: node)
-        elsif unwrap_node?(node)
-          normalize_node(node.named_children.first)
-        elsif RETURN_KINDS.key?(node.kind)
-          normalize_return(node)
-        elsif self_node?(node)
-          wrap(:SELF, children: [], source: node)
-        elsif instance_variable?(node)
-          wrap(:IVAR, children: [node.text.to_s], source: node)
-        elsif global_variable?(node)
-          normalize_global_variable(node)
-        elsif const_node?(node)
-          normalize_const(node)
-        elsif ruby? && IDENTIFIER_KINDS.include?(node.kind) && node.text.to_s == "yield"
-          wrap(:YIELD, children: [nil], source: node)
-        elsif ruby_vcall_identifier?(node)
-          return wrap(:YIELD, children: [nil], source: node) if node.text.to_s == "yield"
+        @normalizing << key
+        begin
+          return nil if node.kind == "comment"
+          return normalize_assignment_lhs(node) if assignment_lhs?(node)
+          return normalize_infix_statement(node) if infix_statement?(node)
+          return normalize_dotted_expression(node) if dotted_expression?(node)
+          return normalize_unary_not_statement(node) if unary_not_statement?(node)
 
-          wrap(:VCALL, children: [node.text.to_s.to_sym], source: node)
-        elsif vcall_identifier?(node)
-          wrap(:VCALL, children: [node.text.to_s.to_sym], source: node)
-        elsif local_identifier?(node)
-          wrap(:LVAR, children: [node.text.to_s], source: node)
-        elsif NIL_KINDS.include?(node.kind)
-          wrap(:NIL, children: [], source: node)
-        elsif interpolated_string?(node)
-          normalize_interpolated_string(node)
-        elsif STRING_KINDS.include?(node.kind)
-          wrap(:STR, children: [node.text.to_s], source: node)
-        elsif SYMBOL_KINDS.include?(node.kind)
-          wrap(:LIT, children: [node.text.to_s.sub(/\A:/, "").to_sym], source: node)
-        else
-          wrap(kind_type(node.kind), children: normalize_children(node), source: node)
+          if leading_function_statement?(node)
+            normalize_leading_function_statement(node)
+          elsif modifier_statement?(node)
+            normalize_modifier_statement(node)
+          elsif ternary_statement?(node)
+            normalize_ternary_statement(node)
+          elsif statement_call_with_block?(node)
+            normalize_statement_call_with_block(node)
+          elsif command_call_statement?(node)
+            normalize_command_call_statement(node)
+          elsif FUNCTION_KINDS.include?(node.kind)
+            normalize_function(node)
+          elsif class_node?(node)
+            normalize_class(node)
+          elsif module_node?(node)
+            normalize_module(node)
+          elsif node.kind == "impl_item"
+            normalize_impl(node)
+          elsif node.kind == "elsif"
+            normalize_elsif(node)
+          elsif IF_KINDS.include?(node.kind)
+            normalize_if(node)
+          elsif LOOP_KINDS.key?(node.kind)
+            normalize_loop(node)
+          elsif CASE_KINDS.include?(node.kind) || hidden_match?(node)
+            normalize_case(node)
+          elsif node.kind == "element_reference"
+            normalize_element_reference(node)
+          elsif node.kind == "rescue_modifier"
+            normalize_rescue_modifier(node)
+          elsif node.kind == "ensure"
+            normalize_ensure_clause(node)
+          elsif node.kind == "begin"
+            normalize_begin(node)
+          elsif node.kind == "operator_assignment"
+            normalize_operator_assignment(node)
+          elsif ASSIGNMENT_KINDS.include?(node.kind)
+            normalize_assignment(node)
+          elsif node.kind == "subshell"
+            normalize_subshell(node)
+          elsif node.kind == "block_argument"
+            normalize_block_argument(node)
+          elsif node.kind == "pair"
+            normalize_pair(node)
+          elsif node.kind == "singleton_class"
+            normalize_singleton_class(node)
+          elsif node.kind == "lambda"
+            normalize_lambda(node)
+          elsif node.kind == "yield"
+            normalize_yield(node)
+          elsif yield_argument_list?(node)
+            normalize_yield_argument_list(node)
+          elsif node.kind == "heredoc_beginning"
+            normalize_heredoc_beginning(node)
+          elsif node.kind == "chained_string"
+            normalize_chained_string(node)
+          elsif node.kind == "interpolation"
+            normalize_interpolation(node)
+          elsif unary_minus_expression?(node)
+            normalize_unary_minus(node)
+          elsif unary_not_expression?(node)
+            normalize_unary_not(node)
+          elsif boolean_expression?(node)
+            normalize_boolean(node)
+          elsif operator_call_expression?(node)
+            normalize_operator_call(node)
+          elsif comparison_expression?(node)
+            normalize_comparison(node)
+          elsif CALL_KINDS.include?(node.kind)
+            normalize_call(node)
+          elsif member_read_node?(node)
+            normalize_member_read(node)
+          elsif BLOCK_KINDS.include?(node.kind)
+            wrap(:BLOCK, children: normalize_children(node), source: node)
+          elsif unwrap_node?(node)
+            normalize_node(node.named_children.first)
+          elsif RETURN_KINDS.key?(node.kind)
+            normalize_return(node)
+          elsif self_node?(node)
+            wrap(:SELF, children: [], source: node)
+          elsif instance_variable?(node)
+            wrap(:IVAR, children: [node.text.to_s], source: node)
+          elsif global_variable?(node)
+            normalize_global_variable(node)
+          elsif const_node?(node)
+            normalize_const(node)
+          elsif ruby? && IDENTIFIER_KINDS.include?(node.kind) && node.text.to_s == "yield"
+            wrap(:YIELD, children: [nil], source: node)
+          elsif ruby_vcall_identifier?(node)
+            return wrap(:YIELD, children: [nil], source: node) if node.text.to_s == "yield"
+
+            wrap(:VCALL, children: [node.text.to_s.to_sym], source: node)
+          elsif vcall_identifier?(node)
+            wrap(:VCALL, children: [node.text.to_s.to_sym], source: node)
+          elsif local_identifier?(node)
+            wrap(:LVAR, children: [node.text.to_s], source: node)
+          elsif NIL_KINDS.include?(node.kind)
+            wrap(:NIL, children: [], source: node)
+          elsif interpolated_string?(node)
+            normalize_interpolated_string(node)
+          elsif STRING_KINDS.include?(node.kind)
+            wrap(:STR, children: [node.text.to_s], source: node)
+          elsif SYMBOL_KINDS.include?(node.kind)
+            wrap(:LIT, children: [node.text.to_s.sub(/\A:/, "").to_sym], source: node)
+          else
+            wrap(kind_type(node.kind), children: normalize_children(node), source: node)
+          end
+        ensure
+          @normalizing.delete(key)
         end
       end
 
@@ -916,7 +930,7 @@ module Decomplex
 
       def normalize_patterns(node)
         patterns = node.named_children.select do |child|
-          %w[pattern case_pattern match_pattern].include?(child.kind)
+          %w[pattern case_pattern match_pattern switch_pattern when_condition].include?(child.kind)
         end
         patterns = [named_field(node, "value")].compact if patterns.empty?
         patterns = [node.named_children.find { |child| !BLOCK_KINDS.include?(child.kind) && !statement_node?(child) }].compact if patterns.empty?
@@ -924,7 +938,7 @@ module Decomplex
         patterns.flat_map do |pattern|
           if pattern.text.to_s.include?("::")
             [wrap(:CONST, children: [pattern.text.to_s.to_sym], source: pattern)]
-          elsif %w[pattern case_pattern match_pattern expression_list].include?(pattern.kind)
+          elsif %w[pattern case_pattern match_pattern switch_pattern when_condition expression_list].include?(pattern.kind)
             pattern.named_children.map { |child| normalize_node(child) }.compact
           else
             [normalize_node(pattern)].compact
@@ -1418,12 +1432,28 @@ module Decomplex
 
         recv = named_field(node, "receiver") || named_field(node, "object") ||
                named_field(node, "operand") || named_field(node, "value") ||
-               node.named_children.first
+               named_field(node, "expression") ||
+               node.named_children.find { |child| child.kind != "navigation_suffix" }
         mid = named_field(node, "method") || named_field(node, "field") ||
-              named_field(node, "property") || node.named_children.reject { |child| %w[block do_block argument_list arguments].include?(child.kind) }.last
+              named_field(node, "property") || named_field(node, "suffix") ||
+              node.named_children.find { |child| child.kind == "navigation_suffix" } ||
+              node.named_children.reject { |child| %w[block do_block argument_list arguments].include?(child.kind) }.last
         return [nil, nil] unless recv && mid && recv != mid
 
-        [recv, mid.text.to_s.sub(/=\z/, "")]
+        [recv, member_name(mid).sub(/=\z/, "")]
+      end
+
+      def member_name(node)
+        return "" unless ts_node?(node)
+
+        if node.kind == "navigation_suffix"
+          suffix = named_field(node, "suffix") ||
+                   node.named_children.find { |child| IDENTIFIER_KINDS.include?(child.kind) } ||
+                   node.named_children.last
+          return suffix&.text.to_s.sub(/\A[.?]+/, "")
+        end
+
+        node.text.to_s.sub(/\A[.?]+/, "")
       end
 
       def call_arguments(node, function)
@@ -2417,13 +2447,19 @@ module Decomplex
         parent.named_children.any? { |child| same_ts_node?(child, node) }
       end
 
-      def same_ts_node?(left, right)
-        left.kind == right.kind && left.start_byte == right.start_byte && left.end_byte == right.end_byte
-      rescue StandardError
-        false
-      end
+	      def same_ts_node?(left, right)
+	        left.kind == right.kind && left.start_byte == right.start_byte && left.end_byte == right.end_byte
+	      rescue StandardError
+	        false
+	      end
 
-      def bare_identifier_text?(text)
+	      def node_key(node)
+	        [node.kind, node.start_byte, node.end_byte]
+	      rescue StandardError
+	        node.object_id
+	      end
+
+	      def bare_identifier_text?(text)
         text.to_s.strip.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
       end
 

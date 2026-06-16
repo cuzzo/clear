@@ -32,6 +32,7 @@ pub fn ingest_hazards(
 ) -> Result<HazardIngestStats> {
     match provider {
         "zig" => ingest_zig_hazards(storage, repo.as_ref(), commit, timestamp),
+        "go" => ingest_go_hazards(storage, repo.as_ref(), commit, timestamp),
         other => anyhow::bail!("unsupported hazard provider {other:?}"),
     }
 }
@@ -42,13 +43,34 @@ fn ingest_zig_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
+    ingest_language_hazards(storage, repo, commit, timestamp, "zig", zig_source_files, scan_zig_sites)
+}
+
+fn ingest_go_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+) -> Result<HazardIngestStats> {
+    ingest_language_hazards(storage, repo, commit, timestamp, "go", go_source_files, scan_go_sites)
+}
+
+fn ingest_language_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+    language: &str,
+    source_files: fn(&Path) -> Result<Vec<String>>,
+    scan_sites: fn(&str, &str) -> Vec<HazardSite>,
+) -> Result<HazardIngestStats> {
     let repo = repo
         .canonicalize()
         .with_context(|| format!("failed to resolve repo {}", repo.display()))?;
     let timestamp = timestamp
         .or_else(|| storage.commit_timestamp(commit).ok().flatten())
         .unwrap_or_else(now_timestamp);
-    let files = zig_source_files(&repo)?;
+    let files = source_files(&repo)?;
     let extractor = HeuristicExtractor::default();
     let mut stats = HazardIngestStats {
         scanned_files: files.len(),
@@ -57,7 +79,7 @@ fn ingest_zig_hazards(
     };
 
     storage.begin_transaction()?;
-    storage.deactivate_active_hazards("zig")?;
+    storage.deactivate_active_hazards(language)?;
     for path in files {
         let abs = repo.join(&path);
         let contents = fs::read_to_string(&abs)
@@ -67,7 +89,7 @@ fn ingest_zig_hazards(
             contents: contents.clone(),
         };
         let units = extractor.extract_units(&blob);
-        for site in scan_zig_sites(&path, &contents) {
+        for site in scan_sites(&path, &contents) {
             stats.hazards += 1;
             let unit = unit_for_site(&blob, &units, site.line);
             let resolved_id = storage
@@ -78,7 +100,7 @@ fn ingest_zig_hazards(
             }
             storage.insert_hazard_event(&HazardEvent {
                 unit_id: resolved_id,
-                language: "zig".into(),
+                language: language.into(),
                 hazard_type: site.hazard_type.clone(),
                 required_evidence: site.required_evidence.clone(),
                 path: site.path.clone(),
@@ -88,7 +110,7 @@ fn ingest_zig_hazards(
                 detected_at_hash: commit.to_string(),
                 is_active: true,
                 payload_json: json!({
-                    "provider": "zig",
+                    "provider": language,
                     "source": site.source,
                     "timestamp": timestamp
                 })
@@ -111,6 +133,34 @@ fn zig_source_files(repo: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
+fn go_source_files(repo: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_go_files(repo, Path::new(""), &mut files)?;
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_go_files(repo: &Path, rel_dir: &Path, out: &mut Vec<String>) -> Result<()> {
+    let abs = repo.join(rel_dir);
+    if !abs.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&abs)? {
+        let entry = entry?;
+        let path = entry.path();
+        let rel = rel_path(repo, &path)?;
+        if path.is_dir() {
+            if !excluded_go_dir(&rel) {
+                collect_go_files(repo, Path::new(&rel), out)?;
+            }
+        } else if rel.ends_with(".go") && !excluded_go_file(&rel) {
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
 fn collect_zig_files(repo: &Path, rel_dir: &Path, out: &mut Vec<String>) -> Result<()> {
     let abs = repo.join(rel_dir);
     if !abs.is_dir() {
@@ -127,6 +177,19 @@ fn collect_zig_files(repo: &Path, rel_dir: &Path, out: &mut Vec<String>) -> Resu
         }
     }
     Ok(())
+}
+
+fn excluded_go_dir(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    matches!(name, ".git" | "vendor" | "testdata" | "node_modules" | "tmp" | "dist")
+        || name.starts_with('.')
+}
+
+fn excluded_go_file(path: &str) -> bool {
+    let Some(name) = path.rsplit('/').next() else {
+        return true;
+    };
+    name.ends_with("_test.go")
 }
 
 fn excluded_zig_file(path: &str) -> bool {
@@ -201,6 +264,34 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     sites
 }
 
+fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let mut sites = Vec::new();
+    let mut in_block_comment = false;
+    for (index, line) in contents.lines().enumerate() {
+        let line_no = (index + 1) as u32;
+        let code = strip_go_comment(line, &mut in_block_comment);
+        if code.trim().is_empty() {
+            continue;
+        }
+        if is_go_goroutine_site(&code) {
+            sites.push(site(path, line_no, line, "go_race_goroutine", "race"));
+        }
+        if is_go_atomic_site(&code) {
+            sites.push(site(path, line_no, line, "go_race_atomic", "race"));
+        }
+        if is_go_lock_site(&code) {
+            sites.push(site(path, line_no, line, "go_race_lock", "race"));
+        }
+        if is_go_waitgroup_site(&code) {
+            sites.push(site(path, line_no, line, "go_concurrency_waitgroup", "concurrency"));
+        }
+        if is_go_channel_site(&code) {
+            sites.push(site(path, line_no, line, "go_concurrency_channel", "concurrency"));
+        }
+    }
+    sites
+}
+
 fn site(
     path: &str,
     line: u32,
@@ -215,6 +306,42 @@ fn site(
         hazard_type: hazard_type.to_string(),
         required_evidence: required_evidence.to_string(),
     }
+}
+
+fn is_go_goroutine_site(code: &str) -> bool {
+    code.trim_start().starts_with("go ") || code.contains("; go ")
+}
+
+fn is_go_atomic_site(code: &str) -> bool {
+    code.contains("atomic.")
+}
+
+fn is_go_lock_site(code: &str) -> bool {
+    [
+        "sync.Mutex",
+        "sync.RWMutex",
+        "sync.Map",
+        "sync.Once",
+        "sync.Cond",
+        ".Lock(",
+        ".Unlock(",
+        ".RLock(",
+        ".RUnlock(",
+    ]
+    .iter()
+    .any(|needle| code.contains(needle))
+}
+
+fn is_go_waitgroup_site(code: &str) -> bool {
+    ["sync.WaitGroup", ".Add(", ".Done(", ".Wait("]
+        .iter()
+        .any(|needle| code.contains(needle))
+}
+
+fn is_go_channel_site(code: &str) -> bool {
+    code.contains("make(chan")
+        || code.contains("select {")
+        || code.contains("<-")
 }
 
 fn is_atomic_site(code: &str) -> bool {
@@ -342,6 +469,42 @@ fn strip_zig_comment(line: &str) -> &str {
     line.split_once("//").map(|(code, _)| code).unwrap_or(line)
 }
 
+fn strip_go_comment(line: &str, in_block_comment: &mut bool) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    loop {
+        if *in_block_comment {
+            let Some((_, after)) = rest.split_once("*/") else {
+                return out;
+            };
+            *in_block_comment = false;
+            rest = after;
+            continue;
+        }
+        let block = rest.find("/*");
+        let line_comment = rest.find("//");
+        match (block, line_comment) {
+            (Some(block), Some(comment)) if comment < block => {
+                out.push_str(&rest[..comment]);
+                return out;
+            }
+            (Some(block), _) => {
+                out.push_str(&rest[..block]);
+                rest = &rest[block + 2..];
+                *in_block_comment = true;
+            }
+            (_, Some(comment)) => {
+                out.push_str(&rest[..comment]);
+                return out;
+            }
+            (None, None) => {
+                out.push_str(rest);
+                return out;
+            }
+        }
+    }
+}
+
 fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
         .iter()
@@ -397,5 +560,38 @@ mod tests {
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.hazards, 2);
         assert_eq!(storage.count_rows("unit_hazards").unwrap(), 2);
+    }
+
+    #[test]
+    fn ingests_go_concurrency_hazards_for_current_snapshot() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("worker.go"),
+            "package demo\n\nimport \"sync/atomic\"\n\nfunc run(ch chan int) {\n    go func() { ch <- 1 }()\n    value := atomic.LoadInt64(&counter)\n    _ = value\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("worker_test.go"),
+            "package demo\n\nfunc TestRun() { go run(nil) }\n",
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+
+        let stats = ingest_hazards(&storage, dir.path(), "go", "abc", Some(10)).unwrap();
+
+        assert_eq!(stats.scanned_files, 1);
+        assert_eq!(stats.hazards, 3);
+        assert_eq!(storage.count_rows("unit_hazards").unwrap(), 3);
+    }
+
+    #[test]
+    fn go_hazard_scan_ignores_comments() {
+        let sites = scan_go_sites(
+            "demo.go",
+            "package demo\n\nfunc run() {\n    // go func() {}()\n    /* atomic.AddInt64(&x, 1) */\n    ch <- 1\n}\n",
+        );
+
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].hazard_type, "go_concurrency_channel");
     }
 }

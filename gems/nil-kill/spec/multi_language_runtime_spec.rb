@@ -327,6 +327,76 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
+  it "does not default non-Ruby static normalization to stale legacy runtime files" do
+    Dir.mktmpdir("nil-kill-python-no-default-traces", NilKill::ROOT) do |dir|
+      static_path = File.join(dir, "static.json")
+      output_path = File.join(dir, "evidence.json")
+      FileUtils.mkdir_p(NilKill::RUNTIME_DIR)
+      File.write(File.join(NilKill::RUNTIME_DIR, "collections-stale.jsonl"),
+        30.times.map { JSON.generate("legacy" => true) }.join("\n") + "\n")
+      File.write(static_path, JSON.pretty_generate(
+        "files" => [{"path" => "pkg/user.py", "language" => "python", "digest" => "sha256:test"}],
+        "methods" => [],
+        "fields" => [],
+        "language_capabilities" => {"python" => NilKill::Languages.capability_for("python")}
+      ))
+
+      NilKill::Commands::NormalizeCommand.new(["--static", static_path, "--output", output_path, "--no-analyze"]).run
+      evidence = JSON.parse(File.read(output_path))
+
+      expect(evidence["languages"]).to eq(["python"])
+      expect(evidence["diagnostics"]).to eq([])
+      expect(evidence.dig("metadata", "trace_files")).to eq([])
+    end
+  end
+
+  it "keeps Ruby-only normalization defaulting to the legacy runtime directory" do
+    Dir.mktmpdir("nil-kill-ruby-default-traces", NilKill::ROOT) do |dir|
+      static_path = File.join(dir, "static.json")
+      output_path = File.join(dir, "evidence.json")
+      FileUtils.mkdir_p(NilKill::RUNTIME_DIR)
+      File.write(File.join(NilKill::RUNTIME_DIR, "events.jsonl"), JSON.generate(
+        "schema_version" => 1,
+        "event" => "process_start",
+        "language" => "ruby",
+        "run_id" => "run-1",
+        "pid" => 1,
+        "thread_id" => "main",
+        "timestamp_ns" => 1,
+        "path" => "src/demo.rb",
+        "line" => 1,
+        "payload" => {}
+      ) + "\n")
+      File.write(static_path, JSON.pretty_generate(
+        "files" => [{"path" => "src/demo.rb", "language" => "ruby", "digest" => "sha256:test"}],
+        "methods" => [],
+        "fields" => []
+      ))
+
+      NilKill::Commands::NormalizeCommand.new(["--static", static_path, "--output", output_path, "--no-analyze"]).run
+      evidence = JSON.parse(File.read(output_path))
+
+      expect(evidence["languages"]).to eq(["ruby"])
+      expect(evidence.dig("runtime", "runs")).to include(a_hash_including("run_id" => "run-1"))
+      expect(evidence.dig("metadata", "trace_files")).not_to be_empty
+    end
+  end
+
+  it "caps incompatible JSONL diagnostics per trace file" do
+    Dir.mktmpdir("nil-kill-bad-traces", NilKill::ROOT) do |dir|
+      trace_path = File.join(dir, "collections-stale.jsonl")
+      File.write(trace_path, 40.times.map { JSON.generate("legacy" => true) }.join("\n") + "\n")
+
+      diagnostics = []
+      NilKill::Runtime::TraceLoader.new([trace_path]).each_event do |_event, diagnostic|
+        diagnostics << diagnostic if diagnostic
+      end
+
+      expect(diagnostics.count { |diagnostic| diagnostic["code"] == "not_raw_trace_event" }).to eq(20)
+      expect(diagnostics).to include(a_hash_including("code" => "not_raw_trace_event_suppressed"))
+    end
+  end
+
   it "keeps legacy Ruby runtime loading behind the normalizer boundary" do
     Dir.mktmpdir("nil-kill-legacy-runtime", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
