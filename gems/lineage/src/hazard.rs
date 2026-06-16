@@ -33,6 +33,10 @@ pub fn ingest_hazards(
     match provider {
         "zig" => ingest_zig_hazards(storage, repo.as_ref(), commit, timestamp),
         "go" => ingest_go_hazards(storage, repo.as_ref(), commit, timestamp),
+        "rust" => ingest_rust_hazards(storage, repo.as_ref(), commit, timestamp),
+        "c" => ingest_c_hazards(storage, repo.as_ref(), commit, timestamp),
+        "cpp" => ingest_cpp_hazards(storage, repo.as_ref(), commit, timestamp),
+        "csharp" => ingest_csharp_hazards(storage, repo.as_ref(), commit, timestamp),
         other => anyhow::bail!("unsupported hazard provider {other:?}"),
     }
 }
@@ -53,6 +57,50 @@ fn ingest_go_hazards(
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
     ingest_language_hazards(storage, repo, commit, timestamp, "go", go_source_files, scan_go_sites)
+}
+
+fn ingest_rust_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+) -> Result<HazardIngestStats> {
+    ingest_language_hazards(storage, repo, commit, timestamp, "rust", rust_source_files, scan_rust_sites)
+}
+
+fn ingest_c_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+) -> Result<HazardIngestStats> {
+    ingest_language_hazards(storage, repo, commit, timestamp, "c", c_source_files, scan_c_sites)
+}
+
+fn ingest_cpp_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+) -> Result<HazardIngestStats> {
+    ingest_language_hazards(storage, repo, commit, timestamp, "cpp", cpp_source_files, scan_cpp_sites)
+}
+
+fn ingest_csharp_hazards(
+    storage: &Storage,
+    repo: &Path,
+    commit: &str,
+    timestamp: Option<i64>,
+) -> Result<HazardIngestStats> {
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "csharp",
+        csharp_source_files,
+        scan_csharp_sites,
+    )
 }
 
 fn ingest_language_hazards(
@@ -141,6 +189,55 @@ fn go_source_files(repo: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
+fn rust_source_files(repo: &Path) -> Result<Vec<String>> {
+    collect_language_files(repo, rust_source_path)
+}
+
+fn c_source_files(repo: &Path) -> Result<Vec<String>> {
+    collect_language_files(repo, c_source_path)
+}
+
+fn cpp_source_files(repo: &Path) -> Result<Vec<String>> {
+    collect_language_files(repo, cpp_source_path)
+}
+
+fn csharp_source_files(repo: &Path) -> Result<Vec<String>> {
+    collect_language_files(repo, csharp_source_path)
+}
+
+fn collect_language_files(repo: &Path, source_path: fn(&str) -> bool) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_matching_files(repo, Path::new(""), &mut files, source_path)?;
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_matching_files(
+    repo: &Path,
+    rel_dir: &Path,
+    out: &mut Vec<String>,
+    source_path: fn(&str) -> bool,
+) -> Result<()> {
+    let abs = repo.join(rel_dir);
+    if !abs.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&abs)? {
+        let entry = entry?;
+        let path = entry.path();
+        let rel = rel_path(repo, &path)?;
+        if path.is_dir() {
+            if !excluded_common_dir(&rel) {
+                collect_matching_files(repo, Path::new(&rel), out, source_path)?;
+            }
+        } else if source_path(&rel) {
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
 fn collect_go_files(repo: &Path, rel_dir: &Path, out: &mut Vec<String>) -> Result<()> {
     let abs = repo.join(rel_dir);
     if !abs.is_dir() {
@@ -185,11 +282,53 @@ fn excluded_go_dir(path: &str) -> bool {
         || name.starts_with('.')
 }
 
+fn excluded_common_dir(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    matches!(
+        name,
+        ".git"
+            | "vendor"
+            | "third_party"
+            | "node_modules"
+            | "tmp"
+            | "dist"
+            | "build"
+            | "target"
+            | "bin"
+            | "obj"
+            | "packages"
+            | "cmake-build-debug"
+            | "cmake-build-release"
+            | "tests"
+            | "test"
+            | "benches"
+            | "examples"
+    ) || name.starts_with('.')
+}
+
 fn excluded_go_file(path: &str) -> bool {
     let Some(name) = path.rsplit('/').next() else {
         return true;
     };
     name.ends_with("_test.go")
+}
+
+fn rust_source_path(path: &str) -> bool {
+    path.ends_with(".rs")
+}
+
+fn c_source_path(path: &str) -> bool {
+    path.ends_with(".c") || path.ends_with(".h")
+}
+
+fn cpp_source_path(path: &str) -> bool {
+    [".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"]
+        .iter()
+        .any(|suffix| path.ends_with(suffix))
+}
+
+fn csharp_source_path(path: &str) -> bool {
+    path.ends_with(".cs")
 }
 
 fn excluded_zig_file(path: &str) -> bool {
@@ -292,6 +431,123 @@ fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     sites
 }
 
+fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let mut sites = Vec::new();
+    let mut in_block_comment = false;
+    let mut unsafe_depth = 0_i32;
+    for (index, line) in contents.lines().enumerate() {
+        let line_no = (index + 1) as u32;
+        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
+        if code.trim().is_empty() {
+            continue;
+        }
+        if is_rust_atomic_site(&code) {
+            sites.push(site(path, line_no, line, "rust_loom_atomic", "loom"));
+        }
+        if is_rust_concurrency_site(&code) {
+            sites.push(site(path, line_no, line, "rust_loom_concurrency", "loom"));
+        }
+        if code.contains("unsafe fn ") || code.contains("unsafe fn(") {
+            sites.push(site(path, line_no, line, "rust_unsafe_fn", "miri"));
+        }
+        if code.contains("unsafe impl ") {
+            sites.push(site(path, line_no, line, "rust_unsafe_impl", "miri"));
+        }
+        let starts_unsafe = code.contains("unsafe {");
+        if starts_unsafe {
+            sites.push(site(path, line_no, line, "rust_unsafe_block", "miri"));
+        }
+        if (unsafe_depth > 0 || starts_unsafe) && is_rust_unsafe_operation(&code) {
+            sites.push(site(path, line_no, line, "rust_unsafe_operation", "miri"));
+        }
+        unsafe_depth = update_unsafe_depth(&code, unsafe_depth);
+    }
+    sites
+}
+
+fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let mut sites = Vec::new();
+    let mut in_block_comment = false;
+    for (index, line) in contents.lines().enumerate() {
+        let line_no = (index + 1) as u32;
+        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
+        if code.trim().is_empty() {
+            continue;
+        }
+        if is_c_tsan_site(&code) {
+            sites.push(site(path, line_no, line, "c_tsan_concurrency", "tsan"));
+        }
+        if is_c_asan_api_site(&code) {
+            sites.push(site(path, line_no, line, "c_asan_raw_memory_api", "asan"));
+        }
+        if is_c_pointer_hazard(&code) {
+            sites.push(site(path, line_no, line, "c_asan_pointer", "asan"));
+        }
+        if is_c_lsan_site(&code) {
+            sites.push(site(path, line_no, line, "c_lsan_lifetime", "lsan"));
+        }
+        if is_arithmetic_ub_site(&code) {
+            sites.push(site(path, line_no, line, "c_ubsan_arithmetic", "ubsan"));
+        }
+        if is_c_cast_ub_site(&code) {
+            sites.push(site(path, line_no, line, "c_ubsan_cast", "ubsan"));
+        }
+    }
+    sites
+}
+
+fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let mut sites = Vec::new();
+    let mut in_block_comment = false;
+    for (index, line) in contents.lines().enumerate() {
+        let line_no = (index + 1) as u32;
+        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
+        if code.trim().is_empty() {
+            continue;
+        }
+        if is_cpp_tsan_site(&code) {
+            sites.push(site(path, line_no, line, "cpp_tsan_concurrency", "tsan"));
+        }
+        if is_cpp_asan_api_site(&code) {
+            sites.push(site(path, line_no, line, "cpp_asan_raw_memory_api", "asan"));
+        }
+        if is_cpp_pointer_or_cast_hazard(&code) {
+            sites.push(site(path, line_no, line, "cpp_asan_pointer_or_cast", "asan"));
+        }
+        if is_cpp_lsan_site(&code) {
+            sites.push(site(path, line_no, line, "cpp_lsan_lifetime", "lsan"));
+        }
+        if is_arithmetic_ub_site(&code) {
+            sites.push(site(path, line_no, line, "cpp_ubsan_arithmetic", "ubsan"));
+        }
+        if contains_any(&code, &["reinterpret_cast<", "const_cast<", "static_cast<"]) {
+            sites.push(site(path, line_no, line, "cpp_ubsan_cast", "ubsan"));
+        }
+    }
+    sites
+}
+
+fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let mut sites = Vec::new();
+    let mut in_block_comment = false;
+    let mut unsafe_depth = 0_i32;
+    for (index, line) in contents.lines().enumerate() {
+        let line_no = (index + 1) as u32;
+        let code = strip_quoted_literals(&strip_go_comment(line, &mut in_block_comment));
+        if code.trim().is_empty() {
+            continue;
+        }
+        if is_csharp_concurrency_site(&code) {
+            sites.push(site(path, line_no, line, "csharp_concurrency", "concurrency"));
+        }
+        if is_csharp_unsafe_site(&code, unsafe_depth) {
+            sites.push(site(path, line_no, line, "csharp_unsafe_memory", "unsafe"));
+        }
+        unsafe_depth = update_csharp_unsafe_depth(&code, unsafe_depth);
+    }
+    sites
+}
+
 fn site(
     path: &str,
     line: u32,
@@ -342,6 +598,341 @@ fn is_go_channel_site(code: &str) -> bool {
     code.contains("make(chan")
         || code.contains("select {")
         || code.contains("<-")
+}
+
+fn contains_any(code: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| code.contains(needle))
+}
+
+fn is_rust_atomic_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "std::sync::atomic",
+            "core::sync::atomic",
+            "Ordering::",
+            ".load(",
+            ".store(",
+            ".swap(",
+            ".compare_exchange(",
+            ".compare_exchange_weak(",
+            ".fetch_add(",
+            ".fetch_sub(",
+            ".fetch_or(",
+            ".fetch_and(",
+            ".fetch_xor(",
+            ".fetch_update(",
+            "fence(",
+            "AtomicBool",
+            "AtomicI",
+            "AtomicU",
+            "AtomicPtr",
+        ],
+    )
+}
+
+fn is_rust_concurrency_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "thread::spawn",
+            "std::thread::spawn",
+            "std::sync::Mutex",
+            "std::sync::RwLock",
+            "std::sync::Condvar",
+            "std::sync::Arc",
+            "Arc<",
+            "Mutex<",
+            "RwLock<",
+            "Condvar",
+            "mpsc::",
+            "crossbeam::channel",
+            ".lock(",
+            ".try_lock(",
+        ],
+    )
+}
+
+fn is_rust_unsafe_operation(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "std::ptr::",
+            "core::ptr::",
+            "ptr::read",
+            "ptr::write",
+            "ptr::copy",
+            "copy_nonoverlapping",
+            "from_raw",
+            "into_raw",
+            "get_unchecked",
+            "get_unchecked_mut",
+            "unwrap_unchecked",
+            "transmute",
+            "assume_init",
+            "MaybeUninit",
+            "addr_of!",
+            "asm!",
+            ".add(",
+            ".offset(",
+            ".read(",
+            ".write(",
+            ".copy_to(",
+            ".copy_from(",
+        ],
+    ) || pointer_deref_site(code)
+}
+
+fn update_unsafe_depth(code: &str, unsafe_depth: i32) -> i32 {
+    let relevant = if unsafe_depth > 0 {
+        code
+    } else if let Some(index) = code.find("unsafe {") {
+        &code[index..]
+    } else {
+        ""
+    };
+    if relevant.is_empty() {
+        return unsafe_depth;
+    }
+    (unsafe_depth + brace_delta(relevant)).max(0)
+}
+
+fn is_c_tsan_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "_Atomic",
+            "atomic_",
+            "__atomic_",
+            "__sync_",
+            "pthread_create",
+            "pthread_mutex_",
+            "pthread_rwlock_",
+            "pthread_cond_",
+            "pthread_spin_",
+            "pthread_barrier_",
+            "mtx_",
+            "cnd_",
+            "thrd_create",
+        ],
+    )
+}
+
+fn is_c_asan_api_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "memcpy(",
+            "memmove(",
+            "memset(",
+            "strcpy(",
+            "strncpy(",
+            "strcat(",
+            "strncat(",
+            "sprintf(",
+            "snprintf(",
+            "vsprintf(",
+            "vsnprintf(",
+            "gets(",
+            "scanf(",
+            "sscanf(",
+            "fscanf(",
+            "alloca(",
+        ],
+    )
+}
+
+fn is_c_lsan_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "malloc(",
+            "calloc(",
+            "realloc(",
+            "aligned_alloc(",
+            "posix_memalign(",
+            "strdup(",
+            "strndup(",
+            "free(",
+        ],
+    )
+}
+
+fn is_c_pointer_hazard(code: &str) -> bool {
+    code.contains("->") || pointer_deref_site(code)
+}
+
+fn is_c_cast_ub_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "(intptr_t)",
+            "(uintptr_t)",
+            "(size_t)",
+            "(ssize_t)",
+            "(int)",
+            "(long)",
+            "(short)",
+            "(char)",
+            "(void *)",
+            "(char *)",
+            "(int *)",
+            "(long *)",
+        ],
+    )
+}
+
+fn is_cpp_tsan_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "std::thread",
+            "std::jthread",
+            "std::async",
+            "std::atomic",
+            "std::mutex",
+            "std::shared_mutex",
+            "std::recursive_mutex",
+            "std::condition_variable",
+            "std::lock_guard",
+            "std::unique_lock",
+            "std::scoped_lock",
+            "std::call_once",
+            ".lock(",
+            ".try_lock(",
+            ".unlock(",
+        ],
+    )
+}
+
+fn is_cpp_asan_api_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "std::memcpy(",
+            "std::memmove(",
+            "std::memset(",
+            "memcpy(",
+            "memmove(",
+            "memset(",
+            "strcpy(",
+            "strncpy(",
+            "strcat(",
+            "strncat(",
+            "sprintf(",
+            "snprintf(",
+            "std::span<",
+            "std::string_view",
+        ],
+    )
+}
+
+fn is_cpp_lsan_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "malloc(",
+            "calloc(",
+            "realloc(",
+            "free(",
+            "std::malloc(",
+            "std::calloc(",
+            "std::realloc(",
+            "std::free(",
+            "new ",
+            "new[]",
+            "delete ",
+            "delete[]",
+        ],
+    )
+}
+
+fn is_cpp_pointer_or_cast_hazard(code: &str) -> bool {
+    code.contains("->")
+        || pointer_deref_site(code)
+        || contains_any(code, &["reinterpret_cast<", "const_cast<"])
+}
+
+fn is_arithmetic_ub_site(code: &str) -> bool {
+    contains_any(code, &[" / ", " % ", "<<", ">>"])
+}
+
+fn is_csharp_concurrency_site(code: &str) -> bool {
+    contains_any(
+        code,
+        &[
+            "Task.Run",
+            "Task.Factory.StartNew",
+            "new Thread",
+            "ThreadPool.",
+            "Parallel.",
+            "lock (",
+            "lock(",
+            "Monitor.",
+            "Interlocked.",
+            "Volatile.",
+            "ConcurrentDictionary",
+            "ConcurrentQueue",
+            "ConcurrentBag",
+            "BlockingCollection",
+            "SemaphoreSlim",
+            "Mutex",
+            "ReaderWriterLockSlim",
+            "SpinLock",
+        ],
+    )
+}
+
+fn is_csharp_unsafe_site(code: &str, unsafe_depth: i32) -> bool {
+    (unsafe_depth > 0 && (code.contains("->") || pointer_deref_site(code)))
+        || contains_any(
+            code,
+            &[
+                "unsafe",
+                "fixed (",
+                "fixed(",
+                "stackalloc",
+                "Marshal.",
+                "IntPtr",
+                "UIntPtr",
+                "GCHandle",
+                "Unsafe.",
+                "MemoryMarshal.",
+                "byte*",
+                "char*",
+                "int*",
+                "long*",
+                "void*",
+            ],
+        )
+}
+
+fn update_csharp_unsafe_depth(code: &str, unsafe_depth: i32) -> i32 {
+    let relevant = if unsafe_depth > 0 {
+        code
+    } else if let Some(index) = code.find("unsafe {") {
+        &code[index..]
+    } else {
+        ""
+    };
+    if relevant.is_empty() {
+        return unsafe_depth;
+    }
+    (unsafe_depth + brace_delta(relevant)).max(0)
+}
+
+fn pointer_deref_site(code: &str) -> bool {
+    let trimmed = code.trim_start();
+    trimmed.starts_with('*')
+        || contains_any(code, &["= *", "=*", "return *", "(*", ", *", "[*"])
+}
+
+fn brace_delta(code: &str) -> i32 {
+    code.chars().fold(0_i32, |total, ch| match ch {
+        '{' => total + 1,
+        '}' => total - 1,
+        _ => total,
+    })
 }
 
 fn is_atomic_site(code: &str) -> bool {
@@ -505,6 +1096,34 @@ fn strip_go_comment(line: &str, in_block_comment: &mut bool) -> String {
     }
 }
 
+fn strip_quoted_literals(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            out.push_str("\"\"");
+            let mut escaped = false;
+            for inner in chars.by_ref() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if inner == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if inner == quote {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
         .iter()
@@ -585,6 +1204,54 @@ mod tests {
     }
 
     #[test]
+    fn ingests_rust_loom_and_unsafe_hazards_for_current_snapshot() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "use std::sync::atomic::{AtomicUsize, Ordering};\n\npub fn run(ptr: *const u8) -> usize {\n    let value = AtomicUsize::new(0);\n    value.fetch_add(1, Ordering::SeqCst);\n    unsafe {\n        ptr.add(1).read()\n    }\n}\n",
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+
+        let stats = ingest_hazards(&storage, dir.path(), "rust", "abc", Some(10)).unwrap();
+
+        assert_eq!(stats.scanned_files, 1);
+        assert_eq!(stats.hazards, 5);
+        assert_eq!(storage.count_rows("unit_hazards").unwrap(), 5);
+    }
+
+    #[test]
+    fn system_hazard_scans_cover_c_cpp_and_csharp_categories() {
+        let c_types = hazard_types(scan_c_sites(
+            "runtime.c",
+            "void run(char *dst, char *src, int n) {\n    pthread_mutex_lock(&lock);\n    char *buf = malloc(32);\n    memcpy(dst, src, n);\n    int shifted = n << src[0];\n    free(buf);\n}\n",
+        ));
+        assert!(c_types.contains(&"c_tsan_concurrency".to_string()));
+        assert!(c_types.contains(&"c_asan_raw_memory_api".to_string()));
+        assert!(c_types.contains(&"c_lsan_lifetime".to_string()));
+        assert!(c_types.contains(&"c_ubsan_arithmetic".to_string()));
+
+        let cpp_types = hazard_types(scan_cpp_sites(
+            "runtime.cpp",
+            "void run(char *dst, char *src, int n) {\n    std::atomic<int> ready;\n    auto *buf = new char[32];\n    std::memcpy(dst, src, n);\n    auto raw = reinterpret_cast<int *>(dst);\n    auto shifted = n << raw[0];\n    delete[] buf;\n}\n",
+        ));
+        assert!(cpp_types.contains(&"cpp_tsan_concurrency".to_string()));
+        assert!(cpp_types.contains(&"cpp_asan_raw_memory_api".to_string()));
+        assert!(cpp_types.contains(&"cpp_asan_pointer_or_cast".to_string()));
+        assert!(cpp_types.contains(&"cpp_lsan_lifetime".to_string()));
+        assert!(cpp_types.contains(&"cpp_ubsan_cast".to_string()));
+        assert!(cpp_types.contains(&"cpp_ubsan_arithmetic".to_string()));
+
+        let csharp_types = hazard_types(scan_csharp_sites(
+            "Worker.cs",
+            "public unsafe class Worker {\n    public void Run(byte* ptr) {\n        Task.Run(() => {});\n        fixed (byte* p = buffer) {\n            *p = 1;\n        }\n    }\n}\n",
+        ));
+        assert!(csharp_types.contains(&"csharp_concurrency".to_string()));
+        assert!(csharp_types.contains(&"csharp_unsafe_memory".to_string()));
+    }
+
+    #[test]
     fn go_hazard_scan_ignores_comments() {
         let sites = scan_go_sites(
             "demo.go",
@@ -593,5 +1260,19 @@ mod tests {
 
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].hazard_type, "go_concurrency_channel");
+    }
+
+    #[test]
+    fn systems_hazard_scans_ignore_comments_and_strings() {
+        let sites = scan_c_sites(
+            "runtime.c",
+            "void run(void) {\n    // pthread_mutex_lock(&lock);\n    const char *s = \"memcpy(dst, src, n)\";\n}\n",
+        );
+
+        assert!(sites.is_empty());
+    }
+
+    fn hazard_types(sites: Vec<HazardSite>) -> Vec<String> {
+        sites.into_iter().map(|site| site.hazard_type).collect()
     }
 }

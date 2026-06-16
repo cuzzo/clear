@@ -248,7 +248,7 @@ fn matching_units<'a>(units: &'a [LogicalUnit], fact: &MutantFact) -> Vec<&'a Lo
     let aliases = method_aliases(&fact.method);
     units
         .iter()
-        .filter(|unit| aliases.iter().any(|alias| alias == &unit.name))
+        .filter(|unit| unit_matches_aliases(unit, &aliases))
         .collect()
 }
 
@@ -281,7 +281,7 @@ fn fallback_matching_unit_entries(
             let aliases = method_aliases(&fact.method);
             units
                 .iter()
-                .filter(|unit| aliases.iter().any(|alias| alias == &unit.name))
+                .filter(|unit| unit_matches_aliases(unit, &aliases))
                 .collect::<Vec<_>>()
         };
         for unit in path_matches {
@@ -316,7 +316,7 @@ fn fallback_owner_mentioned_function_entries(
             continue;
         }
         for unit in units {
-            if unit.kind.as_str() != "function" || !aliases.iter().any(|alias| alias == &unit.name) {
+            if unit.kind.as_str() != "function" || !unit_matches_aliases(unit, &aliases) {
                 continue;
             }
             if !owner_needles.iter().any(|needle| {
@@ -346,8 +346,7 @@ fn fallback_unique_source_function_entry(
             continue;
         }
         for unit in units {
-            if unit.kind.as_str() == "function" && aliases.iter().any(|alias| alias == &unit.name)
-            {
+            if unit.kind.as_str() == "function" && unit_matches_aliases(unit, &aliases) {
                 candidates.push(UnitMatch {
                     path: path.clone(),
                     unit: unit.clone(),
@@ -410,6 +409,13 @@ fn owner_text_needles(owner: &str) -> Vec<String> {
     needles.dedup();
     needles.retain(|value| !value.is_empty());
     needles
+}
+
+fn unit_matches_aliases(unit: &LogicalUnit, aliases: &[String]) -> bool {
+    aliases.iter().any(|alias| {
+        unit.name == *alias
+            || (!alias.contains('.') && !alias.contains('#') && unit.name.ends_with(&format!(".{alias}")))
+    })
 }
 
 fn method_aliases(method: &str) -> Vec<String> {
@@ -706,7 +712,7 @@ mod tests {
         assert_eq!(stats.facts, 1);
         assert_eq!(stats.units, 1);
         assert_eq!(stats.quality_events, 1);
-        assert_eq!(stats.exposure_events, 4);
+        assert_eq!(stats.exposure_events, 3);
         let killed: i64 = storage
             .connection()
             .query_row(
@@ -715,7 +721,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(killed, 4);
+        assert_eq!(killed, 3);
     }
 
     #[test]

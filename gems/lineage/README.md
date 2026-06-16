@@ -120,7 +120,7 @@ from the same source and commit.
 | Coverage | `ingest-coverage` | Codecov JSON, SimpleCov JSON, Cobertura XML, kcov Cobertura XML |
 | Test exposure | `ingest-test-exposure` | Lineage `test-exposure` JSON |
 | Mutation testing | `ingest-mutants` | Ruby `mutant-facts/v1` |
-| Systems hazards | `ingest-hazards` | Zig hazard provider |
+| Systems hazards | `ingest-hazards` | Zig, Go, Rust, C, C++, C# hazard providers |
 | Stack traces | `ingest` | Sentry-style event JSON |
 | Static analysis and risk findings | `ingest-sarif` | SARIF 2.1.0 files from Decomplex, SlopCop, Boobytrap, Nil-Kill, Espalier, and third-party tools |
 
@@ -283,6 +283,11 @@ Recommended CLEAR lanes:
 - Zig kcov unit coverage: `--format cobertura --test-type unit`
 - Zig systems evidence: `--test-type loom`, `--test-type vopr`, or
   `--test-type tsan`
+- Rust systems evidence: `--test-type loom` for concurrency/atomic
+  checks and `--test-type miri` for unsafe-code checks
+- C/C++ systems evidence: `--test-type tsan`, `asan`, `lsan`, or
+  `ubsan`
+- C# systems evidence: `--test-type concurrency` or `unsafe`
 
 ### Test Exposure
 
@@ -359,8 +364,12 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-hazards \
   --commit "$(git rev-parse HEAD)"
 ```
 
-The current first-party provider scans Zig runtime/lib hazard sites used
-by CLEAR's Loom and VOPR coverage work.
+First-party providers currently support `zig`, `go`, `rust`, `c`,
+`cpp`, and `csharp`. Zig scans the CLEAR runtime/lib Loom and VOPR
+hazard sites. Rust scans Loom-relevant concurrency/atomic sites and
+unsafe blocks/operations. C and C++ scan sanitizer-relevant concurrency,
+raw-memory, lifetime, and UB hazards. C# scans concurrency and unsafe
+native-memory hazards.
 
 ### Stack Traces
 
@@ -381,19 +390,23 @@ file.
 
 ## Supported Languages Roadmap
 
-Lineage currently uses a heuristic logical-unit extractor. Ruby and Zig
-are the most exercised paths because CLEAR uses them for compiler and
-runtime review. Other language extraction is experimental until the
-planned Tree-sitter-backed profiles replace the bootstrap extractor.
+Lineage uses Tree-sitter-backed logical-unit extraction for the core
+languages it aims to track as a ground-truth risk ledger. For those
+languages, parse failures produce no units instead of falling back to
+regex boundaries. Heuristic extraction remains only for secondary
+experimental languages.
 
-- [x] Ruby: used for CLEAR compiler review.
-- [x] Zig: used for CLEAR runtime review and systems hazards.
-- [ ] Python: experimentally supported.
-- [ ] JavaScript: experimentally supported.
-- [ ] Lua: experimentally supported.
-- [ ] C: experimentally supported.
-- [ ] Go: experimentally supported.
-- [ ] Assembly: experimentally supported.
+- [x] Ruby: Tree-sitter-backed; used for CLEAR compiler review.
+- [x] Zig: Tree-sitter-backed; used for CLEAR runtime review and
+  systems hazards.
+- [x] Rust: Tree-sitter-backed.
+- [x] Python: Tree-sitter-backed.
+- [x] JavaScript / TypeScript: Tree-sitter-backed.
+- [x] Go: Tree-sitter-backed, including concurrency hazards.
+- [x] C / C++: Tree-sitter-backed, including sanitizer hazards.
+- [x] C#: Tree-sitter-backed, including concurrency/unsafe hazards.
+- [ ] Lua: experimental heuristic extraction.
+- [ ] Assembly: experimental label extraction.
 
 ## Boundaries
 

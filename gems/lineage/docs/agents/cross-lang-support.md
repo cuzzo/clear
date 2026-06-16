@@ -65,6 +65,7 @@ Each repository received as much of this evidence as the current tools could pro
 - Added Go concurrency hazard detection through SlopCop/Lineage.
 - Fixed Lineage source extraction and coverage ingestion issues found during TypeScript/Go validation.
 - Fixed Nil-kill static-only normalization so non-Ruby languages do not accidentally depend on stale runtime traces.
+- Replaced Lineage regex-first logical-unit extraction for Ruby, Python, JavaScript/TypeScript, Go, Rust, Zig, C/C++, and C# with Tree-sitter-backed extraction. The regex heuristic path is now only for secondary experimental languages.
 
 ## Environment Gaps
 
