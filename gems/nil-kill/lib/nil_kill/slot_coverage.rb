@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "set"
+require "json"
 require_relative "static_evidence"
 
 module NilKill
@@ -62,6 +63,7 @@ module NilKill
 
     def initialize(targets)
       @targets = targets
+      @slot_type_overrides = load_slot_type_overrides
     end
 
     def summaries
@@ -129,7 +131,7 @@ module NilKill
     def field_type_for(index, record)
       candidates = field_keys(record).filter_map { |key| index[key] }
       candidates.find { |type| slot_strength(type) != "untyped" } ||
-        inferred_field_type(record) ||
+        override_field_type(record) ||
         candidates.first
     end
 
@@ -200,217 +202,101 @@ module NilKill
     def qualified_owner(path, owner)
       return owner if owner.empty? || owner.include?("::")
 
-      case path
-      when %r{\Asrc/ast/}
-        "AST::#{owner}"
-      when %r{\Asrc/mir/fsm_ops\.rb\z}
-        "FsmOps::#{owner}"
-      when %r{\Asrc/mir/fsm_transform/segments\.rb\z}
-        "FsmTransform::Segments::#{owner}"
-      when %r{\Asrc/mir/}
-        "MIR::#{owner}"
-      else
-        owner
+      owner_alias = @slot_type_overrides.fetch("owner_aliases").find do |rule|
+        rule_matches?(rule, "path" => path, "owner" => owner)
       end
+      return owner unless owner_alias
+
+      pattern = owner_alias.fetch("owner_pattern")
+      owner.sub(pattern, owner_alias.fetch("qualified_owner"))
     end
 
-    def inferred_field_type(record)
-      owner = qualified_owner(record["path"].to_s, record["owner"].to_s)
+    def override_field_type(record)
+      path = record["path"].to_s
+      owner = record["owner"].to_s
       name = record["name"].to_s
-      return inferred_ivar_type(owner, name.delete_prefix("@")) if name.start_with?("@")
+      owners = [owner, qualified_owner(path, owner)].uniq
+      names = [name]
+      names << name.delete_prefix("@") if name.start_with?("@")
 
-      if owner.start_with?("AST::")
-        inferred_ast_field_type(name)
-      elsif owner.start_with?("MIR::")
-        inferred_mir_field_type(name)
-      elsif owner.start_with?("FsmOps::")
-        inferred_fsm_ops_field_type(name)
-      elsif owner.start_with?("FsmTransform::Segments::")
-        inferred_fsm_segment_field_type(name)
-      else
-        inferred_common_field_type(name)
+      override = @slot_type_overrides.fetch("slot_types").find do |rule|
+        rule_matches?(rule, "path" => path) &&
+          owners.any? { |candidate| rule_matches?(rule, "owner" => candidate) } &&
+          names.any? { |candidate| rule_matches?(rule, "name" => candidate) }
+      end
+
+      override && override.fetch("type")
+    end
+
+    def load_slot_type_overrides
+      paths = ENV.fetch("NIL_KILL_SLOT_TYPE_OVERRIDES", "")
+                 .split(File::PATH_SEPARATOR)
+                 .map(&:strip)
+                 .reject(&:empty?)
+      overrides = {"owner_aliases" => [], "slot_types" => []}
+      paths.each do |path|
+        source = JSON.parse(File.read(File.expand_path(path)))
+        overrides.fetch("owner_aliases").concat(Array(source["owner_aliases"]).map { |rule| normalize_owner_alias_rule(rule, path) })
+        slot_rules = Array(source["slot_types"]) + Array(source["field_types"])
+        overrides.fetch("slot_types").concat(slot_rules.map { |rule| normalize_slot_type_rule(rule, path) })
+      rescue JSON::ParserError => error
+        raise ArgumentError, "invalid NIL_KILL_SLOT_TYPE_OVERRIDES #{path}: #{error.message}"
+      end
+      overrides
+    end
+
+    def normalize_owner_alias_rule(rule, path)
+      raise ArgumentError, "invalid owner_aliases rule in #{path}: expected object" unless rule.is_a?(Hash)
+
+      pattern = pattern_for(rule, "owner")
+      replacement = rule["qualified_owner"] || rule["replacement"]
+      if pattern.nil? || replacement.to_s.empty?
+        raise ArgumentError, "invalid owner_aliases rule in #{path}: owner and qualified_owner are required"
+      end
+
+      {
+        "path_pattern" => compile_optional_pattern(rule, "path", path),
+        "owner_pattern" => compile_pattern(pattern, "owner", path),
+        "qualified_owner" => replacement.to_s,
+      }
+    end
+
+    def normalize_slot_type_rule(rule, path)
+      raise ArgumentError, "invalid slot_types rule in #{path}: expected object" unless rule.is_a?(Hash)
+
+      type = rule["type"]
+      if pattern_for(rule, "name").nil? || type.to_s.empty?
+        raise ArgumentError, "invalid slot_types rule in #{path}: name and type are required"
+      end
+
+      {
+        "path_pattern" => compile_optional_pattern(rule, "path", path),
+        "owner_pattern" => compile_optional_pattern(rule, "owner", path),
+        "name_pattern" => compile_pattern(pattern_for(rule, "name"), "name", path),
+        "type" => type.to_s,
+      }
+    end
+
+    def rule_matches?(rule, values)
+      values.all? do |key, value|
+        pattern = rule["#{key}_pattern"]
+        pattern.nil? || pattern.match?(value.to_s)
       end
     end
 
-    def inferred_ivar_type(owner, name)
-      case name
-      when "source_code", "original_message", "fn_name", "name", "stdlib_root", "file"
-        "String"
-      when "strict_test", "branch_terminated", "completed"
-        "T::Boolean"
-      when "debounce_ms", "ctx_id", "checked_arg_count", "line", "column"
-        "Integer"
-      when "token", "param_decl_token"
-        "Lexer::Token"
-      when "tokens"
-        "T::Array[Lexer::Token]"
-      when "stdin", "stdout"
-        "IO"
-      when "items"
-        owner == "MIR::Program" ? "T::Array[MIR::Node]" : nil
-      when "entries"
-        if owner == "Scope::ScopeBindings"
-          "T::Hash[String, SymbolEntry]"
-        elsif owner == "Scope::ScopeTypes"
-          "T::Hash[Symbol, Scope::ScopeTypeEntry]"
-        end
-      when "docs"
-        "T::Hash[String, LSP::DocumentStore::Document]"
-      when "labels"
-        "T::Array[String]"
-      when "frames"
-        "T::Array[PassWorkProfiler::WorkFrame]"
-      when "sync_families"
-        "T::Set[Symbol]"
-      when "arg_mirs"
-        "T::Array[MIR::Node]"
-      when "type_object"
-        "T.nilable(Type)"
-      when "storage_override"
-        "T.nilable(Symbol)"
-      else
-        inferred_common_field_type(name)
-      end
+    def compile_optional_pattern(rule, key, path)
+      pattern = pattern_for(rule, key)
+      pattern.nil? ? nil : compile_pattern(pattern, key, path)
     end
 
-    def inferred_common_field_type(name)
-      case name
-      when "name", "message", "description", "category", "level", "uri", "text", "version"
-        "String"
-      when "line", "column", "index"
-        "Integer"
-      when "token", "name_token"
-        "Lexer::Token"
-      end
+    def compile_pattern(pattern, key, path)
+      Regexp.new(pattern.to_s)
+    rescue RegexpError => error
+      raise ArgumentError, "invalid #{key} pattern in #{path}: #{error.message}"
     end
 
-    def inferred_ast_field_type(name)
-      case name
-      when "body", "statements", "then_branch", "do_branch", "setup", "tests", "benchmarks"
-        "AST::RawBody"
-      when "else_branch", "default_case", "default_body"
-        "T.nilable(AST::RawBody)"
-      when "params"
-        "T::Array[AST::Param]"
-      when "captures"
-        "T::Array[AST::Capture]"
-      when "cases"
-        "T::Array[AST::MatchCase]"
-      when "catch_clauses"
-        "T::Array[AST::CatchClause]"
-      when "deferred_drops", "then_drops", "else_drops", "default_drops"
-        "T.nilable(T::Array[AST::DeferredDrop])"
-      when "case_drops"
-        "T::Array[T::Array[AST::DeferredDrop]]"
-      when "expression", "condition", "value", "target", "object", "index", "start", "finish",
-           "start_expr", "end_expr", "collection", "expr", "default_expr", "message_expr",
-           "initial_value", "right_source", "key_expr", "target_map", "left", "right"
-        "AST::Node"
-      when "fields"
-        "T::Hash[String, AST::Node]"
-      when "field_decls"
-        "T::Hash[String, AST::StructField]"
-      when "type", "return_type", "type_info"
-        "T.nilable(Type)"
-      when "name", "var_name", "binding_name", "function_name", "type_name", "method_name",
-           "union_name", "variant_name", "namespace", "path", "from_module", "description",
-           "error_name", "field"
-        "String"
-      when "kind", "op", "storage", "ownership", "sync", "layout", "visibility", "stack_size"
-        "Symbol"
-      when "mutable", "pinned", "parallel", "can_smash", "exhaustive", "takes", "uses_frame",
-           "inclusive", "is_mutable", "borrowed", "partial", "exclusive"
-        "T::Boolean"
-      when "count", "size", "iterations", "status", "n"
-        "Integer"
-      else
-        inferred_common_field_type(name)
-      end
-    end
-
-    def inferred_mir_field_type(name)
-      case name
-      when "body", "then_body", "else_body", "default_body", "catch_body", "guard_fail_body",
-           "run_body", "body_stmts", "extra_prologue_stmts", "pre_body_stmts", "setup_stmts",
-           "bind_stmts", "branch_bodies", "items", "steps", "promoted_decls"
-        "T::Array[MIR::Node]"
-      when "arms"
-        "T::Array[MIR::Node]"
-      when "params"
-        "T::Array[MIR::Param]"
-      when "fields"
-        "T::Array[MIR::FieldDef]"
-      when "methods"
-        "T::Array[MIR::FnDef]"
-      when "expr", "cond", "iter", "target", "value", "receiver", "object", "index", "source",
-           "optional", "fallback", "inner", "callee", "left", "right", "operand", "subject",
-           "cell", "cell_unwrap", "map", "key", "key_expr", "value_expr", "item_expr", "list",
-           "list_expr", "guard_cond", "default_value", "return_value", "condition", "ret",
-           "tail", "init", "alloc_expr", "lock_expr", "then_expr", "end_expr"
-        "MIR::Node"
-      when "name", "alias_name", "zig_type", "elem_type", "target_type", "promise_zig",
-           "captures_decl_zig", "type_name", "ctx_type", "ctx_var", "promise_var", "alloc_var",
-           "rt_name", "bg_rt", "fn_name", "body_fn_name", "result_var", "result_zig_type",
-           "label", "blk_label", "field_name", "method", "method_name", "module_path", "member",
-           "sync_fn", "sync_type", "own_fn", "key_zig", "val_zig", "batch_var", "source_type",
-           "sink", "sink_alloc", "guard_var", "lock_field_ref", "register_expr", "yield_reason",
-           "panic_msg", "line", "source_line", "with_label", "raw_rt_name", "raw_args_name",
-           "local_stream", "stream_zig", "stream_var", "wg_var", "profile_site_id",
-           "profile_dispatch_id"
-        "String"
-      when "kind", "op", "alloc", "strategy", "visibility", "scope", "map_kind", "snapshot_mode",
-           "capture", "capture_type", "index_capture", "suppression", "fail_step", "retry_step",
-           "ok_step", "wait_step", "error_step", "next_step", "skip_step", "then_step", "else_step",
-           "try_method", "_", "target_alloc"
-        "Symbol"
-      when "mutable", "discard", "needs_field_cleanup", "pointer_passed", "try_wrap", "owned_return",
-           "can_fail", "fallible", "suppress_runtime_ref", "result_aliases_finalized",
-           "result_needs_cleanup", "uses_loop_label", "pre_body_skip", "has_default",
-           "is_atomic_ptr", "tight", "mark_per_iter", "alias_safe", "arc_wrapped",
-           "comptime_arc_unwrap", "has_message"
-        "T::Boolean"
-      when "index", "retries", "shard_idx", "count", "len", "capacity", "worker_count",
-           "source_column", "ctx_id", "next_index"
-        "Integer"
-      when "type_info", "bare_type", "clear_type"
-        "Type"
-      else
-        inferred_common_field_type(name)
-      end
-    end
-
-    def inferred_fsm_ops_field_type(name)
-      case name
-      when "field", "fn", "verb", "zig_type", "name"
-        "String"
-      when "args", "extra_args", "return_args"
-        "T::Array[FsmOps::Expr]"
-      when "value", "expr", "base", "left", "right", "sub", "count", "waiter"
-        "FsmOps::Expr"
-      when "is_try"
-        "T::Boolean"
-      when "idx"
-        "Integer"
-      else
-        inferred_common_field_type(name)
-      end
-    end
-
-    def inferred_fsm_segment_field_type(name)
-      case name
-      when "call_node", "promise_ast", "cond_ast", "with_node"
-        "AST::Node"
-      when "stmts"
-        "AST::RawBody"
-      when "tail"
-        "FsmTransform::Segments::SegmentTail"
-      when "stdlib_def", "result_var"
-        "String"
-      when "next_index", "target_index", "then_index", "else_index"
-        "Integer"
-      else
-        inferred_common_field_type(name)
-      end
+    def pattern_for(rule, key)
+      rule[key] || rule["#{key}_pattern"]
     end
 
     def field_category(field)

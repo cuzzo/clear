@@ -115,6 +115,7 @@ module NilKill
       lines << ""
       lines << "## Hygiene Overview"
       append_type_soundness_table(lines, evidence)
+      append_untyped_slot_name_pressure(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       lines << ""
       lines << "## Action Plan Counts"
@@ -1740,6 +1741,7 @@ module NilKill
       lines << ""
       lines << "## Hygiene Overview"
       append_type_soundness_table(lines, evidence)
+      append_untyped_slot_name_pressure(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       append_union_decomplexity(lines, evidence)
       append_deterministic_guard_collapse(lines, evidence)
@@ -2459,6 +2461,70 @@ module NilKill
       end
       lines << ""
       lines << "Total = Strong + Weak + Untyped. Nilable is a cross-cut sub-count (a `T.nilable(String)` slot is Strong and Nilable, not a fourth bucket). Collection-typed slots (`T::Array[...]` etc.) are counted only in the Arrays/Sets/Hashmaps row, so the four categories are mutually exclusive. The Param/Returns/Struct Untyped columns equal the per-row denominators in the Untyped Cause Breakdown below."
+    end
+
+    def append_untyped_slot_name_pressure(lines, evidence)
+      rows = untyped_slot_name_pressure(evidence)
+      lines << ""
+      lines << "### Top Untyped Slot Names"
+      lines << "- Repeated names are prioritization pressure only; Nil-Kill does not infer a type from a name."
+      if rows.empty?
+        lines << "- none"
+        return
+      end
+
+      lines << ""
+      lines << "| Name | Slots | Categories | Example sites |"
+      lines << "|---|---:|---|---|"
+      rows.first(20).each do |row|
+        categories = row["categories"].sort.map { |kind, count| "#{kind} #{count}" }.join(", ")
+        examples = row["examples"].first(3).join("; ")
+        lines << "| `#{row["name"]}` | #{row["count"]} | #{categories} | #{examples} |"
+      end
+      lines << "- ... #{rows.size - 20} more repeated name(s)" if rows.size > 20
+    end
+
+    def untyped_slot_name_pressure(evidence)
+      rows = Hash.new do |hash, name|
+        hash[name] = {"name" => name, "count" => 0, "categories" => Hash.new(0), "examples" => []}
+      end
+      add = lambda do |name, category, site|
+        clean_name = name.to_s.sub(/\A@/, "")
+        return if clean_name.empty?
+
+        row = rows[clean_name]
+        row["count"] += 1
+        row["categories"][category] += 1
+        row["examples"] << site if row["examples"].size < 3
+      end
+
+      Array(evidence.dig("facts", "existing_sigs")).each do |method|
+        extract_param_entries(method["sig"].to_s).each do |name, type|
+          next unless untyped_type?(strip_nilable(type.to_s))
+
+          add.(name, "param", "#{method["path"]}:#{method["line"]} param `#{name}`")
+        end
+      end
+
+      rbi_types = struct_rbi_types
+      Array(evidence.dig("facts", "struct_declarations")).each do |decl|
+        Array(decl["fields"]).each do |field|
+          type = rbi_types[[decl["class"], field]] || "T.untyped"
+          next unless untyped_type?(strip_nilable(type.to_s))
+
+          add.(field, "field", "#{decl["path"]}:#{decl["line"]} #{decl["class"]}.#{field}")
+        end
+      end
+
+      Array(evidence.dig("facts", "tlet_sites")).each do |site|
+        next unless site["tlet"] && untyped_type?(strip_nilable(site["type"].to_s))
+
+        add.(site["name"], "var", "#{site["path"]}:#{site["line"]} #{site["name"]}")
+      end
+
+      rows.values
+        .select { |row| row["count"] > 1 }
+        .sort_by { |row| [-row["count"], row["name"]] }
     end
 
     # Ordered cause taxonomy. First match wins (most-actionable first).

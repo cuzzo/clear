@@ -3455,6 +3455,31 @@ RSpec.describe NilKill do
       )
     end
 
+    it "reports repeated untyped slot names as pressure, not inferred types" do
+      report = described_class.allocate
+      evidence = {
+        "facts" => {
+          "existing_sigs" => [
+            { "path" => "src/a.rb", "line" => 1, "sig" => "sig { params(node: T.untyped, payload: String).returns(String) }" },
+            { "path" => "src/b.rb", "line" => 2, "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
+          ],
+          "struct_declarations" => [
+            { "class" => "Box", "path" => "src/box.rb", "line" => 4, "fields" => ["node", "payload"] },
+          ],
+          "tlet_sites" => [
+            { "path" => "src/c.rb", "line" => 5, "name" => "@node", "tlet" => true, "type" => "T.untyped" },
+          ],
+        }
+      }
+
+      rows = report.send(:untyped_slot_name_pressure, evidence)
+      node = rows.find { |row| row["name"] == "node" }
+
+      expect(node).to include("count" => 4)
+      expect(node.fetch("categories")).to include("param" => 2, "field" => 1, "var" => 1)
+      expect(rows.map { |row| row["name"] }).not_to include("payload")
+    end
+
     it "splits addressed return fixability by type strength" do
       report = described_class.allocate
 

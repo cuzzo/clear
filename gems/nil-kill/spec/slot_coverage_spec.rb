@@ -3,6 +3,41 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::SlotCoverage do
+  it "does not assign built-in types from repeated project slot names" do
+    path, = repo_tmp_file("slot_coverage_names_fixture.rb", <<~RUBY)
+      class SlotCoverageNamesFixture
+        Record = Struct.new(:name, :line, :body)
+      end
+    RUBY
+
+    summary = described_class.new([path]).summaries.fetch(0)
+
+    expect(summary.fetch("struct_fields")).to include("total" => 3, "strong" => 0, "weak" => 0, "untyped" => 3)
+  end
+
+  it "applies explicit slot type override rules when a project opts in" do
+    path, = repo_tmp_file("slot_coverage_override_fixture.rb", <<~RUBY)
+      class SlotCoverageOverrideFixture
+        Record = Struct.new(:payload)
+      end
+    RUBY
+    config, = repo_tmp_file("slot_coverage_overrides.json", JSON.generate({
+      "slot_types" => [
+        {
+          "path" => "slot_coverage_override_fixture\\.rb\\z",
+          "name" => "\\Apayload\\z",
+          "type" => "String"
+        }
+      ]
+    }))
+
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config) do
+      summary = described_class.new([path]).summaries.fetch(0)
+
+      expect(summary.fetch("struct_fields")).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+    end
+  end
+
   it "counts typed, weak, and untyped slots per file without regex source scanning" do
     path, rel = repo_tmp_file("slot_coverage_fixture.rb", <<~RUBY)
       class CoverageFixture
