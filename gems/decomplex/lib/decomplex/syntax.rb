@@ -934,6 +934,8 @@ module Decomplex
       end
 
       def record_decision_site(document, node, stack, out)
+        return if generated_lua_compat_prelude?(document, node)
+
         if boolean_container?(node) && boolean_and?(node)
           record_conjunction_decision(document, node, stack, out)
           return
@@ -1394,6 +1396,8 @@ module Decomplex
       end
 
       def record_branch_arm(document, node, stack, out)
+        return if generated_lua_compat_prelude?(document, node)
+
         if if_node?(node)
           record_if_arms(document, node, stack, out)
           return
@@ -1983,9 +1987,19 @@ module Decomplex
           normalize_text(match[1])
         elsif (match = text.match(/\A\s*(?:pub\s+)?(?:const|var)\s+\w+\s*:\s*([^=;\n]+)/))
           normalize_text(match[1])
+        elsif (match = after_name.match(/\A\s+([^=;,\n]+)/))
+          normalize_text(match[1])
         end
       rescue StandardError
         nil
+      end
+
+      def generated_lua_compat_prelude?(document, node)
+        return false unless document.language == :lua
+        return false unless line(node) == 1
+
+        first_line = document.lines.first.to_s
+        first_line.include?("_tl_compat") && first_line.include?("compat53.module")
       end
 
       def state_read_target(node)

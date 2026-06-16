@@ -120,6 +120,49 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_lua_adapter_ignores_generated_teal_compat_prelude
+    grammar = ENV["DECOMPLEX_TS_LUA_PATH"]
+    skip "set DECOMPLEX_TS_LUA_PATH to run Lua structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~LUA, ".lua") do |path|
+      local _tl_compat; if (tonumber((_VERSION or ""):match("[%d.]*$")) or 0) < 5.3 then local pcall, require = pcall, require; local ok, compat53 = pcall(require, "compat53.module"); if ok then compat53.module(_ENV) end end
+      function real(a, b)
+        if a and b then
+          return true
+        end
+      end
+    LUA
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :lua)
+
+      assert_empty doc.decision_sites.select { |decision| decision.line == 1 }
+      assert_empty doc.branch_arms.select { |arm| arm.line == 1 }
+      assert_includes doc.decision_sites.map { |decision| [decision.line, decision.kind, decision.members] },
+        [3, :conjunction, %w[a b]]
+    end
+  end
+
+  def test_tree_sitter_go_adapter_extracts_name_type_struct_fields
+    grammar = ENV["DECOMPLEX_TS_GO_PATH"]
+    skip "set DECOMPLEX_TS_GO_PATH to run Go structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~GO, ".go") do |path|
+      package util
+
+      type Slab struct {
+        I16 []int16
+        Count int
+      }
+    GO
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :go)
+
+      assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Slab", :owner]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Slab", "I16", "[]int16"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Slab", "Count", "int"]
+    end
+  end
+
   def test_tree_sitter_ruby_adapter_extracts_portable_facts_when_grammar_is_available
     grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
     skip "set DECOMPLEX_TS_RUBY_PATH to run Tree-sitter adapter smoke test" unless grammar && File.file?(grammar)

@@ -119,6 +119,31 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
+  it "does not report Python None-only returns as nullable signatures" do
+    report = NilKill::Report.allocate
+
+    void_method = {
+      "language" => "python",
+      "path" => "src/worker.py",
+      "owner" => "Worker",
+      "name" => "call",
+      "kind" => "method",
+      "line" => 10,
+      "signature" => "def call(self, value: str) -> None:",
+    }
+    maybe_method = void_method.merge(
+      "name" => "fetch",
+      "line" => 20,
+      "signature" => "def fetch(self, value: str | None) -> str | None:",
+    )
+
+    void_findings = report.send(:static_method_findings, void_method)
+    maybe_findings = report.send(:static_method_findings, maybe_method)
+
+    expect(void_findings.map { |finding| finding["kind"] }).not_to include("nullable_signature")
+    expect(maybe_findings.map { |finding| finding["kind"] }).to include("nullable_signature")
+  end
+
   it "uses TypeScript provider annotations when building Tree-sitter static evidence" do
     grammar = ENV["DECOMPLEX_TS_TYPESCRIPT_PATH"]
     skip "set DECOMPLEX_TS_TYPESCRIPT_PATH to run TypeScript Tree-sitter static evidence test" unless grammar && File.file?(grammar)
@@ -182,6 +207,38 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
         "declared_type" => "string | null"
       ))
       expect(evidence.dig("language_capabilities", "typescript", "type_indexing")).to be(true)
+    end
+  end
+
+  it "keeps Go name-type struct fields typed in static evidence" do
+    grammar = ENV["DECOMPLEX_TS_GO_PATH"]
+    skip "set DECOMPLEX_TS_GO_PATH to run Go Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-go-static", NilKill::ROOT) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "slab.go"), <<~GO)
+        package util
+
+        type Slab struct {
+          I16 []int16
+          Count int
+        }
+      GO
+
+      evidence = NilKill::StaticEvidence.build([src], root: dir)
+      fields = evidence.fetch("fields")
+      report = NilKill::Report.allocate
+
+      expect(evidence.dig("facts", "state_types", "Slab\u0000I16")).to eq("[]int16")
+      expect(evidence.dig("facts", "state_types", "Slab\u0000Count")).to eq("int")
+      expect(fields).to include(a_hash_including(
+        "language" => "go",
+        "name" => "I16",
+        "declared_type" => "[]int16"
+      ))
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "I16" })).to be_nil
+      expect(report.send(:static_field_finding, fields.find { |field| field["name"] == "Count" })).to be_nil
     end
   end
 
