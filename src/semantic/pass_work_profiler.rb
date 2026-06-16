@@ -266,11 +266,11 @@ module PassWorkProfiler
     sig do
       params(
         label: String,
-        ast_root: Object,
-        mir_root: Object,
+        ast_root: T.untyped,
+        mir_root: T.untyped,
         token_count: T.nilable(Integer),
-        block: T.proc.returns(Object)
-      ).returns(Object)
+        block: T.proc.returns(T.untyped)
+      ).returns(T.untyped)
     end
     def measure(label, ast_root: nil, mir_root: nil, token_count: nil, &block)
       record = T.let(nil, T.nilable(StageRecord))
@@ -302,7 +302,7 @@ module PassWorkProfiler
       record_for(current_label).add_work(kind, units, seconds, exclusive_seconds)
     end
 
-    sig { params(kind: String, units: Integer, block: T.proc.returns(Object)).returns(Object) }
+    sig { params(kind: String, units: Integer, block: T.proc.returns(T.untyped)).returns(T.untyped) }
     def measure_work(kind, units: 0, &block)
       frame = T.let(nil, T.nilable(WorkFrame))
       frame = WorkFrame.new(
@@ -519,15 +519,15 @@ module PassWorkProfiler
 
   SCALAR_CLASSES = T.let(
     [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze,
-    T::Array[T.class_of(Object)]
+    T::Array[T::Class[T.untyped]]
   )
 
-  sig { params(root: Object).returns(Integer) }
+  sig { params(root: T.untyped).returns(Integer) }
   def self.count_ast_nodes(root)
     count_nodes(root, "AST::", {})
   end
 
-  sig { params(root: Object).returns(Integer) }
+  sig { params(root: T.untyped).returns(Integer) }
   def self.count_mir_nodes(root)
     count_nodes(root, "MIR::", {})
   end
@@ -540,7 +540,7 @@ module PassWorkProfiler
     format("%.1fm", value / 1_000_000.0)
   end
 
-  sig { params(root: Object, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T.untyped, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_nodes(root, namespace, seen)
     return 0 if scalar?(root)
     return count_array_nodes(root, namespace, seen) if root.is_a?(Array)
@@ -559,26 +559,26 @@ module PassWorkProfiler
   end
   private_class_method :count_nodes
 
-  sig { params(root: T::Array[Object], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Array[T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_array_nodes(root, namespace, seen)
     root.sum { |value| count_nodes(value, namespace, seen) }
   end
   private_class_method :count_array_nodes
 
-  sig { params(root: T::Hash[Object, Object], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Hash[T.untyped, T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_hash_nodes(root, namespace, seen)
     root.each_value.sum { |value| count_nodes(value, namespace, seen) }
   end
   private_class_method :count_hash_nodes
 
-  sig { params(root: Object, namespace: String).returns(T::Boolean) }
+  sig { params(root: T.untyped, namespace: String).returns(T::Boolean) }
   def self.profiler_node?(root, namespace)
     class_name = root.class.name
     !!class_name&.start_with?(namespace) && root.respond_to?(:each_pair)
   end
   private_class_method :profiler_node?
 
-  sig { params(root: Object).returns(T::Boolean) }
+  sig { params(root: T.untyped).returns(T::Boolean) }
   def self.scalar?(root)
     SCALAR_CLASSES.any? { |klass| root.is_a?(klass) }
   end

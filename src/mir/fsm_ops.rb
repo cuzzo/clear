@@ -284,19 +284,19 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, arg_mirs: T::Array[Object]).void }
+    sig { params(ctx_id: Integer, arg_mirs: T::Array[T.untyped]).void }
     def initialize(ctx_id:, arg_mirs:)
       @ctx_id = ctx_id
       @arg_mirs = arg_mirs
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
-    sig { params(ops: T::Array[Stmt]).returns(T::Array[Object]) }
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[T.untyped]) }
     def lower_stmts(ops)
       ops.map { |op| lower_stmt(op) }
     end
 
-    sig { params(op: T.untyped).returns(Object) }
+    sig { params(op: T.untyped).returns(T.untyped) }
     def lower_stmt(op)
       case op
       when AssignField

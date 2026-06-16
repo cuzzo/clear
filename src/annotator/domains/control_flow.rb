@@ -545,16 +545,17 @@ module Annotator
       sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }
       def match_payload_binding_type(plan, variant_name, raw_payload, match_case)
         T.bind(self, SemanticAnnotator)
-        if Schemas.inline_struct?(raw_payload)
+        payload = T.must(raw_payload)
+        if payload.is_a?(Schemas::InlineStructVariant)
           return Type.new(:"#{plan.type_name}_#{variant_name}")
         end
-        if raw_payload.is_a?(Type) && raw_payload.indirect?
-          inner_type = raw_payload.dup
+        if payload.is_a?(Type) && payload.indirect?
+          inner_type = payload.dup
           inner_type.strip_layout!
           match_case.indirect_payload_as = true
           return apply_type_subst(inner_type, plan.union_subst)
         end
-        apply_type_subst(raw_payload, plan.union_subst)
+        apply_type_subst(payload, plan.union_subst)
       end
 
       sig { params(binding: String).void }

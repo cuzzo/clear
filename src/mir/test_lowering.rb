@@ -27,7 +27,12 @@ require "sorbet-runtime"
 module TestLowering
     extend T::Sig
 
-  sig { params(node: AST::TestBlock).returns(T::Array[T.untyped]) }
+  MirBody = T.type_alias { T::Array[MIR::Emittable] }
+  TestDefs = T.type_alias { T::Array[MIR::TestDef] }
+  LetAstMap = T.type_alias { T::Hash[String, AST::LetBinding] }
+  StubInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, String)] }
+
+  sig { params(node: AST::TestBlock).returns(TestDefs) }
   def lower_test_block(node)
     T.bind(self, MIRLowering) rescue nil
     ctx = TestBlockCtx.new(node, self)
@@ -46,7 +51,7 @@ module TestLowering
   # BEFORE ALL hooks, then each TEST THAT, then benchmarks, then
   # AFTER ALL hooks). Mutates test_state.active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
-  sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
+  sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: TestDefs).returns(TestDefs) }
   def lower_when_block(when_block, ctx, tests)
     T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
@@ -163,7 +168,7 @@ module TestLowering
 
   # Scope function_state.current_bindings to the cleanup-classifier's synthetic FN
   # wrapper for the duration of the block. Restored unconditionally.
-  sig { params(test_that: AST::TestThat, blk: T.untyped).returns(T.untyped) }
+  sig { params(test_that: AST::TestThat, blk: T.proc.returns(MirBody)).returns(MirBody) }
   def with_test_that_bindings(test_that, &blk)
     T.bind(self, MIRLowering) rescue nil
     prev = function_state.current_bindings
@@ -190,14 +195,14 @@ module TestLowering
       @test_block = T.let(test_block, AST::TestBlock)
       @test_name  = T.let(test_block.name, String)
       @lowering   = lowering
-      @setup_mir  = T.let(lowering.lower_body(test_block.setup), T::Array[T.untyped])
+      @setup_mir  = T.let(lowering.lower_body(test_block.setup), MirBody)
       @test_before_each_mir = T.let(
         (test_block.before_each || []).map { |b| lowering.lower_body(b) },
-        T::Array[T.untyped],
+        T::Array[MirBody],
       )
       @test_after_each_mir = T.let(
         (test_block.after_each || []).map { |b| lowering.lower_body(b) },
-        T::Array[T.untyped],
+        T::Array[MirBody],
       )
     end
 
@@ -214,12 +219,13 @@ module TestLowering
     # WHEN-level. Each ALL hook gets its own runtime (no shared
     # state with TEST THATs in v1 — file-scope-var promotion is a
     # deferred follow-up).
-    sig { params(bodies: T::Array[T::Array[T.untyped]], name_kind: String, desc_prefix: String, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
+    sig { params(bodies: T::Array[T::Array[AST::Node]], name_kind: String, desc_prefix: String, tests: TestDefs).returns(TestDefs) }
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
       bodies.each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
         tests << MIR::TestDef.new(name, [fresh_preamble] + @lowering.lower_body(body))
       end
+      tests
     end
   end
 
@@ -251,7 +257,7 @@ module TestLowering
   # insertion order preserves declaration order for the surviving
   # entries: outer LETs occupy their original indices unless replaced
   # by an inner LET, which then takes the outer's slot.
-  sig { params(lets: T::Array[T.untyped], base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
+  sig { params(lets: T::Array[AST::LetBinding], base: LetAstMap).returns(LetAstMap) }
   def build_let_ast_map(lets, base: {})
     T.bind(self, MIRLowering) rescue []
     out = base.dup
@@ -265,7 +271,7 @@ module TestLowering
   # RHS expressions depend on. Returns the names in source-declaration
   # order so the emitted Zig declarations resolve cleanly
   # (later LETs may reference earlier ones).
-  sig { params(let_ast_map: T::Hash[String, T.untyped], ast_subtrees: T::Array[T.untyped]).returns(T::Array[String]) }
+  sig { params(let_ast_map: LetAstMap, ast_subtrees: T::Array[T.untyped]).returns(T::Array[String]) }
   def compute_used_let_names(let_ast_map, ast_subtrees)
     T.bind(self, MIRLowering) rescue nil
     return [] if let_ast_map.empty?
@@ -280,7 +286,9 @@ module TestLowering
     while changed
       changed = false
       referenced.to_a.each do |name|
-        rhs = let_ast_map[name].expr
+        let_binding = let_ast_map[name]
+        next unless let_binding
+        rhs = let_binding.expr
         before = referenced.size
         collect_identifier_refs(rhs, let_ast_map, referenced)
         changed = true if referenced.size > before
@@ -295,7 +303,7 @@ module TestLowering
 
   # Walk an AST subtree gathering names from AST::Identifier nodes
   # whose name appears in `name_set`. Adds to the `out` set.
-  sig { params(node: T.untyped, name_set: T::Hash[String, T.untyped], out: T::Set[String]).returns(T.untyped) }
+  sig { params(node: T.untyped, name_set: LetAstMap, out: T::Set[String]).void }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
     return if node.nil? || AST.scalar_literal_value?(node)
@@ -321,7 +329,7 @@ module TestLowering
   # -- no raw Zig escape hatch -- so the checker can see what's going
   # on. Locals that would otherwise become "unused" after stub
   # replacement get an explicit MIR::Suppress (`_ = &name;`).
-  sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(fn_name: String, receiver: T.nilable(AST::Node), args: T::Array[AST::Node]).returns(T.nilable(MIR::Node)) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
     stub_info = test_state.active_stubs[fn_name]
@@ -375,7 +383,7 @@ module TestLowering
   # through function_state.decl_zig_name_map / function_state.fn_name_rename_map so suppressed names
   # match the actual Zig var (cleanup-classification may suffix-rename
   # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
-  sig { params(node: T.untyped).returns(T::Array[String]) }
+  sig { params(node: AST::Node).returns(T::Array[String]) }
   def stub_local_idents(node)
     T.bind(self, MIRLowering) rescue nil
     return [] unless node.is_a?(AST::Identifier)
@@ -388,7 +396,7 @@ module TestLowering
     [renamed]
   end
 
-  sig { params(node: AST::StubDecl).returns(T.untyped) }
+  sig { params(node: AST::StubDecl).returns(T.nilable(MIR::NodeRoot)) }
   def lower_stub_decl(node)
     T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name

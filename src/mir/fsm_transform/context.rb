@@ -21,7 +21,7 @@ module FsmTransform
       const :rt_name, String
       const :promoted_decls, T::Array[MIR::Emittable]
       const :capture_inits, T::Array[MIR::StructInitField]
-      const :captured, T::Hash[String, Object]
+      const :captured, T::Hash[String, T.untyped]
       const :capture_close_plans, T::Hash[String, Schemas::ResourceClosePlan]
       const :pointer_captures, T::Set[String]
       const :extra_ctx_fields, T::Array[MIR::ContextFieldDecl]

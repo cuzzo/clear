@@ -83,7 +83,7 @@ class MIRPassState
     state
   end
 
-  sig { params(program: Object).returns(MIRPassState) }
+  sig { params(program: T.untyped).returns(MIRPassState) }
   def self.for!(program)
     state = program.respond_to?(:mir_pass_state) ? T.unsafe(program).mir_pass_state : nil
     unless state.is_a?(MIRPassState)
@@ -93,7 +93,7 @@ class MIRPassState
     state
   end
 
-  sig { params(program: Object, stage: Symbol, consumer: String).void }
+  sig { params(program: T.untyped, stage: Symbol, consumer: String).void }
   def self.require!(program, stage, consumer:)
     state = program.respond_to?(:mir_pass_state) ? T.unsafe(program).mir_pass_state : nil
     unless state.is_a?(MIRPassState)

@@ -52,7 +52,8 @@ module FsmTransform
     AliasOverrideMap = T.type_alias { T::Hash[String, String] }
     AliasOverrideTable = T.type_alias { T::Hash[Integer, AliasOverrideMap] }
     SegmentSlot = T.type_alias { T.any(FsmTransform::Segments::Segment, Symbol) }
-    SplitContext = T.type_alias { T::Hash[Symbol, Object] }
+    SplitContext = T.type_alias { T::Hash[Symbol, T.untyped] }
+    SegmentRenumberResult = T.type_alias { [T::Array[FsmTransform::Segments::Segment], T::Hash[Integer, Integer]] }
     SegmentTail = T.type_alias do
       T.any(
         FsmTransform::Segments::Done,
@@ -108,7 +109,7 @@ module FsmTransform
       # Push a frame of alias overrides during a recursive emit call.
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
-      sig { params(overrides: AliasOverrideMap, blk: T.proc.returns(Object)).returns(Object) }
+      sig { params(overrides: AliasOverrideMap, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
       def with_alias_overrides(overrides, &blk)
         T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides
@@ -260,7 +261,8 @@ end
       # frame, leaving runSeg<suspend>'s setup with undeclared
       # references. Control-flow pivots (WhileLoop / IF / WITH)
       # don't share frame with pre and stay split.
-      sus = Segments.classify_suspend(pivot)
+      pivot_ast = pivot.is_a?(AST::Locatable) ? pivot : nil
+      sus = pivot_ast ? Segments.classify_suspend(pivot_ast) : nil
       if sus
         emit_suspend_with_pre(sus, pre, rest_entry, builder)
       else
@@ -275,7 +277,7 @@ end
 
     # Suspend with pre-stmts in the same segment. The pre's locals
     # live in the same Zig fn as the descriptor's setup_stmts.
-    sig { params(susp_tail: T.untyped, pre: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(Integer) }
+    sig { params(susp_tail: SuspendTail, pre: T::Array[SegmentStmt], after_idx: Integer, builder: Builder).returns(Integer) }
     def self.emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
@@ -289,10 +291,11 @@ end
     # Does this stmt introduce a segment split? True for top-level
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
-    sig { params(stmt: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
+    sig { params(stmt: T.nilable(SegmentStmt)).returns(T::Boolean) }
     def self.stmt_introduces_split?(stmt)
       T.bind(self, T.untyped) rescue nil
-      return true if Segments.classify_suspend(stmt)
+      return false unless stmt
+      return true if stmt.is_a?(AST::Locatable) && Segments.classify_suspend(stmt)
       case stmt
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
@@ -306,15 +309,17 @@ end
     # Recursively scan for any suspend in a subtree. A WithBlock with
     # a lock-suspending capability counts as a suspend even if its CS
     # body is straight-line.
-    sig { params(stmts: T.untyped).returns(T::Boolean) }
+    sig { params(stmts: T.nilable(T.any(SegmentStmt, T::Array[SegmentStmt]))).returns(T::Boolean) }
     def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
-        next true if Segments.classify_suspend(stmt)
+        next true if stmt.is_a?(AST::Locatable) && Segments.classify_suspend(stmt)
         case stmt
         when AST::WithBlock
           with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
         else
+          next false unless stmt.is_a?(Struct)
+
           AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
         end
       end
@@ -323,7 +328,7 @@ end
     # A WITH "lock-suspends" if any of its capabilities require the
     # FSM lock-acquire protocol (EXCLUSIVE / write_locked_read).
     # Plain @read caps don't suspend.
-    sig { params(with_node: T.untyped).returns(T::Boolean) }
+    sig { params(with_node: AST::WithBlock).returns(T::Boolean) }
     def self.with_lock_suspend?(with_node)
       T.bind(self, T.untyped) rescue nil
       CapabilityPlan.require_for(with_node).locks.any?
@@ -337,7 +342,7 @@ end
     #     suspend). Multi-cap WITH and suspend-in-CS still punt to
     #     the legacy path or stackful.
     #   * try/catch around suspends: not supported.
-    sig { params(body: T.untyped).returns(T::Boolean) }
+    sig { params(body: T.nilable(T.any(SegmentStmt, T::Array[SegmentStmt]))).returns(T::Boolean) }
     def self.contains_unsupported?(body)
       T.bind(self, T.untyped) rescue nil
       Array(body).any? do |stmt|
@@ -366,7 +371,7 @@ end
     # Mixed lock + non-lock caps are still rejected: the parser
     # could synthesize a non-lock leading cap (e.g. @multiowned)
     # for which we don't have a uniform acquire protocol.
-    sig { params(with_node: T.untyped).returns(T::Boolean) }
+    sig { params(with_node: AST::WithBlock).returns(T::Boolean) }
     def self.with_unsupported?(with_node)
       T.bind(self, T.untyped) rescue nil
       if with_lock_suspend?(with_node)
@@ -379,10 +384,10 @@ end
     # NEXT on a non-Future (stream / promise-list) source is FSM
     # ineligible -- the suspend protocol assumes scalar Promise(T)
     # with a `.inner.result` field. Streams have a different shape.
-    sig { params(stmt: T.untyped).returns(T::Boolean) }
+    sig { params(stmt: T.nilable(SegmentStmt)).returns(T::Boolean) }
     def self.stmt_unsupported_suspend?(stmt)
       T.bind(self, T.untyped) rescue nil
-      sus = Segments.classify_suspend(stmt)
+      sus = stmt.is_a?(AST::Locatable) ? Segments.classify_suspend(stmt) : nil
       return false unless sus.is_a?(Segments::NextSuspend)
       pt = Type.from_node!(sus.promise_ast, context: "FSM suspend promise")
       return true unless pt.future?
@@ -395,7 +400,7 @@ end
     sig { params(stmt: SegmentStmt, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_pivot(stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
-      sus = Segments.classify_suspend(stmt)
+      sus = stmt.is_a?(AST::Locatable) ? Segments.classify_suspend(stmt) : nil
       return emit_suspend(T.cast(sus, SuspendTail), after_idx, builder) if sus
 
       case stmt
@@ -493,7 +498,7 @@ end
       raise UnsupportedShape, "WITH split without ctx" unless ctx_id_raw.is_a?(Integer)
 
       ctx_id = T.cast(ctx_id_raw, Integer)
-      captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
+      captured = T.cast(ctx[:captured] || {}, T::Hash[String, T.untyped])
       bg_rt_raw = ctx[:bg_rt]
       raise UnsupportedShape, "WITH split without runtime" unless bg_rt_raw.is_a?(String)
 
@@ -565,7 +570,7 @@ end
     # tail target_indices. Used when emit_stmts produces segments in
     # an order where the entry isn't at index 0 (it can happen when
     # post-segments are emitted before the body that flows into them).
-    sig { params(segments: T.untyped, entry: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(segments: T::Array[Segments::Segment], entry: Integer).returns(SegmentRenumberResult) }
     def self.renumber_with_entry(segments, entry)
       T.bind(self, T.untyped) rescue nil
       mapping = { entry => 0 }
@@ -583,7 +588,7 @@ end
       [remapped, mapping]
     end
 
-    sig { params(tail: T.anything, mapping: T.untyped).returns(T.untyped) }
+    sig { params(tail: SegmentTail, mapping: T::Hash[Integer, Integer]).returns(SegmentTail) }
     def self.remap_tail(tail, mapping)
       T.bind(self, T.untyped) rescue nil
       case tail

@@ -575,9 +575,10 @@ module MIRHoistLowering
       ti.resource?
   end
 
-  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_allocates?(node)
     return false unless node
+    return false unless node.is_a?(MIR::Emittable)
     return true if mir_produces_owned_result?(node)
 
     return false unless node.respond_to?(:child_exprs)
@@ -615,9 +616,9 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(value: T.nilable(MIR::Node)).returns(T::Boolean) }
+  sig { params(value: T.untyped).returns(T::Boolean) }
   def mir_expr_child?(value)
-    !!(value&.expr?)
+    value.respond_to?(:expr?) && T.unsafe(value).expr?
   end
 
   sig do
@@ -635,8 +636,9 @@ module MIRHoistLowering
     if expr.respond_to?(:expr?) && expr.expr?
       function_state.pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
     end
-    return expr unless mir_produces_owned_result?(expr) ||
-                       T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
+    union_return_needs_hoist =
+      ast_node && T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
+    return expr unless mir_produces_owned_result?(expr) || union_return_needs_hoist
     plan = allocating_hoist_plan(
       T.cast(expr, MIR::Node),
       mutable: mutable,
@@ -900,6 +902,8 @@ module MIRHoistLowering
     return prefix unless stmt.respond_to?(:child_exprs)
 
     stmt.child_exprs.each do |child|
+      next unless child
+
       child_prefix, normalized = normalize_allocating_used_expr(child)
       replace_mir_expr_child!(stmt, child, normalized)
       prefix.concat(child_prefix)
@@ -910,6 +914,8 @@ module MIRHoistLowering
   sig { params(stmt: MIR::Node, attr: Symbol, transfer_on_success: T::Boolean).returns(T::Array[MIR::Node]) }
   def normalize_used_expr_attr!(stmt, attr, transfer_on_success: false)
     value = stmt.public_send(attr)
+    return [] unless value
+
     prefix, normalized = normalize_allocating_used_expr(value, transfer_on_success: transfer_on_success)
     setter = :"#{attr}="
     stmt.public_send(setter, normalized)
@@ -1153,7 +1159,9 @@ module MIRHoistLowering
 
   sig { params(ast_node: T.nilable(AST::Node), source: String).returns(CleanupEntry) }
   def rc_cleanup_entry(ast_node, source:)
-    ti = Type.from_node!(T.must(ast_node), context: "RC hoist cleanup")
+    raise "RC hoist cleanup: missing type info for #{source}" unless ast_node
+
+    ti = Type.from_node!(ast_node, context: "RC hoist cleanup")
     zig_t = ti.zig_type
     CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false,
                        zig_type: zig_t, rc_variant: :standard, rc_alloc: :heap)
@@ -1322,6 +1330,7 @@ module MIRHoistLowering
     else
       names = T.let([], T::Array[String])
       return [] unless node
+      return [] unless node.respond_to?(:ownership_source_exprs)
 
       node.ownership_source_exprs.each do |child|
         mir_ident_names(child).each { |name| names << name.to_s }

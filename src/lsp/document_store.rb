@@ -19,14 +19,16 @@ module LSP
   class DocumentStore
       extend T::Sig
 
+    CachedFindings = T.type_alias { T.nilable(T.any(LSP::AnalysisResult, Symbol, String)) }
+
     Document = Struct.new(:uri, :text, :version, keyword_init: true) do
       extend T::Sig
       # Cached findings + the version they reflect. Hover and
       # codeAction read these without re-analysing. Set by the Server
       # after each `analyze_and_publish` pass.
-      sig { returns(T.nilable(T.any(LSP::AnalysisResult, String))) }
-      def cached_findings;          @cached_findings = T.let(@cached_findings, T.nilable(T.any(LSP::AnalysisResult, String))); end
-      sig { params(value: T.untyped).void }
+      sig { returns(CachedFindings) }
+      def cached_findings;          @cached_findings = T.let(@cached_findings, CachedFindings); end
+      sig { params(value: CachedFindings).void }
       def cached_findings=(value);  @cached_findings = value; end
       sig { returns(T.nilable(Integer)) }
       def cached_version;           @cached_version = T.let(@cached_version, T.nilable(Integer)); end
@@ -36,7 +38,7 @@ module LSP
 
     sig { void }
     def initialize
-      @docs = T.let({}, T::Hash[T.untyped, T.untyped])
+      @docs = T.let({}, T::Hash[String, LSP::DocumentStore::Document])
     end
 
     # didOpen — new document arrives.
@@ -79,7 +81,7 @@ module LSP
       @docs[uri]&.version
     end
 
-    sig { params(block: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    sig { params(block: T.proc.params(doc: LSP::DocumentStore::Document).void).returns(T::Hash[String, LSP::DocumentStore::Document]) }
     def each(&block)
       @docs.each_value(&block)
     end

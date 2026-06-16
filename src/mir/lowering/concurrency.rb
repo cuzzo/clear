@@ -8,6 +8,24 @@ module MIRLoweringConcurrency
 
   requires_ancestor { MIRLowering }
 
+  BgTransformValue = T.type_alias do
+    T.nilable(T.any(
+      AST::BgBlock,
+      String,
+      Integer,
+      Symbol,
+      T::Boolean,
+      T::Hash[String, Type],
+      T::Hash[String, Schemas::ResourceClosePlan],
+      T::Set[String],
+      T::Array[MIR::ContextFieldDecl],
+      T::Array[MIR::StructInitField],
+      T::Array[String],
+      T::Array[MIR::CaptureCleanupAction],
+      T::Array[MIR::Emittable],
+    ))
+  end
+
   class NextExprPlan < T::Struct
     extend T::Sig
 
@@ -98,9 +116,9 @@ module MIRLoweringConcurrency
     const :pointer_captures, T::Set[String]
     const :rt_name, String
 
-    sig { returns(T::Hash[Symbol, T.nilable(Object)]) }
+    sig { returns(T::Hash[Symbol, BgTransformValue]) }
     def to_transform_hash
-      result = T.let({}, T::Hash[Symbol, T.nilable(Object)])
+      result = T.let({}, T::Hash[Symbol, BgTransformValue])
       result[:node] = node
       result[:blk_label] = names.blk_label
       result[:ctx_type] = names.ctx_type

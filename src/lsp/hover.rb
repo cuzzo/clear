@@ -1,7 +1,9 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "rpc"
 require_relative "position"
 require_relative "diagnostics"
+require_relative "document_store"
 require_relative "../ast/diagnostic_registry"
 require_relative "../ast/diagnostic_examples"
 
@@ -23,16 +25,18 @@ module LSP
   # the highest-value case first.
   module Hover
     extend T::Sig
-    HoverResponse = T.type_alias { T::Hash[T.untyped, T.untyped] }
+    HoverResponse = T.type_alias { RPC::OutboundMessage }
+    FindingLike = T.type_alias { T.untyped }
+    LspPosition = T.type_alias { T::Hash[T.untyped, T.untyped] }
 
 
     # Build a hover response for the document at `position`. Returns
     # nil when no diagnostic overlaps the cursor.
-    sig { params(document: T.untyped, position: T.untyped).returns(T.nilable(HoverResponse)) }
+    sig { params(document: T.nilable(DocumentStore::Document), position: LspPosition).returns(T.nilable(HoverResponse)) }
     def self.render(document, position)
       return nil unless document
       result = document.cached_findings
-      return nil unless result
+      return nil unless result.is_a?(LSP::AnalysisResult)
 
       source = document.text
       finding = find_overlapping(result, position, source)
@@ -60,7 +64,7 @@ module LSP
     # findings to position their edit) make hover effectively
     # invisible — the user would have to pinpoint the cursor on the
     # exact token to see anything.
-    sig { params(result: T.untyped, position: T.untyped, source: T.untyped).returns(T.untyped) }
+    sig { params(result: LSP::AnalysisResult, position: LspPosition, source: String).returns(T.nilable(FindingLike)) }
     def self.find_overlapping(result, position, source)
       candidates = result.findings.dup
       candidates << result.fatal_error if result.fatal?
@@ -88,7 +92,7 @@ module LSP
       same_line.min_by { |_, dist| dist }.first
     end
 
-    sig { params(diag: T.untyped, entry: T.untyped, example: T.untyped).returns(String) }
+    sig { params(diag: RPC::OutboundMessage, entry: T.untyped, example: T.untyped).returns(String) }
     def self.build_markdown(diag, entry, example)
       lines = []
       lines << header_line(diag, entry)
@@ -129,7 +133,7 @@ module LSP
       lines.join("\n")
     end
 
-    sig { params(diag: T.untyped, entry: T.untyped).returns(String) }
+    sig { params(diag: RPC::OutboundMessage, entry: T.untyped).returns(String) }
     def self.header_line(diag, entry)
       severity = severity_label(diag[:severity])
       code     = diag[:code]
@@ -149,7 +153,7 @@ module LSP
       Diagnostics::SEVERITY_HINT    => "hint",
     }.freeze, T::Hash[Integer, String])
 
-    sig { params(severity: T.untyped).returns(String) }
+    sig { params(severity: Integer).returns(String) }
     def self.severity_label(severity)
       SEVERITY_LABELS.fetch(severity, "error")
     end

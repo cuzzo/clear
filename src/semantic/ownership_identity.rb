@@ -70,12 +70,12 @@ module OwnershipIdentity
       PlaceId.from_path(path.rpartition(".").first)
     end
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def eql?(other)
-      other.is_a?(PlaceId) &&
+      !!(other.is_a?(PlaceId) &&
         path == other.path &&
         binding_name == other.binding_name &&
-        binding_id == other.binding_id
+        binding_id == other.binding_id)
     end
 
     sig { returns(Integer) }

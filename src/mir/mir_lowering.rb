@@ -1050,7 +1050,7 @@ class MIRLowering
     mir_cast(mir, node.full_type!, coerced_type) || mir
   end
 
-  sig { params(node: T.any(AST::Locatable, Object)).returns(T::Boolean) }
+  sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
   def stack_fixed_array_coercion?(node)
     return false unless node.is_a?(AST::ListLit) && node.storage == :stack
     coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type!
@@ -2333,9 +2333,9 @@ class MIRLowering
     AST.borrowed_ownership_view?(node)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T.nilable(String)) }
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def ownership_root_name(node)
-    current = T.let(node, T.nilable(T.any(AST::Node, Object)))
+    current = T.let(node, T.nilable(AST::Node))
     current = current.value if current.is_a?(AST::MoveNode) || current.is_a?(AST::CopyNode) || current.is_a?(AST::CloneNode)
     current = current.target while current.is_a?(AST::GetField) || current.is_a?(AST::GetIndex)
     return current.name.to_s if current.is_a?(AST::Identifier)
@@ -2353,28 +2353,28 @@ class MIRLowering
     )
   end
 
-  sig { params(stmt: T.nilable(T.any(AST::Locatable, Object))).returns(T::Array[String]) }
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
   def collect_bg_capture_transfer_roots(stmt)
     return [] unless stmt.is_a?(AST::Locatable)
 
     ownership_scanner.collect_bg_capture_transfer_roots(stmt)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Locatable, Object))).returns(T::Array[String]) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Array[String]) }
   def collect_explicit_move_roots(node)
     return [] unless node.is_a?(AST::Locatable)
 
     ownership_scanner.collect_explicit_move_roots(node)
   end
 
-  sig { params(stmt: T.nilable(T.any(AST::Locatable, Object))).returns(T::Boolean) }
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Boolean) }
   def bg_stream_boundary_stmt?(stmt)
     found = T.let(false, T::Boolean)
     AST.each_bg_block_in_stmt(stmt) { |bg| found = true if bg.is_a?(AST::BgStreamBlock) }
     found
   end
 
-  sig { params(stmt: T.nilable(T.any(AST::Locatable, Object))).returns(T::Array[String]) }
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
   def collect_stdlib_consumed_roots(stmt)
     names = T.let([], T::Array[String])
     walk_ast_calls(stmt) do |call|
@@ -2383,14 +2383,14 @@ class MIRLowering
     names.uniq
   end
 
-  sig { params(node: T.nilable(T.any(AST::Locatable, Object)), blk: T.proc.params(arg0: AST::Node).void).void }
+  sig { params(node: T.nilable(AST::Node), blk: T.proc.params(arg0: AST::Node).void).void }
   def walk_ast_calls(node, &blk)
     return unless node.is_a?(AST::Locatable)
     yield node if AST.call?(node)
     AST.each_child_node(node) { |child| walk_ast_calls(child, &blk) }
   end
 
-  sig { params(stmt: T.nilable(T.any(AST::Locatable, Object))).returns(T::Array[String]) }
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
   def collect_moved_arg_roots(stmt)
     return [] unless stmt.is_a?(AST::Locatable)
 
@@ -2433,7 +2433,7 @@ class MIRLowering
     type_info.ownership_bearing?(mir_schema_lookup)
   end
 
-  sig { params(arg: T.nilable(T.any(AST::Locatable, Object))).returns(T.nilable(String)) }
+  sig { params(arg: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def consumed_binding_root(arg)
     return nil if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
     node = arg.is_a?(AST::MoveNode) ? arg.value : arg
@@ -2672,7 +2672,7 @@ class MIRLowering
   end
 
 
-  sig { params(kind: Symbol, _rt_name: T.nilable(Object)).returns(Symbol) }
+  sig { params(kind: Symbol, _rt_name: T.nilable(T.any(String, Symbol, MIR::Emittable))).returns(Symbol) }
   def alloc_expr(kind, _rt_name = nil)
     MIR::Placement.alloc(kind, :frame)
   end

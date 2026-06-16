@@ -46,9 +46,9 @@ module FsmTransform
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
     # fields are added by the emitter, not the body).
-    sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, Object]).returns(Result) }
+    sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, T.untyped]).returns(Result) }
     def self.analyze(segments, ctx)
-      captured = T.cast(ctx.fetch(:captured, {}), T::Hash[String, Object])
+      captured = T.cast(ctx.fetch(:captured, {}), T::Hash[String, T.untyped])
       capture_names = T.let(captured.keys.to_set, T::Set[String])
 
       defs_by_seg = T.let({}, T::Hash[Integer, T::Hash[String, T.nilable(Type)]])
@@ -69,8 +69,9 @@ module FsmTransform
         # NextSuspend with a binding); that var is "defined" at
         # the end of this segment AND consumed by the next, so
         # it counts as cross-segment by construction.
-        if Segments.suspend_tail?(seg.tail) && seg.tail.result_var &&
-           seg.tail.kind != :io
+        if (seg.tail.is_a?(Segments::NextSuspend) ||
+            seg.tail.is_a?(Segments::IoSuspend)) &&
+           seg.tail.result_var && seg.tail.kind != :io
           # Type info comes from the call's full_type; the
           # emitter resolves it via the AST node when emitting
           # the state field decl.

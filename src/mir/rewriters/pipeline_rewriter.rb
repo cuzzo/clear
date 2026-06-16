@@ -15,10 +15,18 @@ require_relative "../../ast/std_lib"
 class PipelineRewriter
     extend T::Sig
 
+  PipelineStageList = T.type_alias { T::Array[AST::Node] }
+
+  class PipelineChain < T::Struct
+    const :source, AST::Node
+    const :stages, PipelineStageList
+    const :terminal, T.nilable(AST::Node)
+  end
+
   # OrderByOp, IndexOp, WindowOp, JoinOp: require structural MIR/runtime
   # lowering that the MIR pipeline lowerers own.
 
-  sig { params(annotator: T.untyped).void }
+  sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
     @annotator = T.let(annotator, T.nilable(SemanticAnnotator))
     @var_counter = T.let(0, Integer)
@@ -90,16 +98,16 @@ class PipelineRewriter
     node
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(AST::Node) }
   def rewrite_pipeline(node)
     source = node.left
     rhs = node.right
 
     # Collect the chain FIRST (before any recursive rewriting).
     chain = collect_chain(node)
-    stages = chain[:stages]
-    terminal = chain[:terminal]
-    real_source = chain[:source]
+    stages = chain.stages
+    terminal = chain.terminal
+    real_source = chain.source
 
     # Named binding chains (source AS $u |> UNNEST ...) must reach the MIR
     # lowering intact so lower_binding_chain can fuse them into nested loops
@@ -117,7 +125,7 @@ class PipelineRewriter
     if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.smooth?)
       # Only patch if the source actually changed; patching the same object
       # back into the chain creates a circular reference.
-      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)
       return node
     end
 
@@ -134,7 +142,7 @@ class PipelineRewriter
     has_limit = stages.any? { |s| s.is_a?(AST::LimitOp) }
     if is_range_fold_terminal && stages.all? { |s| AST.pipeline_fusible_stage?(s) }
       if real_source.is_a?(AST::RangeLit) || source_type.bounded_pipeline_stream_source?(has_limit)
-        patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+        patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)
         return node
       end
     end
@@ -146,7 +154,7 @@ class PipelineRewriter
     # BlockExpr produced by fuse_pipeline.
     if terminal.is_a?(AST::DistinctOp) &&
        stages.all? { |s| AST.pipeline_fusible_stage?(s) }
-      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)
       return node
     end
 
@@ -156,7 +164,7 @@ class PipelineRewriter
                       source_type.bounded_pipeline_stream_source?(has_limit) &&
                       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
     if is_stream_index
-      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)
       return node
     end
 
@@ -252,15 +260,15 @@ class PipelineRewriter
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
     return false unless node.is_a?(AST::BinaryOp) && node.smooth?
     # Walk the source chain to find if its root is a BIND_VAR.
-    inner_src = collect_chain(node)[:source]
+    inner_src = collect_chain(node).source
     inner_src.is_a?(AST::BinaryOp) && inner_src.op == :BIND_VAR
   end
 
-  sig { params(node: AST::BinaryOp).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(node: AST::BinaryOp).returns(PipelineChain) }
   def collect_chain(node)
-    stages = []
+    stages = T.let([], PipelineStageList)
     cursor = T.let(node, AST::BinaryOp)
-    terminal = nil
+    terminal = T.let(nil, T.nilable(AST::Node))
 
     # Identify the terminal operation.
     right = node.right
@@ -284,10 +292,10 @@ class PipelineRewriter
       end
     end
 
-    { source: cursor, stages: stages, terminal: terminal }
+    PipelineChain.new(source: cursor, stages: stages, terminal: terminal)
   end
 
-  sig { params(smooth_node: AST::BinaryOp, source: T.untyped, stages: T::Array[T.untyped], terminal: T.untyped).returns(T.untyped) }
+  sig { params(smooth_node: AST::BinaryOp, source: AST::Node, stages: PipelineStageList, terminal: T.nilable(AST::Node)).returns(AST::Node) }
   def fuse_pipeline(smooth_node, source, stages, terminal)
     # Generate unique variable names for this pipeline
     res_var = next_var("__res")
@@ -389,7 +397,7 @@ class PipelineRewriter
     block
   end
 
-  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(T::Array[T.untyped]) }
+  sig { params(terminal: T.nilable(AST::Node), res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::RawBody) }
   def build_init(terminal, res_var, token, smooth_node)
     case terminal
     when AST::SumOp, AST::CountOp
@@ -485,7 +493,7 @@ class PipelineRewriter
     end
   end
 
-  sig { params(stages: T::Array[T.untyped], terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, stage_inits: T::Array[T.untyped], res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
+  sig { params(stages: PipelineStageList, terminal: T.nilable(AST::Node), current_val: AST::Identifier, res_var: String, token: Lexer::Token, stage_inits: AST::RawBody, res_type: T.nilable(Type)).returns(AST::RawBody) }
   def build_recursive_body(stages, terminal, current_val, res_var, token, stage_inits = [], res_type = nil)
     if stages.empty?
       return build_terminal_action(terminal, current_val, res_var, token, res_type)
@@ -583,7 +591,7 @@ class PipelineRewriter
     end
   end
 
-  sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
+  sig { params(terminal: T.nilable(AST::Node), current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(AST::RawBody) }
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
     AST.stamp_synthetic_type!(res_ident, res_type, context: "synthetic AST type") if res_type
@@ -717,7 +725,7 @@ class PipelineRewriter
     call
   end
 
-  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::Identifier) }
+  sig { params(terminal: T.nilable(AST::Node), res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::Identifier) }
   def build_final_result(terminal, res_var, token, smooth_node)
     res = AST::Identifier.new(token, res_var)
     AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
@@ -752,48 +760,46 @@ class PipelineRewriter
 
   # Walk the left-spine of SMOOTH nodes and replace the deepest source.
   # Used when the rewriter skips a pipeline but has already rewritten the source.
-  sig { params(node: T.untyped, new_source: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp, new_source: AST::Node).returns(AST::Node) }
   def patch_chain_source!(node, new_source)
-    cursor = node
+    cursor = T.let(node, AST::BinaryOp)
     while cursor.left.is_a?(AST::BinaryOp) && cursor.left.smooth?
-      cursor = cursor.left
+      cursor = T.cast(cursor.left, AST::BinaryOp)
     end
     cursor.left = new_source
   end
 
-  sig { params(node: T.untyped, name: String, replacement: AST::Identifier).returns(T.untyped) }
+  sig { params(node: AST::Node, name: String, replacement: AST::Identifier).returns(AST::Node) }
   def replace_named_placeholder(node, name, replacement)
-    return node unless node
     if node.is_a?(AST::Identifier) && node.name == name
       return replacement.dup
     end
     new_node = node.dup
     node.class.members.each do |member|
-      val = node[member]
+      val = T.unsafe(node)[member]
       if val.is_a?(Array)
-        new_node[member] = val.map { |i| replace_named_placeholder(i, name, replacement) }
+        T.unsafe(new_node)[member] = val.map { |i| i.is_a?(AST::Locatable) ? replace_named_placeholder(i, name, replacement) : i }
       elsif val.is_a?(AST::Locatable)
-        new_node[member] = replace_named_placeholder(val, name, replacement)
+        T.unsafe(new_node)[member] = replace_named_placeholder(val, name, replacement)
       end
     end
     new_node
   end
 
-  sig { params(node: T.untyped, replacement: AST::Identifier).returns(T.untyped) }
+  sig { params(node: AST::Node, replacement: AST::Identifier).returns(AST::Node) }
   def replace_placeholder(node, replacement)
-    return node unless node
     if node.is_a?(AST::Placeholder) || (node.is_a?(AST::Identifier) && node.name == "_")
       return replacement.dup
     end
     new_node = node.dup
     node.class.members.each do |member|
-      val = node[member]
+      val = T.unsafe(node)[member]
       if val.is_a?(Array)
-        new_node[member] = val.map { |i| replace_placeholder(i, replacement) }
+        T.unsafe(new_node)[member] = val.map { |i| i.is_a?(AST::Locatable) ? replace_placeholder(i, replacement) : i }
       elsif val.is_a?(Hash)
-        new_node[member] = val.transform_values { |v| replace_placeholder(v, replacement) }
+        T.unsafe(new_node)[member] = val.transform_values { |v| v.is_a?(AST::Locatable) ? replace_placeholder(v, replacement) : v }
       elsif val.is_a?(AST::Locatable)
-        new_node[member] = replace_placeholder(val, replacement)
+        T.unsafe(new_node)[member] = replace_placeholder(val, replacement)
       end
     end
     new_node

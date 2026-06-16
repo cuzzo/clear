@@ -55,7 +55,7 @@ RSpec.describe Type, "zig_type gap coverage" do
     type.link_source = :shared
     type.is_observable = true
     type.observable_terminal = :sum
-    token = Object.new
+    token = Lexer::Token.new(:IDENT, "running", 1, 1)
     type.observable_token = token
     type.polymorphic_shared = true
 

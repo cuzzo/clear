@@ -33,10 +33,15 @@
 #                          segment for next state
 
 require_relative "../../ast/type"
+require_relative "../../semantic/capability_plan"
 
 module FsmTransform
   module Segments
     extend T::Sig
+    SegmentBodyInput = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+    LockWithNode = T.type_alias { T.untyped }
+    LockCap = T.type_alias { T.any(CapabilityPlan::CapabilityTransition, Symbol) }
+
     Done         = Struct.new(:_) do
       extend T::Sig
       sig { returns(Symbol) }
@@ -50,7 +55,7 @@ module FsmTransform
       sig { returns(T::Boolean) }
       def suspend?; true; end
 
-      sig { params(index: T.untyped).returns(IoSuspend) }
+      sig { params(index: T.nilable(Integer)).returns(IoSuspend) }
       def with_next_index(index)
         IoSuspend.new(call_node, stdlib_def, result_var, index)
       end
@@ -68,7 +73,7 @@ module FsmTransform
       sig { returns(T::Boolean) }
       def suspend?; true; end
 
-      sig { params(index: T.untyped).returns(NextSuspend) }
+      sig { params(index: T.nilable(Integer)).returns(NextSuspend) }
       def with_next_index(index)
         NextSuspend.new(promise_ast, result_var, index)
       end
@@ -113,9 +118,9 @@ module FsmTransform
 
       sig do
         params(
-          with_node: T.untyped,
-          cap: T.untyped,
-          prior_caps: T::Array[T.untyped],
+          with_node: LockWithNode,
+          cap: LockCap,
+          prior_caps: T::Array[LockCap],
           post_acquire_idx: T.nilable(Integer),
           next_index: T.nilable(Integer),
           lock_index: T.nilable(Integer),
@@ -147,15 +152,17 @@ module FsmTransform
 
     # A segment is a list of AST::Stmt nodes followed by a Tail.
     Segment = Struct.new(:index, :stmts, :tail)
+    SegmentTail = T.type_alias { T.any(Done, IoSuspend, NextSuspend, LockSuspend, LoopBack, Goto, CondBranch) }
+    SuspendTail = T.type_alias { T.any(IoSuspend, NextSuspend, LockSuspend) }
 
     class SplitResult < T::Struct
       const :segments, T::Array[Segment]
     end
 
 
-    sig { params(tail: T.untyped).returns(T::Boolean) }
+    sig { params(tail: T.nilable(SegmentTail)).returns(T::Boolean) }
     def self.suspend_tail?(tail)
-      tail.respond_to?(:suspend?) && tail.suspend?
+      tail.is_a?(IoSuspend) || tail.is_a?(NextSuspend) || tail.is_a?(LockSuspend)
     end
 
     # Public entry. Returns [Segment, ...] on success, nil if the
@@ -170,7 +177,7 @@ module FsmTransform
     #
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
-    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(SplitResult)) }
+    sig { params(body: AST::RawBody, lowering: T.untyped).returns(T.nilable(SplitResult)) }
     def self.split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
@@ -185,7 +192,7 @@ module FsmTransform
       return nil if contains_unsupported_shape?(body)
 
       segments = T.let([], T::Array[Segment])
-      current_stmts = T.let([], T::Array[T.untyped])
+      current_stmts = T.let([], AST::RawBody)
 
       flush = lambda do |tail|
         segments << Segment.new(segments.length, current_stmts, tail)
@@ -215,7 +222,7 @@ module FsmTransform
     #   2  loop_pre         -- NextSuspend / IoSuspend -> 3
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
-    sig { params(body: T.untyped).returns(T.nilable(SplitResult)) }
+    sig { params(body: AST::RawBody).returns(T.nilable(SplitResult)) }
     def self.split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
@@ -239,7 +246,7 @@ module FsmTransform
       pre.each  { |s| return nil if contains_suspend_anywhere?([s]) }
       post.each { |s| return nil if contains_suspend_anywhere?([s]) }
 
-      loop_node = body[loop_idx]
+      loop_node = T.cast(body[loop_idx], T.any(AST::WhileLoop, AST::WhileBindLoop))
       loop_body = loop_node.do_branch.is_a?(Array) ?
                     loop_node.do_branch : [loop_node.do_branch]
 
@@ -249,7 +256,7 @@ module FsmTransform
       # accept-loop / read-loop pattern). Reject multiple suspends or
       # nested suspends.
       sus_idx = T.let(nil, T.nilable(Integer))
-      sus_tail = T.let(nil, T.untyped)
+      sus_tail = T.let(nil, T.nilable(SegmentTail))
       loop_body.each_with_index do |s, j|
         sus = classify_suspend(s)
         if suspend_tail?(sus)
@@ -270,7 +277,7 @@ module FsmTransform
       loop_pre.each  { |s| return nil if contains_suspend_anywhere?([s]) }
       loop_post.each { |s| return nil if contains_suspend_anywhere?([s]) }
 
-      cond_node = loop_node.respond_to?(:condition) ? loop_node.condition : nil
+      cond_node = loop_node.respond_to?(:condition) ? T.unsafe(loop_node).condition : nil
       return nil if cond_node.nil?
 
       segments = [
@@ -285,13 +292,13 @@ module FsmTransform
 
     # Stage 1 punt: anything outside top-level linear stmts +
     # top-level suspends is not yet handled.
-    sig { params(body: T.untyped).returns(T::Boolean) }
+    sig { params(body: AST::RawBody).returns(T::Boolean) }
     def self.contains_unsupported_shape?(body)
       T.bind(self, T.untyped) rescue nil
       body.any? { |stmt| stmt_unsupported?(stmt) }
     end
 
-    sig { params(stmt: T.untyped).returns(T::Boolean) }
+    sig { params(stmt: AST::Node).returns(T::Boolean) }
     def self.stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
@@ -318,7 +325,7 @@ module FsmTransform
     # Recursive scan for any suspend anywhere in a subtree --
     # used to reject control-flow constructs that contain
     # suspends (Stage 1 punts those to the legacy emitters).
-    sig { params(stmts: T.untyped).returns(T::Boolean) }
+    sig { params(stmts: SegmentBodyInput).returns(T::Boolean) }
     def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
@@ -340,7 +347,7 @@ module FsmTransform
 
     # Identify the suspend tail (if any) that this top-level stmt
     # represents. Returns one of IoSuspend / NextSuspend / nil.
-    sig { params(stmt: T.untyped).returns(T.untyped) }
+    sig { params(stmt: AST::Node).returns(T.nilable(SegmentTail)) }
     def self.classify_suspend(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
@@ -357,7 +364,7 @@ module FsmTransform
     # identical FuncCall/MethodCall|NextExpr case 3x (top-level, VarDecl/
     # BindExpr value, Assignment value -- decomplex degenerate-union /
     # Missing-Abstraction). result_var is the binding name (nil if none).
-    sig { params(v: T.untyped, name: T.untyped).returns(T.untyped) }
+    sig { params(v: T.nilable(AST::Node), name: T.nilable(String)).returns(T.nilable(SegmentTail)) }
     def self.suspend_for(v, name)
       T.bind(self, T.untyped) rescue nil
       case v
@@ -371,14 +378,14 @@ module FsmTransform
     # An IO suspend is a stdlib call with both :suspends and
     # :fsm_setup metadata -- the FSM template tells us how to set
     # up the suspend.
-    sig { params(call_node: T.untyped).returns(T::Boolean) }
+    sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall)).returns(T::Boolean) }
     def self.io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
       !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
     end
 
-    sig { params(expr: T.untyped).returns(T::Boolean) }
+    sig { params(expr: AST::Node).returns(T::Boolean) }
     def self.suspending_call?(expr)
       T.bind(self, T.untyped) rescue nil
       (AST.call?(expr)) &&
@@ -402,7 +409,7 @@ module FsmTransform
     #     (suspending pipeline as the value of a bind)
     #   - Multi-stage chains where the suspend isn't at the LHS-most
     #     position
-    sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(body: AST::RawBody).returns(AST::RawBody) }
     def self.rewrite_pipeline_io(body)
       T.bind(self, T.untyped) rescue nil
       return body unless body.is_a?(Array)

@@ -45,12 +45,34 @@ class ClearParser
   include ErrorHelper
   include FixableHelper
 
-  @@stmt_rules = T.let({}, T::Hash[T.untyped, T.untyped])
-  @@primary_rules = T.let({}, T::Hash[T.untyped, T.untyped])
-  @@suffix_rules = T.let({}, T::Hash[T.untyped, T.untyped])
+  RuleKey = T.type_alias { [Symbol, T.nilable(String)] }
+  StmtRule = T.type_alias { T.proc.returns(T.nilable(AST::Node)) }
+  PrimaryRule = T.type_alias { T.proc.returns(T.nilable(AST::Node)) }
+  SuffixResult = T.type_alias { T.any(AST::Node, Symbol) }
+  SuffixRule = T.type_alias { T.proc.params(lhs: AST::Node).returns(SuffixResult) }
+  PatternItem = T.type_alias { T.any(String, Symbol, T::Hash[T.any(String, Symbol), Symbol]) }
+  Pattern = T.type_alias { T::Array[PatternItem] }
+  PatternCapture = T.type_alias { T.untyped }
+  ParserSeq = T.type_alias { [Lexer::Token, T::Array[T.untyped]] }
+  EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(T::Hash[Symbol, T.untyped])] }
+  ElementCapability = T.type_alias { T::Hash[Symbol, T.nilable(Symbol)] }
+  WithMatchArm = T.type_alias { T::Hash[Symbol, T.untyped] }
+  CapJoin = T.type_alias { [T.nilable(Symbol), T.nilable(Symbol), T.nilable(Symbol), T.nilable(Integer)] }
+  SigilAttrs = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
+  SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
+  CapDims = T.type_alias { T::Hash[Symbol, T.nilable(T.any(Symbol, Integer))] }
+  WindowPipelineOp = T.type_alias { T.any(AST::WindowOp, AST::BatchWindowOp) }
+  ConcurrentPipelineOp = T.type_alias do
+    T.any(AST::SelectOp, AST::WhereOp, AST::EachOp, AST::SumOp, AST::CountOp,
+          AST::MinOp, AST::MaxOp, AST::AverageOp)
+  end
+
+  @@stmt_rules = T.let({}, T::Hash[RuleKey, StmtRule])
+  @@primary_rules = T.let({}, T::Hash[RuleKey, PrimaryRule])
+  @@suffix_rules = T.let({}, T::Hash[RuleKey, SuffixRule])
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
 
-  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
+  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: Pattern, inject: T::Array[TrueClass], block: T.nilable(StmtRule)).returns(StmtRule) }
   def self.stmt(type, value, node_class = nil, pattern = [], inject: [], &block)
     unless pattern.empty?
       # If pattern provided, create a block that runs the engine
@@ -62,11 +84,11 @@ class ClearParser
         T.unsafe(node_class).new(start_token, *args)
       end
     else
-      @@stmt_rules[[type, value]] = block
+      @@stmt_rules[[type, value]] = T.must(block)
     end
   end
 
-  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], block: T.untyped).returns(Proc) }
+  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: Pattern, block: T.nilable(PrimaryRule)).returns(PrimaryRule) }
   def self.primary(type, value=nil, node_class = nil, pattern = [],  &block)
     unless pattern.empty?
       # If pattern provided, create a block that runs the engine
@@ -77,11 +99,11 @@ class ClearParser
         T.unsafe(node_class).new(start_token, *args)
       end
     else
-      @@primary_rules[[type, value]] = block
+      @@primary_rules[[type, value]] = T.must(block)
     end
   end
 
-  sig { params(type: Symbol, value: String, block: T.untyped).returns(Proc) }
+  sig { params(type: Symbol, value: String, block: SuffixRule).returns(SuffixRule) }
   def self.suffix(type, value, &block)
     @@suffix_rules[[type, value]] = block
   end
@@ -391,12 +413,12 @@ class ClearParser
     '@atomic'         => { dim: :sync,      val: :atomic      },
     '@indirect'       => { dim: :layout,    val: :indirect    },
     '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, SigilTable)
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -405,7 +427,7 @@ class ClearParser
   suffix(:VAR_ID, '@shared') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -414,7 +436,7 @@ class ClearParser
   suffix(:VAR_ID, '@locked') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -423,7 +445,7 @@ class ClearParser
   suffix(:VAR_ID, '@writeLocked') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -432,35 +454,35 @@ class ClearParser
   suffix(:VAR_ID, '@local') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@versioned') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@atomic') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@indirect') do |lhs|
     T.bind(self, ClearParser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), T.must(CAP_SIGIL_ATTRS[T.must(token).value]))
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
@@ -478,7 +500,8 @@ class ClearParser
         v = parse_expression
         [k, v]
       end
-      AST::UnionVariantLit.new(tok, lhs.target.name, lhs.field, field_pairs.to_h, :stack)
+      target = T.cast(lhs, AST::GetField)
+      AST::UnionVariantLit.new(tok, target.target.name, target.field, field_pairs.to_h, :stack)
     else
       SUFFIX_DECLINE
     end
@@ -492,7 +515,7 @@ class ClearParser
   end
 
   ## START PATTERN DSL
-  sig { params(pattern: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(pattern: Pattern).returns(T::Array[PatternCapture]) }
   def process_pattern(pattern)
     captures = []
 
@@ -502,7 +525,9 @@ class ClearParser
         consume_literal(item)
 
       when Hash
-        trigger, action = item.first
+        pair = T.must(item.first)
+        trigger = T.cast(pair[0], String)
+        action = pair[1]
 
         if match_literal!(trigger)
           captures << run_action(action)
@@ -518,7 +543,7 @@ class ClearParser
     captures
   end
 
-  sig { params(item: Symbol).returns(T.untyped) }
+  sig { params(item: Symbol).returns(PatternCapture) }
   def run_action(item)
     # Convention: :UPPER_CASE is a Token Type to eat
     return T.must(consume(item)).value if item == item.upcase
@@ -541,7 +566,7 @@ class ClearParser
     end
   end
 
-  sig { params(val: String).returns(T.untyped) }
+  sig { params(val: String).returns(T.any(Lexer::Token, FalseClass)) }
   def match_literal!(val)
     type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
     match!(type, val)
@@ -610,7 +635,7 @@ class ClearParser
   #     an inline body on the same line as the condition).
   SYNTAX_TOKENS_AT_STATEMENT_END = %w[; THEN DO ->].freeze
 
-  sig { params(token: Lexer::Token, expected_type: Symbol, expected_value: T.nilable(String)).returns(T.untyped) }
+  sig { params(token: Lexer::Token, expected_type: Symbol, expected_value: T.nilable(String)).returns(T.noreturn) }
   def emit_consume_error_with_fix(token, expected_type, expected_value)
     prev_tok = @pos > 0 ? @tokens[@pos - 1] : nil
 
@@ -629,7 +654,7 @@ class ClearParser
   # Insert `<expected>` at the end of the previous source line (right
   # after its last non-whitespace character, so canonical formatting is
   # preserved). Works uniformly for `;`, `THEN`, `DO`, `->`.
-  sig { params(prev_tok: Lexer::Token, next_tok: Lexer::Token, expected_value: String).returns(T.untyped) }
+  sig { params(prev_tok: Lexer::Token, next_tok: Lexer::Token, expected_value: String).returns(T.noreturn) }
   def emit_syntax_insert_end_of_line!(prev_tok, next_tok, expected_value)
     line_text  = @source_code.lines[prev_tok.line - 1] || ''
     insert_col = line_text.rstrip.length + 1
@@ -657,7 +682,7 @@ class ClearParser
   # Insert `<expected>` just before the unexpected token (same-line
   # missing-keyword shape, e.g., `IF x RETURN 1` needs `THEN` before
   # `RETURN`).
-  sig { params(token: Lexer::Token, expected_value: String).returns(T.untyped) }
+  sig { params(token: Lexer::Token, expected_value: String).returns(T.noreturn) }
   def emit_syntax_insert_before_token!(token, expected_value)
     fix = Fix.new(
       description: fix_description(:INSERT_EXPECTED_BEFORE_TOKEN, expected: expected_value, got: token.value, line: token.line),
@@ -724,7 +749,7 @@ class ClearParser
     end
 
     rule = @@stmt_rules[[current.type, current.value]]
-    return instance_exec(&rule) if rule
+    return T.must(instance_exec(&rule)) if rule
     expr = parse_expression
     consume(:CHAR, ';')
     expr
@@ -797,7 +822,7 @@ class ClearParser
     end
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::Node) }
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
     if match?(:KEYWORD, 'FOR')
@@ -1016,7 +1041,7 @@ class ClearParser
 
   # EXTERN FN name(params) RETURNS type FROM "module_name";
   # EXTERN STRUCT Name { fields } FROM "module_name";
-  sig { returns(T.untyped) }
+  sig { returns(T.any(AST::ExternFnDecl, AST::ExternStructDecl)) }
   def parse_extern_decl
     tok = consume(:KEYWORD, 'EXTERN')
     if match?(:KEYWORD, 'FN')
@@ -1644,7 +1669,7 @@ class ClearParser
 
   # REENTRANT, THUNK, and TAIL_CALL parse as TYPE_IDs matched by value because
   # the only context they appear in is right after EFFECTS.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(EffectsDecl) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
@@ -1937,7 +1962,7 @@ class ClearParser
 
   # Sentinel returned by a suffix rule to signal "this suffix does not apply
   # to the current lhs — stop processing without consuming any tokens."
-  SUFFIX_DECLINE = T.let(Object.new.freeze, Object)
+  SUFFIX_DECLINE = T.let(:__clear_parser_suffix_decline__, Symbol)
 
   sig { params(lhs: AST::Node).returns(AST::Node) }
   def parse_suffixes(lhs)
@@ -2074,7 +2099,7 @@ class ClearParser
   end
 
   # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
-  sig { params(node: T.untyped, if_token: Lexer::Token).void }
+  sig { params(node: AST::Node, if_token: Lexer::Token).void }
   def validate_no_bare_bind!(node, if_token)
     return unless node.is_a?(AST::BinaryOp)
     if node.op == :BIND_VAR && !node.paren_bind
@@ -2121,7 +2146,7 @@ class ClearParser
     consume(:KEYWORD, 'START')
 
     cases = []
-    default_case = T.let(nil, T.untyped)
+    default_case = T.let(nil, T.nilable(AST::RawBody))
 
     until match?(:KEYWORD, 'END') || match?(:EOF)
       if match?(:KEYWORD, 'DEFAULT')
@@ -2220,7 +2245,7 @@ class ClearParser
     consume(:KEYWORD, 'START')
 
     cases = []
-    default_case = T.let(nil, T.untyped)
+    default_case = T.let(nil, T.nilable(AST::RawBody))
 
     until match?(:KEYWORD, 'END') || match?(:EOF)
       if match?(:KEYWORD, 'DEFAULT')
@@ -2474,7 +2499,7 @@ class ClearParser
   def parse_primary
     rule = @@primary_rules[[current.type, current.value]]
     rule ||= @@primary_rules[[current.type, nil]]
-    return instance_exec(&rule) if rule
+    return T.must(instance_exec(&rule)) if rule
     return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
     lit = parse_lit(:stack)
     return parse_suffixes(lit) if !lit.nil?
@@ -2584,7 +2609,7 @@ class ClearParser
     return nil
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::Node)) }
   def parse_sigil_construct
     percent_token = consume(:PERCENT)
     # % is now a no-op for storage: escape analysis and declared types determine heap vs stack.
@@ -2635,7 +2660,7 @@ class ClearParser
   # e.g., prices |> WINDOW(3) SUM(_) / 3.0
   # e.g., stream |> WINDOW(size: 100) SELECT process(_)
   # e.g., stream |> WINDOW(size: 100, time: '500ms') EACH { ... }
-  sig { returns(T.untyped) }
+  sig { returns(WindowPipelineOp) }
   def parse_window_op
     window_token = consume(:KEYWORD, 'WINDOW')
     consume(:CHAR, '(')
@@ -2931,7 +2956,7 @@ class ClearParser
     AST::ConcurrentOp.new(token, inner_op, options)
   end
 
-  sig { params(parent_token: Lexer::Token).returns(T.untyped) }
+  sig { params(parent_token: Lexer::Token).returns(ConcurrentPipelineOp) }
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
       consume(:KEYWORD, 'SELECT')
@@ -3078,7 +3103,7 @@ class ClearParser
     end
   end
 
-  sig { returns(T::Hash[Symbol, T.untyped]) }
+  sig { returns(ElementCapability) }
   def parse_element_capability
     result = { ownership: nil, sync: nil }
     return result unless match?(:VAR_ID) && ELEMENT_CAPABILITY_TOKENS.include?(current.value)
@@ -3102,7 +3127,7 @@ class ClearParser
     token_var?(sync_tok) && ELEMENT_SYNC_TOKENS.include?(T.must(sync_tok).value) && token_char?(peek_at(3), '[')
   end
 
-  sig { params(result: T::Hash[Symbol, T.untyped], value: String).void }
+  sig { params(result: ElementCapability, value: String).void }
   def apply_element_capability!(result, value)
     case value
     when "@shared"
@@ -3441,7 +3466,7 @@ class ClearParser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[WithMatchArm]) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3584,7 +3609,7 @@ class ClearParser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
-  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T::Array[T.untyped]) }
+  sig { params(tok: Lexer::Token, first_attrs: SigilAttrs).returns(CapJoin) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3610,6 +3635,7 @@ class ClearParser
           category: :capability, cascade: true
         )
       end
+      attrs = T.must(attrs)
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(T.must(next_tok), attrs, dims)
       parse_lock_rank_arg!(T.must(next_tok), attrs, dims)
@@ -3620,22 +3646,33 @@ class ClearParser
       error!(current, :MIXED_AT_CAPABILITIES)
     end
 
-    [dims[:ownership], dims[:sync], dims[:layout], dims[:lock_rank]]
+    ownership = dims[:ownership]
+    sync = dims[:sync]
+    layout = dims[:layout]
+    lock_rank = dims[:lock_rank]
+    [
+      ownership.is_a?(Symbol) ? ownership : nil,
+      sync.is_a?(Symbol) ? sync : nil,
+      layout.is_a?(Symbol) ? layout : nil,
+      lock_rank.is_a?(Integer) ? lock_rank : nil
+    ]
   end
 
-  sig { params(tok: Lexer::Token, attrs: T::Hash[Symbol, Symbol], dims: T::Hash[Symbol, T.nilable(Symbol)]).returns(T.nilable(Symbol)) }
+  sig { params(tok: Lexer::Token, attrs: SigilAttrs, dims: CapDims).returns(T.nilable(Symbol)) }
   def apply_cap_dim!(tok, attrs, dims)
     dim = attrs[:dim]
-    if dims[T.must(dim)]
-      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[T.must(dim)], attempted: attrs[:val])
+    val = attrs[:val]
+    return nil unless dim.is_a?(Symbol) && val.is_a?(Symbol)
+    if dims[dim]
+      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[dim], attempted: val)
     end
-    dims[T.must(dim)] = attrs[:val]
+    dims[dim] = val
   end
 
   # Parse an optional `(rank: N)` argument after @locked / @writeLocked.
   # The N is an integer; sign and magnitude are free. Duplicate rank on
   # the same capability chain is an error.
-  sig { params(sigil_tok: Lexer::Token, attrs: T::Hash[Symbol, Symbol], dims: T::Hash[Symbol, T.nilable(Symbol)]).returns(T.nilable(Integer)) }
+  sig { params(sigil_tok: Lexer::Token, attrs: SigilAttrs, dims: CapDims).returns(T.nilable(Integer)) }
   def parse_lock_rank_arg!(sigil_tok, attrs, dims)
     return unless attrs[:dim] == :sync
     return unless attrs[:val] == :locked || attrs[:val] == :write_locked
@@ -3670,7 +3707,7 @@ class ClearParser
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
     '@canSmash' => { can_smash: true       },
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, SigilTable)
 
   # Sigils valid at the start of a BG body (stack size + pinned).
   BG_SIGILS = T.let({
@@ -3684,7 +3721,7 @@ class ClearParser
     '@parallel' => { parallel: true        },
     '@arena'    => { pinned: true, arena: true },
     '@canSmash' => { can_smash: true       },
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, SigilTable)
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
   # Returns a typed prefix record consumed when the branch body is parsed.
@@ -3695,7 +3732,7 @@ class ClearParser
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
     can_smash  = T.let(false, T::Boolean)
-    stack_size = T.let(nil, T.untyped)
+    stack_size = T.let(nil, T.nilable(Symbol))
 
     # Enter the loop on a known sigil OR on a `@<typo>` token that the
     # user clearly intended as a sigil (so the typo path can fire).
@@ -3717,10 +3754,12 @@ class ClearParser
           category: :type, cascade: true
         )
       end
+      attrs = T.must(attrs)
 
-      if attrs[:stack_size]
+      stack_size_attr = attrs[:stack_size]
+      if stack_size_attr.is_a?(Symbol)
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "branch") if stack_size
-        stack_size = attrs[:stack_size]
+        stack_size = stack_size_attr
       end
       pinned    = true if attrs[:pinned]
       parallel  = true if attrs[:parallel]
@@ -3773,9 +3812,9 @@ class ClearParser
     parallel   = T.let(false, T::Boolean)
     arena      = T.let(false, T::Boolean)
     can_smash  = T.let(false, T::Boolean)
-    stack_size = T.let(nil, T.untyped)
-    stack_size_token = T.let(nil, T.untyped)
-    can_smash_token  = T.let(nil, T.untyped)
+    stack_size = T.let(nil, T.nilable(Symbol))
+    stack_size_token = T.let(nil, T.nilable(Lexer::Token))
+    can_smash_token  = T.let(nil, T.nilable(Lexer::Token))
 
     # Enter the loop on a known sigil OR on `@<typo>` that the user
     # clearly intended as a BG sigil (so the typo path can fire).
@@ -3797,10 +3836,12 @@ class ClearParser
           category: :type, cascade: true
         )
       end
+      attrs = T.must(attrs)
 
-      if attrs[:stack_size]
+      stack_size_attr = attrs[:stack_size]
+      if stack_size_attr.is_a?(Symbol)
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "BG") if stack_size
-        stack_size = attrs[:stack_size]
+        stack_size = stack_size_attr
         stack_size_token = tok
       end
       pinned    = true if attrs[:pinned]
@@ -3868,7 +3909,7 @@ class ClearParser
 
     # Keyword statements (IF, WHILE, RETURN, etc.) — cannot start THEN chains
     rule = @@stmt_rules[[current.type, current.value]]
-    return instance_exec(&rule) if rule
+    return T.must(instance_exec(&rule)) if rule
 
     expr = parse_expression
 
@@ -3925,9 +3966,9 @@ class ClearParser
     AST::NextExpr.new(tok, expr)
   end
 
-  sig { params(type: Symbol, open: T.nilable(String), close: T.nilable(String), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig { params(type: Symbol, open: String, close: String, blk: T.proc.returns(T.untyped)).returns(ParserSeq) }
   def parse_comma_seq(type, open, close, &blk)
-    start_token = consume(type, open)
+    start_token = T.must(consume(type, open))
     items = []
     until match?(:CHAR, close)
       items << blk.call
@@ -3964,7 +4005,7 @@ class ClearParser
   # Deep-clone an AST node for compound assignment desugaring.
   # The target appears on both sides (LHS = target, RHS = target op expr),
   # so each side needs its own node to avoid double-visit issues.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def deep_clone_node(node)
     case node
     when AST::Identifier
@@ -4047,7 +4088,7 @@ class ClearParser
   # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
   # statement array. The kind sequence (BEFORE/AFTER + EACH/ALL) is
   # already validated by test_hook_match? at the call site.
-  sig { params(first: String, second: String).returns(T::Array[T.untyped]) }
+  sig { params(first: String, second: String).returns(AST::RawBody) }
   def parse_test_hook(first, second)
     consume(:KEYWORD, first)
     consume(:KEYWORD, second)

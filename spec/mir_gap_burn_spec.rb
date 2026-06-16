@@ -2137,9 +2137,9 @@ RSpec.describe "MIR gap-burn characterization" do
     borrow_left = id("borrowed_left", storage: :heap)
     borrow_left.container_borrow = true
     expect(MIRHoistFacts.container_borrow_expr?(AST::BinaryOp.new(tok, borrow_left, :OR, lit("fallback")))).to eq(true)
-    expect(low.send(:mir_allocates?, Object.new)).to eq(false)
+    expect(low.send(:mir_allocates?, nil)).to eq(false)
     expect(low.send(:hoist_alloc, MIR::Ident.new("plain"), nil)).to be_a(MIR::Ident)
-    passthrough = Object.new
+    passthrough = MIR::Lit.new("0")
     expect(low.send(:hoist_alloc, passthrough, nil)).to be(passthrough)
 
     pipeline_ast = lit("pipeline", type: :String)
@@ -2154,7 +2154,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     owned_stmt = MIR::ExprStmt.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false)
     expect(low.send(:normalize_allocating_mir_stmt!, owned_stmt)).not_to be_empty
-    expect(low.send(:normalize_stmt_child_exprs!, Object.new)).to eq([])
+    expect(low.send(:normalize_stmt_child_exprs!, MIR::Noop.new(nil))).to eq([])
     expect(low.send(:normalize_stmt_child_exprs!, MIR::ExprStmt.new(MIR::Ident.new("plain"), false))).to eq([])
 
     old_child = MIR::Ident.new("old")
@@ -2187,7 +2187,7 @@ RSpec.describe "MIR gap-burn characterization" do
     untyped_call = MIR::Call.new("make", [], false, true)
     expect { low.send(:cleanup_entry_for_ownership_effect, untyped_call, alloc: :heap) }.to raise_error(/no typed cleanup result/)
 
-    expect(low.send(:mir_ident_names, Object.new)).to eq([])
+    expect(low.send(:mir_ident_names, nil)).to eq([])
     expect(low.send(:mir_ident_names, MIR::ArrayInit.new("i64", nil, [MIR::Ident.new("a"), MIR::Ident.new("b")]))).to eq(["a", "b"])
   end
 

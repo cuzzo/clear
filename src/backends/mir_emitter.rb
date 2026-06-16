@@ -277,7 +277,7 @@ class MIREmitter
     text.include?(plan.bg_rt) ? "" : "_ = &#{plan.bg_rt};"
   end
 
-  sig { params(plan: Object).returns(T::Boolean) }
+  sig { params(plan: T.untyped).returns(T::Boolean) }
   def fsm_bg_body_plan?(plan)
     plan.is_a?(MIR::FsmIoBody) || plan.is_a?(MIR::FsmB1Body) || plan.is_a?(MIR::FsmGenericBody)
   end

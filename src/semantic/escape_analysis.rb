@@ -28,10 +28,10 @@ module EscapeAnalysis
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
   AssignmentTarget = T.type_alias { T.any(String, Symbol, AST::Node) }
-  NodeClass = T.type_alias { T::Class[T.anything] }
+  NodeClass = T.type_alias { T::Module[T.anything] }
   NodeValue = T.type_alias { T.nilable(AST::Node) }
   NodeStack = T.type_alias { T::Array[NodeValue] }
-  DynamicValue = T.type_alias { T.nilable(T.any(Object, AST::Locatable)) }
+  DynamicValue = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
 
   class EscapePlacementFact < T::Struct
     extend T::Sig
@@ -389,10 +389,12 @@ module EscapeAnalysis
 
   sig { params(node: AST::ReturnNode, context: EscapeContext).void }
   private_class_method def self.apply_return_escape_sink!(node, context)
-    return unless owning_return_needs_heap_placement?(context.fn, node.value, context.schema_lookup)
+    value = node.value
+    return unless value
+    return unless owning_return_needs_heap_placement?(context.fn, value, context.schema_lookup)
 
-    mark_expr_identifiers_heap!(node.value) unless returned_call_result?(node.value)
-    mark_heap_return!(T.must(context.facts), node.value) if context.facts
+    mark_expr_identifiers_heap!(value) unless returned_call_result?(value)
+    mark_heap_return!(T.must(context.facts), value) if context.facts
   end
 
   sig { params(node: AST::Assignment, context: EscapeContext).void }
@@ -584,7 +586,7 @@ module EscapeAnalysis
   sig { params(node: DynamicValue).returns(DynamicValue) }
   private_class_method def self.unwrap_value(node)
     current = T.let(node, DynamicValue)
-    while T.unsafe(current).is_a?(AST::Locatable) && AST.ownership_wrapper?(T.cast(current, AST::Locatable))
+    while current.is_a?(AST::Locatable) && AST.ownership_wrapper?(current)
       wrapper = T.cast(current, T.any(
         AST::MoveNode,
         AST::CopyNode,
@@ -1082,7 +1084,7 @@ module EscapeAnalysis
   private_class_method def self.returned_call_result?(expr)
     node = unwrap_value(expr)
     node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    node.is_a?(AST::Locatable) && AST.call?(node)
+    !!(node.is_a?(AST::Locatable) && AST.call?(node))
   end
 
   sig { params(facts: FunctionFacts, names: T::Set[String]).void }

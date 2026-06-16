@@ -1355,7 +1355,10 @@ class MIRChecker
                    }
     init_fact = init.respond_to?(:ownership_consumption) ? init.ownership_consumption : nil
     return true if init_fact.is_a?(MIR::OwnershipConsumptionFact) &&
-                   !init_fact.names.empty?
+                   init_fact.operands.any? { |operand|
+                     name = operand.name
+                     !name.nil? && !name.empty?
+                   }
 
     false
   end
@@ -2183,7 +2186,7 @@ class MIRChecker
       # INV-COPY-CLEANUP: primitives and Id<T> (value types that can never own
       # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
       # or visit_CopyNode missed the gate.
-      if (ti = T.must(alloc_marks.first).full_type)
+      if (ti = T.must(alloc_marks.first).type_info)
         no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared? && !ti.heap_ptr?
         if no_caps && (ti.primitive? || ti.id_handle?)
           @errors << error(:COPY_CLEANUP, name,

@@ -156,7 +156,7 @@ module DiagnosticRegistry
     },
     ILLEGAL_FIELD_LOOKUP: {
       severity: :error, category: :type,
-      template: "Type Error: Cannot determine struct type for field access '%{field}'. Object is '%{type}'.",
+      template: "Type Error: Cannot determine struct type for field access '%{field}'. Receiver is '%{type}'.",
       summary:  "Field access on a non-struct (or unresolved-type) target.",
     },
     STRUCT_FIELD_UNRESOLVABLE: {

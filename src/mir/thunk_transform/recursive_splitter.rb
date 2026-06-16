@@ -38,6 +38,11 @@ require_relative "../../ast/ast"
 module ThunkTransform
   module RecursiveSplitter
     extend T::Sig
+
+    ThunkScanLeaf = T.type_alias { T.any(AST::Node, Symbol, String, Integer, Float, T::Boolean, Type) }
+    ThunkScanNode = T.type_alias do
+      T.nilable(T.any(ThunkScanLeaf, T::Array[ThunkScanLeaf]))
+    end
     class BaseCase < T::Struct
       const :cond_ast, AST::Node
       const :value_ast, AST::Node
@@ -89,7 +94,7 @@ module ThunkTransform
     # When the shape matches but codegen isn't yet wired, the
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
-    sig { params(body: T::Array[AST::Node], fn_name: String, lowering: Object).returns(T.nilable(Plan)) }
+    sig { params(body: T::Array[AST::Node], fn_name: String, lowering: T.untyped).returns(T.nilable(Plan)) }
     def self.split(body, fn_name, lowering)
       _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
       return nil if body.empty?
@@ -135,7 +140,7 @@ module ThunkTransform
     # variant in place). Returns nil if the body has any non-tail
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
-    sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String], lowering: Object).returns(T.nilable(MutualPlan)) }
+    sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String], lowering: T.untyped).returns(T.nilable(MutualPlan)) }
     def self.split_mutual(body, fn_name, partner_names, lowering)
       _ = lowering
       return nil if body.empty?
@@ -191,7 +196,7 @@ module ThunkTransform
     end
 
     # Like contains_self_call? but for a SET of fn names.
-    sig { params(node: T.nilable(Object), names_set: T::Set[String]).returns(T::Boolean) }
+    sig { params(node: ThunkScanNode, names_set: T::Set[String]).returns(T::Boolean) }
     def self.contains_any_call?(node, names_set)
       return false if node.nil?
       case node
@@ -260,7 +265,7 @@ module ThunkTransform
 
     # Recursive subtree walk: returns true iff any AST::FuncCall
     # whose name == fn_name appears anywhere under `node`.
-    sig { params(node: T.nilable(Object), fn_name: String).returns(T::Boolean) }
+    sig { params(node: ThunkScanNode, fn_name: String).returns(T::Boolean) }
     def self.contains_self_call?(node, fn_name)
       contains_any_call?(node, Set[fn_name])
     end

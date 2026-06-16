@@ -56,7 +56,7 @@ class IntrinsicEmit < T::Struct
   prop :key_alloc,       T.nilable(Symbol),                  default: nil
   prop :shard_alloc,     T.nilable(Symbol),                  default: nil
   prop :sharded_alloc,   T.nilable(Symbol),                  default: nil
-  prop :borrows,         T.nilable(T.any(Symbol, T::Array[T.untyped])),
+  prop :borrows,         T.nilable(T.any(Symbol, T::Array[Symbol])),
        default: nil
   prop :reject_when,     T.nilable(Symbol),                  default: nil
   prop :bc_op,           T.nilable(Symbol),                  default: nil

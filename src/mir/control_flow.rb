@@ -28,6 +28,9 @@ require_relative "placement"
 require_relative "../semantic/local_binding_facts"
 require_relative "../semantic/ownership_identity"
 
+ControlFlowNodeInput = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+ControlFlowWalkBlock = T.type_alias { T.proc.params(node: AST::Node).void }
+
 module MIRControlFlowExpr
   extend T::Sig
 
@@ -59,9 +62,9 @@ class BasicBlock
   sig { params(id: Integer).void }
   def initialize(id)
     @id = id
-    @stmts = T.let([], T::Array[T.untyped])
-    @successors = T.let([], T::Array[T.untyped])
-    @predecessors = T.let([], T::Array[T.untyped])
+    @stmts = T.let([], AST::RawBody)
+    @successors = T.let([], T::Array[BasicBlock])
+    @predecessors = T.let([], T::Array[BasicBlock])
   end
 
   sig { params(block: BasicBlock).void }
@@ -70,7 +73,7 @@ class BasicBlock
     block.predecessors << self unless block.predecessors.include?(self)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::Node)) }
   def terminator
     @stmts.last
   end
@@ -84,7 +87,7 @@ class FunctionCFG
   sig { params(fn_name: String).void }
   def initialize(fn_name)
     @fn_name = fn_name
-    @blocks = T.let([], T::Array[T.untyped])
+    @blocks = T.let([], T::Array[BasicBlock])
     @block_counter = T.let(0, Integer)
     @entry = T.let(new_block, BasicBlock)
     @exit_block = T.let(new_block, BasicBlock)  # virtual exit - all returns target this
@@ -119,7 +122,7 @@ class FunctionCFG
   private
 
   sig do
-    params(stmts: T::Array[T.untyped], current_block: BasicBlock, exit_target: BasicBlock,
+    params(stmts: AST::RawBody, current_block: BasicBlock, exit_target: BasicBlock,
            cfg: FunctionCFG, break_target: T.nilable(BasicBlock),
            continue_target: T.nilable(BasicBlock)).returns(T.nilable(BasicBlock))
   end
@@ -272,7 +275,7 @@ class FunctionCFG
   # can_fail function. Used to determine whether an error edge is needed.
   # Checks node.can_fail (stamped by annotator on stdlib/static calls) and
   # can_fail_fns set (user-defined functions computed by compute_can_fail!).
-  sig { params(node: T.untyped, can_fail_fns: T::Set[String]).returns(T::Boolean) }
+  sig { params(node: AST::Node, can_fail_fns: T::Set[String]).returns(T::Boolean) }
   def self.stmt_can_fail?(node, can_fail_fns)
     return false unless node
 
@@ -504,12 +507,12 @@ class OwnershipDataflow
   def reverse_postorder_index
     visited = T.let(Set.new, T::Set[Integer])
     order = T.let([], T::Array[BasicBlock])
-    visit = T.let(nil, T.untyped)
+    visit = T.let(nil, T.nilable(Proc))
     visit = lambda do |block|
       next if visited.include?(block.id)
 
       visited << block.id
-      block.successors.each { |succ| visit.call(succ) }
+      block.successors.each { |succ| T.must(visit).call(succ) }
       order << block
     end
     visit.call(@cfg.entry)
@@ -952,7 +955,7 @@ class OwnershipDataflow
   end
 
   # Transfer function for a single statement.
-  sig { params(stmt: T.untyped, state: OwnershipState).returns(T.untyped) }
+  sig { params(stmt: AST::Node, state: OwnershipState).returns(OwnershipState) }
   def transfer_stmt(stmt, state)
     case stmt
     when AST::VarDecl
@@ -1014,6 +1017,7 @@ class OwnershipDataflow
         collect_explicit_move_places(stmt, state).each { |place| mark_moved!(state, place) }
       end
     end
+    state
   end
 
   sig { params(stmt: AST::Node).returns(T.nilable(ControlHeaderTransfer)) }
@@ -1252,7 +1256,7 @@ class OwnershipDataflow
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = node.full_type!(context: "ownership dataflow field move")
@@ -1318,7 +1322,7 @@ class UseAfterMoveChecker
   end
 
   # Convenience: build dataflow + run check in one call.
-  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Array[T.untyped]) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(T::Array[String]) }
   def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
     df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
     checker = new(fn_node, df)
@@ -1329,7 +1333,7 @@ class UseAfterMoveChecker
   private
 
   # Check all read positions in a statement for use-after-move.
-  sig { params(stmt: T.untyped, state: OwnershipDataflow::OwnershipState).returns(T.untyped) }
+  sig { params(stmt: AST::Node, state: OwnershipDataflow::OwnershipState).void }
   def check_stmt_reads(stmt, state)
     case stmt
     when AST::VarDecl, AST::BindExpr, AST::ReturnNode
@@ -1589,9 +1593,9 @@ module LoopFrameAnalysis
     found
   end
 
-  sig { params(root: T.any(AST::Locatable, Object), local_names: T::Set[String], block: T.proc.params(arg0: AST::Locatable).void).void }
+  sig { params(root: T.any(AST::Locatable, T.untyped), local_names: T::Set[String], block: T.proc.params(arg0: AST::Locatable).void).void }
   def self.each_loop_local_locatable(root, local_names = Set.new, &block)
-    stack = T.let([root], T::Array[T.any(AST::Locatable, Object)])
+    stack = T.let([root], T::Array[T.any(AST::Locatable, T.untyped)])
     seen = T.let(Set.new, T::Set[Integer])
     until stack.empty?
       node = stack.pop
@@ -1621,7 +1625,7 @@ module LoopFrameAnalysis
     nil
   end
 
-  sig { params(node: T.any(AST::Locatable, Object)).returns(T::Boolean) }
+  sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
   def self.direct_loop_expression_boundary?(node)
     AST.loop_node?(node.is_a?(Struct) ? node : nil) ||
       node.is_a?(AST::FunctionDef) ||
@@ -1653,7 +1657,7 @@ module LoopFrameAnalysis
     type_info.needs_cleanup? && type_info.cleanup_allocator == :frame
   end
 
-  sig { params(node: T.any(AST::Locatable, Object), local_names: T::Set[String]).returns(T::Boolean) }
+  sig { params(node: T.any(AST::Locatable, T.untyped), local_names: T::Set[String]).returns(T::Boolean) }
   def self.outer_mutating_receiver_call?(node, local_names)
     return false unless node.is_a?(AST::MethodCall) || node.is_a?(AST::FuncCall)
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
@@ -1688,7 +1692,7 @@ module LoopFrameAnalysis
     found
   end
 
-  sig { params(loop_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  sig { params(loop_node: AST::Node, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.loop_capture_frame_alloc?(loop_node, schema_lookup = nil)
     return false unless loop_node.is_a?(AST::WhileBindLoop)
     cond_t = loop_node.condition.full_type!(context: "loop capture condition")
@@ -1703,7 +1707,7 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
-  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).void }
+  sig { params(nodes: ControlFlowNodeInput, visited: T::Set[Integer], block: ControlFlowWalkBlock).void }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     AST.each_locatable(nodes, descend_functions: true) do |node|
       next unless visited.add?(node.object_id)
@@ -1713,19 +1717,20 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).void }
+  sig { params(body: AST::RawBody, fn_nodes: FnNodes).void }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
-      next unless node.respond_to?(:shard_context) && node.shard_context
-      ctx = T.cast(node.shard_context, AST::PipelineShardContext)
+      dynamic_node = T.unsafe(node)
+      next unless node.respond_to?(:shard_context) && dynamic_node.shard_context
+      ctx = T.cast(dynamic_node.shard_context, AST::PipelineShardContext)
 
       # key_allocates_frame: does the routing key expression allocate from frame?
       key_allocates_frame = key_allocates_frame?(ctx.key_expr, fn_nodes)
 
       # body_allocates_frame: does the EACH body contain local frame allocs?
-      each_body = node.respond_to?(:op) && node.op.respond_to?(:body) ? node.op.body : nil
+      each_body = node.respond_to?(:op) && dynamic_node.op.respond_to?(:body) ? dynamic_node.op.body : nil
       body_allocates_frame = each_body ? MIR::LocalBindingAnalysis.direct_loop_body_facts(each_body).frame_decls.any? : ctx.body_allocates_frame
-      node.shard_context = ctx.with_frame_allocations(
+      dynamic_node.shard_context = ctx.with_frame_allocations(
         key_allocates_frame: key_allocates_frame,
         body_allocates_frame: body_allocates_frame,
       )
@@ -1736,7 +1741,7 @@ module LoopFrameAnalysis
   # frame. The decision is expression-shaped, not function-name-shaped: calls,
   # interpolation, literals, and aggregate constructors all flow through the
   # same type/uses_frame facts already produced before MIR lowering.
-  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
+  sig { params(expr: AST::Node, fn_nodes: FnNodes).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     found = T.let(false, T::Boolean)
     walk_all_nodes(expr) do |node|

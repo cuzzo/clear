@@ -9,11 +9,16 @@ module FunctionAnalysis
   requires_ancestor { SemanticAnnotator }
 
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
+  RoutineBody = T.type_alias { T.any(AST::RawBody, AST::Node) }
+  CallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
+  CallArgList = T.type_alias { T::Array[AST::Locatable] }
+  DeclaredReturn = T.type_alias { T.nilable(Type::TypeInput) }
+  LifetimeSourceList = T.type_alias { T::Array[FunctionSignature::LifetimeSource] }
 
   class CallSignatureSite < T::Struct
     extend T::Sig
 
-    const :node, Object
+    const :node, CallNode
     const :name, String
     prop :args, T::Array[AST::Locatable]
 
@@ -85,7 +90,7 @@ module FunctionAnalysis
 
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
-  sig { params(node: RoutineNode, body: T.untyped, declared_return: T.untyped, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
+  sig { params(node: RoutineNode, body: RoutineBody, declared_return: DeclaredReturn, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
     verify_captures!(node)
@@ -346,7 +351,7 @@ module FunctionAnalysis
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
   # call result placement is decided later by escape analysis.
-  sig { params(node: T.untyped, args: T::Array[T.untyped]).returns(T.nilable(Symbol)) }
+  sig { params(node: CallNode, args: CallArgList).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, SemanticAnnotator) rescue nil
     func_name = node.name
@@ -365,8 +370,6 @@ module FunctionAnalysis
     func_type = scope.resolve_type(func_name)
     entry = scope.resolve_entry(func_name)
     fsig = FunctionSignature.unwrap(func_type)
-    call_node = args.equal?(node.args) ? node : Struct.new(:token, :name, :args).new(node.token, func_name, args)
-
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
 
@@ -377,10 +380,10 @@ module FunctionAnalysis
     # routes to the fn_var_call path below.
     elsif fsig && entry&.storage == :static
       signature = fsig
-      node.module_alias = signature.module_alias if node.respond_to?(:module_alias=) && signature.module_alias
+      T.unsafe(node).module_alias = signature.module_alias if node.respond_to?(:module_alias=) && signature.module_alias
       if node.respond_to?(:extern_call=) && signature.extern
-        node.extern_call = true
-        node.extern_effects = signature.extern_effects
+        T.unsafe(node).extern_call = true
+        T.unsafe(node).extern_effects = signature.extern_effects
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
         alloc_kind = signature.extern_effects&.dig(:alloc)
@@ -405,13 +408,14 @@ module FunctionAnalysis
         comptime_type_args = []
         params = signature.params
         params.each_with_index do |p, i|
-          if p.comptime && args[i].is_a?(AST::Identifier)
-            comptime_type_args << args[i].name.to_sym
-            stamp_type!(args[i], :Type) # Mark as type-value, not a variable
+          arg = args[i]
+          if p.comptime && arg.is_a?(AST::Identifier)
+            comptime_type_args << arg.name.to_sym
+            stamp_type!(arg, :Type) # Mark as type-value, not a variable
           end
         end
         if comptime_type_args.any?
-          node.generic_type_args = comptime_type_args if node.respond_to?(:generic_type_args=)
+          T.unsafe(node).generic_type_args = comptime_type_args if node.respond_to?(:generic_type_args=)
         end
       end
 
@@ -426,14 +430,14 @@ module FunctionAnalysis
         else
           subst = infer_generic_type_args!(node, signature, args, type_params)
         end
-        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
+        T.unsafe(node).generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
         substituted = substitute_type_params(signature, subst)
-        verify_function_signature!(call_node, substituted)
-        node.matched_signature = substituted if node.respond_to?(:matched_signature=)
+        verify_function_signature!(node, substituted, args)
+        T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
         stamp_type!(node, substituted.return_type)
       else
-        verify_function_signature!(call_node, signature)
-        node.matched_signature = signature if node.respond_to?(:matched_signature=)
+        verify_function_signature!(node, signature, args)
+        T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
         stamp_type!(node, Type.new(signature.return_type))
@@ -450,22 +454,22 @@ module FunctionAnalysis
         call_type = node.full_type!(context: "function call result")
         if call_type.respond_to?(:error_union?) &&
            call_type.error_union?
-          node.error_union_type = call_type if node.respond_to?(:error_union_type=)
+          T.unsafe(node).error_union_type = call_type if node.respond_to?(:error_union_type=)
           stamp_type!(node, call_type.success_type)
         end
       end
 
 
     elsif fsig
-      node.fn_var_call = true if node.respond_to?(:fn_var_call=)
+      T.unsafe(node).fn_var_call = true if node.respond_to?(:fn_var_call=)
       lookup_scope_for(func_name)&.mark_read(func_name)
       sig = fsig
       synthetic_sig = FunctionSignature.new(
         params: sig.params,
         return_type: sig.return_type
       )
-      verify_function_signature!(call_node, synthetic_sig)
-      node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
+      verify_function_signature!(node, synthetic_sig, args)
+      T.unsafe(node).matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
       stamp_type!(node, sig.return_type)
 
     elsif func_type.is_a?(Symbol)
@@ -484,7 +488,7 @@ module FunctionAnalysis
   # values in this allocator (per "one collection = one allocator").
   # Returns nil when the call has no container context (plain function call,
   # or receiver storage not yet determined).
-  sig { params(node: Object).returns(T.nilable(Symbol)) }
+  sig { params(node: CallNode).returns(T.nilable(Symbol)) }
   def receiver_container_alloc(node)
     return nil unless node.is_a?(AST::MethodCall)
     obj = node.object
@@ -496,10 +500,11 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: Object, signature: FunctionSignature).returns(NilClass) }
-  def verify_function_signature!(node, signature)
+  sig { params(node: CallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
+  def verify_function_signature!(node, signature, args = nil)
     T.bind(self, SemanticAnnotator) rescue nil
-    site = call_signature_site(node)
+    args ||= node.args
+    site = call_signature_site(node, args)
     site.assign_signature!(signature)
     plan = call_arity_plan(site, signature)
     verify_call_arity!(plan)
@@ -525,12 +530,13 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: Object).returns(CallSignatureSite) }
-  def call_signature_site(node)
+  sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
+  def call_signature_site(node, args = nil)
+    args ||= node.args
     CallSignatureSite.new(
       node: node,
-      name: T.unsafe(node).name.to_s,
-      args: T.cast(T.unsafe(node).args, T::Array[AST::Locatable]),
+      name: node.name.to_s,
+      args: args,
     )
   end
 
@@ -814,7 +820,7 @@ module FunctionAnalysis
     !!param.mutable
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def borrowed_takes_argument?(node)
     AST.borrowed_ownership_view?(node)
   end
@@ -827,7 +833,7 @@ module FunctionAnalysis
     !!(expected_accepts_any_element && actual_is_collection_like)
   end
 
-  sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
+  sig { params(arg_node: AST::Locatable, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
   def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -842,7 +848,7 @@ module FunctionAnalysis
     expected_type_obj.primitive?
   end
 
-  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
+  sig { params(arg_node: AST::Locatable, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def atomic_cell_to_atomic_param?(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -869,13 +875,13 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).void }
+  sig { params(node: CallNode, atomic_args: CallArgList).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, SemanticAnnotator) rescue nil
     unique_args = atomic_args.compact
     return if unique_args.length < 2
 
-    names = unique_args.map { |arg| arg.respond_to?(:name) ? arg.name : "<expr>" }
+    names = unique_args.map { |arg| arg.is_a?(AST::Identifier) ? arg.name : "<expr>" }
     warning!(node,
       "Call to '#{node.name}' reads multiple atomic values independently " \
       "(#{names.join(', ')}). This is not a multi-object-consistent snapshot; " \
@@ -883,7 +889,7 @@ module FunctionAnalysis
       "will require an explicit @inconsistent call-site annotation.")
   end
 
-  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
+  sig { params(arg_node: AST::Locatable, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def verify_param_lifetime!(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
@@ -949,7 +955,7 @@ module FunctionAnalysis
 
   # Mixed atomic/non-atomic returned lifetimes are ambiguous because the
   # returned value's runtime layout depends on the caller's family choice.
-  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).void }
+  sig { params(node: AST::FunctionDef, sources: LifetimeSourceList).void }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
@@ -969,7 +975,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: AST::FunctionDef, source_node: T.untyped).void }
+  sig { params(node: AST::FunctionDef, source_node: T.any(AST::Node, String, Symbol)).void }
   def verify_lifetime_source!(node, source_node)
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
@@ -1161,14 +1167,15 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: RoutineNode, found_returns: T::Array[AST::ReturnFact], declared_return: T.nilable(Type)).void }
+  sig { params(node: RoutineNode, found_returns: T::Array[AST::ReturnFact], declared_return: DeclaredReturn).void }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
+    declared_type = declared_return.nil? ? nil : Type.new(declared_return)
     if found_returns.size > 1
-      return if declared_return&.any?
+      return if declared_type&.any?
 
-      if declared_return
-        return if found_returns.all? { |r| declared_return.accepts?(Type.new(r.type)) }
+      if declared_type
+        return if found_returns.all? { |r| declared_type.accepts?(Type.new(r.type)) }
       end
 
       # Normalize: all string-like types (Byte[N], String) → String for comparison
@@ -1182,7 +1189,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(return_type: T.untyped).returns(Symbol) }
+  sig { params(return_type: Type::TypeInput).returns(Symbol) }
   def get_return_strategy(return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     type = Type.new(return_type)
@@ -1197,7 +1204,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def verify_return(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # A returned value is a borrow when it is a direct indexed/field access OR
@@ -1234,7 +1241,7 @@ module FunctionAnalysis
     actual_path = get_path_to_root(node)
     if actual_path.empty?
       error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
-      return
+      return true
     end
 
     # Multi-source semantics: returned value derives from EXACTLY one
@@ -1254,9 +1261,10 @@ module FunctionAnalysis
       error!(node, :RETURN_LIFETIME_MISMATCH,
         sources_msg: sources_msg, actual: actual_path.join('.'))
     end
+    true
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def return_is_borrow?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if node.is_a?(AST::Identifier)
@@ -1292,7 +1300,7 @@ module FunctionAnalysis
     unsigned_integer: ->(t) { t.respond_to?(:unsigned_integer?) && t.unsigned_integer? },
   }.freeze, T::Hash[Symbol, Proc])
 
-  sig { params(arg: T.untyped, kind: Symbol).returns(T::Boolean) }
+  sig { params(arg: AST::Locatable, kind: Symbol).returns(T::Boolean) }
   def reject_arg_type_matches?(arg, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     pred = REJECT_TYPE_PREDICATES[kind]
@@ -1302,7 +1310,7 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[FunctionSignature], args: T::Array[T.untyped]).returns(T.nilable(FunctionSignature)) }
+  sig { params(definitions: T::Array[FunctionSignature], args: CallArgList).returns(T.nilable(FunctionSignature)) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
     definitions.find do |config|
@@ -1317,7 +1325,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(spec: IntrinsicArgSpec, arg: T.untyped).returns(T::Boolean) }
+  sig { params(spec: IntrinsicArgSpec, arg: AST::Locatable).returns(T::Boolean) }
   def intrinsic_arg_matches?(spec, arg)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if spec.unconstrained_any?
@@ -1332,14 +1340,12 @@ module FunctionAnalysis
     true
   end
 
-  sig { params(spec: Symbol, arg: Object).returns(T::Boolean) }
+  sig { params(spec: Symbol, arg: AST::Locatable).returns(T::Boolean) }
   def any_array_intrinsic_arg?(spec, arg)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless spec == :"Any[]"
-    return false unless arg.respond_to?(:full_type!)
 
-    type = arg.send(:full_type!, context: "intrinsic Any[] argument")
-    return false unless type.is_a?(Type)
+    type = arg.full_type!(context: "intrinsic Any[] argument")
     return true if type.array?
     return false unless type.future?
 

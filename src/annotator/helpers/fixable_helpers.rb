@@ -33,6 +33,18 @@ module FixableHelper
     const :description_params, T::Hash[Symbol, DiagnosticKwValue], default: {}
   end
 
+  # Synthetic token used for fixable spans whose AST node carries a
+  # line/column but not a lexer token for the exact identifier.
+  AnchorToken = Struct.new(:line, :column) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def type; :ANCHOR; end
+    sig { returns(NilClass) }
+    def value; nil; end
+  end
+
+  TypoToken = T.type_alias { T.any(Lexer::Token, AnchorToken) }
+
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
   sig { params(reg: T.nilable(AST::VarDecl), name: String).void }
@@ -150,7 +162,7 @@ module FixableHelper
   #                 would have set); the finding is captured and THEN
   #                 the annotator raises. Pass `false` at sites where
   #                 the enclosing visitor can cleanly bail out.
-  sig { params(token: T.nilable(Object), name: String, candidates: T::Array[String], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
+  sig { params(token: T.nilable(TypoToken), name: String, candidates: T::Array[String], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -177,21 +189,6 @@ module FixableHelper
   end
 
   # Synthesize a token-like anchor at an explicit (line, col). Used by
-  # migrations whose error node doesn't carry a separate token for the
-  # offending identifier (e.g., `Shape.Circl` — the field name 'Circl'
-  # is a String in GetField, not a Token).
-  #
-  # Carries `type`/`value` stubs so `SourceError#build_message` — which
-  # reads `@token.type == :EOF` — doesn't NPE when the anchor flows
-  # through to the legacy error path in non-collector mode.
-  AnchorToken = Struct.new(:line, :column) do
-    extend T::Sig
-    sig { returns(Symbol) }
-    def type; :ANCHOR; end
-    sig { returns(NilClass) }
-    def value; nil; end
-  end
-
   sig { params(line: Integer, col: Integer).returns(FixableHelper::AnchorToken) }
   def anchor_at(line, col)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -815,7 +812,7 @@ module FixableHelper
   # annotation. :auto fix wraps the return value with `COPY ` — safe for
   # values the compiler considers copy-eligible at runtime; user can
   # decline and add a lifetime annotation instead.
-  sig { params(node: AST::ReturnNode).returns(NilClass) }
+  sig { params(node: AST::Node).returns(NilClass) }
   def emit_return_borrowed_no_copy_error!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = nil
@@ -901,13 +898,12 @@ module FixableHelper
   # the var's own name with `_v` appended (matches the convention used
   # by emit_cap_field_needs_with!). Falls back to plain `error!`
   # when no var token is locatable.
-  sig { params(node: AST::WithBlock, missing_caps: T::Enumerable[Object]).returns(NilClass) }
+  sig { params(node: AST::WithBlock, missing_caps: T::Enumerable[CapabilityPlan::CapabilityTransition]).returns(NilClass) }
   def emit_with_guard_all_bindings_need_as!(node, missing_caps)
     T.bind(self, SemanticAnnotator) rescue nil
     edits = []
     missing_caps.each do |c|
-      raw = T.unsafe(c)
-      vn = raw.respond_to?(:var_node) ? raw.var_node : raw[:var_node]
+      vn = c.var_node
       next unless vn.is_a?(AST::Identifier) && vn.respond_to?(:token) && vn.token
       tok = vn.token
       name = vn.name.to_s

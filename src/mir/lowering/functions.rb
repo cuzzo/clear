@@ -1483,7 +1483,21 @@ module MIRLoweringFunctions
       if stmt.is_a?(AST::ReturnNode)
         !stmt.value.nil?
       else
-        AST.body_slots(stmt).any? { |slot| function_body_has_value_return?(slot.body) }
+        body_slots =
+          if stmt.is_a?(AST::Locatable)
+            AST.body_slots(stmt)
+          else
+            []
+          end
+        bodies =
+          if body_slots.empty?
+            %i[body then_body else_body do_branch].filter_map do |name|
+              stmt.respond_to?(name) ? stmt.public_send(name) : nil
+            end
+          else
+            body_slots.map(&:body)
+          end
+        bodies.any? { |body| function_body_has_value_return?(Kernel.Array(body)) }
       end
     end
   end

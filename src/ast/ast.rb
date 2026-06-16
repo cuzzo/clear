@@ -38,6 +38,9 @@ module AST
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, String, FunctionSignature) }
   CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
   CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
+  InitArgs = T.type_alias { T.untyped }
+  SchemaLookup = T.type_alias { T.proc.params(type_name: T.any(String, Symbol)).returns(T.untyped) }
+  PrecedenceInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Array[String])] }
   PipelineRewriteMetadataIvars = T.let([
     :@type_object,
     :@coerced_type_object,
@@ -564,7 +567,7 @@ module AST
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
   end
 
-  sig { params(node: Object).returns(T::Boolean) }
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def self.scalar_literal_value?(node)
     node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
       node.is_a?(TrueClass) || node.is_a?(FalseClass)
@@ -778,7 +781,7 @@ module AST
   # gets its own transform_body call which handles its BGs separately;
   # nested BGs capture from their parent BG body's scope, not this
   # stmt's scope.
-  sig { params(stmt: T.nilable(T.any(AST::Node, Object)), block: T.proc.params(node: BgNode).void).void }
+  sig { params(stmt: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self.each_bg_block_in_stmt(stmt, &block)
     case stmt
     when BgBlock, BgStreamBlock
@@ -825,7 +828,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: RawBody, block: T.proc.params(analysis: Object).void).void }
+  sig { params(body: RawBody, block: T.proc.params(analysis: T.untyped).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -840,7 +843,7 @@ module AST
     end
   end
 
-  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: Object).void).void }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: T.untyped).void).void }
   def self._expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
@@ -1015,7 +1018,7 @@ module AST
       !full_type.untyped?
     end
 
-    sig { params(val: T.untyped).returns(T.nilable(Type)) }
+    sig { params(val: CoerceTypeInput).returns(T.nilable(Type)) }
     def coerced_type=(val)
       return @coerced_type_object = T.let(nil, T.nilable(Type)) if val.nil?
 
@@ -1023,7 +1026,7 @@ module AST
       @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
     end
 
-    sig { returns(T.untyped) }
+    sig { returns(CoerceTypeInput) }
     def coerced_type
       @coerced_type_object&.raw
     end
@@ -1070,7 +1073,7 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
-    sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.untyped).returns(Symbol) }
+    sig { params(final_type: T.any(Symbol, Type), schema_lookup: SchemaLookup).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
       # Normalize the Symbol|Type input to a Type once at the seam, so
@@ -1352,7 +1355,7 @@ module AST
     # Struct init from parser/synthetic builders) and post-parse
     # assignment (return inference, auto-infer) so no reader needs
     # an `is_a?(Type)` Symbol/Type discriminator.
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       rt = self[:return_type]
@@ -1578,7 +1581,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:type_params] ||= []
@@ -1602,7 +1605,7 @@ module AST
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       t = self[:type]
@@ -1620,9 +1623,9 @@ module AST
     const :var, String
     const :sync, Symbol
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
-      other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync
+      !!(other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync)
     end
     alias eql? ==
 
@@ -1655,7 +1658,7 @@ module AST
     # always a Type (or nil when unannotated). Coerced at construction
     # and post-parse assignment so no reader needs an `is_a?(Type)`
     # Symbol/Type discriminator.
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       t = self[:type]
@@ -1787,13 +1790,13 @@ module AST
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
     extend T::Sig
     include Locatable
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:params] = self[:params] || []
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
     def params=(val)
       self[:params] = val || []
     end
@@ -1817,7 +1820,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:bindings] = [] if self[:bindings].nil?
@@ -1948,7 +1951,7 @@ module AST
     include Locatable
     include HasBodies
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:capabilities] = [] if self[:capabilities].nil?
@@ -2114,7 +2117,7 @@ module AST
                            keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:items]           = [] if self[:items].nil?
@@ -2312,7 +2315,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:fields] = [] if self[:fields].nil?
@@ -2345,7 +2348,7 @@ module AST
       @fn_type_params
     end
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:params] = self[:params] || []
@@ -2365,7 +2368,7 @@ module AST
       @fn_type_params = value.dup
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
     def params=(val)
       self[:params] = val || []
     end
@@ -2394,7 +2397,7 @@ module AST
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       @type_params = T.let([], T::Array[Symbol])
@@ -2451,7 +2454,7 @@ module AST
     end
     attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       @type_params = T.let([], T::Array[String])
@@ -2480,7 +2483,7 @@ module AST
     const :stack_size, T.nilable(Symbol), default: nil
     const :can_smash, T::Boolean, default: false
     prop :computed_stack_tier, T.nilable(Symbol), default: nil
-    prop :capture_analysis, T.nilable(Object), default: nil
+    prop :capture_analysis, T.untyped, default: nil
   end
 
   # DoBlock: fork-join parallel execution.
@@ -2573,7 +2576,7 @@ module AST
     include Locatable
     include HasBodies
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:cases] = [] if self[:cases].nil?
@@ -2726,8 +2729,8 @@ module AST
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
     1 => { ops: ['OR', '|>', 'AS'], assoc: :left }
-  }, T::Hash[T.untyped, T.untyped])
-  MAX_PRECEDENCE = T.let(PRECEDENCE_MAP.keys.max, Integer)
+  }, T::Hash[Integer, PrecedenceInfo])
+  MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 
   OP_CODE_SENDABLE_SYMS = T.let({
     :SUB => :-,
@@ -2742,7 +2745,7 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
-  }, T::Hash[T.untyped, T.untyped])
+  }, T::Hash[Symbol, Symbol])
 
   # Canonical definitions are in Type class. These aliases maintain backward compat.
   NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
@@ -2773,7 +2776,7 @@ module AST
     '!+' => :CHECK_ADD,
     '!-' => :CHECK_SUB,
     '!*' => :CHECK_MUL,
-  }, T::Hash[T.untyped, T.untyped])
+  }, T::Hash[String, Symbol])
 
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
 end

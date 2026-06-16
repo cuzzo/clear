@@ -913,7 +913,7 @@ module MIRLoweringVariables
 
   sig { params(field: AST::GetField).returns(T.nilable(AST::Identifier)) }
   def field_assignment_root_identifier(field)
-    root = T.let(field.target, Object)
+    root = T.let(field.target, T.untyped)
     root = root.target while root.is_a?(AST::GetField)
     root.is_a?(AST::Identifier) ? root : nil
   end
