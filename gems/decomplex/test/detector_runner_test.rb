@@ -117,6 +117,112 @@ class DetectorRunnerTest < Minitest::Test
     end
   end
 
+  def test_temporal_ordering_pressure_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-temporal-ordering", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Order
+          def one; @a = 1; end
+          def two; @a = 2; @b = 3; end
+          def three; @b = 4; end
+          def reader; @a; end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("temporal-ordering-pressure", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_state_branch_density_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-state-branch", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class User < T::Struct
+          const :name, String
+          const :admin, T::Boolean
+        end
+
+        class Checker
+          sig { params(user: User).void }
+          def check(user)
+            if user.admin
+              @checked = true
+            end
+            if @checked && user.name == "admin"
+              puts "Hello"
+            end
+          end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("state-branch-density", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_redundant_nil_guard_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-redundant-nil", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def check(x)
+          if x
+            puts x.nil?
+            x&.foo
+          end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("redundant-nil-guard", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_state_mesh_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-state-mesh", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Mesh
+          def initialize
+            @a = 1
+            @b = 2
+          end
+
+          def writer
+            @a = 3
+          end
+
+          def reader
+            @a + @b
+          end
+
+          def a_alias
+            @a
+          end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("state-mesh", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
   def test_decision_pressure_rust_engine_matches_ruby_engine_byte_for_byte
     skip "cargo is not available" unless cargo_available?
 

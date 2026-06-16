@@ -61,6 +61,8 @@ module Decomplex
       return unless Ast.node?(node)
 
       case node.type
+      when :CLASS, :MODULE
+        defstack = defstack + [node.children[0].to_s]
       when :DEFN then defstack = defstack + [node.children[0].to_s]
       when :DEFS then defstack = defstack + [node.children[1].to_s]
       when :ATTRASGN
@@ -107,13 +109,17 @@ module Decomplex
       return unless Ast.node?(node)
 
       case node.type
+      when :CLASS, :MODULE
+        defstack = defstack + [node.children[0].to_s]
       when :DEFN then defstack = defstack + [node.children[0].to_s]
       when :DEFS then defstack = defstack + [node.children[1].to_s]
-      when :CALL, :OPCALL
+      when :CALL, :OPCALL, :FCALL, :VCALL
         # CALL(recv, :method, args) - attribute reads have no args
-        recv = node.children[0]
-        mid  = node.children[1]
-        args = node.children[2]
+        # FCALL(:method, args) - attribute reads have no args
+        # VCALL(:method) - attribute reads have no args
+        recv = node.type == :CALL || node.type == :OPCALL ? node.children[0] : nil
+        mid  = node.type == :CALL || node.type == :OPCALL ? node.children[1] : node.children[0]
+        args = node.type == :CALL || node.type == :OPCALL ? node.children[2] : node.children[1]
 
         # Skip if called with arguments (it's a method call, not attr read)
         if args.nil? || (Ast.node?(args) && args.type == :LIST && args.children.compact.empty?)

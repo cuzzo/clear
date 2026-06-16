@@ -2,7 +2,8 @@ mod decomplex;
 
 use anyhow::{bail, Context, Result};
 use decomplex::detectors::{
-    co_update, decision_pressure, flay_similarity, miner, predicate_alias, semantic_alias,
+    co_update, decision_pressure, flay_similarity, miner, predicate_alias, redundant_nil_guard,
+    semantic_alias, state_branch_density, state_mesh, temporal_ordering_pressure,
 };
 use decomplex::parallel;
 use decomplex::syntax::Language;
@@ -46,6 +47,30 @@ fn main() -> Result<()> {
             let language = Language::parse(&language)?;
             let report = decision_pressure::scan_files(&files, language)
                 .with_context(|| "failed to scan decision-pressure facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::StateBranchDensity { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = state_branch_density::scan_files(&files, language)
+                .with_context(|| "failed to scan state-branch-density facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::TemporalOrderingPressure { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = temporal_ordering_pressure::scan_files(&files, language)
+                .with_context(|| "failed to scan temporal-ordering-pressure facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::RedundantNilGuard { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = redundant_nil_guard::scan_files(&files, language)
+                .with_context(|| "failed to scan redundant-nil-guard facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::StateMesh { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = state_mesh::scan_files(&files, language)
+                .with_context(|| "failed to scan state-mesh facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
         Command::FlaySimilarity {
@@ -95,6 +120,26 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    StateBranchDensity {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    TemporalOrderingPressure {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    RedundantNilGuard {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    StateMesh {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
     FlaySimilarity {
         language: String,
         mass: usize,
@@ -113,6 +158,10 @@ impl Command {
             | Self::Miner { jobs, .. }
             | Self::SemanticAliases { jobs, .. }
             | Self::DecisionPressure { jobs, .. }
+            | Self::StateBranchDensity { jobs, .. }
+            | Self::TemporalOrderingPressure { jobs, .. }
+            | Self::RedundantNilGuard { jobs, .. }
+            | Self::StateMesh { jobs, .. }
             | Self::FlaySimilarity { jobs, .. } => *jobs,
         }
     }
@@ -185,6 +234,50 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 bail!("decision-pressure requires at least one file");
             }
             Ok(Command::DecisionPressure {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "state-branch-density" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("state-branch-density requires at least one file");
+            }
+            Ok(Command::StateBranchDensity {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "temporal-ordering-pressure" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("temporal-ordering-pressure requires at least one file");
+            }
+            Ok(Command::TemporalOrderingPressure {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "redundant-nil-guard" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("redundant-nil-guard requires at least one file");
+            }
+            Ok(Command::RedundantNilGuard {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "state-mesh" | "state-heatmap" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("state-mesh requires at least one file");
+            }
+            Ok(Command::StateMesh {
                 language,
                 files,
                 jobs,

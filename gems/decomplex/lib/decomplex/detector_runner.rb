@@ -13,6 +13,10 @@ require_relative "miner"
 require_relative "decision_pressure"
 require_relative "predicate_alias"
 require_relative "semantic_alias"
+require_relative "state_mesh"
+require_relative "state_branch_density"
+require_relative "temporal_ordering_pressure"
+require_relative "redundant_nil_guard"
 
 module Decomplex
   # Runs one detector in isolation and emits deterministic machine output.
@@ -35,7 +39,12 @@ module Decomplex
       "semantic-predicate-aliases" => :semantic_alias,
       "reification-misses" => :semantic_alias,
       "flay-similarity" => :flay_similarity,
-      "structural-similarity" => :flay_similarity
+      "structural-similarity" => :flay_similarity,
+      "temporal-ordering-pressure" => :temporal_ordering_pressure,
+      "state-branch-density" => :state_branch_density,
+      "redundant-nil-guard" => :redundant_nil_guard,
+      "state-mesh" => :state_mesh,
+      "state-heatmap" => :state_mesh
     }.freeze
     ENGINES = %w[ruby rust].freeze
 
@@ -58,6 +67,14 @@ module Decomplex
         semantic_alias(files, engine: engine, jobs: jobs)
       when :flay_similarity
         flay_similarity(files, engine: engine, mass: mass, fuzzy: fuzzy, jobs: jobs)
+      when :temporal_ordering_pressure
+        temporal_ordering_pressure(files, engine: engine, jobs: jobs)
+      when :state_branch_density
+        state_branch_density(files, engine: engine, jobs: jobs)
+      when :redundant_nil_guard
+        redundant_nil_guard(files, engine: engine, jobs: jobs)
+      when :state_mesh
+        state_mesh(files, engine: engine, jobs: jobs)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
@@ -145,6 +162,42 @@ module Decomplex
         end
 
       { "findings" => findings }
+    end
+
+    private_class_method def self.temporal_ordering_pressure(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/temporal_ordering_pressure"
+        return Native::TemporalOrderingPressure.scan(files, jobs: jobs)
+      end
+
+      TemporalOrderingPressure.scan(files)
+    end
+
+    private_class_method def self.state_branch_density(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/state_branch_density"
+        return Native::StateBranchDensity.scan(files, jobs: jobs)
+      end
+
+      StateBranchDensity.scan(files).findings
+    end
+
+    private_class_method def self.redundant_nil_guard(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/redundant_nil_guard"
+        return Native::RedundantNilGuard.scan(files, jobs: jobs)
+      end
+
+      RedundantNilGuard.scan(files)
+    end
+
+    private_class_method def self.state_mesh(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/state_mesh"
+        return Native::StateMesh.scan(files, jobs: jobs)
+      end
+
+      StateMesh.scan(files).tap(&:run).to_json_graph
     end
 
     private_class_method def self.canonicalize(value)

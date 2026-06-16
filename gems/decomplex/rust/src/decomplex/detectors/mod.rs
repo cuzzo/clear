@@ -3,4 +3,8 @@ pub mod decision_pressure;
 pub mod flay_similarity;
 pub mod miner;
 pub mod predicate_alias;
+pub mod redundant_nil_guard;
 pub mod semantic_alias;
+pub mod state_branch_density;
+pub mod state_mesh;
+pub mod temporal_ordering_pressure;

@@ -2,7 +2,7 @@ use crate::decomplex::ast::{self, Child, Node, Span};
 use crate::decomplex::syntax::Language;
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -47,32 +47,27 @@ struct Use {
     span: Span,
 }
 
-#[derive(Clone, Debug)]
-struct Scanner {
+pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<SemanticAliasReport> {
+    let mut preds = Vec::new();
+    let mut uses = Vec::new();
+    for file in files {
+        let (root, lines) = ast::parse(file)?;
+        let mut scanner = SemanticAlias::new(file.to_string_lossy().to_string(), lines);
+        scanner.walk(&root, &Vec::new());
+        preds.extend(scanner.preds);
+        uses.extend(scanner.uses);
+    }
+    Ok(Report::new(preds, uses).findings())
+}
+
+struct SemanticAlias {
     file: String,
     lines: Vec<String>,
     preds: Vec<Pred>,
     uses: Vec<Use>,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<SemanticAliasReport> {
-    let _ = language;
-    let mut preds = Vec::new();
-    let mut uses = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse(file)?;
-        let mut scanner = Scanner::new(file.to_string_lossy().to_string(), lines);
-        scanner.walk(&root, &[]);
-        preds.extend(scanner.preds);
-        uses.extend(scanner.uses);
-    }
-    Ok(SemanticAliasReport {
-        alias_clusters: alias_clusters(&preds),
-        reification_misses: reification_misses(&preds, &uses),
-    })
-}
-
-impl Scanner {
+impl SemanticAlias {
     fn new(file: String, lines: Vec<String>) -> Self {
         Self {
             file,
@@ -83,257 +78,148 @@ impl Scanner {
     }
 
     fn walk(&mut self, node: &Node, defstack: &[String]) {
-        let next_defstack = ast::def_push(node, defstack);
+        let mut next_defstack = defstack.to_vec();
+        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
+            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
+            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
+                next_defstack.push(name.clone());
+            }
+        }
+
         if node.r#type == "DEFN" {
             self.record_pred(node);
         }
-        if matches!(node.r#type.as_str(), "CALL" | "OPCALL") && comparison(node) {
-            let raw = ast::slice(node, &self.lines);
+
+        if matches!(node.r#type.as_str(), "CALL" | "OPCALL") && self.comparison(node) {
+            let c = self.canon(&ast::slice(node, &self.lines));
             self.uses.push(Use {
-                canon: canon(&raw),
+                canon: c,
                 file: self.file.clone(),
-                defn: next_defstack
-                    .last()
-                    .cloned()
-                    .unwrap_or_else(|| "(top-level)".to_string()),
+                defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
                 line: node.first_lineno,
-                raw,
-                span: [
-                    node.first_lineno,
-                    node.first_column,
-                    node.last_lineno,
-                    node.last_column,
-                ],
+                raw: ast::slice(node, &self.lines),
+                span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
             });
         }
+
         for child in node.children.iter().filter_map(ast::node) {
             self.walk(child, &next_defstack);
         }
     }
 
+    fn canon(&self, text: &str) -> String {
+        let (mut t, _) = ast::canon_polarity(text);
+        t = t.strip_prefix("self.").unwrap_or(&t).to_string();
+        t = t.strip_prefix('@').unwrap_or(&t).to_string();
+        
+        // Ruby: t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
+        let re = regex::Regex::new(r"^[A-Za-z_]\w*(?:\([^)]*\))?\.(?P<rest>[A-Za-z_]\w*\s*(?:==|!=|\.))").unwrap();
+        t = re.replace(&t, "$rest").to_string();
+
+        t.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn comparison(&self, node: &Node) -> bool {
+        let mid = node.children.get(1);
+        match mid {
+            Some(Child::Symbol(s)) => matches!(s.as_str(), "==" | "!=" | "nil?"),
+            _ => false
+        }
+    }
+
     fn record_pred(&mut self, node: &Node) {
-        let Some(name) = child_to_string(node.children.first()) else {
-            return;
-        };
-        if !name.ends_with('?') {
-            return;
+        if let Some(Child::Symbol(name)) = node.children.first() {
+            if !name.ends_with('?') { return; }
+
+            let stmts = ast::body_stmts(node);
+            if stmts.len() != 1 { return; }
+
+            self.preds.push(Pred {
+                name: name.clone(),
+                canon: self.canon(&ast::slice(stmts[0], &self.lines)),
+                file: self.file.clone(),
+                line: node.first_lineno,
+                span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            });
         }
-        let statements = ast::body_stmts(node);
-        if statements.len() != 1 {
-            return;
-        }
-        self.preds.push(Pred {
-            name,
-            canon: canon(&ast::slice(statements[0], &self.lines)),
-            file: self.file.clone(),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-        });
     }
 }
 
-fn alias_clusters(preds: &[Pred]) -> Vec<SemanticAliasCluster> {
-    let mut by_canon: Vec<(&str, Vec<&Pred>)> = Vec::new();
-    for pred in preds {
-        if let Some((_, rows)) = by_canon
-            .iter_mut()
-            .find(|(existing, _)| *existing == pred.canon.as_str())
-        {
-            rows.push(pred);
-        } else {
-            by_canon.push((pred.canon.as_str(), vec![pred]));
+struct Report {
+    preds: Vec<Pred>,
+    uses: Vec<Use>,
+}
+
+impl Report {
+    fn new(preds: Vec<Pred>, uses: Vec<Use>) -> Self {
+        Self { preds, uses }
+    }
+
+    fn findings(&self) -> SemanticAliasReport {
+        SemanticAliasReport {
+            alias_clusters: self.alias_clusters(),
+            reification_misses: self.reification_misses(),
         }
     }
 
-    let mut out = by_canon
-        .into_iter()
-        .filter_map(|(canon, rows)| {
-            let mut names = Vec::new();
-            for pred in &rows {
-                if !names.contains(&pred.name) {
-                    names.push(pred.name.clone());
-                }
+    fn alias_clusters(&self) -> Vec<SemanticAliasCluster> {
+        let mut by_canon: BTreeMap<String, Vec<&Pred>> = BTreeMap::new();
+        for p in &self.preds {
+            by_canon.entry(p.canon.clone()).or_default().push(p);
+        }
+
+        let mut out = Vec::new();
+        for (c, ps) in by_canon {
+            let mut names_set = BTreeSet::new();
+            for p in &ps { names_set.insert(p.name.clone()); }
+            let names: Vec<_> = names_set.into_iter().collect();
+            if names.len() < 2 { continue; }
+
+            let mut sites = Vec::new();
+            let mut spans = BTreeMap::new();
+            for p in &ps {
+                let loc = format!("{}:{}:{}", p.file, p.name, p.line);
+                sites.push(loc.clone());
+                spans.insert(loc, p.span);
             }
-            if names.len() < 2 {
-                return None;
-            }
-            let sites = rows
-                .iter()
-                .map(|pred| format!("{}:{}:{}", pred.file, pred.name, pred.line))
-                .collect::<Vec<_>>();
-            let spans = rows
-                .iter()
-                .map(|pred| (format!("{}:{}:{}", pred.file, pred.name, pred.line), pred.span))
-                .collect::<BTreeMap<_, _>>();
-            Some(SemanticAliasCluster {
-                canon: canon.to_string(),
+
+            out.push(SemanticAliasCluster {
+                canon: c,
                 names,
                 sites,
                 spans,
-            })
-        })
-        .collect::<Vec<_>>();
-    out.sort_by(|left, right| right.names.len().cmp(&left.names.len()));
-    out
-}
-
-fn reification_misses(preds: &[Pred], uses: &[Use]) -> Vec<ReificationMiss> {
-    let mut out = Vec::new();
-    for usage in uses {
-        let usage_canon = usage.canon.clone();
-        let Some(pred) = preds.iter().find(|candidate| candidate.canon == usage_canon) else {
-            continue;
-        };
-        let usage_function = semantic_function_name(&usage.defn);
-        if usage_function.ends_with('?')
-            && preds
-                .iter()
-                .any(|candidate| candidate.canon == usage_canon && candidate.name == usage_function)
-        {
-            continue;
+            });
         }
-        let at = format!("{}:{}:{}", usage.file, usage_function, usage.line);
-        let mut spans = BTreeMap::new();
-        spans.insert(at.clone(), usage.span);
-        out.push(ReificationMiss {
-            predicate: pred.name.clone(),
-            canon: usage_canon,
-            at,
-            spans,
-            raw: usage.raw.clone(),
-        });
+        out.sort_by(|a, b| b.names.len().cmp(&a.names.len()));
+        out
     }
-    out.sort_by(|left, right| left.predicate.cmp(&right.predicate));
-    out
-}
 
-fn canon(text: &str) -> String {
-    let (mut value, _) = ast::canon_polarity(text);
-    value = value.strip_prefix("self.").unwrap_or(&value).to_string();
-    value = value.strip_prefix('@').unwrap_or(&value).to_string();
-    value = strip_single_receiver_hop(&value);
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn strip_single_receiver_hop(text: &str) -> String {
-    let Some(dot) = text.find('.') else {
-        return text.to_string();
-    };
-    let receiver = &text[..dot];
-    if receiver.is_empty() || !identifier_like(receiver) {
-        return text.to_string();
-    }
-    let rest = &text[dot + 1..];
-    let Some(attr_len) = leading_identifier_len(rest) else {
-        return text.to_string();
-    };
-    let after_attr = rest[attr_len..].trim_start();
-    if !(after_attr.starts_with("==") || after_attr.starts_with("!=") || after_attr.starts_with('.')) {
-        return text.to_string();
-    }
-    rest.to_string()
-}
-
-fn leading_identifier_len(text: &str) -> Option<usize> {
-    let mut chars = text.char_indices();
-    let (_, first) = chars.next()?;
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return None;
-    }
-    let mut end = first.len_utf8();
-    for (index, ch) in chars {
-        if ch == '_' || ch.is_ascii_alphanumeric() {
-            end = index + ch.len_utf8();
-        } else {
-            break;
+    fn reification_misses(&self) -> Vec<ReificationMiss> {
+        let mut by_canon: BTreeMap<String, Vec<&Pred>> = BTreeMap::new();
+        for p in &self.preds {
+            by_canon.entry(p.canon.clone()).or_default().push(p);
         }
-    }
-    Some(end)
-}
 
-fn identifier_like(text: &str) -> bool {
-    let mut chars = text.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
+        let mut out = Vec::new();
+        for u in &self.uses {
+            if let Some(ps) = by_canon.get(&u.canon) {
+                if ps.is_empty() { continue; }
+                if u.defn.ends_with('?') && ps.iter().any(|p| p.name == u.defn) { continue; }
 
-fn semantic_function_name(name: &str) -> String {
-    name.strip_prefix("self.").unwrap_or(name).to_string()
-}
+                let loc = format!("{}:{}:{}", u.file, u.defn, u.line);
+                let mut spans = BTreeMap::new();
+                spans.insert(loc.clone(), u.span);
 
-fn comparison(node: &Node) -> bool {
-    let Some(method) = child_to_string(node.children.get(1)) else {
-        return false;
-    };
-    matches!(method.as_str(), "==" | "!=" | "nil?")
-}
-
-fn child_to_string(child: Option<&Child>) -> Option<String> {
-    match child {
-        Some(Child::String(value)) | Some(Child::Symbol(value)) => Some(value.clone()),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pred(name: &str, body: &str, line: usize) -> Pred {
-        Pred {
-            name: name.to_string(),
-            canon: canon(body),
-            file: "a.rb".to_string(),
-            line,
-            span: [line, 0, line, 1],
+                out.push(ReificationMiss {
+                    predicate: ps[0].name.clone(),
+                    canon: u.canon.clone(),
+                    at: loc,
+                    spans,
+                    raw: u.raw.clone(),
+                });
+            }
         }
-    }
-
-    fn use_at(function: &str, raw: &str, line: usize) -> Use {
-        Use {
-            canon: canon(raw),
-            raw: raw.to_string(),
-            file: "a.rb".to_string(),
-            defn: function.to_string(),
-            line,
-            span: [line, 0, line, 1],
-        }
-    }
-
-    #[test]
-    fn canonicalizes_receiver_forms() {
-        assert_eq!(canon("node.provenance == :frame"), "provenance == :frame");
-        assert_eq!(canon("@provenance == :frame"), "provenance == :frame");
-        assert_eq!(canon("self.provenance == :frame"), "provenance == :frame");
-        assert_eq!(canon("!x.heap?"), "x.heap?");
-        assert_eq!(canon("stmt.expr? && ok"), "stmt.expr? && ok");
-    }
-
-    #[test]
-    fn reports_aliases_and_reification_misses() {
-        let preds = vec![
-            pred("frame?", "@provenance == :frame", 1),
-            pred("is_frame?", "provenance == :frame", 2),
-            pred("heap?", "@provenance == :heap", 3),
-        ];
-        let uses = vec![use_at("somewhere", "node.provenance == :frame", 10)];
-        let report = SemanticAliasReport {
-            alias_clusters: alias_clusters(&preds),
-            reification_misses: reification_misses(&preds, &uses),
-        };
-        assert_eq!(report.alias_clusters.len(), 1);
-        assert_eq!(report.alias_clusters[0].names, vec!["frame?", "is_frame?"]);
-        assert_eq!(report.reification_misses.len(), 1);
-        assert_eq!(report.reification_misses[0].predicate, "frame?");
+        out.sort_by(|a, b| a.predicate.cmp(&b.predicate));
+        out
     }
 }

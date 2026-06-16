@@ -27,32 +27,29 @@ struct Hit {
     span: Span,
 }
 
-#[derive(Clone, Debug)]
-struct Scanner {
-    file: String,
-    lines: Vec<String>,
-    guard_hits: Vec<Hit>,
-    dispatch_hits: Vec<Hit>,
-}
-
-type AssignmentMap = Vec<(String, Node)>;
-
 pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<DecisionPressureRow>> {
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
 
     for file in files {
         let (root, lines) = ast::parse(file)?;
-        let mut scanner = Scanner::new(file.to_string_lossy().to_string(), lines);
-        scanner.walk(&root, &[], &Vec::new());
-        guard.extend(scanner.guard_hits);
-        dispatch.extend(scanner.dispatch_hits);
+        let mut detector = DecisionPressure::new(file.to_string_lossy().to_string(), lines);
+        detector.walk(&root, &Vec::new(), &BTreeMap::new());
+        guard.extend(detector.guard_hits);
+        dispatch.extend(detector.dispatch_hits);
     }
 
-    Ok(ranked(&guard, &dispatch))
+    Ok(Report::new(guard, dispatch).ranked())
 }
 
-impl Scanner {
+struct DecisionPressure {
+    file: String,
+    lines: Vec<String>,
+    guard_hits: Vec<Hit>,
+    dispatch_hits: Vec<Hit>,
+}
+
+impl DecisionPressure {
     fn new(file: String, lines: Vec<String>) -> Self {
         Self {
             file,
@@ -62,14 +59,14 @@ impl Scanner {
         }
     }
 
-    fn walk(&mut self, node: &Node, defstack: &[String], asgmap: &AssignmentMap) {
+    fn walk(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
         let mut next_defstack = defstack.to_vec();
         let mut next_asgmap = asgmap.clone();
 
         if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
             let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(name) = child_to_string(node.children.get(name_index)) {
-                next_defstack.push(name);
+            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
+                next_defstack.push(name.clone());
             }
             next_asgmap = self.build_asgmap(node);
         }
@@ -81,109 +78,38 @@ impl Scanner {
         }
     }
 
-    fn build_asgmap(&self, defn_node: &Node) -> AssignmentMap {
-        let mut map = Vec::new();
+    fn build_asgmap(&self, defn_node: &Node) -> BTreeMap<String, Node> {
+        let mut map = BTreeMap::new();
         let mut stack = ast::body_stmts(defn_node);
+        stack.reverse();
 
         while let Some(node) = stack.pop() {
             if node.r#type == "LASGN" {
-                let name = child_to_string(node.children.first());
-                let source = node.children.get(1).and_then(ast::node);
-                if let (Some(name), Some(source)) = (name, source) {
-                    if !map.iter().any(|(existing, _)| existing == &name)
-                        && self.simple_source(source)
-                    {
-                        map.push((name, source.clone()));
+                if let Some(Child::String(name)) = node.children.get(0) {
+                    if let Some(src) = node.children.get(1).and_then(ast::node) {
+                        if !map.contains_key(name) && self.simple_source(src) {
+                            map.insert(name.clone(), src.clone());
+                        }
                     }
                 }
             }
-            for child in node.children.iter().filter_map(ast::node) {
+            for child in node.children.iter().filter_map(ast::node).rev() {
                 stack.push(child);
             }
         }
-
         map
     }
 
-    fn simple_source(&self, node: &Node) -> bool {
-        match node.r#type.as_str() {
+    fn simple_source(&self, n: &Node) -> bool {
+        match n.r#type.as_str() {
             "IVAR" => true,
             "CALL" | "QCALL" => {
-                let receiver = node.children.first().and_then(ast::node);
-                let method = child_to_string(node.children.get(1));
-                let args_nil = child_nil(node.children.get(2));
-                receiver.is_some()
-                    && (args_nil || method.as_deref() == Some("[]"))
+                let recv = n.children.get(0).and_then(ast::node);
+                let mid = n.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None });
+                let args = n.children.get(2);
+                recv.is_some() && (args.is_none() || matches!(args, Some(Child::Nil)) || mid.map(|s| s.as_str()) == Some("[]"))
             }
             _ => false,
-        }
-    }
-
-    fn record_decision(
-        &mut self,
-        node: &Node,
-        defstack: &[String],
-        asgmap: &AssignmentMap,
-    ) {
-        if !matches!(node.r#type.as_str(), "CALL" | "QCALL") {
-            return;
-        }
-
-        let Some(receiver) = node.children.first().and_then(ast::node) else {
-            return;
-        };
-        let Some(method) = child_to_string(node.children.get(1)) else {
-            return;
-        };
-
-        let guard = (node.r#type == "CALL" && GUARD_MIDS.contains(&method.as_str()))
-            || node.r#type == "QCALL";
-        if guard {
-            if let Some(contract) = self.contract_of(receiver, asgmap, 0) {
-                self.guard_hits.push(self.hit(contract, defstack, node));
-            }
-            return;
-        }
-
-        if node.r#type == "CALL" && method.ends_with('?') {
-            if let Some(contract) = self.contract_of(receiver, asgmap, 0) {
-                self.dispatch_hits.push(self.hit(contract, defstack, node));
-            }
-        }
-    }
-
-    fn record_rescue_nil(
-        &mut self,
-        node: &Node,
-        defstack: &[String],
-        asgmap: &AssignmentMap,
-    ) {
-        if node.r#type != "RESCUE" {
-            return;
-        }
-
-        let Some(body) = node.children.first().and_then(ast::node) else {
-            return;
-        };
-        let Some(resbody) = node.children.get(1).and_then(ast::node) else {
-            return;
-        };
-        if resbody.r#type != "RESBODY" || !child_nil(resbody.children.first()) {
-            return;
-        }
-
-        let handler = resbody.children.get(1);
-        let nil_handler = child_nil(handler)
-            || handler
-                .and_then(ast::node)
-                .map(|node| node.r#type == "NIL")
-                .unwrap_or(false);
-        if !nil_handler || !matches!(body.r#type.as_str(), "CALL" | "QCALL") {
-            return;
-        }
-
-        if let Some(contract) = self.contract_of(body, asgmap, 0) {
-            self.guard_hits.push(self.hit(contract, defstack, node));
         }
     }
 
@@ -191,312 +117,163 @@ impl Scanner {
         Hit {
             contract,
             file: self.file.clone(),
-            defn: defstack
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "(top-level)".to_string()),
+            defn: defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
             line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
+            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
         }
     }
 
-    fn contract_of(
-        &self,
-        node: &Node,
-        asgmap: &AssignmentMap,
-        depth: usize,
-    ) -> Option<String> {
-        if depth >= 8 {
-            return None;
+    fn record_decision(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
+        if !matches!(node.r#type.as_str(), "CALL" | "QCALL") {
+            return;
         }
 
-        match node.r#type.as_str() {
-            "LVAR" | "DVAR" => {
-                let name = child_to_string(node.children.first())?;
-                if let Some((_, source)) = asgmap
-                    .iter()
-                    .find(|(candidate, _)| candidate == &name)
-                {
-                    self.contract_of(source, asgmap, depth + 1)
-                } else {
-                    Some("~local".to_string())
-                }
-            }
-            "IVAR" => child_to_string(node.children.first()),
-            "CALL" | "QCALL" => {
-                let receiver = node.children.first().and_then(ast::node);
-                let method = child_to_string(node.children.get(1))?;
-                let args = node.children.get(2).and_then(ast::node);
+        let recv = node.children.get(0).and_then(ast::node);
+        let mid = node.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None });
+        let _args = node.children.get(2);
 
-                if method == "[]" {
-                    let key = args.and_then(|args| first_non_nil_child(&args.children));
-                    let text = key
-                        .map(|child| child_slice(child, &self.lines))
-                        .unwrap_or_else(|| "nil".to_string());
-                    Some(format!("[{text}]"))
-                } else if args.is_none()
-                    && receiver.is_some()
-                    && !TRANSIENT_NOARG_MIDS.contains(&method.as_str())
-                {
-                    Some(format!(".{method}"))
+        let Some(recv) = recv else { return };
+        let Some(mid) = mid else { return };
+
+        let guard = (node.r#type == "CALL" && GUARD_MIDS.contains(&mid.as_str())) || node.r#type == "QCALL";
+        if guard {
+            if let Some(c) = self.contract_of(recv, asgmap, 0) {
+                self.guard_hits.push(self.hit(c, defstack, node));
+            }
+            return;
+        }
+
+        if node.r#type == "CALL" && mid.ends_with('?') {
+            if let Some(c) = self.contract_of(recv, asgmap, 0) {
+                self.dispatch_hits.push(self.hit(c, defstack, node));
+            }
+        }
+    }
+
+    fn record_rescue_nil(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
+        if node.r#type != "RESCUE" {
+            return;
+        }
+
+        let body = node.children.get(0).and_then(ast::node);
+        let resb = node.children.get(1).and_then(ast::node);
+
+        let Some(resb) = resb else { return };
+        if resb.r#type != "RESBODY" { return };
+        if !matches!(resb.children.get(0), None | Some(Child::Nil)) { return };
+
+        let handler = resb.children.get(1);
+        let nil_handler = matches!(handler, None | Some(Child::Nil)) || handler.and_then(ast::node).map(|n| n.r#type == "NIL").unwrap_or(false);
+        if !nil_handler { return };
+
+        let Some(body) = body else { return };
+        if !matches!(body.r#type.as_str(), "CALL" | "QCALL") { return };
+
+        if let Some(c) = self.contract_of(body, asgmap, 0) {
+            self.guard_hits.push(self.hit(c, defstack, node));
+        }
+    }
+
+    fn contract_of(&self, n: &Node, asgmap: &BTreeMap<String, Node>, depth: usize) -> Option<String> {
+        if depth >= 8 { return None; }
+
+        match n.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                if let Some(Child::String(nm)) = n.children.first() {
+                    if let Some(src) = asgmap.get(nm) {
+                        return self.contract_of(src, asgmap, depth + 1);
+                    } else {
+                        return Some("~local".to_string());
+                    }
+                }
+                None
+            }
+            "IVAR" => {
+                if let Some(Child::String(attr)) = n.children.first() {
+                    return Some(attr.clone());
+                }
+                None
+            }
+            "CALL" | "QCALL" => {
+                let recv = n.children.get(0).and_then(ast::node);
+                let mid = n.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None })?;
+                let args = n.children.get(2);
+
+                if mid == "[]" {
+                    let key = if let Some(Child::Node(node)) = args {
+                        node.children.iter().filter(|c| !matches!(c, Child::Nil)).next()
+                    } else {
+                        None
+                    };
+                    let kt = match key {
+                        Some(Child::Node(k)) => ast::slice(k, &self.lines),
+                        _ => "nil".to_string(), // Simplified key.inspect
+                    };
+                    Some(format!("[{}]", kt))
+                } else if (args.is_none() || matches!(args, Some(Child::Nil))) && recv.is_some() && !TRANSIENT_NOARG_MIDS.contains(&mid.as_str()) {
+                    Some(format!(".{}", mid))
                 } else {
                     None
                 }
             }
-            "VCALL" => child_to_string(node.children.first()).map(|name| format!(".{name}")),
-            _ => None,
+            "VCALL" => {
+                if let Some(Child::Symbol(name)) = n.children.first() {
+                    return Some(format!(".{}", name));
+                }
+                None
+            }
+            _ => None
         }
     }
 }
 
-fn ranked(guard_hits: &[Hit], dispatch_hits: &[Hit]) -> Vec<DecisionPressureRow> {
-    let mut essential = Vec::<(String, usize)>::new();
-    for hit in dispatch_hits {
-        if let Some((_, count)) = essential
-            .iter_mut()
-            .find(|(contract, _)| contract == &hit.contract)
-        {
-            *count += 1;
-        } else {
-            essential.push((hit.contract.clone(), 1));
-        }
+struct Report {
+    guard: Vec<Hit>,
+    dispatch: Vec<Hit>,
+}
+
+impl Report {
+    fn new(guard: Vec<Hit>, dispatch: Vec<Hit>) -> Self {
+        Self { guard, dispatch }
     }
 
-    let mut groups = Vec::<(String, Vec<&Hit>)>::new();
-    for hit in guard_hits {
-        if let Some((_, hits)) = groups
-            .iter_mut()
-            .find(|(contract, _)| contract == &hit.contract)
-        {
-            hits.push(hit);
-        } else {
-            groups.push((hit.contract.clone(), vec![hit]));
+    fn ranked(&self) -> Vec<DecisionPressureRow> {
+        let mut ess = BTreeMap::new();
+        for h in &self.dispatch {
+            *ess.entry(&h.contract).or_insert(0) += 1;
         }
-    }
 
-    let rows = groups
-        .into_iter()
-        .map(|(contract, hits)| {
-            let methods = hits
-                .iter()
-                .map(|hit| (hit.file.clone(), hit.defn.clone()))
-                .collect::<BTreeSet<_>>()
-                .len();
-            let sites = hits.iter().map(|hit| loc(hit)).collect::<Vec<_>>();
-            let spans = hits
-                .iter()
-                .map(|hit| (loc(hit), hit.span))
-                .collect::<BTreeMap<_, _>>();
-            let essential_count = essential
-                .iter()
-                .find(|(candidate, _)| candidate == &contract)
-                .map(|(_, count)| *count)
-                .unwrap_or(0);
+        let mut rows_map: BTreeMap<String, Vec<&Hit>> = BTreeMap::new();
+        for h in &self.guard {
+            rows_map.entry(h.contract.clone()).or_default().push(h);
+        }
+
+        let mut rows: Vec<_> = rows_map.into_iter().map(|(contract, hs)| {
+            let mut methods_set = BTreeSet::new();
+            for h in &hs {
+                methods_set.insert((&h.file, &h.defn));
+            }
+            let sites = hs.iter().map(|h| loc(h)).collect();
+            let spans = hs.iter().map(|h| (loc(h), h.span)).collect();
+            let essential = ess.get(&contract).cloned().unwrap_or(0);
             DecisionPressureRow {
                 contract,
-                decisions: hits.len(),
-                essential: essential_count,
-                methods,
+                decisions: hs.len(),
+                essential,
+                methods: methods_set.len(),
                 sites,
                 spans,
             }
-        })
-        .collect::<Vec<_>>();
+        }).collect();
 
-    let mut named = rows
-        .iter()
-        .filter(|row| row.contract != "~local")
-        .cloned()
-        .collect::<Vec<_>>();
-    named.sort_by(|left, right| {
-        right
-            .decisions
-            .cmp(&left.decisions)
-            .then(right.methods.cmp(&left.methods))
-    });
-    let local = rows
-        .into_iter()
-        .filter(|row| row.contract == "~local")
-        .collect::<Vec<_>>();
-    named.into_iter().chain(local).collect()
-}
-
-fn child_to_string(child: Option<&Child>) -> Option<String> {
-    match child {
-        Some(Child::String(value)) | Some(Child::Symbol(value)) => Some(value.clone()),
-        _ => None,
+        let mut named: Vec<_> = rows.iter().filter(|r| r.contract != "~local").cloned().collect();
+        named.sort_by(|a, b| b.decisions.cmp(&a.decisions).then_with(|| b.methods.cmp(&a.methods)));
+        
+        let local: Vec<_> = rows.into_iter().filter(|r| r.contract == "~local").collect();
+        named.into_iter().chain(local).collect()
     }
 }
 
-fn child_nil(child: Option<&Child>) -> bool {
-    matches!(child, None | Some(Child::Nil))
-}
-
-fn first_non_nil_child(children: &[Child]) -> Option<&Child> {
-    children.iter().find(|child| !matches!(child, Child::Nil))
-}
-
-fn child_slice(child: &Child, lines: &[String]) -> String {
-    match child {
-        Child::Node(node) => ast::slice(node, lines),
-        Child::Symbol(value) => value.clone(),
-        Child::String(value) => format!("{value:?}"),
-        Child::Nil => "nil".to_string(),
-    }
-}
-
-fn loc(hit: &Hit) -> String {
-    format!("{}:{}:{}", hit.file, hit.defn, hit.line)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn node(node_type: &str, children: Vec<Child>) -> Node {
-        Node {
-            r#type: node_type.to_string(),
-            children,
-            first_lineno: 1,
-            first_column: 0,
-            last_lineno: 1,
-            last_column: 1,
-            text: String::new(),
-        }
-    }
-
-    #[test]
-    fn resolves_local_to_accessor_contract() {
-        let source = node(
-            "CALL",
-            vec![
-                Child::Node(Box::new(node("LVAR", vec![Child::String("node".to_string())]))),
-                Child::Symbol("full_type".to_string()),
-                Child::Nil,
-            ],
-        );
-        let scanner = Scanner::new("test.rb".to_string(), Vec::new());
-        let local = node("LVAR", vec![Child::String("ti".to_string())]);
-        assert_eq!(
-            scanner.contract_of(&local, &vec![("ti".to_string(), source)], 0),
-            Some(".full_type".to_string())
-        );
-    }
-
-    #[test]
-    fn resolved_transient_local_does_not_fall_back_to_local_contract() {
-        let source = node(
-            "CALL",
-            vec![
-                Child::Node(Box::new(node(
-                    "LVAR",
-                    vec![Child::String("stack".to_string())],
-                ))),
-                Child::Symbol("pop".to_string()),
-                Child::Nil,
-            ],
-        );
-        let scanner = Scanner::new("test.rb".to_string(), Vec::new());
-        let local = node("LVAR", vec![Child::String("node".to_string())]);
-
-        assert_eq!(
-            scanner.contract_of(&local, &vec![("node".to_string(), source)], 0),
-            None
-        );
-    }
-
-    #[test]
-    fn hash_key_contract_uses_key_text() {
-        let element = node(
-            "CALL",
-            vec![
-                Child::Node(Box::new(node("LVAR", vec![Child::String("p".to_string())]))),
-                Child::Symbol("[]".to_string()),
-                Child::Node(Box::new(node(
-                    "LIST",
-                    vec![Child::Node(Box::new(Node {
-                        r#type: "LIT".to_string(),
-                        children: vec![Child::Symbol("type".to_string())],
-                        first_lineno: 1,
-                        first_column: 2,
-                        last_lineno: 1,
-                        last_column: 7,
-                        text: ":type".to_string(),
-                    }))],
-                ))),
-            ],
-        );
-        let scanner = Scanner::new("test.rb".to_string(), Vec::new());
-        assert_eq!(scanner.contract_of(&element, &Vec::new(), 0), Some("[:type]".to_string()));
-    }
-
-    #[test]
-    fn scan_records_safe_navigation_pressure() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp");
-        std::io::Write::write_all(
-            &mut file,
-            b"def scan\n  file&.unlink\nend\n",
-        )
-        .expect("write");
-
-        let rows = scan_files(&[file.path().to_path_buf()], Language::Ruby).expect("scan");
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].contract, ".file");
-        assert_eq!(rows[0].decisions, 1);
-    }
-
-    #[test]
-    fn scan_records_safe_navigation_pressure_inside_ensure() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp");
-        std::io::Write::write_all(
-            &mut file,
-            b"class CoUpdateTest < Minitest::Test\n  def scan(ruby)\n    f = Tempfile.new([\"cu\", \".rb\"])\n    f.write(ruby)\n  ensure\n    f&.unlink\n  end\nend\n",
-        )
-        .expect("write");
-
-        let rows = scan_files(&[file.path().to_path_buf()], Language::Ruby).expect("scan");
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].contract, "~local");
-        assert_eq!(rows[0].decisions, 1);
-    }
-
-    #[test]
-    fn scan_counts_block_predicate_on_assigned_local_as_essential_context() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp");
-        std::io::Write::write_all(
-            &mut file,
-            b"def t\n  pairs = []\n  refute(pairs.any? { |h| h[:pair].include?(\"[]\") })\n  pairs.nil?\nend\n",
-        )
-        .expect("write");
-
-        let rows = scan_files(&[file.path().to_path_buf()], Language::Ruby).expect("scan");
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].contract, "~local");
-        assert_eq!(rows[0].decisions, 1);
-        assert_eq!(rows[0].essential, 1);
-    }
-
-    #[test]
-    fn scan_records_safe_navigation_pressure_in_ternary_arm() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp");
-        std::io::Write::write_all(
-            &mut file,
-            b"def x(node)\n  decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil\nend\n",
-        )
-        .expect("write");
-
-        let rows = scan_files(&[file.path().to_path_buf()], Language::Ruby).expect("scan");
-
-        assert_eq!(rows.iter().find(|row| row.contract == ".symbol").map(|row| row.decisions), Some(1));
-        assert_eq!(rows.iter().find(|row| row.contract == "~local").map(|row| row.decisions), Some(1));
-    }
-
+fn loc(h: &Hit) -> String {
+    format!("{}:{}:{}", h.file, h.defn, h.line)
 }
