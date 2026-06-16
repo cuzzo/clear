@@ -286,9 +286,84 @@ RSpec.describe NilKill do
         "nil-kill.static.nullable-signature",
         "nil-kill.static.untyped-field",
       )
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.static.untyped-signature",
+        "message" => a_hash_including("text" => include("replace Any/T.untyped/unknown")),
+      ))
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.static.nullable-signature",
+        "message" => a_hash_including("text" => include("nilability pressure")),
+      ))
       expect(results).not_to include(a_hash_including(
         "ruleId" => "nil-kill.static.untyped-field",
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
+      ))
+    end
+
+    it "renders pressure facts as actionable SARIF findings" do
+      evidence = {
+        "facts" => {
+          "hidden_enum_pressure" => [{
+            "path" => "src/workflow.rb",
+            "line" => 10,
+            "owner" => "Workflow",
+            "method" => "label",
+            "method_kind" => "instance",
+            "kind" => "param",
+            "slot" => "status",
+            "confidence" => "high",
+            "score" => 12,
+            "values" => %w[:active :pending],
+            "decision_pressure" => 2,
+            "runtime" => {"calls" => 5, "classes" => ["Symbol"]},
+            "blockers" => [],
+            "suggestion" => "review for a named Status enum or literal-union contract",
+            "decisions" => [],
+          }],
+          "fallibility_pressure" => [{
+            "label" => "Parser#parse",
+            "path" => "src/parser.rb",
+            "line" => 12,
+            "score" => 9,
+            "direct_sources" => [{"path" => "src/parser.rb", "line" => 15, "kind" => "raise", "code" => "raise ParserError"}],
+            "runtime" => {"calls" => 20, "ok_calls" => 18, "raised_calls" => 2, "raised_rate" => 10.0, "raised_classes" => ["ParserError"]},
+            "fallible_callers" => ["Compiler#run"],
+            "handler_pressure" => 1,
+            "exclusive_handlers" => 1,
+            "shared_handlers" => 0,
+            "handlers" => [],
+          }],
+          "collection_index_lookups" => [{
+            "path" => "src/options.rb",
+            "line" => 8,
+            "code" => "opts[:mode]",
+            "receiver" => "opts",
+            "receiver_type" => "Hash",
+            "index" => ":mode",
+            "lookup_type" => "T.untyped",
+            "status" => "untyped receiver",
+          }],
+          "param_origins" => [],
+          "return_origins" => [],
+        },
+        "actions" => [],
+        "diagnostics" => [],
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      results = sarif.fetch("runs").first.fetch("results")
+
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.pressure.hidden-enum",
+        "message" => a_hash_including("text" => include("hidden enum pressure: Workflow#label param `status`")),
+      ))
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.pressure.fallibility",
+        "message" => a_hash_including("text" => include("fallibility pressure: Parser#parse")),
+      ))
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.pressure.primitive-record",
+        "message" => a_hash_including("text" => include("primitive record pressure")),
       ))
     end
 

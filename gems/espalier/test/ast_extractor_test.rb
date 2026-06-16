@@ -12,7 +12,10 @@ class AstExtractorTest < Minitest::Test
     typescript: "DECOMPLEX_TS_TYPESCRIPT_PATH",
     go: "DECOMPLEX_TS_GO_PATH",
     rust: "DECOMPLEX_TS_RUST_PATH",
-    zig: "DECOMPLEX_TS_ZIG_PATH"
+    zig: "DECOMPLEX_TS_ZIG_PATH",
+    c: "DECOMPLEX_TS_C_PATH",
+    cpp: "DECOMPLEX_TS_CPP_PATH",
+    csharp: "DECOMPLEX_TS_CSHARP_PATH"
   }.freeze
 
   def parse_ruby(code)
@@ -296,6 +299,166 @@ class AstExtractorTest < Minitest::Test
       assert_includes run[:delegations], { receiver: "self", message: bump_name, type: :always }, language
       assert run[:line].positive?, language
       refute_nil run[:span], language
+    end
+  end
+
+  def test_extracts_architecture_parity_facts_across_supported_tree_sitter_languages
+    profiles = {
+      python: [
+        ".py",
+        <<~PY,
+          class Worker:
+              def work(self):
+                  pass
+          class Unit:
+              def __init__(self, value):
+                  self.value = value
+                  self.other = Worker()
+              def run(self):
+                  self.value = self.value + 1
+                  self.other.work()
+                  self._bump()
+              def _bump(self):
+                  pass
+        PY
+        "Unit",
+        "run",
+        "_bump",
+        "other",
+        nil,
+        "self.other"
+      ],
+      typescript: [
+        ".ts",
+        <<~TS,
+          class Worker { work(): void {} }
+          class Unit {
+            value: number;
+            private other: Worker;
+            constructor(value: number) { this.value = value; this.other = new Worker(); }
+            public run(): void { this.value = this.value + 1; this.other.work(); this.bump(); }
+            private bump(): void {}
+          }
+        TS
+        "Unit",
+        "run",
+        "bump",
+        "other",
+        "Worker",
+        "this.other"
+      ],
+      go: [
+        ".go",
+        <<~GO,
+          package p
+          type Worker struct{}
+          func (w *Worker) Work() {}
+          type Unit struct { value int; other *Worker }
+          func (u *Unit) Run() { u.value = u.value + 1; u.other.Work(); u.bump() }
+          func (u *Unit) bump() {}
+        GO
+        "Unit",
+        "Run",
+        "bump",
+        "other",
+        "*Worker",
+        "self.other"
+      ],
+      rust: [
+        ".rs",
+        <<~RS,
+          struct Worker {}
+          impl Worker { fn work(&self) {} }
+          struct Unit { value: i32, other: Worker }
+          impl Unit {
+            pub fn run(&mut self) { self.value = self.value + 1; self.other.work(); self.bump(); }
+            fn bump(&self) {}
+          }
+        RS
+        "Unit",
+        "run",
+        "bump",
+        "other",
+        "Worker",
+        "self.other"
+      ],
+      c: [
+        ".c",
+        <<~C,
+          typedef struct Worker { int ready; } Worker;
+          typedef struct Unit { int value; Worker *other; } Unit;
+          void worker_work(Worker *worker) {}
+          static void unit_bump(Unit *unit) {}
+          void unit_run(Unit *unit) { unit->value = unit->value + 1; worker_work(unit->other); unit_bump(unit); }
+        C
+        "Unit",
+        "unit_run",
+        "unit_bump",
+        "other",
+        "Worker",
+        "self.other"
+      ],
+      cpp: [
+        ".cpp",
+        <<~CPP,
+          class Worker { public: void work() {} };
+          class Unit {
+            int value;
+            Worker other;
+          public:
+            void run(){ value = value + 1; other.work(); bump(); }
+          private:
+            void bump(){}
+          };
+        CPP
+        "Unit",
+        "run",
+        "bump",
+        "other",
+        "Worker",
+        "other"
+      ],
+      csharp: [
+        ".cs",
+        <<~CS,
+          class Worker { public void Work() {} }
+          class Unit {
+            private int value;
+            private Worker other = new Worker();
+            public void Run(){ value = value + 1; other.Work(); Bump(); }
+            private void Bump(){}
+          }
+        CS
+        "Unit",
+        "Run",
+        "Bump",
+        "other",
+        "Worker",
+        "other"
+      ]
+    }
+
+    available = profiles.select do |language, _profile|
+      grammar = ENV[GRAMMAR_ENVS.fetch(language)]
+      grammar && File.file?(grammar)
+    end
+    skip "set Tree-sitter grammar paths to run architecture parity extractor test" if available.empty?
+
+    available.each do |language, (ext, source, owner_name, run_name, helper_name, state_name, state_type, receiver)|
+      mods = parse_source(source, ext)
+      mod = mods.find { |candidate| candidate[:name] == owner_name }
+      refute_nil mod, language
+      assert_includes mod[:states], state_name, language
+      assert_equal state_type, mod[:ivar_types][state_name] if state_type
+
+      vis = mod[:methods].to_h { |method| [method[:name], method[:visibility]] }
+      assert_equal :public, vis[run_name], language
+      assert_equal :private, vis[helper_name], language
+
+      run = mod[:methods].find { |method| method[:name] == run_name }
+      assert_includes run[:effects][:writes], "value", language
+      assert_includes run[:effects][:reads], state_name, language
+      assert_includes run[:delegations].map { |call| call[:receiver] }, receiver, language
     end
   end
 end

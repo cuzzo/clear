@@ -241,13 +241,21 @@ module NilKill
           short_description: "Nil-Kill static analysis signal"
         )
       end
-      action_rules + diagnostic_rules + static_rules
+      pressure_rules = sarif_pressure_findings(evidence).map { |finding| finding.fetch("kind") }.uniq.map do |kind|
+        Decomplex::Sarif.rule(
+          id: "nil-kill.pressure.#{Decomplex::Sarif.slug(kind)}",
+          name: "Pressure: #{kind.tr("_", " ")}",
+          short_description: "Nil-Kill pressure signal"
+        )
+      end
+      action_rules + diagnostic_rules + static_rules + pressure_rules
     end
 
     def sarif_results(evidence)
       sarif_actions(evidence).map { |action| sarif_action_result(action, evidence) } +
         sarif_diagnostics(evidence).map { |diagnostic| sarif_diagnostic_result(diagnostic) } +
-        sarif_static_findings(evidence).map { |finding| sarif_static_result(finding) }
+        sarif_static_findings(evidence).map { |finding| sarif_static_result(finding) } +
+        sarif_pressure_findings(evidence).map { |finding| sarif_pressure_result(finding) }
     end
 
     def sarif_actions(evidence)
@@ -283,7 +291,8 @@ module NilKill
         findings << {
           "kind" => "untyped_signature",
           "level" => "warning",
-          "message" => "static signature includes an untyped or unknown type for #{static_member_label(method)}",
+          "message" => "untyped signature pressure: #{static_member_label(method)} has `#{signature}`; " \
+                       "replace Any/T.untyped/unknown with the narrowest contract to stop downstream type guards",
           "path" => method["path"],
           "line" => method["line"],
           "static_kind" => method["kind"] || "method",
@@ -297,7 +306,8 @@ module NilKill
         findings << {
           "kind" => "nullable_signature",
           "level" => "note",
-          "message" => "static signature includes a nullable type for #{static_member_label(method)}",
+          "message" => "nilability pressure: #{static_member_label(method)} has `#{signature}`; " \
+                       "confirm absence is meaningful, otherwise tighten the contract or use an empty collection/value",
           "path" => method["path"],
           "line" => method["line"],
           "static_kind" => method["kind"] || "method",
@@ -317,7 +327,8 @@ module NilKill
       {
         "kind" => "untyped_field",
         "level" => "warning",
-        "message" => "static field has no precise type for #{static_member_label(field)}",
+        "message" => "untyped field pressure: #{static_member_label(field)} has no precise static type; " \
+                     "add a declared field type or typed initializer so readers do not need guards",
         "path" => field["path"],
         "line" => field["line"],
         "static_kind" => field["kind"] || "field",
@@ -349,6 +360,77 @@ module NilKill
       return owner if name.empty?
 
       "#{owner}##{name}"
+    end
+
+    def sarif_pressure_findings(evidence)
+      hidden_enum_pressure_findings(evidence) +
+        fallibility_pressure_findings(evidence) +
+        primitive_record_pressure_findings(evidence)
+    end
+
+    def hidden_enum_pressure_findings(evidence)
+      Array(evidence.dig("facts", "hidden_enum_pressure")).map do |row|
+        values = Array(row["values"]).first(10).join(", ")
+        label = pressure_member_label(row)
+        {
+          "kind" => "hidden_enum",
+          "level" => row["confidence"].to_s == "high" ? "warning" : "note",
+          "message" => "hidden enum pressure: #{label} #{row["kind"]} `#{row["slot"]}` has values #{values}; " \
+                       "decision pressure #{row["decision_pressure"].to_i}, score #{row["score"].to_i}; " \
+                       "#{row["suggestion"]}",
+          "path" => row["path"],
+          "line" => row["line"],
+          "pressure" => row,
+        }
+      end
+    end
+
+    def fallibility_pressure_findings(evidence)
+      fallibility_display_rows(Array(evidence.dig("facts", "fallibility_pressure"))).map do |row|
+        runtime = row["runtime"] || {}
+        raised = "#{runtime["raised_calls"].to_i}/#{runtime["calls"].to_i}"
+        classes = Array(runtime["raised_classes"]).first(4).join(", ")
+        class_text = classes.empty? ? "" : "; raised #{classes}"
+        {
+          "kind" => "fallibility",
+          "level" => row["handler_pressure"].to_i.positive? || runtime["raised_calls"].to_i.positive? ? "warning" : "note",
+          "message" => "fallibility pressure: #{row["label"]} score #{row["score"].to_i}; " \
+                       "direct sources #{Array(row["direct_sources"]).size}; runtime raises #{raised} " \
+                       "(#{runtime["raised_rate"].to_f}%#{class_text}); handlers #{row["handler_pressure"].to_i}; " \
+                       "unhandled callers #{Array(row["fallible_callers"]).size}",
+          "path" => row["path"],
+          "line" => row["line"],
+          "pressure" => row,
+        }
+      end
+    end
+
+    def primitive_record_pressure_findings(evidence)
+      hash_record_struct_pressure(evidence).map do |row|
+        location = parse_location(Array(row["examples"]).first)
+        keys = Array(row["keys"]).first(10).join(", ")
+        {
+          "kind" => "primitive_record",
+          "level" => row["total_pressure"].to_i >= 3 ? "warning" : "note",
+          "message" => "primitive record pressure: #{row["label"]} behaves like an ad-hoc struct; " \
+                       "total pressure #{row["total_pressure"].to_i} " \
+                       "(return #{row["return_slots"].to_i}, param #{row["param_slots"].to_i}, " \
+                       "ivar #{row["ivar_slots"].to_i}, collection #{row["collection_slots"].to_i}); keys #{keys}",
+          "path" => location[:path],
+          "line" => location[:line],
+          "pressure" => row,
+        }
+      end
+    end
+
+    def pressure_member_label(row)
+      owner = row["owner"].to_s
+      method = row["method"].to_s
+      return owner if method.empty?
+      return method if owner.empty?
+
+      separator = row["method_kind"] == "class" ? "." : "#"
+      "#{owner}#{separator}#{method}"
     end
 
     def sarif_action_result(action, evidence)
@@ -389,6 +471,20 @@ module NilKill
         line: finding["line"],
         properties: Decomplex::Sarif.json_safe_value(finding).merge(
           "source_format" => "nil-kill.static.evidence.v2"
+        )
+      )
+    end
+
+    def sarif_pressure_result(finding)
+      kind = finding["kind"].to_s.empty? ? "pressure" : finding["kind"].to_s
+      Decomplex::Sarif.result(
+        rule_id: "nil-kill.pressure.#{Decomplex::Sarif.slug(kind)}",
+        level: finding["level"] || "note",
+        message: finding["message"] || kind,
+        path: finding["path"],
+        line: finding["line"],
+        properties: Decomplex::Sarif.json_safe_value(finding).merge(
+          "source_format" => "nil-kill.pressure"
         )
       )
     end

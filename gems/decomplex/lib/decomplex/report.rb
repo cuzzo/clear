@@ -371,8 +371,7 @@ module Decomplex
     private
 
     def sarif_rules
-      SECTIONS.reject { |title, *_| CONVERGENCE_EXCLUDED_SECTIONS.include?(title) }
-              .map do |title, _ivar, tier, desc|
+      sarif_sections_data(include_findings: false).map do |title, tier, _findings, desc|
         Decomplex::Sarif.rule(
           id: sarif_rule_id(title),
           name: title,
@@ -397,7 +396,7 @@ module Decomplex
     end
 
     def sarif_results(include_finding_payload: true)
-      sections_data.flat_map do |title, tier, findings|
+      sarif_sections_data.flat_map do |title, tier, findings, _desc|
         Array(findings).flat_map do |finding|
           sarif_locations_for_finding(finding).map do |location|
             properties = {
@@ -448,6 +447,12 @@ module Decomplex
           "#{finding[:methods]} method(s)"
       when "Redundant Nil Guards"
         "`#{finding[:local]}` is nil-guarded by `#{finding[:guard]}` after proof `#{finding[:proof]}`"
+      when "State Heatmap"
+        writers = Array(finding[:top_writers]).first(3).join(" | ")
+        readers = Array(finding[:top_readers]).first(3).join(" | ")
+        "state `#{finding[:field]}` has pressure=#{finding[:pressure]}, messiness=#{finding[:messiness]} " \
+          "(writes=#{finding[:writes]}, reads=#{finding[:reads]}, re-derived=#{finding[:re_derivations]}, " \
+          "scatter=#{finding[:scatter]}); writers #{writers}; readers #{readers}"
       when "Missing Abstractions"
         "guard tuple `#{Array(finding[:members]).join(' | ')}` repeats in #{finding[:support]} site(s) " \
           "with scatter=#{finding[:scatter]}"
@@ -559,6 +564,13 @@ module Decomplex
         method: method,
         line: line&.positive? ? line : 1
       }
+    end
+
+    def sarif_sections_data(include_findings: true)
+      SECTIONS.map do |title, ivar, tier, desc|
+        findings = include_findings ? instance_variable_get(ivar) : nil
+        [title, tier, findings, desc]
+      end
     end
 
     def zero_based_column_to_sarif(value)
