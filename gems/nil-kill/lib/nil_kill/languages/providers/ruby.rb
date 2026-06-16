@@ -138,7 +138,17 @@ module NilKill
                 source: "sorbet"
               )
             elsif (match = stripped.match(/\A([A-Z]\w*)\s*=\s*Struct\.new\((.*)\)/))
-              definitions.concat(ruby_struct_new_fields(rel_path, qualified_name(owner_stack, match[1]), match[2], line_no))
+              owner_name = qualified_name(owner_stack, match[1])
+              definitions.concat(ruby_struct_new_fields(rel_path, owner_name, match[2], line_no))
+              owner_stack << { name: owner_name, t_struct: false, indent: indent } if stripped.match?(/\bdo\b/)
+              next
+            elsif owner && (match = stripped.match(/\Ainclude\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+              definitions << ruby_included_module_definition(
+                rel_path: rel_path,
+                owner: owner.fetch(:name),
+                name: qualified_include_name(owner_stack, match[1]),
+                line: line_no
+              )
             end
           end
           definitions
@@ -265,6 +275,19 @@ module NilKill
           }
         end
 
+        def ruby_included_module_definition(rel_path:, owner:, name:, line:)
+          {
+            "id" => ["ruby", rel_path, owner, "included_module", name, line, "ruby-include"].map(&:to_s).join("\u0000"),
+            "language" => "ruby",
+            "type_system" => "ruby-include",
+            "kind" => "included_module",
+            "path" => rel_path,
+            "owner" => owner.to_s,
+            "name" => name.to_s,
+            "line" => line,
+          }
+        end
+
         def qualified_name(stack, name)
           return name.to_s if name.to_s.include?("::")
 
@@ -274,6 +297,12 @@ module NilKill
           end
           parent_name = parent.is_a?(Hash) ? parent[:name].to_s : parent.to_s
           parent_name.empty? ? name.to_s : "#{parent_name}::#{name}"
+        end
+
+        def qualified_include_name(stack, name)
+          return name.to_s if name.to_s.include?("::")
+
+          qualified_name(Array(stack)[0...-1], name)
         end
 
         def self_receiver_names

@@ -75,6 +75,73 @@ RSpec.describe NilKill::SlotCoverage do
     expect(payload).not_to have_key("typed_hints")
   end
 
+  it "includes repeated untyped hash fields in slot-name pressure" do
+    path, = repo_tmp_file("slot_coverage_hash_field_fixture.rb", <<~RUBY)
+      class SlotCoverageHashFieldFixture
+        def first
+          { token: compute_token, name: "ready" }
+        end
+
+        def second
+          { token: other_token, name: "done" }
+        end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+    token = rows.find { |row| row["name"] == "token" }
+
+    expect(token).to include("count" => 2)
+    expect(token.fetch("categories")).to include("hash_field" => 2)
+    expect(token.fetch("examples")).to include(match(/hash field token/))
+    expect(token.fetch("typed_total")).to eq(0)
+  end
+
+  it "does not report hash fields whose literal values have typed shapes" do
+    path, = repo_tmp_file("slot_coverage_typed_hash_field_fixture.rb", <<~RUBY)
+      class SlotCoverageTypedHashFieldFixture
+        ERROR_ID = 12
+
+        def first
+          { codes: %i[A B], id: ERROR_ID, col: 7, name: "ready" }
+        end
+
+        def second
+          { codes: %i[C D], id: ERROR_ID, col: 8, name: "done" }
+        end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+
+    expect(rows.map { |row| row["name"] }).not_to include("codes", "id", "col", "name")
+  end
+
+  it "credits typed accessors from included modules to Ruby struct fields" do
+    path, = repo_tmp_file("slot_coverage_included_accessor_fixture.rb", <<~RUBY)
+      module IncludedAccessorFixture
+        module DropField
+          extend T::Sig
+
+          sig { returns(T::Array[String]) }
+          def drops
+            self[:drops] ||= []
+          end
+        end
+
+        Item = Struct.new(:drops) do
+          include DropField
+        end
+      end
+    RUBY
+
+    summary = described_class.new([path]).summaries.fetch(0)
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+
+    expect(summary.fetch("struct_fields")).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+    expect(rows.map { |row| row["name"] }).not_to include("drops")
+  end
+
   it "qualifies Ruby struct owners under modules without popping on method ends" do
     path, = repo_tmp_file("slot_coverage_nested_structs.rb", <<~RUBY)
       module Sample

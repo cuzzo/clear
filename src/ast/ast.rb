@@ -1324,6 +1324,20 @@ module AST
     const :resource, T::Boolean, default: false
   end
 
+  module DeferredDropsField
+    extend T::Sig
+
+    sig { returns(T::Array[AST::DeferredDrop]) }
+    def deferred_drops
+      T.unsafe(self)[:deferred_drops] ||= []
+    end
+
+    sig { params(val: T.nilable(T::Array[AST::DeferredDrop])).void }
+    def deferred_drops=(val)
+      T.unsafe(self)[:deferred_drops] = val || []
+    end
+  end
+
   class ReturnFact < T::Struct
     const :storage, T.nilable(Symbol)
     const :type, Symbol
@@ -1358,6 +1372,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
 
@@ -1805,6 +1820,7 @@ module AST
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
     extend T::Sig
     include Locatable
+    include DeferredDropsField
     sig { params(args: InitArgs).void }
     def initialize(*args)
       super
@@ -1861,6 +1877,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
@@ -1871,6 +1888,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
@@ -1975,6 +1993,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+    include DeferredDropsField
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
@@ -2531,6 +2550,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
@@ -2569,6 +2589,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
@@ -2648,6 +2669,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :tight
@@ -2659,6 +2681,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
+    include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter

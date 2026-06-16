@@ -122,6 +122,7 @@ module NilKill
         add_slot!(summary, field_category(definition), type)
         record_name_slot!(name_pressure, typed_name_counts, definition["name"], field_category(definition).delete_suffix("s"), type, field_site(definition))
       end
+      record_hash_shape_name_slots!(evidence, name_pressure, typed_name_counts)
 
       files = summaries.values.sort_by { |summary| summary.fetch("path") }.map do |summary|
         self.class.finalize_summary!(summary)
@@ -142,7 +143,9 @@ module NilKill
     end
 
     def field_type_index(evidence)
-      type_definitions(evidence).each_with_object({}) do |definition, index|
+      definitions = type_definitions(evidence)
+      included_modules = included_modules_by_owner(definitions)
+      definitions.each_with_object({}) do |definition, index|
         case definition["kind"]
         when "state_field"
           type = definition["declared_type"]
@@ -155,6 +158,47 @@ module NilKill
         field_keys(definition).each do |key|
           assign_field_type!(index, key, type)
         end
+        included_method_field_keys(definition, included_modules).each do |key|
+          assign_field_type!(index, key, type)
+        end
+      end
+    end
+
+    def included_modules_by_owner(definitions)
+      direct = Hash.new { |hash, key| hash[key] = Set.new }
+      definitions.each do |definition|
+        next unless definition["kind"] == "included_module"
+
+        owner = definition["owner"].to_s
+        name = definition["name"].to_s
+        next if owner.empty? || name.empty?
+
+        direct[owner].add(name)
+      end
+
+      direct.keys.each_with_object({}) do |owner, index|
+        index[owner] = expanded_included_modules(owner, direct, Set.new)
+      end
+    end
+
+    def expanded_included_modules(owner, direct, seen)
+      return Set.new if seen.include?(owner)
+
+      seen.add(owner)
+      direct[owner].each_with_object(Set.new) do |mod, modules|
+        modules.add(mod)
+        expanded_included_modules(mod, direct, seen.dup).each { |nested| modules.add(nested) }
+      end
+    end
+
+    def included_method_field_keys(definition, included_modules)
+      return [] unless definition["kind"] == "method_signature"
+
+      signature_owner = definition["owner"].to_s
+      included_modules.flat_map do |owner, modules|
+        next [] unless modules.include?(signature_owner)
+
+        field_keys(definition.merge("owner" => owner))
       end
     end
 
@@ -346,6 +390,26 @@ module NilKill
         row["examples"] << site if row["examples"].size < 3
       else
         typed_name_counts[clean_name][distribution_type(type, clean_name)] += 1
+      end
+    end
+
+    def record_hash_shape_name_slots!(evidence, name_pressure, typed_name_counts)
+      seen = Set.new
+      Array(evidence.dig("facts", "hash_shapes")).each do |shape|
+        keys = Array(shape["keys"])
+        value_types = Array(shape["value_types"])
+        keys.each_with_index do |key, index|
+          name = key.to_s
+          next if name.empty?
+
+          site_key = [shape["path"], shape["line"], name, index]
+          next if seen.include?(site_key)
+
+          seen.add(site_key)
+          type = value_types[index]
+          site = "#{shape["path"]}:#{shape["line"]} hash field #{name}"
+          record_name_slot!(name_pressure, typed_name_counts, name, "hash_field", type, site)
+        end
       end
     end
 
