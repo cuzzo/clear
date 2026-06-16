@@ -103,106 +103,48 @@ module Espalier
     def sarif_rules
       [
         Decomplex::Sarif.rule(
-          id: "espalier.owner",
-          name: "Owner",
-          short_description: "Static architecture owner/module record",
-          default_level: "note"
-        ),
-        Decomplex::Sarif.rule(
-          id: "espalier.state",
-          name: "State",
-          short_description: "State owned by an architecture owner",
-          default_level: "note"
-        ),
-        Decomplex::Sarif.rule(
           id: "espalier.function",
-          name: "Function",
-          short_description: "Function/method static architecture record",
+          name: "Impure Function",
+          short_description: "Function/method with direct state effects",
           default_level: "note"
-        ),
-        Decomplex::Sarif.rule(
-          id: "espalier.privacy-candidate",
-          name: "Privacy Candidate",
-          short_description: "Public function appears to be same-owner helper behavior"
         )
       ]
     end
 
     def sarif_results(manifest)
       Array(manifest).flat_map do |mod|
-        owner_result(mod) + state_results(mod) + function_results(mod)
-      end
-    end
-
-    def owner_result(mod)
-      [
-        Decomplex::Sarif.result(
-          rule_id: "espalier.owner",
-          level: "note",
-          message: "owner: #{mod[:module]}",
-          path: mod[:file],
-          line: 1,
-          properties: {
-            "module" => mod[:module],
-            "language" => mod[:language],
-            "type" => mod[:type],
-            "source_format" => "espalier.manifest.v1"
-          }
-        )
-      ]
-    end
-
-    def state_results(mod)
-      Array(mod[:state]).map do |state|
-        Decomplex::Sarif.result(
-          rule_id: "espalier.state",
-          level: "note",
-          message: "state: #{mod[:module]} #{state[:name]}",
-          path: mod[:file],
-          line: 1,
-          properties: {
-            "module" => mod[:module],
-            "state" => Decomplex::Sarif.json_safe_value(state),
-            "source_format" => "espalier.manifest.v1"
-          }
-        )
+        function_results(mod)
       end
     end
 
     def function_results(mod)
-      Array(mod[:functions]).flat_map do |fn|
-        metrics = fn[:quality_metrics] || {}
-        base = Decomplex::Sarif.result(
-          rule_id: "espalier.function",
-          level: "note",
-          message: "function: #{mod[:module]}##{fn[:name]}",
-          path: mod[:file],
-          line: fn[:line] || span_line(fn, 0) || 1,
-          end_line: span_line(fn, 2),
-          properties: {
-            "module" => mod[:module],
-            "function" => Decomplex::Sarif.json_safe_value(fn),
-            "source_format" => "espalier.manifest.v1"
-          }
-        )
-        privacy = if metrics[:privacy_candidate] || metrics["privacy_candidate"]
-                    Decomplex::Sarif.result(
-                      rule_id: "espalier.privacy-candidate",
-                      level: "warning",
-                      message: "privacy candidate: #{mod[:module]}##{fn[:name]}",
-                      path: mod[:file],
-                      line: fn[:line] || span_line(fn, 0) || 1,
-                      end_line: span_line(fn, 2),
-                      properties: {
-                        "module" => mod[:module],
-                        "function" => fn[:name],
-                        "quality_metrics" => Decomplex::Sarif.json_safe_value(metrics),
-                        "source_format" => "espalier.manifest.v1"
-                      }
-                    )
-                  end
-        [base, privacy].compact
-      end
+      Array(mod[:functions]).filter_map { |fn| impure_function_result(mod, fn) }
+    end
+
+    def impure_function_result(mod, fn)
+      effects = fn[:EFFECTS] || fn["EFFECTS"] || fn[:effects] || fn["effects"] || {}
+      reads = Array(effects[:reads] || effects["reads"])
+      writes = Array(effects[:writes] || effects["writes"])
+      return nil if reads.empty? && writes.empty?
+      effect_kind = writes.empty? ? "read-only function" : "impure function"
+
+      Decomplex::Sarif.result(
+        rule_id: "espalier.function",
+        level: "note",
+        message: "#{effect_kind}: #{mod[:module]}##{fn[:name]}",
+        path: mod[:file],
+        line: fn[:line] || span_line(fn, 0) || 1,
+        end_line: span_line(fn, 2),
+        properties: {
+          "module" => mod[:module],
+          "function" => Decomplex::Sarif.json_safe_value(fn),
+          "effects" => {
+            "reads" => reads,
+            "writes" => writes
+          },
+          "source_format" => "espalier.manifest.v1"
+        }
+      )
     end
 
     def span_line(fn, index)

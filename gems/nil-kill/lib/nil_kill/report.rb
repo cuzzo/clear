@@ -311,7 +311,7 @@ module NilKill
     end
 
     def static_field_finding(field)
-      type = field["type"] || field["signature"] || field.dig("source", "type")
+      type = field["type"] || field["declared_type"] || field["signature"] || field.dig("source", "type")
       return nil unless type.to_s.empty? || static_untyped_signature?(type.to_s)
 
       {

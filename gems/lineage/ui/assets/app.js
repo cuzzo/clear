@@ -62,6 +62,7 @@
   };
 
   const linePanelClass = (input) => {
+    if (input.dataset.panelClass) return input.dataset.panelClass;
     if (input.classList.contains("bug-toggle")) return "bug-open";
     if (input.classList.contains("meta-toggle")) return "meta-open";
     if (input.classList.contains("decomplex-toggle")) return "decomplex-open";

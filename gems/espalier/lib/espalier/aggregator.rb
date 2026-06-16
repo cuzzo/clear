@@ -107,6 +107,8 @@ module Espalier
         mod_row = {
           module: mod[:name],
           file: mod[:file],
+          line: mod[:line],
+          span: mod[:span],
           language: mod[:language],
           type: mod[:type],
           state: aggregated_states.empty? ? nil : aggregated_states,

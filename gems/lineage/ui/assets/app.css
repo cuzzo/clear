@@ -126,7 +126,7 @@
   }
   .outline a {
     display: grid;
-    grid-template-columns: 24px 36px minmax(0, 1fr);
+    grid-template-columns: 30px 36px minmax(0, 1fr);
     gap: 6px;
     padding: 4px 2px;
     color: var(--text);
@@ -138,7 +138,7 @@
   .outline-kind { color: var(--muted); }
   .outline-rail {
     display: grid;
-    grid-template-columns: 12px 6px;
+    grid-template-columns: 14px 8px;
     gap: 4px;
     align-items: stretch;
     min-height: 14px;
@@ -152,11 +152,16 @@
   }
   .outline-hotspot {
     border-radius: 2px;
-    background: rgba(22, 101, 52, 0.42);
+    background: rgba(20, 83, 45, 0.72);
   }
-  .hotspot-yellow .outline-hotspot { background: rgba(234, 179, 8, 0.62); }
-  .hotspot-orange .outline-hotspot { background: rgba(249, 115, 22, 0.70); }
+  .hotspot-dark-green .outline-hotspot { background: rgba(20, 83, 45, 0.72); }
+  .hotspot-green .outline-hotspot { background: rgba(22, 101, 52, 0.54); }
+  .hotspot-light-green .outline-hotspot { background: rgba(34, 197, 94, 0.30); }
+  .hotspot-yellow .outline-hotspot { background: rgba(234, 179, 8, 0.46); }
+  .hotspot-orange .outline-hotspot { background: rgba(249, 115, 22, 0.58); }
+  .hotspot-light-red .outline-hotspot { background: rgba(248, 113, 113, 0.66); }
   .hotspot-red .outline-hotspot { background: rgba(185, 28, 28, 0.78); }
+  .hotspot-deep-red .outline-hotspot { background: rgba(127, 29, 29, 0.92); }
   .pure-symbol .outline-name { color: #166534; }
   .impure-symbol .outline-name { color: #7f1d1d; }
   .outline-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -451,6 +456,7 @@
     position: absolute;
     inset-block-start: 6px;
     inset-inline-end: 6px;
+    cursor: pointer;
     inline-size: 22px;
     block-size: 22px;
     min-height: 0;
@@ -699,7 +705,7 @@
   #layer-gutter-icons:not(:checked) ~ .viewer .bomb,
   #layer-gutter-icons:not(:checked) ~ .viewer .line-icon { display: none; }
   .bomb {
-    cursor: help;
+    cursor: pointer;
     display: inline-block;
     font-size: 13px;
     line-height: 18px;
@@ -786,13 +792,25 @@
     font-size: 13px;
     line-height: 18px;
   }
-  .decomplex-finding { color: var(--muted); }
+  .decomplex-finding,
+  .espalier-finding,
+  .nil-kill-finding,
+  .lint-finding { color: var(--muted); }
   .decomplex-finding:hover,
-  .decomplex-finding:focus-visible { color: var(--text); }
+  .decomplex-finding:focus-visible,
+  .espalier-finding:hover,
+  .espalier-finding:focus-visible,
+  .nil-kill-finding:hover,
+  .nil-kill-finding:focus-visible,
+  .lint-finding:hover,
+  .lint-finding:focus-visible { color: var(--text); }
   .bomb i,
   .line-meta i,
   .bug-history i,
-  .decomplex-finding i {
+  .decomplex-finding i,
+  .espalier-finding i,
+  .nil-kill-finding i,
+  .lint-finding i {
     inline-size: 14px;
     text-align: center;
   }
@@ -809,10 +827,18 @@
   }
   .bug-toggle:checked ~ .bug-panel,
   .meta-toggle:checked ~ .meta-panel,
+  .hazard-toggle:checked ~ .hazard-panel,
   .decomplex-toggle:checked ~ .decomplex-panel,
+  .espalier-toggle:checked ~ .espalier-panel,
+  .nil-kill-toggle:checked ~ .nil-kill-panel,
+  .lint-toggle:checked ~ .lint-panel,
   .row.bug-open .bug-panel,
   .row.meta-open .meta-panel,
-  .row.decomplex-open .decomplex-panel { display: block; }
+  .row.hazard-panel-open .hazard-panel,
+  .row.decomplex-open .decomplex-panel,
+  .row.espalier-open .espalier-panel,
+  .row.nil-kill-open .nil-kill-panel,
+  .row.lint-open .lint-panel { display: block; }
   .line-panel p {
     margin: 0 0 4px;
     overflow: hidden;
@@ -824,22 +850,31 @@
     color: #7f1d1d;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  .decomplex-panel {
+  .hazard-panel {
+    color: #7f1d1d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .hazard-source {
+    color: #475569;
+    padding-left: 2ch;
+  }
+  .finding-panel {
     color: #334155;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  .decomplex-panel p {
+  .finding-panel p {
     overflow: visible;
     text-overflow: clip;
     white-space: normal;
   }
-  .decomplex-panel a {
+  .finding-panel a,
+  .finding-panel strong {
     color: #334155;
     font-weight: 700;
     text-decoration: none;
   }
-  .decomplex-panel a:hover { text-decoration: underline; }
-  .decomplex-tier {
+  .finding-panel a:hover { text-decoration: underline; }
+  .finding-tier {
     color: var(--muted);
     font-weight: 700;
   }

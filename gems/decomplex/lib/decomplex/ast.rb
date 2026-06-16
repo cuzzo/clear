@@ -523,7 +523,7 @@ module Decomplex
       end
 
       def yield_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
+        %w[body_statement block block_body statement].include?(node.kind) &&
           node.children.first&.text == "yield"
       rescue StandardError
         false
@@ -558,7 +558,7 @@ module Decomplex
       end
 
       def super_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
+        %w[body_statement block block_body statement].include?(node.kind) &&
           node.named_children.first&.kind == "super" &&
           node.named_children.drop(1).all? { |child| child.kind == "argument_list" }
       rescue StandardError
@@ -1722,7 +1722,7 @@ module Decomplex
       end
 
       def command_call_statement?(node)
-        return false unless %w[body_statement block_body statement].include?(node.kind)
+        return false unless %w[body_statement block block_body statement].include?(node.kind)
         return false if dotted_call?(node)
         return false unless node.named_children.first&.kind == "identifier"
 
@@ -1755,7 +1755,7 @@ module Decomplex
       end
 
       def leading_if_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
+        %w[body_statement block block_body statement].include?(node.kind) &&
           %w[if unless].include?(node.children.first&.kind.to_s) &&
           node.named_children.size >= 2 &&
           !IF_KINDS.include?(node.named_children.first.kind)

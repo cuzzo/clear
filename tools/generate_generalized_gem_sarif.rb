@@ -11,12 +11,16 @@ DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS"
 $LOAD_PATH.unshift(File.join(ROOT, "gems/decomplex/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/boobytrap/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
+$LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
+$LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
 
 require "decomplex/report"
 require "decomplex/source_filter"
 require "decomplex/sarif"
 require "boobytrap"
 require "slopcop"
+require "espalier"
+require "nil_kill"
 
 options = {
   repo: ".",
@@ -97,6 +101,26 @@ def empty_markdown(tool_name)
   "# #{tool_name} Report\n\n_No changed Tree-sitter-supported source files in this PR._\n"
 end
 
+def build_espalier_manifest(files)
+  modules = files.flat_map { |file| Espalier::AstExtractor.new(file).extract }
+  Espalier::Aggregator.new.aggregate(modules)
+end
+
+def build_nil_kill_evidence(files, repo)
+  static = NilKill::StaticEvidence.build(files, root: repo)
+  NilKill::Schema::EvidenceBundle.build(
+    root: repo,
+    static: static,
+    runtime: nil,
+    actions: [],
+    diagnostics: [],
+    metadata: {
+      "source" => "tools/generate_generalized_gem_sarif.rb",
+      "mode" => "static-only"
+    }
+  )
+end
+
 coverage_paths = options[:coverage].flat_map { |entry| entry.split(File::PATH_SEPARATOR) }
                                   .map(&:strip)
                                   .reject(&:empty?)
@@ -116,6 +140,10 @@ if rel_files.empty?
   write(File.join(out_dir, "boobytrap.md"), empty_markdown("Boobytrap"))
   write(File.join(out_dir, "slopcop.sarif"), empty_sarif("SlopCop", "slopcop.report.sarif.v1"))
   write(File.join(out_dir, "slopcop.md"), empty_markdown("SlopCop"))
+  write(File.join(out_dir, "espalier.sarif"), empty_sarif("Espalier", "espalier.manifest.sarif.v1"))
+  write(File.join(out_dir, "espalier.md"), empty_markdown("Espalier"))
+  write(File.join(out_dir, "nil-kill.sarif"), empty_sarif("Nil-Kill", "nil-kill.report.sarif.v1"))
+  write(File.join(out_dir, "nil-kill.md"), empty_markdown("Nil-Kill"))
   exit 0
 end
 
@@ -156,6 +184,23 @@ begin
   )
   write(File.join(out_dir, "slopcop.sarif"), slopcop.to_json)
   write(File.join(out_dir, "slopcop.md"), slopcop.to_markdown)
+
+  Dir.chdir(repo) do
+    manifest = build_espalier_manifest(rel_files)
+    write(File.join(out_dir, "espalier.sarif"), Espalier::Formatter.to_sarif(manifest))
+    write(
+      File.join(out_dir, "espalier.md"),
+      Espalier::Reporter.new(manifest, root: repo, link_base: out_dir).to_markdown
+    )
+
+    nil_kill_evidence = build_nil_kill_evidence(rel_files, repo)
+    nil_kill_report = NilKill::Report.new(["--format", "sarif"], evidence: nil_kill_evidence)
+    write(File.join(out_dir, "nil-kill.sarif"), nil_kill_report.to_sarif(nil_kill_evidence))
+    write(
+      File.join(out_dir, "nil-kill.md"),
+      NilKill::Reporting::MultiLanguageReport.new(nil_kill_evidence).lines.join("\n") + "\n"
+    )
+  end
 ensure
   previous_parser.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous_parser
 end

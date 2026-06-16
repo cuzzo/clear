@@ -119,6 +119,15 @@ class AggregatorTest < Minitest::Test
             span: [4, 0, 8, 3],
             EFFECTS: { reads: [], writes: ["@active"] },
             quality_metrics: { privacy_candidate: true, privacy_score: 8.0 }
+          },
+          {
+            name: "read_state",
+            signature: "def read_state",
+            visibility: :public,
+            line: 10,
+            span: [10, 0, 12, 3],
+            EFFECTS: { reads: ["@active"], writes: [] },
+            quality_metrics: { privacy_candidate: false }
           }
         ]
       }
@@ -128,7 +137,11 @@ class AggregatorTest < Minitest::Test
     assert_equal "2.1.0", sarif.fetch("version")
     run = sarif.fetch("runs").first
     assert_equal "Espalier", run.dig("tool", "driver", "name")
-    assert run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.privacy-candidate" }
+    assert run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.function" }
+    assert run.fetch("results").any? { |result| result.dig("properties", "function", "name") == "read_state" }
+    assert run.fetch("results").any? { |result| result.dig("message", "text") == "read-only function: ConnectionManager#read_state" }
+    refute run.fetch("results").any? { |result| result.dig("message", "text") == "impure function: ConnectionManager#read_state" }
+    refute run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.privacy-candidate" }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
   end
 

@@ -202,7 +202,7 @@ class ClassifierTest < Minitest::Test
     f&.unlink
   end
 
-  def test_kcov_cobertura_zig_classification_does_not_infer_dark_arms
+  def test_kcov_cobertura_zig_classification_infers_dark_arms_from_line_hits
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
       file = "#{dir}/src/worker.zig"
@@ -240,7 +240,13 @@ class ClassifierTest < Minitest::Test
       XML
 
       with_env("DECOMPLEX_PARSER", "tree_sitter") do
-        assert_empty C.classify_file(coverage, file, root: dir)
+        arms = C.classify_file(coverage, file, root: dir)
+
+        refute_empty arms
+        assert arms.all? { |arm| arm.source == :tree_sitter_static }
+        assert_equal ["run"], arms.map(&:defn).uniq
+        assert_includes arms.map(&:line), 7
+        assert_includes arms.map(&:category), :genuine
       end
     end
   end

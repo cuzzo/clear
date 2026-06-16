@@ -262,6 +262,14 @@ RSpec.describe NilKill do
               "name" => "@cache",
               "language" => "ruby",
             },
+            {
+              "path" => "src/storage.rs",
+              "line" => 16,
+              "owner" => "CurrentUnitSpan",
+              "name" => "id",
+              "language" => "rust",
+              "declared_type" => "String",
+            },
           ],
         },
         "runtime" => {},
@@ -270,13 +278,18 @@ RSpec.describe NilKill do
       }
 
       sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
-      rule_ids = sarif.fetch("runs").first.fetch("results").map { |result| result.fetch("ruleId") }
+      results = sarif.fetch("runs").first.fetch("results")
+      rule_ids = results.map { |result| result.fetch("ruleId") }
 
       expect(rule_ids).to include(
         "nil-kill.static.untyped-signature",
         "nil-kill.static.nullable-signature",
         "nil-kill.static.untyped-field",
       )
+      expect(results).not_to include(a_hash_including(
+        "ruleId" => "nil-kill.static.untyped-field",
+        "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
+      ))
     end
 
     it "--hygiene emits only the slot summary and action counts, skipping heavy sections" do

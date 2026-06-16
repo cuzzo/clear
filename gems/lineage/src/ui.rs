@@ -1,4 +1,6 @@
-use crate::extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
+use crate::extract::{
+    is_production_source_path, BoundaryExtractor, HeuristicExtractor, SourceFilter,
+};
 use crate::git::GitProvider;
 use crate::model::BlobFile;
 use crate::storage::Storage;
@@ -176,6 +178,90 @@ pub struct UiFinding {
     pub span: Option<[u32; 4]>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstPartyFindingTool {
+    Decomplex,
+    Espalier,
+    NilKill,
+    Lint,
+}
+
+impl FirstPartyFindingTool {
+    fn all() -> &'static [Self] {
+        &[Self::Decomplex, Self::Espalier, Self::NilKill, Self::Lint]
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex",
+            Self::Espalier => "espalier",
+            Self::NilKill => "nil-kill",
+            Self::Lint => "lint",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Decomplex => "Decomplex",
+            Self::Espalier => "Espalier",
+            Self::NilKill => "Nil-Kill",
+            Self::Lint => "Lint",
+        }
+    }
+
+    fn icon_family(self) -> &'static str {
+        match self {
+            Self::Lint => "fa-regular",
+            _ => "fa-solid",
+        }
+    }
+
+    fn icon_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "fa-puzzle-piece",
+            Self::Espalier => "fa-tree",
+            Self::NilKill => "fa-skull",
+            Self::Lint => "fa-note-sticky",
+        }
+    }
+
+    fn panel_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-panel",
+            Self::Espalier => "espalier-panel",
+            Self::NilKill => "nil-kill-panel",
+            Self::Lint => "lint-panel",
+        }
+    }
+
+    fn toggle_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-toggle",
+            Self::Espalier => "espalier-toggle",
+            Self::NilKill => "nil-kill-toggle",
+            Self::Lint => "lint-toggle",
+        }
+    }
+
+    fn open_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-open",
+            Self::Espalier => "espalier-open",
+            Self::NilKill => "nil-kill-open",
+            Self::Lint => "lint-open",
+        }
+    }
+
+    fn control_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-finding",
+            Self::Espalier => "espalier-finding",
+            Self::NilKill => "nil-kill-finding",
+            Self::Lint => "lint-finding",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiSourceSymbol {
     pub kind: String,
@@ -265,6 +351,20 @@ pub struct UiUnitHotspot {
     pub distinct_tests: i64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiArchitectureRisk {
+    pub path: String,
+    pub owner: String,
+    pub owner_kind: String,
+    pub start_line: u32,
+    pub score: f64,
+    pub findings: i64,
+    pub states: i64,
+    pub functions: i64,
+    pub impure_functions: i64,
+    pub privacy_candidates: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CommentFold {
     id: usize,
@@ -321,6 +421,7 @@ pub struct UiDashboard {
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
     pub top_units: Vec<UiUnitHotspot>,
+    pub top_architecture_risks: Vec<UiArchitectureRisk>,
     pub warnings: Vec<UiWarning>,
 }
 
@@ -580,7 +681,7 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
     let files = rows
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|file| scope.allows(&file.path))
+        .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
         .collect();
     profile_log("file_index.current_units", query_start);
     profile_log("file_index.total", total_start);
@@ -605,7 +706,11 @@ fn append_sarif_only_files(
         .map(|file| file.path.clone())
         .collect::<BTreeSet<_>>();
     for (path, count) in sarif_counts {
-        if *count <= 0 || existing.contains(path) || !scope.allows(path) {
+        if *count <= 0
+            || existing.contains(path)
+            || !scope.allows(path)
+            || !is_production_source_path(path)
+        {
             continue;
         }
         files.push(UiFile {
@@ -722,7 +827,7 @@ fn read_model_file_index_with_scope(
     let files = rows
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|file| scope.allows(&file.path))
+        .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
         .collect();
     profile_log("file_index.read_model_query", start);
     Ok(Some(files))
@@ -865,7 +970,7 @@ fn line_coverage_by_file(
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
     for row in rows {
         let (path, hits) = row?;
-        if !scope.allows(&path) {
+        if !scope.allows(&path) || !is_production_source_path(&path) {
             continue;
         }
         let entry = by_file.entry(path).or_default();
@@ -953,6 +1058,9 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
     let unit_start = Instant::now();
     let top_units = top_unit_hotspots(storage, &directory, scope, repo)?;
     profile_log("dashboard.top_units", unit_start);
+    let architecture_start = Instant::now();
+    let top_architecture_risks = top_architecture_risks(storage, &directory, scope)?;
+    profile_log("dashboard.top_architecture_risks", architecture_start);
 
     let files_with_coverage = files
         .iter()
@@ -1008,6 +1116,7 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         files_with_coverage,
         top_hazard_files,
         top_units,
+        top_architecture_risks,
         warnings,
     };
     profile_log("dashboard.total", total_start);
@@ -1021,7 +1130,11 @@ fn warnings_for_directory(
 ) -> Result<Vec<UiWarning>> {
     let units = warning_units(storage)?
         .into_iter()
-        .filter(|unit| scope.allows(&unit.current_path) && path_in_directory(&unit.current_path, directory))
+        .filter(|unit| {
+            scope.allows(&unit.current_path)
+                && is_production_source_path(&unit.current_path)
+                && path_in_directory(&unit.current_path, directory)
+        })
         .collect::<Vec<_>>();
     Ok(warnings_for_units(&units))
 }
@@ -1265,6 +1378,7 @@ fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
 #[derive(Clone, Default)]
 struct UnitSignalCounts {
     sarif_findings: i64,
+    lint_findings: i64,
     dark_arms: i64,
     hazards: i64,
 }
@@ -1282,7 +1396,9 @@ fn top_unit_hotspots(
     };
     let mut summaries = storage.top_units(2_000, &prefixes)?;
     summaries.retain(|summary| {
-        scope.allows(&summary.current_path) && path_in_directory(&summary.current_path, directory)
+        scope.allows(&summary.current_path)
+            && is_production_source_path(&summary.current_path)
+            && path_in_directory(&summary.current_path, directory)
     });
     let signals = unit_signal_counts(storage)?;
     let spans = storage
@@ -1340,6 +1456,167 @@ fn top_unit_hotspots(
     Ok(units)
 }
 
+#[derive(Debug, Default, Clone)]
+struct ArchitectureRiskAccumulator {
+    path: String,
+    owner: String,
+    owner_kind: String,
+    start_line: u32,
+    findings: i64,
+    states: i64,
+    functions: i64,
+    impure_functions: i64,
+    privacy_candidates: i64,
+}
+
+fn top_architecture_risks(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiArchitectureRisk>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path, start_line, rule_id, level, message, properties_json
+        FROM sarif_findings
+        WHERE lower(tool_name) = 'espalier'
+           OR lower(run_format) = 'espalier.manifest.sarif.v1'
+           OR lower(source) LIKE '%espalier%'
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+
+    let mut risks = BTreeMap::<(String, String), ArchitectureRiskAccumulator>::new();
+    for row in rows {
+        let (path, start_line, rule_id, level, message, properties_json) = row?;
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
+            continue;
+        }
+        let properties = serde_json::from_str::<Value>(&properties_json).unwrap_or(Value::Null);
+        let Some(owner) = espalier_owner_name(&properties, &message) else {
+            continue;
+        };
+        let owner_kind = string_field(&properties, &["type"])
+            .or_else(|| string_field(&properties, &["kind"]))
+            .unwrap_or("owner")
+            .to_string();
+        let key = (path.clone(), owner.clone());
+        let entry = risks.entry(key).or_insert_with(|| ArchitectureRiskAccumulator {
+            path: path.clone(),
+            owner: owner.clone(),
+            owner_kind: owner_kind.clone(),
+            start_line: 0,
+            ..ArchitectureRiskAccumulator::default()
+        });
+        if entry.owner_kind == "owner" && owner_kind != "owner" {
+            entry.owner_kind = owner_kind;
+        }
+        let line = espalier_finding_start_line(&properties).unwrap_or(start_line).max(1);
+        if entry.start_line == 0 || line < entry.start_line {
+            entry.start_line = line;
+        }
+        entry.findings += 1;
+        match rule_id.as_str() {
+            "espalier.state" => entry.states += 1,
+            "espalier.function" => {
+                entry.functions += 1;
+                if espalier_function_impure(&properties) {
+                    entry.impure_functions += 1;
+                }
+            }
+            "espalier.privacy-candidate" => entry.privacy_candidates += 1,
+            _ => {
+                if level == "warning" {
+                    entry.privacy_candidates += 1;
+                }
+            }
+        }
+    }
+
+    let mut out = risks
+        .into_values()
+        .map(|risk| {
+            let score = architecture_risk_score(&risk);
+            UiArchitectureRisk {
+                path: risk.path,
+                owner: risk.owner,
+                owner_kind: risk.owner_kind,
+                start_line: risk.start_line.max(1),
+                score,
+                findings: risk.findings,
+                states: risk.states,
+                functions: risk.functions,
+                impure_functions: risk.impure_functions,
+                privacy_candidates: risk.privacy_candidates,
+            }
+        })
+        .filter(|risk| risk.score > 0.0)
+        .collect::<Vec<_>>();
+    out.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.privacy_candidates.cmp(&left.privacy_candidates))
+            .then_with(|| right.impure_functions.cmp(&left.impure_functions))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.owner.cmp(&right.owner))
+    });
+    out.truncate(12);
+    Ok(out)
+}
+
+fn espalier_owner_name(properties: &Value, message: &str) -> Option<String> {
+    string_field(properties, &["module"])
+        .or_else(|| object_field(properties, &["function"]).and_then(|function| string_field(function, &["owner"])))
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            message
+                .strip_prefix("owner:")
+                .or_else(|| message.strip_prefix("function:"))
+                .and_then(|tail| tail.trim().split('#').next())
+                .map(str::trim)
+                .filter(|owner| !owner.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn espalier_finding_start_line(properties: &Value) -> Option<u32> {
+    u32_field(properties, &["line"])
+        .or_else(|| span_field(properties, &["span"]).map(|span| span[0]))
+        .or_else(|| {
+            object_field(properties, &["function"])
+                .and_then(|function| u32_field(function, &["line"]).or_else(|| span_field(function, &["span"]).map(|span| span[0])))
+        })
+}
+
+fn espalier_function_impure(properties: &Value) -> bool {
+    let Some(function) = object_field(properties, &["function"]) else {
+        return false;
+    };
+    !normalized_effect_list(function, &["EFFECTS", "effects"], "writes").is_empty()
+}
+
+fn architecture_risk_score(risk: &ArchitectureRiskAccumulator) -> f64 {
+    risk.privacy_candidates as f64 * 4.0
+        + risk.impure_functions as f64 * 2.0
+        + risk.states as f64 * 0.75
+        + risk.findings as f64 * 0.2
+}
+
 fn current_source_start_lines(
     repo: &Path,
     summaries: &[crate::storage::UnitSummary],
@@ -1370,7 +1647,24 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
         let mut stmt = storage.connection().prepare(
             r#"
             SELECT unit_id,
-                   COUNT(*) AS sarif_findings,
+                   SUM(CASE WHEN NOT (
+                     lower(category) = 'lint'
+                     OR lower(source) LIKE '%lint%'
+                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                     OR lower(rule_id) LIKE 'lint/%'
+                     OR lower(rule_id) LIKE 'security/%'
+                     OR lower(rule_id) LIKE 'clippy::%'
+                     OR lower(rule_id) LIKE 'zig.ast-check%'
+                   ) THEN 1 ELSE 0 END) AS sarif_findings,
+                   SUM(CASE WHEN (
+                     lower(category) = 'lint'
+                     OR lower(source) LIKE '%lint%'
+                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                     OR lower(rule_id) LIKE 'lint/%'
+                     OR lower(rule_id) LIKE 'security/%'
+                     OR lower(rule_id) LIKE 'clippy::%'
+                     OR lower(rule_id) LIKE 'zig.ast-check%'
+                   ) THEN 1 ELSE 0 END) AS lint_findings,
                    SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
             FROM sarif_findings
             WHERE unit_id IS NOT NULL
@@ -1382,12 +1676,14 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
             ))
         })?;
         for row in rows {
-            let (unit_id, sarif_findings, dark_arms) = row?;
+            let (unit_id, sarif_findings, lint_findings, dark_arms) = row?;
             let entry = counts.entry(unit_id).or_default();
             entry.sarif_findings = sarif_findings;
+            entry.lint_findings = lint_findings;
             entry.dark_arms = dark_arms;
         }
     }
@@ -1414,6 +1710,7 @@ fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCou
 fn unit_hotspot_score(summary: &crate::storage::UnitSummary, signal: &UnitSignalCounts) -> f64 {
     summary.risk_score
         + signal.sarif_findings as f64 * 0.35
+        + signal.lint_findings as f64 * 0.08
         + signal.dark_arms as f64 * 1.2
         + signal.hazards as f64 * 2.0
 }
@@ -1549,7 +1846,10 @@ fn dashboard_line_counts(
             has_invariant_mutant_killed,
             has_invariant_mutant_verified,
         ) = row?;
-        if !_scope.allows(&path) || !path_in_directory(&path, _directory) {
+        if !_scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, _directory)
+        {
             continue;
         }
         if has_mutant_verified > 0 {
@@ -1613,7 +1913,10 @@ fn dashboard_coverage_line_counts(
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
     for row in rows {
         let (path, hits) = row?;
-        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
             continue;
         }
         counts.tracked += 1;
@@ -1710,7 +2013,10 @@ fn dashboard_hazard_counts(
     })?;
     for row in rows {
         let (path, evidence_present, is_verified) = row?;
-        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
             continue;
         }
         active += 1;
@@ -2254,7 +2560,7 @@ impl EspalierFunctionEffect {
     }
 
     fn impure(&self) -> bool {
-        !self.reads.is_empty() || !self.writes.is_empty() || !self.impure_calls.is_empty()
+        !self.writes.is_empty() || !self.impure_calls.is_empty()
     }
 
     fn summary(&self) -> Vec<String> {
@@ -2291,7 +2597,7 @@ fn espalier_function_effects(
 
     let impure_names = effects
         .iter()
-        .filter(|effect| !effect.reads.is_empty() || !effect.writes.is_empty())
+        .filter(|effect| !effect.writes.is_empty())
         .map(|effect| effect.name.clone())
         .collect::<BTreeSet<_>>();
     for effect in &mut effects {
@@ -2406,6 +2712,7 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
     for symbol in symbols {
         let end_line = symbol.end_line.max(symbol.start_line);
         let mut sarif_findings = 0_i64;
+        let mut lint_findings = 0_i64;
         let mut dark_arms = 0_i64;
         let mut hazards = 0_i64;
         let mut unverified_hazards = 0_i64;
@@ -2416,7 +2723,13 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
             .iter()
             .filter(|annotation| annotation.line >= symbol.start_line && annotation.line <= end_line)
         {
-            sarif_findings += annotation.findings.len() as i64;
+            let lint_count = annotation
+                .findings
+                .iter()
+                .filter(|finding| is_lint_finding(finding))
+                .count() as i64;
+            lint_findings += lint_count;
+            sarif_findings += annotation.findings.len() as i64 - lint_count;
             dark_arms += annotation.dark_arms.len().max(annotation.dark_arm_spans.len()) as i64;
             hazards += annotation.hazards.len() as i64;
             unverified_hazards += annotation
@@ -2430,6 +2743,7 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
 
         let line_count = (end_line.saturating_sub(symbol.start_line) + 1).max(1) as f64;
         let density = (sarif_findings as f64 * 0.45
+            + lint_findings as f64 * 0.08
             + dark_arms as f64 * 1.2
             + hazards as f64 * 1.6
             + unverified_hazards as f64 * 1.5)
@@ -2437,7 +2751,7 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
         let history = bug_weight * 3.0 + semantic_churn.min(line_count) / line_count.max(1.0);
         let score = density + history;
 
-        symbol.sarif_findings = sarif_findings;
+        symbol.sarif_findings = sarif_findings + lint_findings;
         symbol.dark_arms = dark_arms;
         symbol.hazards = hazards;
         symbol.unverified_hazards = unverified_hazards;
@@ -2449,14 +2763,22 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
 }
 
 fn hotspot_level(score: f64) -> &'static str {
-    if score >= 5.0 {
+    if score >= 8.0 {
+        "deep-red"
+    } else if score >= 5.0 {
         "red"
-    } else if score >= 2.5 {
+    } else if score >= 3.5 {
+        "light-red"
+    } else if score >= 2.0 {
         "orange"
-    } else if score >= 0.25 {
+    } else if score >= 1.0 {
         "yellow"
-    } else {
+    } else if score >= 0.35 {
+        "light-green"
+    } else if score > 0.0 {
         "green"
+    } else {
+        "dark-green"
     }
 }
 
@@ -4106,7 +4428,7 @@ fn render_source_outline(payload: &UiSourcePayload) -> String {
         out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
         out.push_str("\">");
         if symbol.impure {
-            out.push_str("<i class=\"fa-solid fa-triangle-exclamation\" aria-hidden=\"true\"></i>");
+            out.push_str("<i class=\"fa-solid fa-link\" aria-hidden=\"true\"></i>");
         }
         out.push_str("</span><span class=\"outline-hotspot\" title=\"");
         out.push_str(&html_escape(&outline_hotspot_title(symbol)));
@@ -4395,6 +4717,13 @@ fn render_dashboard(
 
     out.push_str("<section class=\"dashboard-section\"><h2>Highest Risk Units</h2>");
     out.push_str(&render_unit_hotspots(&dashboard.top_units, filter));
+    out.push_str("</section>");
+
+    out.push_str("<section class=\"dashboard-section\"><h2>Highest Architectural Risks</h2>");
+    out.push_str(&render_architecture_risks(
+        &dashboard.top_architecture_risks,
+        filter,
+    ));
     out.push_str("</section>");
 
     out.push_str("<section class=\"dashboard-section\"><h2>Code tree</h2>");
@@ -4713,6 +5042,41 @@ fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
         ));
         out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
         out.push_str(&format!("{:.1}", unit.score));
+        out.push_str("</strong></a>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> String {
+    if risks.is_empty() {
+        return "<p class=\"empty-inline\">No Espalier architectural risks to show.</p>".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str("<div class=\"unit-hotspots architecture-hotspots\">");
+    for risk in risks {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(&page_href(&risk.path, None, filter)));
+        out.push_str("#L");
+        out.push_str(&risk.start_line.to_string());
+        out.push_str("\"><span class=\"unit-hotspot-kind\">");
+        out.push_str(&html_escape(&unit_kind_label(&risk.owner_kind, &risk.owner)));
+        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
+        out.push_str(&html_escape(&risk.owner));
+        out.push_str("</strong><small>");
+        out.push_str(&html_escape(&risk.path));
+        out.push_str("</small><small>");
+        out.push_str(&format!(
+            "{} Espalier, {} states, {} functions, {} impure, {} privacy",
+            risk.findings,
+            risk.states,
+            risk.functions,
+            risk.impure_functions,
+            risk.privacy_candidates
+        ));
+        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
+        out.push_str(&format!("{:.1}", risk.score));
         out.push_str("</strong></a>");
     }
     out.push_str("</div>");
@@ -5071,12 +5435,13 @@ fn render_code_line(
 
     let bug_id = format!("L{line_no}-fixes");
     let meta_id = format!("L{line_no}-details");
-    let decomplex_id = format!("L{line_no}-decomplex");
+    let hazard_id = format!("L{line_no}-hazards");
     let has_bug_history = annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false);
     let has_line_details = annotation.map(line_has_details).unwrap_or(false);
-    let has_decomplex_findings = annotation
-        .map(|annotation| !decomplex_findings(annotation).is_empty())
-        .unwrap_or(false);
+    let has_hazards = annotation.map(|a| !a.hazards.is_empty()).unwrap_or(false);
+    let finding_tools = annotation
+        .map(first_party_finding_tools)
+        .unwrap_or_default();
     let fold_input_id = comment_fold
         .filter(|fold| fold.is_start)
         .map(|fold| format!("comment-fold-{}", fold.id));
@@ -5113,9 +5478,19 @@ fn render_code_line(
         out.push_str(&meta_id);
         out.push_str("\">");
     }
-    if has_decomplex_findings {
-        out.push_str("<input class=\"line-toggle decomplex-toggle\" type=\"checkbox\" id=\"");
-        out.push_str(&decomplex_id);
+    if has_hazards {
+        out.push_str("<input class=\"line-toggle hazard-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&hazard_id);
+        out.push_str("\" data-panel-class=\"hazard-panel-open\">");
+    }
+    for tool in &finding_tools {
+        let id = finding_panel_id(line_no, *tool);
+        out.push_str("<input class=\"line-toggle tool-toggle ");
+        out.push_str(tool.toggle_class());
+        out.push_str("\" type=\"checkbox\" id=\"");
+        out.push_str(&id);
+        out.push_str("\" data-panel-class=\"");
+        out.push_str(tool.open_class());
         out.push_str("\">");
     }
     out.push_str("<span class=\"hazard-rail\"");
@@ -5124,31 +5499,12 @@ fn render_code_line(
     out.push_str(&gutter_title);
     out.push_str(">");
     if let Some(annotation) = annotation {
-        for hazard in &annotation.hazards {
-            let mut title = format!(
-                "{} requires {} ({})",
-                hazard.hazard_type,
-                hazard.required_evidence,
-                if hazard.verified {
-                    "evidence plus invariant mutation present"
-                } else if hazard.evidence_present {
-                    "systems evidence present; invariant mutation missing"
-                } else {
-                    "systems evidence and invariant mutation missing"
-                }
-            );
-            if !hazard.source.is_empty() {
-                title.push('\n');
-                title.push_str(&hazard.source);
-            }
-            out.push_str(&format!(
-                "<span class=\"bomb{}\" title=\"{}\"><i class=\"fa-solid fa-bomb\" aria-hidden=\"true\"></i></span>",
-                if hazard.verified { " verified" } else { "" },
-                html_escape(&title)
-            ));
+        if has_hazards {
+            out.push_str(&render_hazard_control(annotation, &hazard_id));
         }
-        if has_decomplex_findings {
-            out.push_str(&render_decomplex_control(annotation, &decomplex_id));
+        for tool in &finding_tools {
+            let id = finding_panel_id(line_no, *tool);
+            out.push_str(&render_finding_control(annotation, *tool, &id));
         }
         if has_bug_history {
             out.push_str(&render_bug_history_control(annotation, &bug_id));
@@ -5201,14 +5557,17 @@ fn render_code_line(
     out.push_str("</pre>");
     out.push_str(&render_blame_cell(blame));
     if let Some(annotation) = annotation {
+        if has_hazards {
+            out.push_str(&render_hazard_panel(annotation));
+        }
         if has_bug_history {
             out.push_str(&render_bug_history_panel(annotation));
         }
         if has_line_details {
             out.push_str(&render_line_details_panel(annotation));
         }
-        if has_decomplex_findings {
-            out.push_str(&render_decomplex_panel(annotation));
+        for tool in &finding_tools {
+            out.push_str(&render_finding_panel(annotation, *tool));
         }
     }
     out.push_str("</div>");
@@ -5388,6 +5747,84 @@ fn render_line_details_panel(annotation: &UiLineAnnotation) -> String {
     out
 }
 
+fn render_hazard_control(annotation: &UiLineAnnotation, hazard_id: &str) -> String {
+    let mut classes = "bomb line-icon".to_string();
+    if annotation.hazards.iter().all(|hazard| hazard.verified) {
+        classes.push_str(" verified");
+    }
+    let title = hazard_panel_title(annotation);
+    let mut out = String::new();
+    out.push_str("<label class=\"");
+    out.push_str(&classes);
+    out.push_str("\" for=\"");
+    out.push_str(&html_escape(hazard_id));
+    out.push_str("\" title=\"");
+    out.push_str(&html_escape(&title));
+    out.push_str("\" aria-label=\"concurrency hazard details\"><i class=\"fa-solid fa-bomb\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_hazard_panel(annotation: &UiLineAnnotation) -> String {
+    let mut hazards = annotation.hazards.iter().collect::<Vec<_>>();
+    hazards.sort_by(|left, right| {
+        left.verified
+            .cmp(&right.verified)
+            .then_with(|| left.required_evidence.cmp(&right.required_evidence))
+            .then_with(|| left.hazard_type.cmp(&right.hazard_type))
+            .then_with(|| left.source.cmp(&right.source))
+    });
+
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel hazard-panel\">");
+    for hazard in hazards {
+        out.push_str("<p><strong>");
+        out.push_str(&html_escape(&hazard.hazard_type));
+        out.push_str("</strong> requires <strong>");
+        out.push_str(&html_escape(&hazard.required_evidence));
+        out.push_str("</strong>: ");
+        out.push_str(hazard_status_text(hazard));
+        out.push_str("</p>");
+        if !hazard.source.is_empty() {
+            out.push_str("<p class=\"hazard-source\">");
+            out.push_str(&html_escape(&hazard.source));
+            out.push_str("</p>");
+        }
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn hazard_panel_title(annotation: &UiLineAnnotation) -> String {
+    annotation
+        .hazards
+        .iter()
+        .map(|hazard| {
+            let mut title = format!(
+                "{} requires {} ({})",
+                hazard.hazard_type,
+                hazard.required_evidence,
+                hazard_status_text(hazard)
+            );
+            if !hazard.source.is_empty() {
+                title.push('\n');
+                title.push_str(&hazard.source);
+            }
+            title
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn hazard_status_text(hazard: &UiHazard) -> &'static str {
+    if hazard.verified {
+        "evidence plus invariant mutation present"
+    } else if hazard.evidence_present {
+        "systems evidence present; invariant mutation missing"
+    } else {
+        "systems evidence and invariant mutation missing"
+    }
+}
+
 fn line_detail_rows(annotation: &UiLineAnnotation) -> Vec<String> {
     let mut rows = Vec::new();
     if let Some(summary) = test_type_summary(annotation) {
@@ -5527,13 +5964,29 @@ fn test_type_rank(test_type: &str) -> usize {
     }
 }
 
-fn render_decomplex_control(annotation: &UiLineAnnotation, decomplex_id: &str) -> String {
-    let findings = decomplex_findings(annotation);
+fn finding_panel_id(line_no: u32, tool: FirstPartyFindingTool) -> String {
+    format!("L{}-{}", line_no, tool.key())
+}
+
+fn first_party_finding_tools(annotation: &UiLineAnnotation) -> Vec<FirstPartyFindingTool> {
+    FirstPartyFindingTool::all()
+        .iter()
+        .copied()
+        .filter(|tool| !tool_findings(annotation, *tool).is_empty())
+        .collect()
+}
+
+fn render_finding_control(
+    annotation: &UiLineAnnotation,
+    tool: FirstPartyFindingTool,
+    panel_id: &str,
+) -> String {
+    let findings = tool_findings(annotation, tool);
     if findings.is_empty() {
         return String::new();
     }
 
-    let mut title = format!("{} Decomplex SARIF signal(s)", findings.len());
+    let mut title = format!("{} {} SARIF signal(s)", findings.len(), tool.title());
     let rules = findings
         .iter()
         .map(|finding| finding.rule_id.as_str())
@@ -5544,36 +5997,59 @@ fn render_decomplex_control(annotation: &UiLineAnnotation, decomplex_id: &str) -
     }
 
     let mut out = String::new();
-    out.push_str("<label class=\"decomplex-finding line-icon\" for=\"");
-    out.push_str(&html_escape(decomplex_id));
+    out.push_str("<label class=\"");
+    out.push_str(tool.control_class());
+    out.push_str(" line-icon\" for=\"");
+    out.push_str(&html_escape(panel_id));
     out.push_str("\" title=\"");
     out.push_str(&html_escape(&title));
-    out.push_str("\" aria-label=\"Decomplex SARIF signals\"><i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i></label>");
+    out.push_str("\" aria-label=\"");
+    out.push_str(tool.title());
+    out.push_str(" SARIF signals\"><i class=\"");
+    out.push_str(tool.icon_family());
+    out.push(' ');
+    out.push_str(tool.icon_class());
+    out.push_str("\" aria-hidden=\"true\"></i></label>");
     out
 }
 
-fn render_decomplex_panel(annotation: &UiLineAnnotation) -> String {
-    let findings = decomplex_findings(annotation);
+fn render_finding_panel(annotation: &UiLineAnnotation, tool: FirstPartyFindingTool) -> String {
+    let findings = tool_findings(annotation, tool);
     let mut out = String::new();
-    out.push_str("<div class=\"line-panel decomplex-panel\">");
+    out.push_str("<div class=\"line-panel finding-panel ");
+    out.push_str(tool.panel_class());
+    out.push_str("\">");
     for finding in findings {
         out.push_str("<p>");
         if let Some(tier) = finding.tier {
-            out.push_str("<span class=\"decomplex-tier\">tier ");
+            out.push_str("<span class=\"finding-tier\">tier ");
             out.push_str(&tier.to_string());
             out.push_str("</span> ");
         }
-        out.push_str("<a href=\"");
-        out.push_str(&html_escape(&decomplex_doc_url(finding)));
-        out.push_str("\" target=\"_blank\" rel=\"noopener\">");
-        out.push_str(&html_escape(&finding.rule_id));
-        out.push_str("</a>");
+        if tool == FirstPartyFindingTool::Decomplex {
+            out.push_str("<a href=\"");
+            out.push_str(&html_escape(&decomplex_doc_url(finding)));
+            out.push_str("\" target=\"_blank\" rel=\"noopener\">");
+            out.push_str(&html_escape(&finding.rule_id));
+            out.push_str("</a>");
+        } else {
+            out.push_str("<strong>");
+            out.push_str(&html_escape(&finding.rule_id));
+            out.push_str("</strong>");
+        }
         out.push_str(": ");
-        out.push_str(&html_escape(&decomplex_display_message(finding)));
+        out.push_str(&html_escape(&finding_display_message(finding, tool)));
         out.push_str("</p>");
     }
     out.push_str("</div>");
     out
+}
+
+fn finding_display_message(finding: &UiFinding, tool: FirstPartyFindingTool) -> String {
+    match tool {
+        FirstPartyFindingTool::Decomplex => decomplex_display_message(finding),
+        _ => finding.message.trim().to_string(),
+    }
 }
 
 fn decomplex_display_message(finding: &UiFinding) -> String {
@@ -5614,11 +6090,11 @@ fn title_case_ascii(word: &str) -> String {
     out
 }
 
-fn decomplex_findings(annotation: &UiLineAnnotation) -> Vec<&UiFinding> {
+fn tool_findings(annotation: &UiLineAnnotation, tool: FirstPartyFindingTool) -> Vec<&UiFinding> {
     let mut findings = annotation
         .findings
         .iter()
-        .filter(|finding| is_decomplex_finding(finding))
+        .filter(|finding| is_tool_finding(finding, tool))
         .collect::<Vec<_>>();
     findings.sort_by(|left, right| {
         left.tier
@@ -5631,9 +6107,30 @@ fn decomplex_findings(annotation: &UiLineAnnotation) -> Vec<&UiFinding> {
 }
 
 fn is_decomplex_finding(finding: &UiFinding) -> bool {
+    is_tool_finding(finding, FirstPartyFindingTool::Decomplex)
+}
+
+fn is_tool_finding(finding: &UiFinding, tool: FirstPartyFindingTool) -> bool {
+    if tool == FirstPartyFindingTool::Lint {
+        return is_lint_finding(finding);
+    }
+    let needle = tool.key();
     [finding.source.as_str(), finding.tool.as_str(), finding.rule_id.as_str()]
         .iter()
-        .any(|value| value.to_ascii_lowercase().contains("decomplex"))
+        .any(|value| value.to_ascii_lowercase().contains(needle))
+}
+
+fn is_lint_finding(finding: &UiFinding) -> bool {
+    let source = finding.source.to_ascii_lowercase();
+    let tool = finding.tool.to_ascii_lowercase();
+    let rule = finding.rule_id.to_ascii_lowercase();
+    finding.category.eq_ignore_ascii_case("lint")
+        || source.contains("lint")
+        || matches!(tool.as_str(), "rubocop" | "clippy" | "zig ast check")
+        || rule.starts_with("lint/")
+        || rule.starts_with("security/")
+        || rule.starts_with("clippy::")
+        || rule.starts_with("zig.ast-check")
 }
 
 fn decomplex_doc_url(finding: &UiFinding) -> String {
@@ -6746,7 +7243,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("src")).unwrap();
         fs::write(
             dir.path().join("src/demo.rb"),
-            "def pure\n  1\nend\ndef prepare\n  @state = compute(@state)\nend\ndef run\n  prepare\nend\n",
+            "def pure\n  1\nend\ndef read_state\n  @state\nend\ndef prepare\n  @state = compute(@state)\nend\ndef run\n  prepare\n  read_state\nend\n",
         )
         .unwrap();
         let storage = Storage::open_memory().unwrap();
@@ -6764,23 +7261,34 @@ mod tests {
             "prepare",
             UnitKind::Function,
             "src/demo.rb",
+            7,
+            7,
+            9,
+            "def prepare",
+            "def prepare\n@state = compute(@state)\nend",
+        );
+        let read_state = LogicalUnit::new(
+            "read_state",
+            UnitKind::Function,
+            "src/demo.rb",
             4,
             4,
             6,
-            "def prepare",
-            "def prepare\n@state = compute(@state)\nend",
+            "def read_state",
+            "def read_state\n@state\nend",
         );
         let run = LogicalUnit::new(
             "run",
             UnitKind::Function,
             "src/demo.rb",
-            7,
-            7,
-            9,
+            10,
+            10,
+            13,
             "def run",
-            "def run\nprepare\nend",
+            "def run\nprepare\nread_state\nend",
         );
         storage.upsert_logical_unit(&pure, 10).unwrap();
+        storage.upsert_logical_unit(&read_state, 10).unwrap();
         storage.upsert_logical_unit(&prepare, 10).unwrap();
         storage.upsert_logical_unit(&run, 10).unwrap();
         let artifact_id = storage
@@ -6807,11 +7315,21 @@ mod tests {
                 }),
             ),
             (
+                "read_state",
+                &read_state,
+                serde_json::json!({
+                    "name": "read_state",
+                    "span": [4, 0, 6, 3],
+                    "EFFECTS": { "reads": ["@state"], "writes": [] },
+                    "CALL_GRAPH": { "internal_calls": [] }
+                }),
+            ),
+            (
                 "prepare",
                 &prepare,
                 serde_json::json!({
                     "name": "prepare",
-                    "span": [4, 0, 6, 3],
+                    "span": [7, 0, 9, 3],
                     "EFFECTS": { "reads": ["@state"], "writes": ["@state"] },
                     "CALL_GRAPH": { "internal_calls": [] }
                 }),
@@ -6821,9 +7339,9 @@ mod tests {
                 &run,
                 serde_json::json!({
                     "name": "run",
-                    "span": [7, 0, 9, 3],
+                    "span": [10, 0, 13, 3],
                     "EFFECTS": { "reads": [], "writes": [] },
-                    "CALL_GRAPH": { "internal_calls": ["prepare"] }
+                    "CALL_GRAPH": { "internal_calls": ["prepare", "read_state"] }
                 }),
             ),
         ] {
@@ -6876,9 +7394,17 @@ mod tests {
             .iter()
             .find(|symbol| symbol.name == "prepare")
             .unwrap();
+        let read_symbol = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "read_state")
+            .unwrap();
         let run_symbol = payload.symbols.iter().find(|symbol| symbol.name == "run").unwrap();
-        let state_line = payload.annotations.iter().find(|line| line.line == 5).unwrap();
-        let call_line = payload.annotations.iter().find(|line| line.line == 8).unwrap();
+        let read_line = payload.annotations.iter().find(|line| line.line == 5).unwrap();
+        let state_line = payload.annotations.iter().find(|line| line.line == 8).unwrap();
+        let call_line = payload.annotations.iter().find(|line| line.line == 11).unwrap();
+        let read_call_line = payload.annotations.iter().find(|line| line.line == 12);
+        let read_labels = effect_span_labels(read_line);
         let state_labels = effect_span_labels(state_line);
         let call_labels = effect_span_labels(call_line);
         let branch_context = UiBranchContext {
@@ -6891,14 +7417,21 @@ mod tests {
         assert!(pure_symbol.effect_known);
         assert!(!pure_symbol.impure);
         assert_eq!(pure_symbol.start_line, 1);
+        assert!(read_symbol.effect_known);
+        assert!(!read_symbol.impure);
+        assert_eq!(read_symbol.start_line, 4);
         assert!(prepare_symbol.impure);
-        assert_eq!(prepare_symbol.start_line, 4);
+        assert_eq!(prepare_symbol.start_line, 7);
         assert!(run_symbol.impure);
-        assert_eq!(run_symbol.start_line, 7);
+        assert_eq!(run_symbol.start_line, 10);
+        assert_eq!(read_labels, vec!["state read @state"]);
         assert!(state_labels.contains(&"state read @state".to_string()));
         assert!(state_labels.contains(&"state write @state".to_string()));
         assert_eq!(call_labels, vec!["impure call prepare"]);
-        assert!(outline.contains("fa-triangle-exclamation"));
+        assert!(read_call_line
+            .map(|line| effect_span_labels(line).is_empty())
+            .unwrap_or(true));
+        assert!(outline.contains("fa-link"));
         assert!(html.contains("effect-state-read"));
         assert!(html.contains("effect-state-write"));
         assert!(html.contains("effect-impure-call"));
@@ -7158,6 +7691,36 @@ mod tests {
                         tier: Some(1),
                         span: None,
                     },
+                    UiFinding {
+                        source: "espalier".to_string(),
+                        tool: "Espalier".to_string(),
+                        rule_id: "espalier.function".to_string(),
+                        level: "note".to_string(),
+                        message: "function: Demo#run".to_string(),
+                        category: "architecture".to_string(),
+                        tier: None,
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "nil-kill".to_string(),
+                        tool: "Nil-Kill".to_string(),
+                        rule_id: "nil-kill.static.untyped-signature".to_string(),
+                        level: "warning".to_string(),
+                        message: "static signature includes an untyped or unknown type for Demo#run".to_string(),
+                        category: "nil-kill.static.untyped-signature".to_string(),
+                        tier: None,
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "lint".to_string(),
+                        tool: "RuboCop".to_string(),
+                        rule_id: "Lint/DuplicateBranch".to_string(),
+                        level: "warning".to_string(),
+                        message: "Duplicate branch body detected.".to_string(),
+                        category: "lint".to_string(),
+                        tier: None,
+                        span: None,
+                    },
                 ],
                 hazards: vec![UiHazard {
                     hazard_type: "zig_loom_atomic".to_string(),
@@ -7230,7 +7793,14 @@ mod tests {
         assert!(html.contains("Ada Lovelace"));
         assert!(html.contains("hazard-rail"));
         assert!(html.contains("hazard-open"));
+        assert!(html.contains("class=\"line-toggle hazard-toggle\""));
+        assert!(html.contains("data-panel-class=\"hazard-panel-open\""));
+        assert!(html.contains("class=\"bomb line-icon\""));
         assert!(html.contains("<i class=\"fa-solid fa-bomb\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("class=\"line-panel hazard-panel\""));
+        assert!(html.contains("<strong>zig_loom_atomic</strong> requires <strong>loom</strong>"));
+        assert!(html.contains("systems evidence and invariant mutation missing"));
+        assert!(html.contains("atomic store"));
         assert!(html.contains("bug-history"));
         assert!(html.contains("decayed fix history"));
         assert!(html.contains("<i class=\"fa-solid fa-bug\" aria-hidden=\"true\"></i>"));
@@ -7238,10 +7808,25 @@ mod tests {
             html.contains("<i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i>")
         );
         assert!(html.contains("<i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i>"));
-        assert!(html.contains("class=\"line-toggle decomplex-toggle\""));
+        assert!(html.contains("<i class=\"fa-solid fa-tree\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("<i class=\"fa-solid fa-skull\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("<i class=\"fa-regular fa-note-sticky\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("class=\"line-toggle tool-toggle decomplex-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle espalier-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle nil-kill-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle lint-toggle\""));
         assert!(html.contains("class=\"decomplex-finding line-icon\""));
-        assert!(html.contains("class=\"line-panel decomplex-panel\""));
+        assert!(html.contains("class=\"espalier-finding line-icon\""));
+        assert!(html.contains("class=\"nil-kill-finding line-icon\""));
+        assert!(html.contains("class=\"lint-finding line-icon\""));
+        assert!(html.contains("class=\"line-panel finding-panel decomplex-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel espalier-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel nil-kill-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel lint-panel\""));
         assert!(html.contains("Decomplex SARIF signals"));
+        assert!(html.contains("Espalier SARIF signals"));
+        assert!(html.contains("Nil-Kill SARIF signals"));
+        assert!(html.contains("Lint SARIF signals"));
         assert!(html.contains("tier 1"));
         assert!(html.contains("tier 2"));
         assert!(
@@ -7284,10 +7869,16 @@ mod tests {
         assert!(STYLE.contains("max-width: 120ch"));
         assert!(STYLE.contains(".bug-toggle:checked ~ .bug-panel"));
         assert!(STYLE.contains(".meta-toggle:checked ~ .meta-panel"));
+        assert!(STYLE.contains(".hazard-toggle:checked ~ .hazard-panel"));
         assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
+        assert!(STYLE.contains(".espalier-toggle:checked ~ .espalier-panel"));
+        assert!(STYLE.contains(".nil-kill-toggle:checked ~ .nil-kill-panel"));
+        assert!(STYLE.contains(".row.hazard-panel-open .hazard-panel"));
         assert!(STYLE.contains(".row.decomplex-open .decomplex-panel"));
-        assert!(STYLE.contains(".decomplex-finding { color: var(--muted); }"));
-        assert!(STYLE.contains(".decomplex-panel p"));
+        assert!(STYLE.contains(".row.espalier-open .espalier-panel"));
+        assert!(STYLE.contains(".row.nil-kill-open .nil-kill-panel"));
+        assert!(STYLE.contains(".decomplex-finding,"));
+        assert!(STYLE.contains(".finding-panel p"));
         assert!(STYLE.contains("white-space: normal;"));
         assert!(STYLE.contains(".row:target"));
         assert!(STYLE.contains(".history-drawer[open]"));
@@ -7364,12 +7955,18 @@ mod tests {
         assert!(html.contains("class=\"warning-dismiss\""));
         assert!(html.contains("Dismiss warning"));
         assert!(STYLE.contains(".warning-dismiss-toggle:checked + .warning"));
+        let dismiss_style = STYLE
+            .split(".warning-dismiss {")
+            .nth(1)
+            .and_then(|style| style.split('}').next())
+            .unwrap();
+        assert!(dismiss_style.contains("cursor: pointer;"));
         assert!(js.contains("warning-dismiss"));
         assert!(js.contains("control.closest(\".warning\")"));
         assert!(js.contains("input.checked = true"));
         assert!(js.contains("bindLayerLabel"));
         assert!(js.contains("bindLineToggleLabel"));
-        assert!(js.contains("decomplex-open"));
+        assert!(js.contains("input.dataset.panelClass"));
         assert!(js.contains("sourceView.classList.toggle(`${input.id}-on`, input.checked)"));
         assert!(js.contains("write(key, \"true\")"));
         assert!(js.contains("comment-fold-expanded"));
@@ -7873,17 +8470,30 @@ mod tests {
                 payload_json: "{}".into(),
             })
             .unwrap();
+        let test_unit = LogicalUnit::new(
+            "test_run",
+            UnitKind::Function,
+            "gems/decomplex/test/report_test.rb",
+            1,
+            1,
+            2,
+            "def test_run",
+            "def test_run\nend",
+        );
+        storage.upsert_logical_unit(&test_unit, 10).unwrap();
 
         storage.refresh_ui_summaries().unwrap();
 
         let files = file_index(&storage).unwrap();
         assert_eq!(files.len(), 1);
         assert!(files[0].read_model);
+        assert_eq!(files[0].path, "src/a.rb");
         assert_eq!(files[0].tracked_lines, 2);
         assert_eq!(files[0].covered_lines, 1);
         assert_eq!(files[0].mutant_killed_covered_lines, 1);
 
         let dashboard = dashboard_summary(&storage).unwrap();
+        assert_eq!(dashboard.files, 1);
         assert_eq!(dashboard.tracked_lines, 2);
         assert_eq!(dashboard.covered_lines, 1);
         assert_eq!(dashboard.mutant_killed_covered_percent, 100.0);

@@ -106,6 +106,7 @@ GEM
       logger (~> 1.6)
     lint_roller (1.1.0)
     logger (1.7.0)
+    minitest (5.27.0)
     msgpack (1.8.0)
     mutant (0.15.1)
       diff-lcs (>= 1.6, < 3)
@@ -291,6 +292,7 @@ DEPENDENCIES
   debride
   decomplex!
   flog
+  minitest (~> 5.25)
   msgpack (~> 1.7, >= 1.7.2)
   mutant
   mutant-rspec
