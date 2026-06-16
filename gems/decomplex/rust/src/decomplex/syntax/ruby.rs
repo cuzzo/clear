@@ -1,30 +1,65 @@
-use super::StateWrite;
+use super::{Document, FunctionDef, Language, PredicateAlias, StateWrite};
+use crate::decomplex::ast::{line, node_text, normalize_text, span, RawNode};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
-use tree_sitter::{Language, Node, Parser};
+use std::path::{Path, PathBuf};
+use tree_sitter::{Language as TreeSitterLanguage, Node, Parser};
 
-pub fn state_writes_for_file(file: &Path) -> Result<Vec<StateWrite>> {
-    let source = fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut parser = Parser::new();
-    parser
-        .set_language(&ruby_language())
-        .with_context(|| "failed to initialize tree-sitter ruby parser")?;
-    let tree = parser
-        .parse(&source, None)
-        .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
+pub fn parse_file(file: PathBuf) -> Result<Document> {
+    let parsed = ParsedRuby::parse(file)?;
+    let mut function_defs = Vec::new();
+    let mut state_writes = Vec::new();
+    let mut predicate_aliases = Vec::new();
+    let mut seen_writes = HashSet::new();
+    let context = ContextState::new(file_owner(&parsed.file));
 
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    let context = ContextState::new(file_owner(file));
-    walk(tree.root_node(), &source, file, &context, &mut out, &mut seen);
-    Ok(out)
+    collect_facts(
+        parsed.tree.root_node(),
+        &parsed.source,
+        &parsed.file,
+        &context,
+        &mut function_defs,
+        &mut state_writes,
+        &mut predicate_aliases,
+        &mut seen_writes,
+    );
+
+    Ok(Document {
+        file: parsed.file.to_string_lossy().to_string(),
+        language: Language::Ruby,
+        source: parsed.source.clone(),
+        lines: parsed.source.lines().map(ToString::to_string).collect(),
+        root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
+        function_defs,
+        state_writes,
+        predicate_aliases,
+    })
 }
 
-fn ruby_language() -> Language {
+fn ruby_language() -> TreeSitterLanguage {
     tree_sitter_ruby::LANGUAGE.into()
+}
+
+struct ParsedRuby {
+    file: PathBuf,
+    source: String,
+    tree: tree_sitter::Tree,
+}
+
+impl ParsedRuby {
+    fn parse(file: PathBuf) -> Result<Self> {
+        let source = fs::read_to_string(&file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&ruby_language())
+            .with_context(|| "failed to initialize tree-sitter ruby parser")?;
+        let tree = parser
+            .parse(&source, None)
+            .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
+        Ok(Self { file, source, tree })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,20 +91,112 @@ impl ContextState {
     }
 }
 
-fn walk(
+fn collect_facts(
     node: Node<'_>,
     source: &str,
     file: &Path,
     context: &ContextState,
-    out: &mut Vec<StateWrite>,
-    seen: &mut HashSet<String>,
+    function_defs: &mut Vec<FunctionDef>,
+    state_writes: &mut Vec<StateWrite>,
+    predicate_aliases: &mut Vec<PredicateAlias>,
+    seen_writes: &mut HashSet<String>,
 ) {
     let next_context = push_function_context(node, push_owner_context(node, source, context), source);
-    record_state_write(node, source, file, &next_context, out, seen);
+    record_function_def(node, source, file, &next_context, function_defs);
+    record_state_write(node, source, file, &next_context, state_writes, seen_writes);
+    record_predicate_alias(node, source, file, predicate_aliases);
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk(child, source, file, &next_context, out, seen);
+        collect_facts(
+            child,
+            source,
+            file,
+            &next_context,
+            function_defs,
+            state_writes,
+            predicate_aliases,
+            seen_writes,
+        );
+    }
+}
+
+fn record_function_def(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<FunctionDef>,
+) {
+    let Some(name) = function_name(node, source) else {
+        return;
+    };
+    let function = FunctionDef {
+        file: file.to_string_lossy().to_string(),
+        name,
+        owner: context.current_owner(),
+        line: line(node),
+        span: span(node),
+        body: RawNode::from_tree_sitter(node, source),
+    };
+    let key = (function.file.clone(), function.owner.clone(), function.name.clone(), function.line);
+    if out
+        .iter()
+        .any(|existing| (existing.file.clone(), existing.owner.clone(), existing.name.clone(), existing.line) == key)
+    {
+        return;
+    }
+    out.push(function);
+}
+
+fn record_predicate_alias(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    out: &mut Vec<PredicateAlias>,
+) {
+    if node.kind() != "method" {
+        return;
+    }
+    let Some(name) = function_name(node, source) else {
+        return;
+    };
+    let Some(body) = method_single_expression_body(node) else {
+        return;
+    };
+    let text = normalize_text(node_text(body, source));
+    if text.is_empty() || text == "nil" || text.len() > 200 {
+        return;
+    }
+    let file_name = file.to_string_lossy().to_string();
+    out.push(PredicateAlias {
+        name: name.clone(),
+        body: text,
+        file: file_name,
+        defn: name,
+        line: line(node),
+        span: span(node),
+    });
+}
+
+fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    if node.children(&mut cursor).any(|child| child.kind() == "=") {
+        let named = named_children(node);
+        return named.last().copied();
+    }
+
+    let body = node
+        .child_by_field_name("body")
+        .or_else(|| named_children(node).into_iter().find(|child| child.kind() == "body_statement"))?;
+    let statements: Vec<Node<'_>> = named_children(body)
+        .into_iter()
+        .filter(|child| !matches!(child.kind(), "comment" | "heredoc_body"))
+        .collect();
+    if statements.len() == 1 {
+        statements.first().copied()
+    } else {
+        None
     }
 }
 
@@ -392,39 +519,21 @@ fn strip_assignment_suffix(text: &str) -> String {
     text.strip_suffix('=').unwrap_or(text).to_string()
 }
 
-fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
-    node.utf8_text(source.as_bytes()).unwrap_or("")
-}
-
-fn normalize_text(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn span(node: Node<'_>) -> [usize; 4] {
-    let start = node.start_position();
-    let end = node.end_position();
-    [start.row + 1, start.column, end.row + 1, end.column]
-}
-
-fn line(node: Node<'_>) -> usize {
-    node.start_position().row + 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn extract(source: &str) -> Vec<StateWrite> {
+    fn document(source: &str) -> Document {
         let mut file = NamedTempFile::new().expect("tempfile");
         file.write_all(source.as_bytes()).expect("write source");
-        state_writes_for_file(file.path()).expect("state writes")
+        parse_file(file.path().to_path_buf()).expect("document")
     }
 
     #[test]
     fn extracts_ruby_attribute_and_instance_writes() {
-        let writes = extract(
+        let doc = document(
             r#"
 class Box
   def a(n)
@@ -440,7 +549,8 @@ end
 "#,
         );
 
-        let summary: Vec<(&str, &str, &str, &str)> = writes
+        let summary: Vec<(&str, &str, &str, &str)> = doc
+            .state_writes
             .iter()
             .map(|write| {
                 (
@@ -466,7 +576,7 @@ end
 
     #[test]
     fn extracts_nested_owner_names() {
-        let writes = extract(
+        let doc = document(
             r#"
 module Outer
   class Inner
@@ -478,9 +588,9 @@ end
 "#,
         );
 
-        assert_eq!(writes.len(), 1);
-        assert_eq!(writes[0].owner, "Outer::Inner");
-        assert_eq!(writes[0].function, "set");
-        assert_eq!(writes[0].field, "state");
+        assert_eq!(doc.state_writes.len(), 1);
+        assert_eq!(doc.state_writes[0].owner, "Outer::Inner");
+        assert_eq!(doc.state_writes[0].function, "set");
+        assert_eq!(doc.state_writes[0].field, "state");
     }
 }

@@ -69,6 +69,7 @@ if ARGV[0] == "detector"
   json = false
   compare = false
   benchmark = false
+  detector_options = {}
   args = args.reject do |arg|
     case arg
     when /\A--engine=(.+)\z/
@@ -83,6 +84,12 @@ if ARGV[0] == "detector"
     when "--benchmark"
       benchmark = true
       true
+    when /\A--mass=(\d+)\z/
+      detector_options[:mass] = Integer(Regexp.last_match(1))
+      true
+    when /\A--fuzzy=(\d+)\z/
+      detector_options[:fuzzy] = Integer(Regexp.last_match(1))
+      true
     else
       false
     end
@@ -91,7 +98,7 @@ if ARGV[0] == "detector"
   abort no_files_message if files.empty?
 
   if compare
-    ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare(detector, files)
+    ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare(detector, files, **detector_options)
     unless ok
       warn "decomplex detector #{detector} output differs between ruby and rust engines"
       warn "--- ruby"
@@ -103,9 +110,12 @@ if ARGV[0] == "detector"
     puts ruby_json
   elsif json
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    output = Decomplex::DetectorRunner.canonical_json(detector, files, engine: engine)
+    output = Decomplex::DetectorRunner.canonical_json(detector, files, engine: engine, **detector_options)
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-    warn format("decomplex detector=%s engine=%s files=%d elapsed=%.6fs", detector, engine, files.size, elapsed) if benchmark
+    if benchmark
+      warn format("decomplex detector=%s engine=%s files=%d elapsed=%.6fs",
+                  detector, engine, files.size, elapsed)
+    end
     print output
   else
     abort "decomplex detector currently requires --json or --compare-engines"
@@ -287,8 +297,8 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
 
       decomplex FILE_OR_DIR [FILE_OR_DIR ...]
       decomplex report [--output=FILE] [--emit-json=FILE] [--sarif=FILE] [--exclude=GLOB] FILE_OR_DIR ...
-      decomplex detector DETECTOR --engine=ruby|rust --json [--benchmark] FILE_OR_DIR ...
-      decomplex detector DETECTOR --compare-engines FILE_OR_DIR ...
+      decomplex detector DETECTOR --engine=ruby|rust --json [--benchmark] [--mass=N] [--fuzzy=N] FILE_OR_DIR ...
+      decomplex detector DETECTOR --compare-engines [--mass=N] [--fuzzy=N] FILE_OR_DIR ...
       decomplex state-mesh [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex state-branches [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex temporal-ordering [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
