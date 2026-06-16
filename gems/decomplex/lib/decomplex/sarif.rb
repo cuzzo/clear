@@ -21,27 +21,30 @@ module Decomplex
         result
       end
 
+      run = compact_hash(
+        {
+          "tool" => {
+            "driver" => compact_hash(
+              {
+                "name" => tool_name,
+                "informationUri" => information_uri,
+                "rules" => normalized_rules
+              }
+            )
+          },
+          "results" => normalized_results,
+          "properties" => json_safe_value(properties)
+        }
+      )
+      # GitHub code scanning rejects SARIF runs that omit `results`, even
+      # when the tool found nothing.
+      run["results"] = normalized_results
+
       compact_hash(
         {
           "version" => "2.1.0",
           "$schema" => SCHEMA,
-          "runs" => [
-            compact_hash(
-              {
-                "tool" => {
-                  "driver" => compact_hash(
-                    {
-                      "name" => tool_name,
-                      "informationUri" => information_uri,
-                      "rules" => normalized_rules
-                    }
-                  )
-                },
-                "results" => normalized_results,
-                "properties" => json_safe_value(properties)
-              }
-            )
-          ]
+          "runs" => [run]
         }
       )
     end
