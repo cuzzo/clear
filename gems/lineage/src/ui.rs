@@ -1,17 +1,31 @@
+use crate::extract::{
+    is_production_source_path, BoundaryExtractor, HeuristicExtractor, SourceFilter,
+};
 use crate::git::GitProvider;
 use crate::model::BlobFile;
 use crate::storage::Storage;
 use crate::vcs::VcsProvider;
 use anyhow::{Context, Result};
+use askama::Template;
+use axum::body::Body;
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::header::{self, HeaderValue};
+use axum::http::{Response, StatusCode};
+use axum::response::{Html, IntoResponse};
+use axum::routing::get;
+use axum::{Json, Router};
+use git2::{BlameOptions, Oid, Repository};
 use rusqlite::params;
-use serde::Serialize;
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
+use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::trace::TraceLayer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageScope {
@@ -30,6 +44,8 @@ pub struct UiFile {
     pub path: String,
     pub units: i64,
     pub hazards: i64,
+    pub sarif_findings: i64,
+    pub dark_arm_findings: i64,
     pub evidence_covered_hazards: i64,
     pub covered_hazards: i64,
     pub distinct_tests: i64,
@@ -38,8 +54,11 @@ pub struct UiFile {
     pub covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
+    pub mutant_verified_covered_lines: i64,
     pub mutant_killed_covered_lines: i64,
+    pub stochastic_mutant_verified_covered_lines: i64,
     pub stochastic_mutant_killed_covered_lines: i64,
+    pub invariant_mutant_verified_covered_lines: i64,
     pub invariant_mutant_killed_covered_lines: i64,
     pub multi_type_covered_lines: i64,
     #[serde(skip)]
@@ -52,12 +71,65 @@ pub struct UiDirectory {
     pub files: i64,
     pub units: i64,
     pub hazards: i64,
+    pub sarif_findings: i64,
+    pub dark_arm_findings: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
     pub tracked_lines: i64,
     pub covered_lines: i64,
+    pub mutant_killed_covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UiBranchContext {
+    branch: String,
+    commit: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct UiCoverageContext {
+    path: String,
+    tracked_lines: i64,
+    covered_lines: i64,
+    partial_lines: i64,
+    missed_lines: i64,
+    coverage_percent: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CoverageSort {
+    Path,
+    Total,
+    Covered,
+    Partial,
+    Missed,
+    Percent,
+}
+
+impl CoverageSort {
+    fn parse(value: &str) -> Self {
+        match value {
+            "total" => Self::Total,
+            "covered" => Self::Covered,
+            "partial" => Self::Partial,
+            "missed" => Self::Missed,
+            "percent" => Self::Percent,
+            _ => Self::Path,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Total => "total",
+            Self::Covered => "covered",
+            Self::Partial => "partial",
+            Self::Missed => "missed",
+            Self::Percent => "percent",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -94,6 +166,150 @@ pub struct UiDarkArm {
     pub span: Option<[u32; 4]>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiFinding {
+    pub source: String,
+    pub tool: String,
+    pub rule_id: String,
+    pub level: String,
+    pub message: String,
+    pub category: String,
+    pub tier: Option<i64>,
+    pub span: Option<[u32; 4]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstPartyFindingTool {
+    Decomplex,
+    Espalier,
+    NilKill,
+    Lint,
+}
+
+impl FirstPartyFindingTool {
+    fn all() -> &'static [Self] {
+        &[Self::Decomplex, Self::Espalier, Self::NilKill, Self::Lint]
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex",
+            Self::Espalier => "espalier",
+            Self::NilKill => "nil-kill",
+            Self::Lint => "lint",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Decomplex => "Decomplex",
+            Self::Espalier => "Espalier",
+            Self::NilKill => "Nil-Kill",
+            Self::Lint => "Lint",
+        }
+    }
+
+    fn icon_family(self) -> &'static str {
+        match self {
+            Self::Lint => "fa-regular",
+            _ => "fa-solid",
+        }
+    }
+
+    fn icon_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "fa-puzzle-piece",
+            Self::Espalier => "fa-tree",
+            Self::NilKill => "fa-skull",
+            Self::Lint => "fa-note-sticky",
+        }
+    }
+
+    fn panel_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-panel",
+            Self::Espalier => "espalier-panel",
+            Self::NilKill => "nil-kill-panel",
+            Self::Lint => "lint-panel",
+        }
+    }
+
+    fn toggle_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-toggle",
+            Self::Espalier => "espalier-toggle",
+            Self::NilKill => "nil-kill-toggle",
+            Self::Lint => "lint-toggle",
+        }
+    }
+
+    fn open_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-open",
+            Self::Espalier => "espalier-open",
+            Self::NilKill => "nil-kill-open",
+            Self::Lint => "lint-open",
+        }
+    }
+
+    fn control_class(self) -> &'static str {
+        match self {
+            Self::Decomplex => "decomplex-finding",
+            Self::Espalier => "espalier-finding",
+            Self::NilKill => "nil-kill-finding",
+            Self::Lint => "lint-finding",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiSourceSymbol {
+    pub kind: String,
+    pub name: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub effect_known: bool,
+    pub impure: bool,
+    pub effect_summary: Vec<String>,
+    pub hotspot_score: f64,
+    pub hotspot_level: String,
+    pub sarif_findings: i64,
+    pub dark_arms: i64,
+    pub hazards: i64,
+    pub unverified_hazards: i64,
+    pub bug_weight: f64,
+    pub semantic_churn: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiBugEvent {
+    pub event_type: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub path: String,
+    pub line: u32,
+    pub label: String,
+    pub weight: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiLineBlame {
+    pub line: u32,
+    pub commit_hash: String,
+    pub ordinal: usize,
+    pub total_commits: usize,
+    pub timestamp: i64,
+    pub author: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UiEffectSpan {
+    pub kind: String,
+    pub label: String,
+    pub start: usize,
+    pub end: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiLineAnnotation {
     pub line: u32,
@@ -108,7 +324,60 @@ pub struct UiLineAnnotation {
     pub mutant_coverage: Option<f64>,
     pub dark_arms: Vec<String>,
     pub dark_arm_spans: Vec<UiDarkArm>,
+    pub effect_spans: Vec<UiEffectSpan>,
+    pub findings: Vec<UiFinding>,
     pub hazards: Vec<UiHazard>,
+    pub test_type_counts: BTreeMap<String, i64>,
+    pub semantic_churn: f64,
+    pub semantic_churn_events: i64,
+    pub bug_weight: f64,
+    pub bug_events: Vec<UiBugEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiUnitHotspot {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub start_line: u32,
+    pub score: f64,
+    pub risk_score: f64,
+    pub sarif_findings: i64,
+    pub dark_arms: i64,
+    pub hazards: i64,
+    pub fixes: i64,
+    pub changes: i64,
+    pub mutant_killed_tests: i64,
+    pub distinct_tests: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiArchitectureRisk {
+    pub path: String,
+    pub owner: String,
+    pub owner_kind: String,
+    pub start_line: u32,
+    pub score: f64,
+    pub findings: i64,
+    pub states: i64,
+    pub functions: i64,
+    pub impure_functions: i64,
+    pub privacy_candidates: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommentFold {
+    id: usize,
+    start_line: u32,
+    end_line: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommentFoldLine {
+    id: usize,
+    start_line: u32,
+    end_line: u32,
+    is_start: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -117,6 +386,8 @@ pub struct UiSourcePayload {
     pub commit: Option<String>,
     pub lines: Vec<String>,
     pub versions: Vec<UiVersion>,
+    pub symbols: Vec<UiSourceSymbol>,
+    pub blame: Vec<UiLineBlame>,
     pub annotations: Vec<UiLineAnnotation>,
     pub warnings: Vec<UiWarning>,
 }
@@ -128,20 +399,29 @@ pub struct UiDashboard {
     pub covered_lines: i64,
     pub coverage_percent: f64,
     pub active_hazards: i64,
+    pub sarif_findings: i64,
     pub evidence_covered_hazards: i64,
     pub hazard_evidence_percent: f64,
     pub covered_hazards: i64,
     pub hazard_coverage_percent: f64,
+    pub mutant_verified_covered_lines: i64,
+    pub mutant_verified_covered_percent: f64,
     pub mutant_killed_covered_lines: i64,
     pub mutant_killed_covered_percent: f64,
+    pub stochastic_mutant_verified_covered_lines: i64,
+    pub stochastic_mutant_verified_covered_percent: f64,
     pub stochastic_mutant_killed_covered_lines: i64,
     pub stochastic_mutant_killed_covered_percent: f64,
+    pub invariant_mutant_verified_covered_lines: i64,
+    pub invariant_mutant_verified_covered_percent: f64,
     pub invariant_mutant_killed_covered_lines: i64,
     pub invariant_mutant_killed_covered_percent: f64,
     pub multi_type_covered_lines: i64,
     pub multi_type_covered_percent: f64,
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
+    pub top_units: Vec<UiUnitHotspot>,
+    pub top_architecture_risks: Vec<UiArchitectureRisk>,
     pub warnings: Vec<UiWarning>,
 }
 
@@ -149,8 +429,11 @@ pub struct UiDashboard {
 struct DashboardLineCounts {
     tracked: i64,
     covered: i64,
+    mutant_verified: i64,
     mutant_killed: i64,
+    stochastic_mutant_verified: i64,
     stochastic_mutant_killed: i64,
+    invariant_mutant_verified: i64,
     invariant_mutant_killed: i64,
     multi_type: i64,
 }
@@ -173,6 +456,44 @@ pub struct UiOverlays {
     dark_arms: HashMap<String, BTreeMap<u32, Vec<UiDarkArm>>>,
 }
 
+#[derive(RustEmbed)]
+#[folder = "ui/"]
+struct EmbeddedUi;
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct IndexPageTemplate<'a> {
+    title: &'a str,
+    body: &'a str,
+}
+
+#[derive(Clone)]
+struct UiServerState {
+    db: Arc<PathBuf>,
+    repo: Arc<PathBuf>,
+    overlays: Arc<UiOverlays>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct IndexQuery {
+    path: Option<String>,
+    dir: Option<String>,
+    commit: Option<String>,
+    q: Option<String>,
+    sort: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DirectoryQuery {
+    dir: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SourceQuery {
+    path: Option<String>,
+    commit: Option<String>,
+}
+
 #[derive(Default)]
 struct AnnotationBuilder {
     covered: bool,
@@ -186,8 +507,19 @@ struct AnnotationBuilder {
     mutant_coverage: Option<f64>,
     dark_arms: Vec<String>,
     dark_arm_spans: Vec<UiDarkArm>,
+    effect_spans: Vec<UiEffectSpan>,
+    findings: Vec<UiFinding>,
     hazards: Vec<UiHazard>,
+    test_type_counts: BTreeMap<String, i64>,
+    semantic_churn: f64,
+    semantic_churn_events: i64,
+    bug_weight: f64,
+    bug_events: Vec<UiBugEvent>,
 }
+
+const MIN_HISTORY_WEIGHT: f64 = 0.001;
+const BUG_HISTORY_ROW_BUDGET: usize = 120;
+const DECOMPLEX_DOC_BASE: &str = "https://github.com/cuzzo/clear/blob/master/gems/decomplex";
 
 pub fn serve_ui(db: impl AsRef<Path>, repo: impl AsRef<Path>, host: &str, port: u16) -> Result<()> {
     serve_ui_with_overlays(db, repo, host, port, &[])
@@ -204,20 +536,49 @@ pub fn serve_ui_with_overlays(
     let repo = repo.as_ref().to_path_buf();
     Storage::open(&db)?;
     let overlays = UiOverlays::load(overlay_paths)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(serve_ui_async(db, repo, host.to_string(), port, overlays))
+}
+
+async fn serve_ui_async(
+    db: PathBuf,
+    repo: PathBuf,
+    host: String,
+    port: u16,
+    overlays: UiOverlays,
+) -> Result<()> {
     let addr = format!("{host}:{port}");
-    let listener = TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("bind {addr}"))?;
+    let state = UiServerState {
+        db: Arc::new(db),
+        repo: Arc::new(repo),
+        overlays: Arc::new(overlays),
+    };
+    let app = ui_router(state);
     println!("Lineage UI listening on http://{addr}");
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                if let Err(error) = handle_stream(stream, &db, &repo, &overlays) {
-                    eprintln!("lineage ui request failed: {error:#}");
-                }
-            }
-            Err(error) => eprintln!("lineage ui connection failed: {error}"),
-        }
-    }
+    axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn ui_router(state: UiServerState) -> Router {
+    Router::new()
+        .route("/", get(index_handler))
+        .route("/index.html", get(index_handler))
+        .route("/api/files", get(api_files_handler))
+        .route("/api/dashboard", get(api_dashboard_handler))
+        .route("/api/source", get(api_source_handler))
+        .route("/assets/*path", get(asset_handler))
+        .route("/favicon.ico", get(favicon_handler))
+        .with_state(state)
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
+        .layer(TraceLayer::new_for_http())
 }
 
 pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
@@ -226,9 +587,19 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
 
 pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
     let total_start = Instant::now();
-    if let Some(files) = read_model_file_index_with_scope(storage, scope)? {
+    let sarif_counts = storage.sarif_finding_counts_by_file()?;
+    let dark_arm_counts = sarif_dark_arm_counts_by_file(storage)?;
+    if let Some(files) =
+        read_model_file_index_with_scope(storage, scope, &sarif_counts, &dark_arm_counts)?
+    {
         profile_log("file_index.read_model_total", total_start);
-        return Ok(files);
+        return Ok(append_sarif_only_files(
+            files,
+            scope,
+            &sarif_counts,
+            &dark_arm_counts,
+            true,
+        ));
     }
     let line_start = Instant::now();
     let line_stats = line_coverage_by_file(storage, scope)?;
@@ -277,10 +648,14 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
         let path = row.get::<_, String>(0)?;
         let fallback_line_coverage = row.get::<_, f64>(5)?;
         let stats = line_stats.get(&path).copied().unwrap_or_default();
+        let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
+        let dark_arm_findings = dark_arm_counts.get(&path).copied().unwrap_or_default();
         Ok(UiFile {
             path,
             units: row.get(1)?,
             hazards: row.get(2)?,
+            sarif_findings,
+            dark_arm_findings,
             evidence_covered_hazards: 0,
             covered_hazards: 0,
             distinct_tests: row.get(3)?,
@@ -293,8 +668,11 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
                 fallback_line_coverage
             },
             mutant_coverage: row.get(6)?,
+            mutant_verified_covered_lines: 0,
             mutant_killed_covered_lines: 0,
+            stochastic_mutant_verified_covered_lines: 0,
             stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_verified_covered_lines: 0,
             invariant_mutant_killed_covered_lines: 0,
             multi_type_covered_lines: 0,
             read_model: false,
@@ -303,16 +681,92 @@ pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result
     let files = rows
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|file| scope.allows(&file.path))
+        .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
         .collect();
     profile_log("file_index.current_units", query_start);
     profile_log("file_index.total", total_start);
-    Ok(files)
+    Ok(append_sarif_only_files(
+        files,
+        scope,
+        &sarif_counts,
+        &dark_arm_counts,
+        false,
+    ))
+}
+
+fn append_sarif_only_files(
+    mut files: Vec<UiFile>,
+    scope: &CoverageScope,
+    sarif_counts: &HashMap<String, i64>,
+    dark_arm_counts: &HashMap<String, i64>,
+    read_model: bool,
+) -> Vec<UiFile> {
+    let existing = files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<BTreeSet<_>>();
+    for (path, count) in sarif_counts {
+        if *count <= 0
+            || existing.contains(path)
+            || !scope.allows(path)
+            || !is_production_source_path(path)
+        {
+            continue;
+        }
+        files.push(UiFile {
+            path: path.clone(),
+            units: 0,
+            hazards: 0,
+            sarif_findings: *count,
+            dark_arm_findings: dark_arm_counts.get(path).copied().unwrap_or_default(),
+            evidence_covered_hazards: 0,
+            covered_hazards: 0,
+            distinct_tests: 0,
+            mutant_killed_tests: 0,
+            tracked_lines: 0,
+            covered_lines: 0,
+            line_coverage: 0.0,
+            mutant_coverage: 0.0,
+            mutant_verified_covered_lines: 0,
+            mutant_killed_covered_lines: 0,
+            stochastic_mutant_verified_covered_lines: 0,
+            stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_verified_covered_lines: 0,
+            invariant_mutant_killed_covered_lines: 0,
+            multi_type_covered_lines: 0,
+            read_model,
+        });
+    }
+    files.sort_by(|left, right| {
+        right
+            .hazards
+            .cmp(&left.hazards)
+            .then_with(|| right.sarif_findings.cmp(&left.sarif_findings))
+            .then_with(|| right.mutant_killed_tests.cmp(&left.mutant_killed_tests))
+            .then_with(|| right.distinct_tests.cmp(&left.distinct_tests))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    files
+}
+
+fn sarif_dark_arm_counts_by_file(storage: &Storage) -> Result<HashMap<String, i64>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path, COUNT(*) AS findings
+        FROM sarif_findings
+        WHERE is_dark_arm = 1
+        GROUP BY path
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
 }
 
 fn read_model_file_index_with_scope(
     storage: &Storage,
     scope: &CoverageScope,
+    sarif_counts: &HashMap<String, i64>,
+    dark_arm_counts: &HashMap<String, i64>,
 ) -> Result<Option<Vec<UiFile>>> {
     let start = Instant::now();
     if storage.count_rows("ui_file_summaries")? == 0 {
@@ -331,8 +785,11 @@ fn read_model_file_index_with_scope(
                covered_lines,
                line_coverage,
                mutant_coverage,
+               mutant_verified_covered_lines,
                mutant_killed_covered_lines,
+               stochastic_mutant_verified_covered_lines,
                stochastic_mutant_killed_covered_lines,
+               invariant_mutant_verified_covered_lines,
                invariant_mutant_killed_covered_lines,
                multi_type_covered_lines
         FROM ui_file_summaries
@@ -340,10 +797,15 @@ fn read_model_file_index_with_scope(
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
+        let path = row.get::<_, String>(0)?;
+        let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
+        let dark_arm_findings = dark_arm_counts.get(&path).copied().unwrap_or_default();
         Ok(UiFile {
-            path: row.get(0)?,
+            path,
             units: row.get(1)?,
             hazards: row.get(2)?,
+            sarif_findings,
+            dark_arm_findings,
             evidence_covered_hazards: row.get(3)?,
             covered_hazards: row.get(4)?,
             distinct_tests: row.get(5)?,
@@ -352,17 +814,20 @@ fn read_model_file_index_with_scope(
             covered_lines: row.get(8)?,
             line_coverage: row.get(9)?,
             mutant_coverage: row.get(10)?,
-            mutant_killed_covered_lines: row.get(11)?,
-            stochastic_mutant_killed_covered_lines: row.get(12)?,
-            invariant_mutant_killed_covered_lines: row.get(13)?,
-            multi_type_covered_lines: row.get(14)?,
+            mutant_verified_covered_lines: row.get(11)?,
+            mutant_killed_covered_lines: row.get(12)?,
+            stochastic_mutant_verified_covered_lines: row.get(13)?,
+            stochastic_mutant_killed_covered_lines: row.get(14)?,
+            invariant_mutant_verified_covered_lines: row.get(15)?,
+            invariant_mutant_killed_covered_lines: row.get(16)?,
+            multi_type_covered_lines: row.get(17)?,
             read_model: true,
         })
     })?;
     let files = rows
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|file| scope.allows(&file.path))
+        .filter(|file| scope.allows(&file.path) && is_production_source_path(&file.path))
         .collect();
     profile_log("file_index.read_model_query", start);
     Ok(Some(files))
@@ -505,7 +970,7 @@ fn line_coverage_by_file(
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
     for row in rows {
         let (path, hits) = row?;
-        if !scope.allows(&path) {
+        if !scope.allows(&path) || !is_production_source_path(&path) {
             continue;
         }
         let entry = by_file.entry(path).or_default();
@@ -518,17 +983,31 @@ fn line_coverage_by_file(
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope(storage, "", &CoverageScope::all())
+    dashboard_summary_for_directory_with_scope_and_repo(storage, "", &CoverageScope::all(), None)
 }
 
 pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope(storage, directory, &CoverageScope::all())
+    dashboard_summary_for_directory_with_scope_and_repo(
+        storage,
+        directory,
+        &CoverageScope::all(),
+        None,
+    )
 }
 
 pub fn dashboard_summary_for_directory_with_scope(
     storage: &Storage,
     directory: &str,
     scope: &CoverageScope,
+) -> Result<UiDashboard> {
+    dashboard_summary_for_directory_with_scope_and_repo(storage, directory, scope, None)
+}
+
+fn dashboard_summary_for_directory_with_scope_and_repo(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
 ) -> Result<UiDashboard> {
     let total_start = Instant::now();
     let directory = normalize_directory(directory);
@@ -576,6 +1055,12 @@ pub fn dashboard_summary_for_directory_with_scope(
     let warning_start = Instant::now();
     let warnings = warnings_for_directory(storage, &directory, scope)?;
     profile_log("dashboard.warnings", warning_start);
+    let unit_start = Instant::now();
+    let top_units = top_unit_hotspots(storage, &directory, scope, repo)?;
+    profile_log("dashboard.top_units", unit_start);
+    let architecture_start = Instant::now();
+    let top_architecture_risks = top_architecture_risks(storage, &directory, scope)?;
+    profile_log("dashboard.top_architecture_risks", architecture_start);
 
     let files_with_coverage = files
         .iter()
@@ -585,6 +1070,11 @@ pub fn dashboard_summary_for_directory_with_scope(
         .iter()
         .filter(|file| path_in_directory(&file.path, &directory))
         .count();
+    let sarif_findings = files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, &directory))
+        .map(|file| file.sarif_findings)
+        .sum();
 
     let dashboard = UiDashboard {
         files: files_count,
@@ -592,15 +1082,28 @@ pub fn dashboard_summary_for_directory_with_scope(
         covered_lines: line_counts.covered,
         coverage_percent: percent(line_counts.covered, line_counts.tracked),
         active_hazards,
+        sarif_findings,
         evidence_covered_hazards,
         hazard_evidence_percent: percent(evidence_covered_hazards, active_hazards),
         covered_hazards,
         hazard_coverage_percent: percent(covered_hazards, active_hazards),
+        mutant_verified_covered_lines: line_counts.mutant_verified,
+        mutant_verified_covered_percent: percent(line_counts.mutant_verified, line_counts.covered),
         mutant_killed_covered_lines: line_counts.mutant_killed,
         mutant_killed_covered_percent: percent(line_counts.mutant_killed, line_counts.covered),
+        stochastic_mutant_verified_covered_lines: line_counts.stochastic_mutant_verified,
+        stochastic_mutant_verified_covered_percent: percent(
+            line_counts.stochastic_mutant_verified,
+            line_counts.covered,
+        ),
         stochastic_mutant_killed_covered_lines: line_counts.stochastic_mutant_killed,
         stochastic_mutant_killed_covered_percent: percent(
             line_counts.stochastic_mutant_killed,
+            line_counts.covered,
+        ),
+        invariant_mutant_verified_covered_lines: line_counts.invariant_mutant_verified,
+        invariant_mutant_verified_covered_percent: percent(
+            line_counts.invariant_mutant_verified,
             line_counts.covered,
         ),
         invariant_mutant_killed_covered_lines: line_counts.invariant_mutant_killed,
@@ -612,6 +1115,8 @@ pub fn dashboard_summary_for_directory_with_scope(
         multi_type_covered_percent: percent(line_counts.multi_type, line_counts.covered),
         files_with_coverage,
         top_hazard_files,
+        top_units,
+        top_architecture_risks,
         warnings,
     };
     profile_log("dashboard.total", total_start);
@@ -625,7 +1130,11 @@ fn warnings_for_directory(
 ) -> Result<Vec<UiWarning>> {
     let units = warning_units(storage)?
         .into_iter()
-        .filter(|unit| scope.allows(&unit.current_path) && path_in_directory(&unit.current_path, directory))
+        .filter(|unit| {
+            scope.allows(&unit.current_path)
+                && is_production_source_path(&unit.current_path)
+                && path_in_directory(&unit.current_path, directory)
+        })
         .collect::<Vec<_>>();
     Ok(warnings_for_units(&units))
 }
@@ -866,13 +1375,356 @@ fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
     warnings
 }
 
+#[derive(Clone, Default)]
+struct UnitSignalCounts {
+    sarif_findings: i64,
+    lint_findings: i64,
+    dark_arms: i64,
+    hazards: i64,
+}
+
+fn top_unit_hotspots(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+    repo: Option<&Path>,
+) -> Result<Vec<UiUnitHotspot>> {
+    let prefixes = if directory.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("{}/", normalize_directory(directory))]
+    };
+    let mut summaries = storage.top_units(2_000, &prefixes)?;
+    summaries.retain(|summary| {
+        scope.allows(&summary.current_path)
+            && is_production_source_path(&summary.current_path)
+            && path_in_directory(&summary.current_path, directory)
+    });
+    let signals = unit_signal_counts(storage)?;
+    let spans = storage
+        .current_unit_spans()?
+        .into_iter()
+        .map(|span| (span.id, span.start_line))
+        .collect::<HashMap<_, _>>();
+    let current_spans = repo
+        .map(|repo| current_source_start_lines(repo, &summaries))
+        .unwrap_or_default();
+    let mut units = summaries
+        .into_iter()
+        .map(|summary| {
+            let signal = signals.get(&summary.id).cloned().unwrap_or_default();
+            let key = (
+                summary.current_path.clone(),
+                summary.name.clone(),
+                summary.kind.clone(),
+            );
+            let start_line = current_spans
+                .get(&key)
+                .copied()
+                .or_else(|| spans.get(&summary.id).copied())
+                .unwrap_or(1);
+            let score = unit_hotspot_score(&summary, &signal);
+            UiUnitHotspot {
+                path: summary.current_path,
+                name: summary.name,
+                kind: summary.kind,
+                start_line,
+                score,
+                risk_score: summary.risk_score,
+                sarif_findings: signal.sarif_findings,
+                dark_arms: signal.dark_arms,
+                hazards: signal.hazards,
+                fixes: summary.fixes,
+                changes: summary.changes,
+                mutant_killed_tests: summary.current_mutant_killed_tests,
+                distinct_tests: summary.current_distinct_tests,
+            }
+        })
+        .filter(|unit| unit.score > 0.0)
+        .collect::<Vec<_>>();
+    units.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.hazards.cmp(&left.hazards))
+            .then_with(|| right.sarif_findings.cmp(&left.sarif_findings))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    units.truncate(12);
+    Ok(units)
+}
+
+#[derive(Debug, Default, Clone)]
+struct ArchitectureRiskAccumulator {
+    path: String,
+    owner: String,
+    owner_kind: String,
+    start_line: u32,
+    findings: i64,
+    states: i64,
+    functions: i64,
+    impure_functions: i64,
+    privacy_candidates: i64,
+}
+
+fn top_architecture_risks(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<Vec<UiArchitectureRisk>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT path, start_line, rule_id, level, message, properties_json
+        FROM sarif_findings
+        WHERE lower(tool_name) = 'espalier'
+           OR lower(run_format) = 'espalier.manifest.sarif.v1'
+           OR lower(source) LIKE '%espalier%'
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+
+    let mut risks = BTreeMap::<(String, String), ArchitectureRiskAccumulator>::new();
+    for row in rows {
+        let (path, start_line, rule_id, level, message, properties_json) = row?;
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
+            continue;
+        }
+        let properties = serde_json::from_str::<Value>(&properties_json).unwrap_or(Value::Null);
+        let Some(owner) = espalier_owner_name(&properties, &message) else {
+            continue;
+        };
+        let owner_kind = string_field(&properties, &["type"])
+            .or_else(|| string_field(&properties, &["kind"]))
+            .unwrap_or("owner")
+            .to_string();
+        let key = (path.clone(), owner.clone());
+        let entry = risks.entry(key).or_insert_with(|| ArchitectureRiskAccumulator {
+            path: path.clone(),
+            owner: owner.clone(),
+            owner_kind: owner_kind.clone(),
+            start_line: 0,
+            ..ArchitectureRiskAccumulator::default()
+        });
+        if entry.owner_kind == "owner" && owner_kind != "owner" {
+            entry.owner_kind = owner_kind;
+        }
+        let line = espalier_finding_start_line(&properties).unwrap_or(start_line).max(1);
+        if entry.start_line == 0 || line < entry.start_line {
+            entry.start_line = line;
+        }
+        entry.findings += 1;
+        match rule_id.as_str() {
+            "espalier.state" => entry.states += 1,
+            "espalier.function" => {
+                entry.functions += 1;
+                if espalier_function_impure(&properties) {
+                    entry.impure_functions += 1;
+                }
+            }
+            "espalier.privacy-candidate" => entry.privacy_candidates += 1,
+            _ => {
+                if level == "warning" {
+                    entry.privacy_candidates += 1;
+                }
+            }
+        }
+    }
+
+    let mut out = risks
+        .into_values()
+        .map(|risk| {
+            let score = architecture_risk_score(&risk);
+            UiArchitectureRisk {
+                path: risk.path,
+                owner: risk.owner,
+                owner_kind: risk.owner_kind,
+                start_line: risk.start_line.max(1),
+                score,
+                findings: risk.findings,
+                states: risk.states,
+                functions: risk.functions,
+                impure_functions: risk.impure_functions,
+                privacy_candidates: risk.privacy_candidates,
+            }
+        })
+        .filter(|risk| risk.score > 0.0)
+        .collect::<Vec<_>>();
+    out.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.privacy_candidates.cmp(&left.privacy_candidates))
+            .then_with(|| right.impure_functions.cmp(&left.impure_functions))
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.owner.cmp(&right.owner))
+    });
+    out.truncate(12);
+    Ok(out)
+}
+
+fn espalier_owner_name(properties: &Value, message: &str) -> Option<String> {
+    string_field(properties, &["module"])
+        .or_else(|| object_field(properties, &["function"]).and_then(|function| string_field(function, &["owner"])))
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            message
+                .strip_prefix("owner:")
+                .or_else(|| message.strip_prefix("function:"))
+                .and_then(|tail| tail.trim().split('#').next())
+                .map(str::trim)
+                .filter(|owner| !owner.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn espalier_finding_start_line(properties: &Value) -> Option<u32> {
+    u32_field(properties, &["line"])
+        .or_else(|| span_field(properties, &["span"]).map(|span| span[0]))
+        .or_else(|| {
+            object_field(properties, &["function"])
+                .and_then(|function| u32_field(function, &["line"]).or_else(|| span_field(function, &["span"]).map(|span| span[0])))
+        })
+}
+
+fn espalier_function_impure(properties: &Value) -> bool {
+    let Some(function) = object_field(properties, &["function"]) else {
+        return false;
+    };
+    !normalized_effect_list(function, &["EFFECTS", "effects"], "writes").is_empty()
+}
+
+fn architecture_risk_score(risk: &ArchitectureRiskAccumulator) -> f64 {
+    risk.privacy_candidates as f64 * 4.0
+        + risk.impure_functions as f64 * 2.0
+        + risk.states as f64 * 0.75
+        + risk.findings as f64 * 0.2
+}
+
+fn current_source_start_lines(
+    repo: &Path,
+    summaries: &[crate::storage::UnitSummary],
+) -> HashMap<(String, String, String), u32> {
+    let paths = summaries
+        .iter()
+        .map(|summary| summary.current_path.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut spans = HashMap::new();
+    for path in paths {
+        let Ok(file) = read_source(repo, path, None) else {
+            continue;
+        };
+        for symbol in source_symbols_from_current_file(&file) {
+            let key = (path.to_string(), symbol.name, symbol.kind);
+            spans
+                .entry(key)
+                .and_modify(|line: &mut u32| *line = (*line).min(symbol.start_line))
+                .or_insert(symbol.start_line);
+        }
+    }
+    spans
+}
+
+fn unit_signal_counts(storage: &Storage) -> Result<HashMap<String, UnitSignalCounts>> {
+    let mut counts = HashMap::<String, UnitSignalCounts>::new();
+    {
+        let mut stmt = storage.connection().prepare(
+            r#"
+            SELECT unit_id,
+                   SUM(CASE WHEN NOT (
+                     lower(category) = 'lint'
+                     OR lower(source) LIKE '%lint%'
+                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                     OR lower(rule_id) LIKE 'lint/%'
+                     OR lower(rule_id) LIKE 'security/%'
+                     OR lower(rule_id) LIKE 'clippy::%'
+                     OR lower(rule_id) LIKE 'zig.ast-check%'
+                   ) THEN 1 ELSE 0 END) AS sarif_findings,
+                   SUM(CASE WHEN (
+                     lower(category) = 'lint'
+                     OR lower(source) LIKE '%lint%'
+                     OR lower(tool_name) IN ('rubocop', 'clippy', 'zig ast check')
+                     OR lower(rule_id) LIKE 'lint/%'
+                     OR lower(rule_id) LIKE 'security/%'
+                     OR lower(rule_id) LIKE 'clippy::%'
+                     OR lower(rule_id) LIKE 'zig.ast-check%'
+                   ) THEN 1 ELSE 0 END) AS lint_findings,
+                   SUM(CASE WHEN is_dark_arm = 1 THEN 1 ELSE 0 END) AS dark_arms
+            FROM sarif_findings
+            WHERE unit_id IS NOT NULL
+            GROUP BY unit_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (unit_id, sarif_findings, lint_findings, dark_arms) = row?;
+            let entry = counts.entry(unit_id).or_default();
+            entry.sarif_findings = sarif_findings;
+            entry.lint_findings = lint_findings;
+            entry.dark_arms = dark_arms;
+        }
+    }
+    {
+        let mut stmt = storage.connection().prepare(
+            r#"
+            SELECT unit_id, COUNT(*) AS hazards
+            FROM unit_hazards
+            WHERE is_active = 1
+            GROUP BY unit_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (unit_id, hazards) = row?;
+            counts.entry(unit_id).or_default().hazards = hazards;
+        }
+    }
+    Ok(counts)
+}
+
+fn unit_hotspot_score(summary: &crate::storage::UnitSummary, signal: &UnitSignalCounts) -> f64 {
+    summary.risk_score
+        + signal.sarif_findings as f64 * 0.35
+        + signal.lint_findings as f64 * 0.08
+        + signal.dark_arms as f64 * 1.2
+        + signal.hazards as f64 * 2.0
+}
+
 fn dashboard_line_counts_from_files(files: &[UiFile], directory: &str) -> DashboardLineCounts {
     let mut counts = DashboardLineCounts::default();
     for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
         counts.tracked += file.tracked_lines;
         counts.covered += file.covered_lines;
+        counts.mutant_verified += file.mutant_verified_covered_lines;
         counts.mutant_killed += file.mutant_killed_covered_lines;
+        counts.stochastic_mutant_verified += file.stochastic_mutant_verified_covered_lines;
         counts.stochastic_mutant_killed += file.stochastic_mutant_killed_covered_lines;
+        counts.invariant_mutant_verified += file.invariant_mutant_verified_covered_lines;
         counts.invariant_mutant_killed += file.invariant_mutant_killed_covered_lines;
         counts.multi_type += file.multi_type_covered_lines;
     }
@@ -921,7 +1773,7 @@ fn dashboard_line_counts(
         ),
         ranked_exposure AS (
           SELECT path, line, branch_id, test_id, test_type, is_verified,
-                 is_mutation_killed, mutation_kind,
+                 is_mutation_verified, is_mutation_killed, mutation_kind,
                  ROW_NUMBER() OVER (
                    PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
                    ORDER BY timestamp DESC, id DESC
@@ -937,7 +1789,14 @@ fn dashboard_line_counts(
         SELECT path,
                line,
                COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
+               MAX(CASE WHEN is_verified = 1 AND is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
                MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
+                 THEN 1 ELSE 0
+               END) AS stochastic_mutant_verified,
                MAX(CASE
                  WHEN is_verified = 1
                   AND is_mutation_killed = 1
@@ -949,7 +1808,13 @@ fn dashboard_line_counts(
                   AND is_mutation_killed = 1
                   AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
                  THEN 1 ELSE 0
-               END) AS invariant_mutant_killed
+               END) AS invariant_mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_verified = 1
+                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                 THEN 1 ELSE 0
+               END) AS invariant_mutant_verified
         FROM latest_exposure
         JOIN latest_lines USING (path, line)
         WHERE latest_lines.hits > 0
@@ -964,6 +1829,9 @@ fn dashboard_line_counts(
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
             row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, i64>(8)?,
         ))
     })?;
     for row in rows {
@@ -971,18 +1839,33 @@ fn dashboard_line_counts(
             path,
             _line,
             verified_test_types,
+            has_mutant_verified,
             has_mutant_killed,
+            has_stochastic_mutant_verified,
             has_stochastic_mutant_killed,
             has_invariant_mutant_killed,
+            has_invariant_mutant_verified,
         ) = row?;
-        if !_scope.allows(&path) || !path_in_directory(&path, _directory) {
+        if !_scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, _directory)
+        {
             continue;
+        }
+        if has_mutant_verified > 0 {
+            counts.mutant_verified += 1;
         }
         if has_mutant_killed > 0 {
             counts.mutant_killed += 1;
         }
+        if has_stochastic_mutant_verified > 0 {
+            counts.stochastic_mutant_verified += 1;
+        }
         if has_stochastic_mutant_killed > 0 {
             counts.stochastic_mutant_killed += 1;
+        }
+        if has_invariant_mutant_verified > 0 {
+            counts.invariant_mutant_verified += 1;
         }
         if has_invariant_mutant_killed > 0 {
             counts.invariant_mutant_killed += 1;
@@ -1030,7 +1913,10 @@ fn dashboard_coverage_line_counts(
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
     for row in rows {
         let (path, hits) = row?;
-        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
             continue;
         }
         counts.tracked += 1;
@@ -1127,7 +2013,10 @@ fn dashboard_hazard_counts(
     })?;
     for row in rows {
         let (path, evidence_present, is_verified) = row?;
-        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+        if !scope.allows(&path)
+            || !is_production_source_path(&path)
+            || !path_in_directory(&path, directory)
+        {
             continue;
         }
         active += 1;
@@ -1153,10 +2042,13 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.files += 1;
         entry.units += file.units;
         entry.hazards += file.hazards;
+        entry.sarif_findings += file.sarif_findings;
+        entry.dark_arm_findings += file.dark_arm_findings;
         entry.distinct_tests += file.distinct_tests;
         entry.mutant_killed_tests += file.mutant_killed_tests;
         entry.tracked_lines += file.tracked_lines;
         entry.covered_lines += file.covered_lines;
+        entry.mutant_killed_covered_lines += file.mutant_killed_covered_lines;
         entry.line_coverage_sum += file.line_coverage;
         entry.mutant_coverage_sum += file.mutant_coverage;
         if file.tracked_lines == 0 {
@@ -1176,10 +2068,13 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 files: builder.files,
                 units: builder.units,
                 hazards: builder.hazards,
+                sarif_findings: builder.sarif_findings,
+                dark_arm_findings: builder.dark_arm_findings,
                 distinct_tests: builder.distinct_tests,
                 mutant_killed_tests: builder.mutant_killed_tests,
                 tracked_lines: builder.tracked_lines,
                 covered_lines: builder.covered_lines,
+                mutant_killed_covered_lines: builder.mutant_killed_covered_lines,
                 line_coverage,
                 mutant_coverage: builder.mutant_coverage_sum / files,
             }
@@ -1192,10 +2087,13 @@ struct DirectoryBuilder {
     files: i64,
     units: i64,
     hazards: i64,
+    sarif_findings: i64,
+    dark_arm_findings: i64,
     distinct_tests: i64,
     mutant_killed_tests: i64,
     tracked_lines: i64,
     covered_lines: i64,
+    mutant_killed_covered_lines: i64,
     fallback_files: i64,
     line_coverage_sum: f64,
     mutant_coverage_sum: f64,
@@ -1232,6 +2130,18 @@ pub fn source_payload_with_overlays(
     let versions_start = Instant::now();
     let versions = file_versions(storage, path)?;
     profile_log("source.file_versions", versions_start);
+    let symbols_start = Instant::now();
+    let mut symbols = source_symbols(storage, &file)?;
+    profile_log("source.symbols", symbols_start);
+    let effects_start = Instant::now();
+    let effects = espalier_function_effects(storage, path)?;
+    apply_espalier_symbol_effects(&mut symbols, &effects);
+    apply_espalier_effect_spans(&lines, &mut annotations, &effects);
+    apply_symbol_hotspots(&mut symbols, &annotations);
+    profile_log("source.espalier_effects", effects_start);
+    let blame_start = Instant::now();
+    let blame = source_blame(repo, path, commit, lines.len()).unwrap_or_default();
+    profile_log("source.blame", blame_start);
     let warnings_start = Instant::now();
     let warnings = warnings_for_path(storage, path)?;
     profile_log("source.warnings", warnings_start);
@@ -1241,6 +2151,8 @@ pub fn source_payload_with_overlays(
         commit: commit.map(str::to_string),
         lines,
         versions,
+        symbols,
+        blame,
         annotations,
         warnings,
     })
@@ -1260,146 +2172,148 @@ impl UiOverlays {
     }
 }
 
-fn handle_stream(
-    mut stream: TcpStream,
-    db: &Path,
-    repo: &Path,
-    overlays: &UiOverlays,
-) -> Result<()> {
-    let mut buffer = [0_u8; 8192];
-    let read = stream.read(&mut buffer)?;
-    if read == 0 {
-        return Ok(());
-    }
-    let request = String::from_utf8_lossy(&buffer[..read]);
-    let Some(first_line) = request.lines().next() else {
-        return Ok(());
+async fn index_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<IndexQuery>,
+) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     };
-    let mut parts = first_line.split_whitespace();
-    let method = parts.next().unwrap_or_default();
-    let target = parts.next().unwrap_or("/");
-    if method != "GET" {
-        return write_response(&mut stream, 405, "text/plain; charset=utf-8", "method not allowed");
-    }
-    route(&mut stream, db, repo, overlays, target)
-}
-
-fn route(
-    stream: &mut TcpStream,
-    db: &Path,
-    repo: &Path,
-    overlays: &UiOverlays,
-    target: &str,
-) -> Result<()> {
-    let (path, query) = split_target(target);
-    match path {
-        "/" | "/index.html" => {
-            let storage = Storage::open_existing(db)?;
-            let scope = CoverageScope::from_repo(repo);
-            let selected = query.get("path").map(String::as_str);
-            let directory = query.get("dir").map(String::as_str);
-            let commit = query
-                .get("commit")
-                .map(String::as_str)
-                .filter(|value| !value.is_empty() && *value != "current");
-            let filter = query.get("q").map(String::as_str).unwrap_or_default();
-            let body = render_index_page(&storage, repo, overlays, &scope, selected, directory, commit, filter)?;
-            write_response(stream, 200, "text/html; charset=utf-8", &body)
-        }
-        "/api/files" => {
-            let storage = Storage::open_existing(db)?;
-            let scope = CoverageScope::from_repo(repo);
-            let json = serde_json::to_string(&file_index_with_scope(&storage, &scope)?)?;
-            write_response(stream, 200, "application/json", &json)
-        }
-        "/api/dashboard" => {
-            let storage = Storage::open_existing(db)?;
-            let scope = CoverageScope::from_repo(repo);
-            let directory = query.get("dir").map(String::as_str).unwrap_or_default();
-            let json = serde_json::to_string(&dashboard_summary_for_directory_with_scope(&storage, directory, &scope)?)?;
-            write_response(stream, 200, "application/json", &json)
-        }
-        "/api/source" => {
-            let Some(source_path) = query.get("path").map(String::as_str) else {
-                return write_response(stream, 400, "application/json", r#"{"error":"missing path"}"#);
-            };
-            let commit = query
-                .get("commit")
-                .map(String::as_str)
-                .filter(|value| !value.is_empty() && *value != "current");
-            let storage = Storage::open_existing(db)?;
-            match source_payload_with_overlays(&storage, repo, source_path, commit, overlays) {
-                Ok(payload) => {
-                    let json = serde_json::to_string(&payload)?;
-                    write_response(stream, 200, "application/json", &json)
-                }
-                Err(error) => write_response(
-                    stream,
-                    404,
-                    "application/json",
-                    &serde_json::json!({ "error": error.to_string() }).to_string(),
-                ),
-            }
-        }
-        _ => write_response(stream, 404, "text/plain; charset=utf-8", "not found"),
+    let scope = CoverageScope::from_repo(state.repo.as_ref());
+    let commit = query
+        .commit
+        .as_deref()
+        .filter(|value| !value.is_empty() && *value != "current");
+    let filter = query.q.as_deref().unwrap_or_default();
+    let sort = query
+        .sort
+        .as_deref()
+        .map(CoverageSort::parse)
+        .unwrap_or(CoverageSort::Path);
+    match render_index_page(
+        &storage,
+        state.repo.as_ref(),
+        state.overlays.as_ref(),
+        &scope,
+        query.path.as_deref(),
+        query.dir.as_deref(),
+        commit,
+        filter,
+        sort,
+    ) {
+        Ok(body) => Html(body).into_response(),
+        Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
 
-fn write_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &str) -> Result<()> {
-    let reason = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        _ => "OK",
+async fn api_files_handler(State(state): State<UiServerState>) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     };
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes())?;
-    Ok(())
+    let scope = CoverageScope::from_repo(state.repo.as_ref());
+    match file_index_with_scope(&storage, &scope) {
+        Ok(files) => Json(files).into_response(),
+        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
 }
 
-fn split_target(target: &str) -> (&str, HashMap<String, String>) {
-    let Some((path, raw_query)) = target.split_once('?') else {
-        return (target, HashMap::new());
+async fn api_dashboard_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<DirectoryQuery>,
+) -> Response<Body> {
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     };
-    let mut query = HashMap::new();
-    for pair in raw_query.split('&') {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        query.insert(percent_decode(key), percent_decode(value));
+    let scope = CoverageScope::from_repo(state.repo.as_ref());
+    let directory = query.dir.as_deref().unwrap_or_default();
+    match dashboard_summary_for_directory_with_scope_and_repo(
+        &storage,
+        directory,
+        &scope,
+        Some(state.repo.as_ref()),
+    ) {
+        Ok(dashboard) => Json(dashboard).into_response(),
+        Err(error) => error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
-    (path, query)
 }
 
-fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => {
-                out.push(b' ');
-                index += 1;
-            }
-            b'%' if index + 2 < bytes.len() => {
-                let hex = &input[index + 1..index + 3];
-                if let Ok(value) = u8::from_str_radix(hex, 16) {
-                    out.push(value);
-                    index += 3;
-                } else {
-                    out.push(bytes[index]);
-                    index += 1;
-                }
-            }
-            byte => {
-                out.push(byte);
-                index += 1;
-            }
-        }
+async fn api_source_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<SourceQuery>,
+) -> Response<Body> {
+    let Some(source_path) = query.path.as_deref() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "missing path" })),
+        )
+            .into_response();
+    };
+    let storage = match Storage::open_existing(state.db.as_ref()) {
+        Ok(storage) => storage,
+        Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let commit = query
+        .commit
+        .as_deref()
+        .filter(|value| !value.is_empty() && *value != "current");
+    match source_payload_with_overlays(
+        &storage,
+        state.repo.as_ref(),
+        source_path,
+        commit,
+        state.overlays.as_ref(),
+    ) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => error_json(StatusCode::NOT_FOUND, error),
     }
-    String::from_utf8_lossy(&out).into_owned()
+}
+
+async fn asset_handler(AxumPath(path): AxumPath<String>) -> Response<Body> {
+    let path = path.trim_start_matches('/');
+    let embedded_path = embedded_asset_path(path);
+    let Some(asset) = EmbeddedUi::get(&embedded_path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, asset_content_type(&embedded_path))
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(asset.data.into_owned()))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn embedded_asset_path(path: &str) -> String {
+    format!("assets/{}", path.trim_start_matches('/'))
+}
+
+async fn favicon_handler() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .body(Body::empty())
+        .unwrap_or_else(|_| StatusCode::NO_CONTENT.into_response())
+}
+
+fn asset_content_type(path: &str) -> &'static str {
+    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
+fn error_response(status: StatusCode, error: impl std::fmt::Display) -> Response<Body> {
+    (status, Html(format!("<p>{}</p>", html_escape(&error.to_string())))).into_response()
+}
+
+fn error_json(status: StatusCode, error: impl std::fmt::Display) -> Response<Body> {
+    (status, Json(serde_json::json!({ "error": error.to_string() }))).into_response()
 }
 
 fn read_source(repo: &Path, path: &str, commit: Option<&str>) -> Result<BlobFile> {
@@ -1468,6 +2382,506 @@ fn file_versions(storage: &Storage, path: &str) -> Result<Vec<UiVersion>> {
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+fn source_symbols(storage: &Storage, file: &BlobFile) -> Result<Vec<UiSourceSymbol>> {
+    let current_symbols = source_symbols_from_current_file(file);
+    if !current_symbols.is_empty() {
+        return Ok(current_symbols);
+    }
+
+    persisted_source_symbols(storage, &file.path)
+}
+
+fn source_symbols_from_current_file(file: &BlobFile) -> Vec<UiSourceSymbol> {
+    let extractor = HeuristicExtractor::new(SourceFilter::code_defaults());
+    extractor
+        .extract_units(file)
+        .into_iter()
+        .map(|unit| empty_source_symbol(unit.kind.as_str(), unit.name, unit.start_line, unit.end_line))
+        .collect()
+}
+
+fn empty_source_symbol(
+    kind: impl Into<String>,
+    name: impl Into<String>,
+    start_line: u32,
+    end_line: u32,
+) -> UiSourceSymbol {
+    UiSourceSymbol {
+        kind: kind.into(),
+        name: name.into(),
+        start_line,
+        end_line,
+        effect_known: false,
+        impure: false,
+        effect_summary: Vec::new(),
+        hotspot_score: 0.0,
+        hotspot_level: "green".to_string(),
+        sarif_findings: 0,
+        dark_arms: 0,
+        hazards: 0,
+        unverified_hazards: 0,
+        bug_weight: 0.0,
+        semantic_churn: 0.0,
+    }
+}
+
+fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourceSymbol>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_events AS (
+          SELECT e.*
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        )
+        SELECT u.type,
+               u.name,
+               COALESCE(le.start_line, 1) AS start_line,
+               COALESCE(le.end_line, le.start_line, 1) AS end_line
+        FROM logical_units u
+        LEFT JOIN latest_events le ON le.unit_id = u.id
+        WHERE COALESCE(le.path, u.original_path) = ?1
+        ORDER BY start_line, end_line, u.type, u.name
+        "#,
+    )?;
+    let rows = stmt.query_map(params![path], |row| {
+        Ok(empty_source_symbol(
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, u32>(2)?,
+            row.get::<_, u32>(3)?,
+        ))
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+fn source_blame(
+    repo: &Path,
+    path: &str,
+    commit: Option<&str>,
+    line_count: usize,
+) -> Result<Vec<UiLineBlame>> {
+    if line_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let repository = Repository::open(repo)?;
+    let mut options = BlameOptions::new();
+    options
+        .track_copies_same_file(true)
+        .ignore_whitespace(true)
+        .min_line(1)
+        .max_line(line_count);
+    if let Some(commit) = commit {
+        if let Some(oid) = resolve_commit_oid(&repository, commit) {
+            options.newest_commit(oid);
+        }
+    }
+
+    let blame = repository.blame_file(Path::new(path), Some(&mut options))?;
+    let mut raw = Vec::<(u32, String, i64, String)>::new();
+    for line in 1..=line_count {
+        let Some(hunk) = blame.get_line(line) else {
+            continue;
+        };
+        let commit_hash = hunk.final_commit_id().to_string();
+        let signature = hunk.final_signature();
+        let timestamp = signature.when().seconds();
+        let author = signature
+            .name()
+            .map(str::to_string)
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| commit_author(&repository, &commit_hash))
+            .unwrap_or_else(|| "unknown".to_string());
+        raw.push((line as u32, commit_hash, timestamp, author));
+    }
+
+    let mut commits = raw
+        .iter()
+        .map(|(_, hash, timestamp, _)| (hash.clone(), *timestamp))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    commits.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    let total_commits = commits.len().max(1);
+    let ordinals = commits
+        .into_iter()
+        .enumerate()
+        .map(|(index, (hash, _))| (hash, index + 1))
+        .collect::<HashMap<_, _>>();
+
+    Ok(raw
+        .into_iter()
+        .map(|(line, commit_hash, timestamp, author)| UiLineBlame {
+            line,
+            ordinal: ordinals.get(&commit_hash).copied().unwrap_or(1),
+            total_commits,
+            commit_hash,
+            timestamp,
+            author,
+        })
+        .collect())
+}
+
+fn resolve_commit_oid(repository: &Repository, commit: &str) -> Option<Oid> {
+    Oid::from_str(commit)
+        .ok()
+        .or_else(|| repository.revparse_single(commit).ok().map(|object| object.id()))
+}
+
+fn commit_author(repository: &Repository, commit_hash: &str) -> Option<String> {
+    resolve_commit_oid(repository, commit_hash).and_then(|oid| {
+        repository
+            .find_commit(oid)
+            .ok()
+            .and_then(|commit| commit.author().name().map(str::to_string))
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EspalierFunctionEffect {
+    name: String,
+    start_line: u32,
+    end_line: u32,
+    reads: Vec<String>,
+    writes: Vec<String>,
+    internal_calls: Vec<String>,
+    impure_calls: Vec<String>,
+}
+
+impl EspalierFunctionEffect {
+    fn effect_known(&self) -> bool {
+        true
+    }
+
+    fn impure(&self) -> bool {
+        !self.writes.is_empty() || !self.impure_calls.is_empty()
+    }
+
+    fn summary(&self) -> Vec<String> {
+        let mut rows = Vec::new();
+        if self.reads.is_empty() && self.writes.is_empty() && self.impure_calls.is_empty() {
+            rows.push("pure (no state effects)".to_string());
+        }
+        if !self.reads.is_empty() {
+            rows.push(format!("reads {}", self.reads.join(", ")));
+        }
+        if !self.writes.is_empty() {
+            rows.push(format!("writes {}", self.writes.join(", ")));
+        }
+        if !self.impure_calls.is_empty() {
+            rows.push(format!("calls impure {}", self.impure_calls.join(", ")));
+        }
+        rows
+    }
+}
+
+fn espalier_function_effects(
+    storage: &Storage,
+    path: &str,
+) -> Result<Vec<EspalierFunctionEffect>> {
+    let mut effects = storage
+        .sarif_findings_for_path(path)?
+        .into_iter()
+        .filter(|finding| is_espalier_function_finding(finding))
+        .filter_map(|finding| espalier_effect_from_finding(&finding))
+        .collect::<Vec<_>>();
+    if effects.is_empty() {
+        return Ok(effects);
+    }
+
+    let impure_names = effects
+        .iter()
+        .filter(|effect| !effect.writes.is_empty())
+        .map(|effect| effect.name.clone())
+        .collect::<BTreeSet<_>>();
+    for effect in &mut effects {
+        let calls = effect
+            .internal_calls
+            .iter()
+            .cloned()
+            .into_iter()
+            .filter(|call| impure_names.contains(call))
+            .collect::<Vec<_>>();
+        effect.impure_calls = calls;
+    }
+    Ok(effects)
+}
+
+fn is_espalier_function_finding(finding: &crate::model::SarifFinding) -> bool {
+    finding.rule_id == "espalier.function"
+        || (finding.tool_name.eq_ignore_ascii_case("espalier")
+            && finding
+                .run_format
+                .eq_ignore_ascii_case("espalier.manifest.sarif.v1")
+            && finding.rule_id.ends_with(".function"))
+}
+
+fn espalier_effect_from_finding(
+    finding: &crate::model::SarifFinding,
+) -> Option<EspalierFunctionEffect> {
+    let properties = serde_json::from_str::<Value>(&finding.properties_json).ok()?;
+    let function = properties.get("function")?;
+    let name = string_field(function, &["name"])
+        .or_else(|| string_field(&properties, &["function"]))
+        .or_else(|| finding.message.rsplit('#').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    let span = span_field(function, &["span"]);
+    let start_line = span
+        .map(|span| span[0])
+        .unwrap_or(finding.start_line)
+        .max(1);
+    let end_line = span
+        .map(|span| span[2].max(start_line))
+        .or(finding.end_line)
+        .unwrap_or(start_line)
+        .max(start_line);
+    Some(EspalierFunctionEffect {
+        name,
+        start_line,
+        end_line,
+        reads: normalized_effect_list(function, &["EFFECTS", "effects"], "reads"),
+        writes: normalized_effect_list(function, &["EFFECTS", "effects"], "writes"),
+        internal_calls: object_field(function, &["CALL_GRAPH", "call_graph"])
+            .map(|call_graph| string_list_field(call_graph, "internal_calls"))
+            .unwrap_or_default(),
+        impure_calls: Vec::new(),
+    })
+}
+
+fn normalized_effect_list(function: &Value, effect_keys: &[&str], key: &str) -> Vec<String> {
+    effect_keys
+        .iter()
+        .find_map(|effect_key| function.get(*effect_key))
+        .map(|effects| string_list_field(effects, key))
+        .unwrap_or_default()
+}
+
+fn object_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| value.get(*key).filter(|child| child.is_object()))
+}
+
+fn string_list_field(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn apply_espalier_symbol_effects(
+    symbols: &mut [UiSourceSymbol],
+    effects: &[EspalierFunctionEffect],
+) {
+    for symbol in symbols {
+        let Some(effect) = effects
+            .iter()
+            .find(|effect| effect.name == symbol.name)
+            .or_else(|| {
+                effects.iter().find(|effect| {
+                    symbol.start_line >= effect.start_line && symbol.start_line <= effect.end_line
+                })
+            })
+        else {
+            continue;
+        };
+        symbol.effect_known = effect.effect_known();
+        symbol.impure = effect.impure();
+        symbol.effect_summary = effect.summary();
+    }
+}
+
+fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAnnotation]) {
+    for symbol in symbols {
+        let end_line = symbol.end_line.max(symbol.start_line);
+        let mut sarif_findings = 0_i64;
+        let mut lint_findings = 0_i64;
+        let mut dark_arms = 0_i64;
+        let mut hazards = 0_i64;
+        let mut unverified_hazards = 0_i64;
+        let mut bug_weight = 0.0_f64;
+        let mut semantic_churn = 0.0_f64;
+
+        for annotation in annotations
+            .iter()
+            .filter(|annotation| annotation.line >= symbol.start_line && annotation.line <= end_line)
+        {
+            let lint_count = annotation
+                .findings
+                .iter()
+                .filter(|finding| is_lint_finding(finding))
+                .count() as i64;
+            lint_findings += lint_count;
+            sarif_findings += annotation.findings.len() as i64 - lint_count;
+            dark_arms += annotation.dark_arms.len().max(annotation.dark_arm_spans.len()) as i64;
+            hazards += annotation.hazards.len() as i64;
+            unverified_hazards += annotation
+                .hazards
+                .iter()
+                .filter(|hazard| !hazard.verified)
+                .count() as i64;
+            bug_weight += annotation.bug_weight;
+            semantic_churn += annotation.semantic_churn;
+        }
+
+        let line_count = (end_line.saturating_sub(symbol.start_line) + 1).max(1) as f64;
+        let density = (sarif_findings as f64 * 0.45
+            + lint_findings as f64 * 0.08
+            + dark_arms as f64 * 1.2
+            + hazards as f64 * 1.6
+            + unverified_hazards as f64 * 1.5)
+            / line_count.sqrt();
+        let history = bug_weight * 3.0 + semantic_churn.min(line_count) / line_count.max(1.0);
+        let score = density + history;
+
+        symbol.sarif_findings = sarif_findings + lint_findings;
+        symbol.dark_arms = dark_arms;
+        symbol.hazards = hazards;
+        symbol.unverified_hazards = unverified_hazards;
+        symbol.bug_weight = bug_weight.min(1.0);
+        symbol.semantic_churn = semantic_churn.min(1.0);
+        symbol.hotspot_score = score;
+        symbol.hotspot_level = hotspot_level(score).to_string();
+    }
+}
+
+fn hotspot_level(score: f64) -> &'static str {
+    if score >= 8.0 {
+        "deep-red"
+    } else if score >= 5.0 {
+        "red"
+    } else if score >= 3.5 {
+        "light-red"
+    } else if score >= 2.0 {
+        "orange"
+    } else if score >= 1.0 {
+        "yellow"
+    } else if score >= 0.35 {
+        "light-green"
+    } else if score > 0.0 {
+        "green"
+    } else {
+        "dark-green"
+    }
+}
+
+fn apply_espalier_effect_spans(
+    source_lines: &[String],
+    annotations: &mut Vec<UiLineAnnotation>,
+    effects: &[EspalierFunctionEffect],
+) {
+    if effects.is_empty() {
+        return;
+    }
+
+    let mut by_line = annotations
+        .drain(..)
+        .map(|annotation| (annotation.line, annotation))
+        .collect::<BTreeMap<_, _>>();
+    for effect in effects {
+        let tokens = effect_tokens(effect);
+        for line_no in effect.start_line..=effect.end_line {
+            let Some(source) = source_lines.get(line_no.saturating_sub(1) as usize) else {
+                continue;
+            };
+            let mut spans = Vec::new();
+            for (kind, label, token) in &tokens {
+                spans.extend(find_effect_token_ranges(source, token).into_iter().map(
+                    |(start, end)| UiEffectSpan {
+                        kind: kind.clone(),
+                        label: label.clone(),
+                        start,
+                        end,
+                    },
+                ));
+            }
+            if spans.is_empty() {
+                continue;
+            }
+            by_line
+                .entry(line_no)
+                .or_insert_with(|| empty_annotation(line_no))
+                .effect_spans
+                .extend(spans);
+        }
+    }
+
+    *annotations = by_line.into_values().collect();
+}
+
+fn effect_tokens(effect: &EspalierFunctionEffect) -> Vec<(String, String, String)> {
+    let mut tokens = Vec::new();
+    tokens.extend(effect.reads.iter().map(|name| {
+        (
+            "state-read".to_string(),
+            format!("state read {name}"),
+            name.clone(),
+        )
+    }));
+    tokens.extend(effect.writes.iter().map(|name| {
+        (
+            "state-write".to_string(),
+            format!("state write {name}"),
+            name.clone(),
+        )
+    }));
+    tokens.extend(effect.impure_calls.iter().map(|name| {
+        (
+            "impure-call".to_string(),
+            format!("impure call {name}"),
+            name.clone(),
+        )
+    }));
+    tokens
+}
+
+fn find_effect_token_ranges(source: &str, token: &str) -> Vec<(usize, usize)> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    while let Some(relative) = source[offset..].find(token) {
+        let start = offset + relative;
+        let end = start + token.len();
+        if token_boundaries_ok(source, start, end) {
+            ranges.push((start, end));
+        }
+        offset = end;
+    }
+    ranges
+}
+
+fn token_boundaries_ok(source: &str, start: usize, end: usize) -> bool {
+    let before = source[..start].chars().next_back();
+    let after = source[end..].chars().next();
+    !before.map(is_effect_identifier_continue).unwrap_or(false)
+        && !after.map(is_effect_identifier_continue).unwrap_or(false)
+}
+
+fn is_effect_identifier_continue(ch: char) -> bool {
+    ch == '_' || ch == '@' || ch == '$' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric()
+}
+
 pub fn line_annotations(
     storage: &Storage,
     path: &str,
@@ -1487,6 +2901,12 @@ pub fn line_annotations(
     let hazard_start = Instant::now();
     apply_hazards(storage, path, &mut lines)?;
     profile_log("line_annotations.hazards", hazard_start);
+    let history_start = Instant::now();
+    apply_history_heat(storage, path, &mut lines)?;
+    profile_log("line_annotations.history_heat", history_start);
+    let sarif_start = Instant::now();
+    apply_sarif_findings(storage, path, &mut lines)?;
+    profile_log("line_annotations.sarif_findings", sarif_start);
     let overlay_start = Instant::now();
     apply_overlays(path, overlays, &mut lines);
     profile_log("line_annotations.overlays", overlay_start);
@@ -1506,7 +2926,14 @@ pub fn line_annotations(
             mutant_coverage: builder.mutant_coverage,
             dark_arms: builder.dark_arms,
             dark_arm_spans: builder.dark_arm_spans,
+            effect_spans: builder.effect_spans,
+            findings: builder.findings,
             hazards: builder.hazards,
+            test_type_counts: builder.test_type_counts,
+            semantic_churn: builder.semantic_churn.min(1.0),
+            semantic_churn_events: builder.semantic_churn_events,
+            bug_weight: builder.bug_weight.min(1.0),
+            bug_events: builder.bug_events,
         })
         .collect();
     profile_log("line_annotations.total", total_start);
@@ -1564,9 +2991,15 @@ fn paint_statement_continuations(lines: &[String], annotations: &mut Vec<UiLineA
 }
 
 fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
+    let mut annotation = empty_annotation(line);
+    annotation.covered = true;
+    annotation
+}
+
+fn empty_annotation(line: u32) -> UiLineAnnotation {
     UiLineAnnotation {
         line,
-        covered: true,
+        covered: false,
         mutant_tested: false,
         test_types: Vec::new(),
         distinct_tests: 0,
@@ -1577,7 +3010,14 @@ fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
         mutant_coverage: None,
         dark_arms: Vec::new(),
         dark_arm_spans: Vec::new(),
+        effect_spans: Vec::new(),
+        findings: Vec::new(),
         hazards: Vec::new(),
+        test_type_counts: BTreeMap::new(),
+        semantic_churn: 0.0,
+        semantic_churn_events: 0,
+        bug_weight: 0.0,
+        bug_events: Vec::new(),
     }
 }
 
@@ -1792,7 +3232,8 @@ fn apply_test_exposure(
         if paint_line_coverage {
             entry.covered = true;
         }
-        entry.test_types.insert(test_type);
+        entry.test_types.insert(test_type.clone());
+        *entry.test_type_counts.entry(test_type).or_insert(0) += tests;
         entry.distinct_tests += tests;
         entry.mutant_verified_tests += mutation_verified;
         entry.mutant_killed_tests += mutation_killed;
@@ -1879,6 +3320,458 @@ fn apply_hazards(
     Ok(())
 }
 
+fn apply_history_heat(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<()> {
+    let (first, last) = decay_bounds(storage)?;
+    let (fix_first, fix_last) = fix_decay_bounds(storage)?.unwrap_or((first, last));
+    let discount_old_fixes_after_quality_jumps = has_multicommit_quality_history(storage)?;
+    apply_semantic_churn(
+        storage,
+        path,
+        lines,
+        first,
+        last,
+        fix_first,
+        fix_last,
+        discount_old_fixes_after_quality_jumps,
+    )?;
+    apply_crash_history(storage, path, lines, first, last)?;
+    Ok(())
+}
+
+fn apply_semantic_churn(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    first_timestamp: i64,
+    last_timestamp: i64,
+    fix_first_timestamp: i64,
+    fix_last_timestamp: i64,
+    discount_old_fixes_after_quality_jumps: bool,
+) -> Result<()> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH fix_commit_raw AS (
+          SELECT commit_hash,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN unit_id END) AS code_units,
+                 COUNT(DISTINCT CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN path END) AS code_files,
+                 COALESCE(SUM(CASE
+                   WHEN NOT (
+                     path LIKE 'spec/%'
+                     OR path LIKE 'test/%'
+                     OR path LIKE 'tests/%'
+                     OR path LIKE 'transpile-tests/%'
+                     OR path LIKE 'tools/fuzz/%'
+                     OR path LIKE '%/spec/%'
+                     OR path LIKE '%/test/%'
+                     OR path LIKE '%_spec.%'
+                     OR path LIKE '%_test.%'
+                   )
+                   THEN ABS(lines_added) + ABS(lines_removed) ELSE 0 END), 0) AS code_lines
+          FROM events
+          WHERE event_type = 'FIX'
+            AND semantic_change = 1
+          GROUP BY commit_hash
+        ),
+        fix_commit_profiles AS (
+          SELECT commit_hash,
+                 CASE
+                   WHEN code_units BETWEEN 1 AND 3
+                    AND code_files BETWEEN 1 AND 3
+                    AND code_lines <= 80
+                   THEN 1.0
+                   WHEN code_units BETWEEN 1 AND 8
+                    AND code_files BETWEEN 1 AND 5
+                    AND code_lines <= 200
+                   THEN 0.65
+                   WHEN code_units BETWEEN 1 AND 20
+                    AND code_files BETWEEN 1 AND 10
+                    AND code_lines <= 500
+                   THEN 0.30
+                   ELSE 0.10
+                 END AS target_factor
+          FROM fix_commit_raw
+        ),
+        latest_events AS (
+          SELECT e.*
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        )
+        SELECT COALESCE(le.start_line, 1) AS current_start,
+               COALESCE(le.end_line, le.start_line, 1) AS current_end,
+               e.path,
+               e.start_line,
+               e.end_line,
+               e.event_type,
+               e.commit_hash,
+               e.timestamp,
+               e.name,
+               COALESCE(m.message, '') AS message,
+               CASE
+                 WHEN ?2 = 1 THEN COALESCE((
+                   SELECT MIN(CASE
+                     WHEN q.metric_type = 'MUTANT_COV'
+                      AND q.old_value IS NOT NULL
+                      AND q.new_value >= 70.0
+                      AND q.new_value - q.old_value >= 25.0
+                     THEN 0.15
+                     WHEN q.metric_type IN ('LINE_COV', 'INTEGRATION_COV')
+                      AND q.old_value IS NOT NULL
+                      AND q.new_value >= 80.0
+                      AND q.new_value - q.old_value >= 25.0
+                     THEN 0.35
+                     WHEN q.metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
+                      AND q.old_value IS NOT NULL
+                      AND q.new_value - q.old_value >= 15.0
+                     THEN 0.60
+                     ELSE 1.0
+                   END)
+                   FROM quality_events q
+                   WHERE q.unit_id = e.unit_id
+                     AND q.timestamp > e.timestamp
+                     AND q.metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
+                 ), 1.0)
+                 ELSE 1.0
+               END AS protection_factor,
+               CASE WHEN e.event_type = 'FIX'
+                    THEN COALESCE(fp.target_factor, 0.10)
+                    ELSE 1.0
+               END AS target_factor,
+               CASE
+                 WHEN e.event_type = 'FIX'
+                  AND COALESCE(fp.target_factor, 0.10) >= 0.65
+                  AND EXISTS (
+                    SELECT 1
+                    FROM test_exposure_events t
+                    WHERE t.unit_id = e.unit_id
+                      AND t.timestamp > e.timestamp
+                      AND t.is_mutation_killed = 1
+                    LIMIT 1
+                  )
+                 THEN 0.25
+                 ELSE 1.0
+               END AS mutation_hardening_factor
+        FROM logical_units u
+        LEFT JOIN latest_events le ON le.unit_id = u.id
+        JOIN events e ON e.unit_id = u.id
+        LEFT JOIN metadata m ON m.commit_hash = e.commit_hash
+        LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
+        WHERE COALESCE(le.path, u.original_path) = ?1
+          AND e.semantic_change = 1
+          AND e.event_type IN ('CHANGE', 'FIX')
+        ORDER BY e.timestamp DESC, e.id DESC
+        "#,
+    )?;
+    let quality_discount_enabled = if discount_old_fixes_after_quality_jumps {
+        1
+    } else {
+        0
+    };
+    let rows = stmt.query_map(params![path, quality_discount_enabled], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, u32>(3)?,
+            row.get::<_, u32>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, f64>(10)?,
+            row.get::<_, f64>(11)?,
+            row.get::<_, f64>(12)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (
+            current_start,
+            current_end,
+            event_path,
+            event_start,
+            event_end,
+            event_type,
+            commit_hash,
+            timestamp,
+            name,
+            message,
+            protection_factor,
+            target_factor,
+            mutation_hardening_factor,
+        ) = row?;
+        let churn_weight = fix_cache_decay(timestamp, first_timestamp, last_timestamp);
+        let fix_weight = if event_type == "FIX" {
+            fix_cache_decay(timestamp, fix_first_timestamp, fix_last_timestamp)
+                * protection_factor
+                * target_factor
+                * mutation_hardening_factor
+        } else {
+            churn_weight
+        };
+        let Some((first_line, last_line)) = mapped_history_range(
+            path,
+            current_start,
+            current_end,
+            &event_path,
+            event_start,
+            event_end,
+        ) else {
+            continue;
+        };
+        for line in first_line..=last_line {
+            let entry = lines.entry(line).or_default();
+            entry.semantic_churn += churn_weight;
+            entry.semantic_churn_events += 1;
+            if event_type == "FIX" && fix_weight >= MIN_HISTORY_WEIGHT {
+                push_bug_event(
+                    entry,
+                    UiBugEvent {
+                        event_type: "fix".to_string(),
+                        commit_hash: commit_hash.clone(),
+                        timestamp,
+                        path: event_path.clone(),
+                        line,
+                        label: fix_event_label(&name, &message),
+                        weight: fix_weight,
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_crash_history(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    first_timestamp: i64,
+    last_timestamp: i64,
+) -> Result<()> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_events AS (
+          SELECT e.*
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        )
+        SELECT COALESCE(le.start_line, 1) AS current_start,
+               COALESCE(le.end_line, le.start_line, 1) AS current_end,
+               c.path,
+               c.line,
+               c.commit_hash,
+               c.timestamp,
+               c.error_class,
+               c.provider_id,
+               c.function
+        FROM logical_units u
+        LEFT JOIN latest_events le ON le.unit_id = u.id
+        JOIN crash_events c ON c.unit_id = u.id
+        WHERE COALESCE(le.path, u.original_path) = ?1
+        ORDER BY c.timestamp DESC, c.id DESC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![path], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, u32>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (
+            current_start,
+            current_end,
+            crash_path,
+            crash_line,
+            commit_hash,
+            timestamp,
+            error_class,
+            provider_id,
+            function,
+        ) = row?;
+        let weight = fix_cache_decay(timestamp, first_timestamp, last_timestamp);
+        if weight < MIN_HISTORY_WEIGHT {
+            continue;
+        }
+        let line = if crash_path == path && crash_line >= current_start && crash_line <= current_end
+        {
+            crash_line
+        } else {
+            current_start
+        };
+        let entry = lines.entry(line).or_default();
+        push_bug_event(
+            entry,
+            UiBugEvent {
+                event_type: "crash".to_string(),
+                commit_hash,
+                timestamp,
+                path: crash_path,
+                line: crash_line,
+                label: bug_event_label(
+                    "crash",
+                    &function,
+                    &format!("{error_class} {provider_id}"),
+                ),
+                weight,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn decay_bounds(storage: &Storage) -> Result<(i64, i64)> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT COALESCE(MIN(timestamp), 0), COALESCE(MAX(timestamp), 0)
+        FROM (
+          SELECT timestamp
+          FROM events
+          WHERE semantic_change = 1
+            AND event_type IN ('CHANGE', 'FIX')
+          UNION ALL
+          SELECT timestamp
+          FROM crash_events
+        )
+        "#,
+    )?;
+    Ok(stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?)
+}
+
+fn fix_decay_bounds(storage: &Storage) -> Result<Option<(i64, i64)>> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        SELECT MIN(timestamp), MAX(timestamp)
+        FROM events
+        WHERE semantic_change = 1
+          AND event_type = 'FIX'
+        "#,
+    )?;
+    let (first, last) = stmt.query_row([], |row| {
+        Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
+    })?;
+    Ok(first.zip(last))
+}
+
+fn has_multicommit_quality_history(storage: &Storage) -> Result<bool> {
+    let count: i64 = storage.connection().query_row(
+        r#"
+        SELECT COUNT(DISTINCT commit_hash)
+        FROM quality_events
+        WHERE metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV')
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 1)
+}
+
+fn fix_cache_decay(timestamp: i64, first_timestamp: i64, last_timestamp: i64) -> f64 {
+    let span = (last_timestamp - first_timestamp) as f64;
+    let t = if span <= 0.0 {
+        1.0
+    } else {
+        ((timestamp - first_timestamp) as f64 / span).clamp(0.0, 1.0)
+    };
+    1.0 / (1.0 + ((-12.0 * t) + 12.0).exp())
+}
+
+fn mapped_history_range(
+    current_path: &str,
+    current_start: u32,
+    current_end: u32,
+    event_path: &str,
+    event_start: u32,
+    event_end: u32,
+) -> Option<(u32, u32)> {
+    let current_end = current_end.max(current_start);
+    if event_path == current_path {
+        let first = event_start.max(current_start);
+        let last = event_end.max(event_start).min(current_end);
+        (first <= last).then_some((first, last))
+    } else {
+        Some((current_start, current_end))
+    }
+}
+
+fn push_bug_event(entry: &mut AnnotationBuilder, event: UiBugEvent) {
+    entry.bug_weight += event.weight;
+    entry.bug_events.push(event);
+}
+
+fn bug_event_label(kind: &str, name: &str, detail: &str) -> String {
+    let mut parts = Vec::new();
+    if !name.trim().is_empty() {
+        parts.push(name.trim().to_string());
+    }
+    if !detail.trim().is_empty() {
+        parts.push(detail.trim().to_string());
+    }
+    if parts.is_empty() {
+        kind.to_string()
+    } else {
+        parts.join(": ")
+    }
+}
+
+fn fix_event_label(name: &str, message: &str) -> String {
+    let first_line = message.lines().next().unwrap_or_default().trim();
+    if first_line.is_empty() {
+        name.trim().to_string()
+    } else {
+        first_line.to_string()
+    }
+}
+
 fn apply_overlays(
     path: &str,
     overlays: &UiOverlays,
@@ -1903,6 +3796,93 @@ fn apply_overlays(
     }
 }
 
+fn apply_sarif_findings(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<()> {
+    for finding in storage.sarif_findings_for_path(path)? {
+        let span = sarif_finding_span(
+            finding.start_line,
+            finding.start_column,
+            finding.end_line,
+            finding.end_column,
+        );
+        let label = sarif_finding_label(&finding.rule_id, &finding.category, &finding.message);
+        let ui_finding = UiFinding {
+            source: finding.source.clone(),
+            tool: finding.tool_name.clone(),
+            rule_id: finding.rule_id.clone(),
+            level: finding.level.clone(),
+            message: finding.message.clone(),
+            category: finding.category.clone(),
+            tier: sarif_finding_tier(&finding.properties_json),
+            span,
+        };
+        lines
+            .entry(finding.start_line)
+            .or_default()
+            .findings
+            .push(ui_finding);
+
+        if finding.is_dark_arm {
+            let arm = UiDarkArm {
+                label,
+                span,
+            };
+            let (first_line, last_line) = span
+                .map(|span| (span[0], span[2].max(span[0])))
+                .unwrap_or((finding.start_line, finding.start_line));
+            for target_line in first_line..=last_line {
+                let entry = lines.entry(target_line).or_default();
+                if target_line == finding.start_line {
+                    entry.dark_arms.push(arm.label.clone());
+                }
+                entry.dark_arm_spans.push(arm.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sarif_finding_span(
+    start_line: u32,
+    start_column: Option<u32>,
+    end_line: Option<u32>,
+    end_column: Option<u32>,
+) -> Option<[u32; 4]> {
+    let end_line = end_line.unwrap_or(start_line);
+    if start_column.is_none() && end_column.is_none() && end_line == start_line {
+        return None;
+    }
+    let start = start_column.unwrap_or(1).saturating_sub(1);
+    let end = end_column.unwrap_or(start + 1).saturating_sub(1);
+    Some([start_line, start, end_line, end])
+}
+
+fn sarif_finding_label(rule_id: &str, category: &str, message: &str) -> String {
+    if !category.trim().is_empty() {
+        category.to_string()
+    } else if !rule_id.trim().is_empty() {
+        rule_id.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
+fn sarif_finding_tier(properties_json: &str) -> Option<i64> {
+    let properties = serde_json::from_str::<Value>(properties_json).ok()?;
+    properties
+        .get("tier")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            properties
+                .get("decomplex_finding")
+                .and_then(|finding| finding.get("tier"))
+                .and_then(Value::as_i64)
+        })
+}
+
 fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
     match value {
         Value::Array(items) => {
@@ -1911,6 +3891,14 @@ fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
             }
         }
         Value::Object(map) => {
+            if is_sarif_document(value) {
+                collect_sarif_document(value, overlays);
+                return;
+            }
+            if value.get("locations").is_some() {
+                collect_sarif_result(value, overlays);
+                return;
+            }
             if let (Some(path), Some(line), Some(label)) = (
                 string_field(value, &["path", "file", "filename"]),
                 u32_field(value, &["line", "arm_line", "start_line"]),
@@ -1935,8 +3923,66 @@ fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
     }
 }
 
+fn is_sarif_document(value: &Value) -> bool {
+    value.get("version").and_then(Value::as_str) == Some("2.1.0")
+        && value.get("runs").and_then(Value::as_array).is_some()
+}
+
+fn collect_sarif_document(value: &Value, overlays: &mut UiOverlays) {
+    let Some(runs) = value.get("runs").and_then(Value::as_array) else {
+        return;
+    };
+    for run in runs {
+        let Some(results) = run.get("results").and_then(Value::as_array) else {
+            continue;
+        };
+        for result in results {
+            collect_sarif_result(result, overlays);
+        }
+    }
+}
+
+fn collect_sarif_result(value: &Value, overlays: &mut UiOverlays) {
+    let Some(locations) = value.get("locations").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(label) = sarif_overlay_label(value) else {
+        return;
+    };
+
+    for location in locations {
+        let physical = location.get("physicalLocation").unwrap_or(location);
+        let path = physical
+            .get("artifactLocation")
+            .and_then(|artifact| artifact.get("uri"))
+            .and_then(Value::as_str);
+        let Some(path) = path else {
+            continue;
+        };
+        let null_region = Value::Null;
+        let region = physical.get("region").unwrap_or(&null_region);
+        let Some(line) = u32_field(region, &["startLine"]) else {
+            continue;
+        };
+        overlays
+            .dark_arms
+            .entry(path.trim_start_matches("./").to_string())
+            .or_default()
+            .entry(line)
+            .or_default()
+            .push(UiDarkArm {
+                label: label.clone(),
+                span: sarif_region_span(region),
+            });
+    }
+}
+
 fn overlay_label(value: &Value) -> Option<String> {
     let label = string_field(value, &["category", "kind", "rule_id", "ruleId", "message", "finding"])?;
+    overlay_label_text(label)
+}
+
+fn overlay_label_text(label: &str) -> Option<String> {
     let normalized = label.to_ascii_lowercase();
     if ["dark", "gap", "branch", "genuine"]
         .iter()
@@ -1946,6 +3992,37 @@ fn overlay_label(value: &Value) -> Option<String> {
     } else {
         None
     }
+}
+
+fn sarif_overlay_label(value: &Value) -> Option<String> {
+    let null_properties = Value::Null;
+    let properties = value.get("properties").unwrap_or(&null_properties);
+    if properties
+        .get("dark_arm")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Some(
+            string_field(properties, &["category", "arm_category", "kind"])
+                .or_else(|| string_field(value, &["ruleId"]))
+                .unwrap_or("dark arm")
+                .to_string(),
+        );
+    }
+
+    let message_text = value
+        .get("message")
+        .and_then(|message| message.get("text"))
+        .and_then(Value::as_str);
+    let result = [
+        string_field(value, &["ruleId"]),
+        message_text,
+        string_field(properties, &["category", "arm_category", "kind", "rule_id", "ruleId"]),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(overlay_label_text);
+    result
 }
 
 fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -1972,6 +4049,18 @@ fn span_field(value: &Value, keys: &[&str]) -> Option<[u32; 4]> {
                 .ok()?;
             values.try_into().ok()
         })
+}
+
+fn sarif_region_span(region: &Value) -> Option<[u32; 4]> {
+    let start_line = u32_field(region, &["startLine"])?;
+    let start_column = u32_field(region, &["startColumn"]).map(|column| column.saturating_sub(1));
+    let end_line = u32_field(region, &["endLine"]).unwrap_or(start_line);
+    let end_column = u32_field(region, &["endColumn"]).map(|column| column.saturating_sub(1));
+    if start_column.is_none() && end_column.is_none() && end_line == start_line {
+        return None;
+    }
+    let start = start_column.unwrap_or(0);
+    Some([start_line, start, end_line, end_column.unwrap_or(start)])
 }
 
 fn profile_enabled() -> bool {
@@ -2003,6 +4092,25 @@ fn format_days(days: f64) -> String {
     }
 }
 
+fn branch_context(repo: &Path) -> UiBranchContext {
+    Repository::open(repo)
+        .ok()
+        .and_then(|repository| {
+            let head = repository.head().ok()?;
+            let branch = head.shorthand().unwrap_or("HEAD").to_string();
+            let commit = head
+                .target()
+                .or_else(|| head.peel_to_commit().ok().map(|commit| commit.id()))
+                .map(|oid| short_commit(&oid.to_string()))
+                .unwrap_or_else(|| "unknown".to_string());
+            Some(UiBranchContext { branch, commit })
+        })
+        .unwrap_or_else(|| UiBranchContext {
+            branch: "unknown".to_string(),
+            commit: "unknown".to_string(),
+        })
+}
+
 fn render_index_page(
     storage: &Storage,
     repo: &Path,
@@ -2012,6 +4120,7 @@ fn render_index_page(
     directory: Option<&str>,
     commit: Option<&str>,
     filter: &str,
+    sort: CoverageSort,
 ) -> Result<String> {
     let files = file_index_with_scope(storage, scope)?;
     let selected_path = selected
@@ -2022,74 +4131,103 @@ fn render_index_page(
         .as_deref()
         .map(parent_directory)
         .unwrap_or(requested_directory);
-    let dashboard = dashboard_summary_for_directory_with_scope(storage, &current_directory, scope)?;
+    let dashboard = dashboard_summary_for_directory_with_scope_and_repo(
+        storage,
+        &current_directory,
+        scope,
+        Some(repo),
+    )?;
     let child_directories = directory_index(&files, &current_directory);
     let child_files = files_in_directory(&files, &current_directory);
+    let table_files = sorted_table_files(&files, filter, &current_directory, sort);
     let filtered = filtered_files_in_directory(&files, filter, &current_directory);
+    let branch_context = branch_context(repo);
     let payload = selected_path
         .as_deref()
         .map(|path| source_payload_with_overlays(storage, repo, path, commit, overlays))
         .transpose();
 
     let mut out = String::new();
-    out.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
-    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-    out.push_str("<title>Lineage</title><style>");
-    out.push_str(STYLE);
-    out.push_str("</style></head><body><div class=\"app\"><aside>");
-    out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
-    out.push_str(&format!(
-        "{} files{} | {:.1}% covered",
-        dashboard.files,
-        directory_label_suffix(&current_directory),
-        dashboard.coverage_percent
-    ));
-    out.push_str("</div>");
-    out.push_str(&render_sidebar_navigation(&current_directory, filter));
-    out.push_str("</header>");
-    out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
-    if !current_directory.is_empty() {
-        out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
-        out.push_str(&html_escape(&current_directory));
-        out.push_str("\">");
+    out.push_str("<div class=\"app\"><aside");
+    if matches!(&payload, Ok(Some(_))) {
+        out.push_str(" class=\"source-sidebar\"");
     }
-    out.push_str("<input name=\"q\" placeholder=\"Filter files\" value=\"");
-    out.push_str(&html_escape(filter));
-    out.push_str("\"><button type=\"submit\">Filter</button></form>");
-    out.push_str("<nav class=\"files\">");
-    if filter.trim().is_empty() {
-        if !current_directory.is_empty() {
-            out.push_str(&render_parent_directory_link(&current_directory, filter));
+    out.push('>');
+    match &payload {
+        Ok(Some(payload)) => {
+            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
+            out.push_str(&html_escape(&payload.path));
+            out.push_str("</div>");
+            out.push_str(&render_sidebar_navigation(&current_directory, filter));
+            out.push_str("</header>");
+            let outline = render_source_outline(payload);
+            if outline.is_empty() {
+                out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div><div class=\"empty\">No functions, methods, classes, or modules found.</div></nav>");
+            } else {
+                out.push_str(&outline);
+            }
         }
-        for directory in &child_directories {
-            out.push_str(&render_directory_link(directory, false, filter));
-        }
-        for file in &child_files {
-            let active = selected_path.as_deref() == Some(file.path.as_str());
-            out.push_str(&render_file_link(file, active, filter));
-        }
-        if child_directories.is_empty() && child_files.is_empty() {
-            out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
-        }
-    } else {
-        for file in &filtered {
-            let active = selected_path.as_deref() == Some(file.path.as_str());
-            out.push_str(&render_file_link(file, active, filter));
-        }
-        if filtered.is_empty() {
-            out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
+        _ => {
+            out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
+            out.push_str(&format!(
+                "{} files{} | {:.1}% covered",
+                dashboard.files,
+                directory_label_suffix(&current_directory),
+                dashboard.coverage_percent
+            ));
+            out.push_str("</div>");
+            out.push_str(&render_sidebar_navigation(&current_directory, filter));
+            out.push_str("</header>");
+            out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
+            if !current_directory.is_empty() {
+                out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
+                out.push_str(&html_escape(&current_directory));
+                out.push_str("\">");
+            }
+            out.push_str("<input name=\"q\" list=\"lineage-search-options\" autocomplete=\"off\" placeholder=\"Filter files\" value=\"");
+            out.push_str(&html_escape(filter));
+            out.push_str("\"><button type=\"submit\">Filter</button>");
+            out.push_str(&render_search_options(&files, &child_directories, &current_directory));
+            out.push_str("</form>");
+            out.push_str("<nav class=\"files\">");
+            if filter.trim().is_empty() {
+                if !current_directory.is_empty() {
+                    out.push_str(&render_parent_directory_link(&current_directory, filter));
+                }
+                for directory in &child_directories {
+                    out.push_str(&render_directory_link(directory, false, filter));
+                }
+                for file in &child_files {
+                    let active = selected_path.as_deref() == Some(file.path.as_str());
+                    out.push_str(&render_file_link(file, active, filter));
+                }
+                if child_directories.is_empty() && child_files.is_empty() {
+                    out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
+                }
+            } else {
+                for file in &filtered {
+                    let active = selected_path.as_deref() == Some(file.path.as_str());
+                    out.push_str(&render_file_link(file, active, filter));
+                }
+                if filtered.is_empty() {
+                    out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
+                }
+            }
+            out.push_str("</nav>");
         }
     }
-    out.push_str("</nav></aside><main>");
+    out.push_str("</aside><main>");
     match payload {
-        Ok(Some(payload)) => out.push_str(&render_source_view(&payload, filter)),
+        Ok(Some(payload)) => out.push_str(&render_source_view(&payload, filter, &branch_context)),
         Ok(None) => {
             out.push_str(&render_dashboard(
                 &dashboard,
                 &current_directory,
                 &child_directories,
-                &child_files,
+                &table_files,
                 filter,
+                sort,
+                &branch_context,
             ));
         }
         Err(error) => {
@@ -2100,8 +4238,14 @@ fn render_index_page(
             out.push_str("<div class=\"viewer\"><div class=\"empty\">The selected path is not available in the current checkout. Regenerate coverage for HEAD or open a historical commit view.</div></div>");
         }
     }
-    out.push_str("</main></div></body></html>");
-    Ok(out)
+    out.push_str("</main></div>");
+    render_page("Lineage", &out)
+}
+
+fn render_page(title: &str, body: &str) -> Result<String> {
+    IndexPageTemplate { title, body }
+        .render()
+        .context("render lineage index template")
 }
 
 fn filtered_files<'a>(files: &'a [UiFile], filter: &str) -> Vec<&'a UiFile> {
@@ -2121,6 +4265,38 @@ fn filtered_files_in_directory<'a>(
         .into_iter()
         .filter(|file| path_in_directory(&file.path, directory))
         .collect()
+}
+
+fn sorted_table_files<'a>(
+    files: &'a [UiFile],
+    filter: &str,
+    directory: &str,
+    sort: CoverageSort,
+) -> Vec<&'a UiFile> {
+    let mut files = filtered_files_in_directory(files, filter, directory);
+    files.sort_by(|left, right| match sort {
+        CoverageSort::Path => left.path.cmp(&right.path),
+        CoverageSort::Total => right
+            .tracked_lines
+            .cmp(&left.tracked_lines)
+            .then_with(|| left.path.cmp(&right.path)),
+        CoverageSort::Covered => right
+            .covered_lines
+            .cmp(&left.covered_lines)
+            .then_with(|| left.path.cmp(&right.path)),
+        CoverageSort::Partial => partial_line_count(right.covered_lines, right.dark_arm_findings)
+            .cmp(&partial_line_count(left.covered_lines, left.dark_arm_findings))
+            .then_with(|| left.path.cmp(&right.path)),
+        CoverageSort::Missed => missed_line_count(right.tracked_lines, right.covered_lines)
+            .cmp(&missed_line_count(left.tracked_lines, left.covered_lines))
+            .then_with(|| left.path.cmp(&right.path)),
+        CoverageSort::Percent => right
+            .line_coverage
+            .partial_cmp(&left.line_coverage)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.path.cmp(&right.path)),
+    });
+    files
 }
 
 fn files_in_directory<'a>(files: &'a [UiFile], directory: &str) -> Vec<&'a UiFile> {
@@ -2199,6 +4375,105 @@ fn render_sidebar_navigation(directory: &str, filter: &str) -> String {
     out
 }
 
+fn render_search_options(files: &[UiFile], directories: &[UiDirectory], directory: &str) -> String {
+    let mut values = BTreeSet::new();
+    for directory in directories {
+        values.insert(format!("{}/", directory.path));
+    }
+    for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
+        values.insert(file.path.clone());
+        if let Some(name) = file.path.rsplit('/').next() {
+            values.insert(name.to_string());
+        }
+    }
+    let mut out = String::new();
+    out.push_str("<datalist id=\"lineage-search-options\">");
+    for value in values {
+        out.push_str("<option value=\"");
+        out.push_str(&html_escape(&value));
+        out.push_str("\"></option>");
+    }
+    out.push_str("</datalist>");
+    out
+}
+
+fn render_source_outline(payload: &UiSourcePayload) -> String {
+    if payload.symbols.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<nav class=\"outline\" aria-label=\"source outline\"><div class=\"outline-title\">Outline</div>");
+    for symbol in &payload.symbols {
+        out.push_str("<a href=\"#L");
+        out.push_str(&symbol.start_line.to_string());
+        out.push_str("\"");
+        let effect_title = outline_effect_title(symbol);
+        if !effect_title.is_empty() {
+            out.push_str(" title=\"");
+            out.push_str(&html_escape(&effect_title));
+            out.push('"');
+        }
+        out.push_str(" class=\"");
+        if symbol.impure {
+            out.push_str("impure-symbol");
+        } else if symbol.effect_known {
+            out.push_str("pure-symbol");
+        } else {
+            out.push_str("unknown-symbol");
+        }
+        out.push_str(" hotspot-");
+        out.push_str(&html_escape(&symbol.hotspot_level));
+        out.push_str("\"><span class=\"outline-rail\"><span class=\"outline-impure\" aria-label=\"");
+        out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
+        out.push_str("\">");
+        if symbol.impure {
+            out.push_str("<i class=\"fa-solid fa-link\" aria-hidden=\"true\"></i>");
+        }
+        out.push_str("</span><span class=\"outline-hotspot\" title=\"");
+        out.push_str(&html_escape(&outline_hotspot_title(symbol)));
+        out.push_str("\"></span></span><span class=\"outline-kind\">");
+        out.push_str(&html_escape(&outline_kind_label(symbol)));
+        out.push_str("</span><span class=\"outline-name\">");
+        out.push_str(&html_escape(&symbol.name));
+        out.push_str("</span></a>");
+    }
+    out.push_str("</nav>");
+    out
+}
+
+fn outline_kind_label(symbol: &UiSourceSymbol) -> String {
+    unit_kind_label(&symbol.kind, &symbol.name)
+}
+
+fn is_class_method_name(name: &str) -> bool {
+    name.contains('.') || name.contains("::") || name.starts_with("self.")
+}
+
+fn outline_hotspot_title(symbol: &UiSourceSymbol) -> String {
+    format!(
+        "hotspot {:.2}: {} SARIF, {} partial, {} hazards ({} unverified), bug {:.2}, churn {:.2}",
+        symbol.hotspot_score,
+        symbol.sarif_findings,
+        symbol.dark_arms,
+        symbol.hazards,
+        symbol.unverified_hazards,
+        symbol.bug_weight,
+        symbol.semantic_churn
+    )
+}
+
+fn outline_effect_title(symbol: &UiSourceSymbol) -> String {
+    if !symbol.effect_summary.is_empty() {
+        return symbol.effect_summary.join("\n");
+    }
+    if symbol.effect_known {
+        "pure (no state effects)".to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn render_parent_directory_link(directory: &str, filter: &str) -> String {
     let parent = parent_directory(directory);
     format!(
@@ -2220,6 +4495,12 @@ fn render_file_link(file: &UiFile, active: bool, filter: &str) -> String {
         out.push_str(&format!(
             "<span class=\"pill\" title=\"active hazards\">{}</span>",
             file.hazards
+        ));
+    }
+    if file.sarif_findings > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"SARIF findings\">{}</span>",
+            file.sarif_findings
         ));
     }
     if file.line_coverage > 0.0 {
@@ -2253,6 +4534,12 @@ fn render_directory_link(directory: &UiDirectory, active: bool, filter: &str) ->
             directory.hazards
         ));
     }
+    if directory.sarif_findings > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"SARIF findings\">{}</span>",
+            directory.sarif_findings
+        ));
+    }
     if directory.line_coverage > 0.0 {
         out.push_str(&format!(
             "<span class=\"pill coverage-pill\" title=\"line coverage\">{:.0}%</span>",
@@ -2269,12 +4556,65 @@ fn render_directory_link(directory: &UiDirectory, active: bool, filter: &str) ->
     out
 }
 
+fn render_coverage_bar(
+    tracked_lines: i64,
+    covered_lines: i64,
+    line_coverage: f64,
+    mutant_killed_covered_lines: i64,
+    dark_arm_findings: i64,
+) -> String {
+    let (strong, weak) = coverage_bar_widths(
+        tracked_lines,
+        covered_lines,
+        line_coverage,
+        mutant_killed_covered_lines,
+        dark_arm_findings,
+    );
+    let title = format!(
+        "{:.1}% covered; {:.1}% mutant-killed/no-partial confidence; {:.1}% weak covered tail",
+        (strong + weak).min(100.0),
+        strong,
+        weak
+    );
+    format!(
+        "<span class=\"coverage-bar\" title=\"{}\"><span class=\"coverage-strong\" style=\"width:{:.3}%\"></span><span class=\"coverage-weak\" style=\"width:{:.3}%\"></span></span>",
+        html_escape(&title),
+        strong,
+        weak
+    )
+}
+
+fn coverage_bar_widths(
+    tracked_lines: i64,
+    covered_lines: i64,
+    line_coverage: f64,
+    mutant_killed_covered_lines: i64,
+    dark_arm_findings: i64,
+) -> (f64, f64) {
+    if tracked_lines <= 0 {
+        let covered = line_coverage.clamp(0.0, 100.0);
+        return (0.0, covered);
+    }
+    let covered_lines = covered_lines.clamp(0, tracked_lines);
+    let dark_arm_lines = dark_arm_findings.clamp(0, covered_lines);
+    let missing_mutant_lines = covered_lines
+        .saturating_sub(mutant_killed_covered_lines.clamp(0, covered_lines));
+    let weak_lines = missing_mutant_lines.max(dark_arm_lines).min(covered_lines);
+    let strong_lines = covered_lines.saturating_sub(weak_lines);
+    (
+        percent(strong_lines, tracked_lines),
+        percent(weak_lines, tracked_lines),
+    )
+}
+
 fn render_dashboard(
     dashboard: &UiDashboard,
     directory: &str,
-    directories: &[UiDirectory],
+    _directories: &[UiDirectory],
     files: &[&UiFile],
     filter: &str,
+    sort: CoverageSort,
+    branch_context: &UiBranchContext,
 ) -> String {
     let directory = normalize_directory(directory);
     let mut out = String::new();
@@ -2303,6 +4643,8 @@ fn render_dashboard(
     }
     out.push_str("</div></div>");
     out.push_str("<div class=\"viewer\"><section class=\"dashboard\">");
+    let coverage_context = dashboard_coverage_context(dashboard, directory.as_str(), files);
+    out.push_str(&render_branch_context(branch_context, &coverage_context, filter));
     out.push_str("<div class=\"metric-grid\">");
     out.push_str(&render_metric(
         "Line coverage",
@@ -2330,26 +4672,26 @@ fn render_dashboard(
     ));
     out.push_str(&render_metric(
         "Mutant-backed lines",
-        &format!("{:.1}%", dashboard.mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines have killed-mutant evidence",
-            dashboard.mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines have mutant-verified evidence",
+            dashboard.mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
         "Stochastic mutants",
-        &format!("{:.1}%", dashboard.stochastic_mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.stochastic_mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines are stochastic-mutant backed",
-            dashboard.stochastic_mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines are stochastic-mutant verified",
+            dashboard.stochastic_mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
         "Invariant mutants",
-        &format!("{:.1}%", dashboard.invariant_mutant_killed_covered_percent),
+        &format!("{:.1}%", dashboard.invariant_mutant_verified_covered_percent),
         &format!(
-            "{} / {} covered lines are invariant-mutant backed",
-            dashboard.invariant_mutant_killed_covered_lines, dashboard.covered_lines
+            "{} / {} covered lines are invariant-mutant verified",
+            dashboard.invariant_mutant_verified_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
@@ -2361,6 +4703,11 @@ fn render_dashboard(
         ),
     ));
     out.push_str(&render_metric(
+        "SARIF findings",
+        &dashboard.sarif_findings.to_string(),
+        "persisted first-party and ecosystem analysis findings",
+    ));
+    out.push_str(&render_metric(
         "Files",
         &dashboard.files.to_string(),
         &format!("{} files currently report coverage", dashboard.files_with_coverage),
@@ -2368,28 +4715,25 @@ fn render_dashboard(
     out.push_str("</div>");
     out.push_str(&render_warning_banner(&dashboard.warnings));
 
-    out.push_str("<section class=\"dashboard-section\"><h2>Directories</h2>");
-    if directories.is_empty() {
-        out.push_str("<p class=\"empty-inline\">No child directories are tracked here.</p>");
-    } else {
-        out.push_str("<div class=\"dashboard-files\">");
-        for directory in directories {
-            out.push_str(&render_directory_dashboard_row(directory, filter));
-        }
-        out.push_str("</div>");
-    }
+    out.push_str("<section class=\"dashboard-section\"><h2>Highest Risk Units</h2>");
+    out.push_str(&render_unit_hotspots(&dashboard.top_units, filter));
     out.push_str("</section>");
 
-    out.push_str("<section class=\"dashboard-section\"><h2>Files</h2>");
-    if files.is_empty() {
-        out.push_str("<p class=\"empty-inline\">No files are tracked directly in this directory.</p>");
-    } else {
-        out.push_str("<div class=\"dashboard-files\">");
-        for file in files {
-            out.push_str(&render_file_dashboard_row(file, filter));
-        }
-        out.push_str("</div>");
-    }
+    out.push_str("<section class=\"dashboard-section\"><h2>Highest Architectural Risks</h2>");
+    out.push_str(&render_architecture_risks(
+        &dashboard.top_architecture_risks,
+        filter,
+    ));
+    out.push_str("</section>");
+
+    out.push_str("<section class=\"dashboard-section\"><h2>Code tree</h2>");
+    out.push_str(&render_code_tree_table(
+        dashboard,
+        &directory,
+        files,
+        filter,
+        sort,
+    ));
     out.push_str("</section>");
 
     out.push_str("<section class=\"dashboard-section\"><h2>Active Hazards</h2>");
@@ -2432,48 +4776,401 @@ fn render_dashboard(
     out
 }
 
-fn render_directory_dashboard_row(directory: &UiDirectory, filter: &str) -> String {
+fn dashboard_coverage_context(
+    dashboard: &UiDashboard,
+    directory: &str,
+    files: &[&UiFile],
+) -> UiCoverageContext {
+    let partial_lines = files
+        .iter()
+        .map(|file| partial_line_count(file.covered_lines, file.dark_arm_findings))
+        .sum::<i64>();
+    let partial_lines = partial_lines.clamp(0, dashboard.covered_lines);
+    UiCoverageContext {
+        path: normalize_directory(directory),
+        tracked_lines: dashboard.tracked_lines,
+        covered_lines: dashboard.covered_lines,
+        partial_lines,
+        missed_lines: missed_line_count(dashboard.tracked_lines, dashboard.covered_lines),
+        coverage_percent: dashboard.coverage_percent,
+    }
+}
+
+fn source_coverage_context(payload: &UiSourcePayload) -> UiCoverageContext {
+    let tracked_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| {
+            annotation.line_hits.is_some()
+                || annotation.line_coverage.is_some()
+                || annotation.covered
+                || !annotation.test_types.is_empty()
+                || !annotation.findings.is_empty()
+                || !annotation.hazards.is_empty()
+        })
+        .count() as i64;
+    let covered_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0)
+        .count() as i64;
+    let partial_lines = payload
+        .annotations
+        .iter()
+        .filter(|annotation| annotation_has_dark_arms(annotation))
+        .count() as i64;
+    let partial_lines = partial_lines.clamp(0, covered_lines);
+    UiCoverageContext {
+        path: payload.path.clone(),
+        tracked_lines,
+        covered_lines,
+        partial_lines,
+        missed_lines: missed_line_count(tracked_lines, covered_lines),
+        coverage_percent: percent(covered_lines, tracked_lines),
+    }
+}
+
+fn partial_line_count(covered_lines: i64, partial_findings: i64) -> i64 {
+    partial_findings.clamp(0, covered_lines.max(0))
+}
+
+fn missed_line_count(tracked_lines: i64, covered_lines: i64) -> i64 {
+    tracked_lines.saturating_sub(covered_lines.clamp(0, tracked_lines.max(0)))
+}
+
+fn render_branch_context(
+    context: &UiBranchContext,
+    coverage: &UiCoverageContext,
+    filter: &str,
+) -> String {
     let mut out = String::new();
-    out.push_str("<a href=\"");
-    out.push_str(&html_escape(&directory_href(&directory.path, filter)));
-    out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
-    out.push_str(&html_escape(&directory.path));
-    out.push_str("/</span><small>");
-    out.push_str(&html_escape(&format!(
-        "{} files | {} / {} lines | {} hazards | {} mutant-killed tests",
-        directory.files,
-        directory.covered_lines,
-        directory.tracked_lines,
-        directory.hazards,
-        directory.mutant_killed_tests
-    )));
-    out.push_str("</small></span><strong class=\"metric-value\">");
-    out.push_str(&format!("{:.0}%", directory.line_coverage));
-    out.push_str("</strong></a>");
+    out.push_str("<section class=\"branch-context\" aria-label=\"branch coverage context\">");
+    out.push_str("<div class=\"branch-context-head\"><div><div class=\"context-kicker\">Branch Context</div><strong>");
+    out.push_str(&html_escape(&context.branch));
+    out.push_str("</strong><span>Source: latest commit <code>");
+    out.push_str(&html_escape(&context.commit));
+    out.push_str("</code></span></div><div class=\"coverage-on-branch\"><span>Coverage on branch</span><strong>");
+    out.push_str(&format!("{:.2}%", coverage.coverage_percent));
+    out.push_str("</strong><small>");
+    out.push_str(&format!(
+        "{} of {} lines covered; {} partial, {} missed",
+        coverage.covered_lines,
+        coverage.tracked_lines,
+        coverage.partial_lines,
+        coverage.missed_lines
+    ));
+    out.push_str("</small><span class=\"branch-summary-bar\">");
+    out.push_str(&render_coverage_bar(
+        coverage.tracked_lines,
+        coverage.covered_lines,
+        coverage.coverage_percent,
+        coverage.covered_lines.saturating_sub(coverage.partial_lines),
+        coverage.partial_lines,
+    ));
+    out.push_str("</span></div></div>");
+    out.push_str("<div class=\"branch-context-body\"><div class=\"branch-crumbs\">");
+    out.push_str(&render_path_breadcrumb(&coverage.path, filter));
+    out.push_str("</div><div class=\"coverage-legend\" aria-label=\"coverage legend\">");
+    out.push_str("<span><i class=\"legend-swatch legend-uncovered\"></i>uncovered</span>");
+    out.push_str("<span><i class=\"legend-swatch legend-partial\"></i>partial</span>");
+    out.push_str("<span><i class=\"legend-alert\">!</i>hazard</span>");
+    out.push_str("<span><i class=\"legend-swatch legend-covered\"></i>covered</span>");
+    out.push_str("</div></div>");
+    out.push_str("</section>");
     out
 }
 
-fn render_file_dashboard_row(file: &UiFile, filter: &str) -> String {
+fn render_path_breadcrumb(path: &str, filter: &str) -> String {
+    let path = normalize_source_path(path);
     let mut out = String::new();
     out.push_str("<a href=\"");
-    out.push_str(&html_escape(&page_href(&file.path, None, filter)));
-    out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
-    out.push_str(&html_escape(&file.path));
-    out.push_str("</span><small>");
-    out.push_str(&file_detail(file));
-    out.push_str("</small></span><strong class=\"metric-value\">");
-    out.push_str(&format!("{:.0}%", file.line_coverage));
-    out.push_str("</strong></a>");
+    out.push_str(&html_escape(&directory_href("", filter)));
+    out.push_str("\">clear</a>");
+    if path.is_empty() {
+        return out;
+    }
+
+    let parts = path.split('/').collect::<Vec<_>>();
+    let mut current = String::new();
+    for (index, part) in parts.iter().enumerate() {
+        out.push_str("<span>/</span>");
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(part);
+        if index + 1 == parts.len() {
+            out.push_str("<strong>");
+            out.push_str(&html_escape(part));
+            out.push_str("</strong>");
+        } else {
+            out.push_str("<a href=\"");
+            out.push_str(&html_escape(&directory_href(&current, filter)));
+            out.push_str("\">");
+            out.push_str(&html_escape(part));
+            out.push_str("</a>");
+        }
+    }
     out
+}
+
+fn render_code_tree_table(
+    dashboard: &UiDashboard,
+    directory: &str,
+    files: &[&UiFile],
+    filter: &str,
+    sort: CoverageSort,
+) -> String {
+    let mut out = String::new();
+    out.push_str("<table class=\"coverage-table\"><thead><tr>");
+    out.push_str("<th scope=\"col\" class=\"name-col\">");
+    out.push_str(&render_sort_link("File list", CoverageSort::Path, sort, directory, filter));
+    out.push_str("</th>");
+    out.push_str("<th scope=\"col\">");
+    out.push_str(&render_sort_link("Total", CoverageSort::Total, sort, directory, filter));
+    out.push_str("</th><th scope=\"col\">");
+    out.push_str(&render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter));
+    out.push_str("</th><th scope=\"col\">");
+    out.push_str(&render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter));
+    out.push_str("</th><th scope=\"col\">");
+    out.push_str(&render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter));
+    out.push_str("</th>");
+    out.push_str("<th scope=\"col\" class=\"coverage-col\">Coverage</th><th scope=\"col\">");
+    out.push_str(&render_sort_link("%", CoverageSort::Percent, sort, directory, filter));
+    out.push_str("</th>");
+    out.push_str("</tr></thead><tbody>");
+    for file in files {
+        out.push_str(&render_file_coverage_row(file, directory, filter));
+    }
+    if files.is_empty() {
+        out.push_str("<tr><td colspan=\"7\" class=\"empty-table\">No tracked files in this directory.</td></tr>");
+    }
+    out.push_str("</tbody><tfoot>");
+    let partial = files
+        .iter()
+        .map(|file| partial_line_count(file.covered_lines, file.dark_arm_findings))
+        .sum::<i64>();
+    let partial = partial.clamp(0, dashboard.covered_lines);
+    out.push_str(&render_coverage_table_row(
+        None,
+        "Subtotal",
+        "",
+        dashboard.tracked_lines,
+        dashboard.covered_lines,
+        partial,
+        dashboard.mutant_killed_covered_lines,
+        dashboard.coverage_percent,
+    ));
+    out.push_str("</tfoot></table>");
+    out
+}
+
+fn render_sort_link(
+    label: &str,
+    target: CoverageSort,
+    active: CoverageSort,
+    directory: &str,
+    filter: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str("<a class=\"sort-link");
+    if target == active {
+        out.push_str(" active-sort");
+    }
+    out.push_str("\" href=\"");
+    out.push_str(&html_escape(&directory_sort_href(directory, filter, target)));
+    out.push_str("\">");
+    out.push_str(&html_escape(label));
+    if target == active {
+        let marker = if target == CoverageSort::Path {
+            "asc"
+        } else {
+            "desc"
+        };
+        out.push_str("<span class=\"sort-marker\">");
+        out.push_str(marker);
+        out.push_str("</span>");
+    }
+    out.push_str("</a>");
+    out
+}
+
+fn render_file_coverage_row(file: &UiFile, directory: &str, filter: &str) -> String {
+    let display_path = file_display_path(&file.path, directory);
+    let detail = format!(
+        "{} hazards, {} SARIF, {} tests, {} mutant killed",
+        file.hazards, file.sarif_findings, file.distinct_tests, file.mutant_killed_tests
+    );
+    render_coverage_table_row(
+        Some(&page_href(&file.path, None, filter)),
+        &display_path,
+        &detail,
+        file.tracked_lines,
+        file.covered_lines,
+        file.dark_arm_findings,
+        file.mutant_killed_covered_lines,
+        file.line_coverage,
+    )
+}
+
+fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
+    if units.is_empty() {
+        return "<p class=\"empty-inline\">No function or class hotspots to show.</p>".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str("<div class=\"unit-hotspots\">");
+    for unit in units {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(&page_href(&unit.path, None, filter)));
+        out.push_str("#L");
+        out.push_str(&unit.start_line.to_string());
+        out.push_str("\"><span class=\"unit-hotspot-kind\">");
+        out.push_str(&html_escape(&unit_kind_label(&unit.kind, &unit.name)));
+        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
+        out.push_str(&html_escape(&unit.name));
+        out.push_str("</strong><small>");
+        out.push_str(&html_escape(&unit.path));
+        out.push_str("</small><small>");
+        out.push_str(&format!(
+            "{} SARIF, {} partial, {} hazards, {} fixes, {} tests, {} killed",
+            unit.sarif_findings,
+            unit.dark_arms,
+            unit.hazards,
+            unit.fixes,
+            unit.distinct_tests,
+            unit.mutant_killed_tests
+        ));
+        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
+        out.push_str(&format!("{:.1}", unit.score));
+        out.push_str("</strong></a>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> String {
+    if risks.is_empty() {
+        return "<p class=\"empty-inline\">No Espalier architectural risks to show.</p>".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str("<div class=\"unit-hotspots architecture-hotspots\">");
+    for risk in risks {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(&page_href(&risk.path, None, filter)));
+        out.push_str("#L");
+        out.push_str(&risk.start_line.to_string());
+        out.push_str("\"><span class=\"unit-hotspot-kind\">");
+        out.push_str(&html_escape(&unit_kind_label(&risk.owner_kind, &risk.owner)));
+        out.push_str("</span><span class=\"unit-hotspot-main\"><strong>");
+        out.push_str(&html_escape(&risk.owner));
+        out.push_str("</strong><small>");
+        out.push_str(&html_escape(&risk.path));
+        out.push_str("</small><small>");
+        out.push_str(&format!(
+            "{} Espalier, {} states, {} functions, {} impure, {} privacy",
+            risk.findings,
+            risk.states,
+            risk.functions,
+            risk.impure_functions,
+            risk.privacy_candidates
+        ));
+        out.push_str("</small></span><strong class=\"unit-hotspot-score\">");
+        out.push_str(&format!("{:.1}", risk.score));
+        out.push_str("</strong></a>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn unit_kind_label(kind: &str, name: &str) -> String {
+    match kind {
+        "module" => "mod".to_string(),
+        "class" => "class".to_string(),
+        "function" if is_class_method_name(name) => "meth".to_string(),
+        "function" => "func".to_string(),
+        other => other.chars().take(5).collect(),
+    }
+}
+
+fn render_coverage_table_row(
+    href: Option<&str>,
+    name: &str,
+    detail: &str,
+    tracked_lines: i64,
+    covered_lines: i64,
+    partial_findings: i64,
+    mutant_killed_covered_lines: i64,
+    line_coverage: f64,
+) -> String {
+    let partial = partial_line_count(covered_lines, partial_findings);
+    let covered = covered_lines.saturating_sub(partial);
+    let missed = missed_line_count(tracked_lines, covered_lines);
+    let percent_value = if tracked_lines > 0 {
+        percent(covered_lines, tracked_lines)
+    } else {
+        line_coverage
+    };
+    let mut out = String::new();
+    out.push_str("<tr>");
+    out.push_str("<th scope=\"row\" class=\"coverage-name\">");
+    if let Some(href) = href {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(href));
+        out.push_str("\">");
+        out.push_str(&html_escape(name));
+        out.push_str("</a>");
+    } else {
+        out.push_str("<span>");
+        out.push_str(&html_escape(name));
+        out.push_str("</span>");
+    }
+    if !detail.is_empty() {
+        out.push_str("<small>");
+        out.push_str(&html_escape(detail));
+        out.push_str("</small>");
+    }
+    out.push_str("</th><td>");
+    out.push_str(&tracked_lines.to_string());
+    out.push_str("</td><td>");
+    out.push_str(&covered.to_string());
+    out.push_str("</td><td>");
+    out.push_str(&partial.to_string());
+    out.push_str("</td><td>");
+    out.push_str(&missed.to_string());
+    out.push_str("</td><td class=\"coverage-cell\">");
+    out.push_str(&render_coverage_bar(
+        tracked_lines,
+        covered_lines,
+        percent_value,
+        mutant_killed_covered_lines,
+        partial,
+    ));
+    out.push_str("</td><td class=\"coverage-percent\">");
+    out.push_str(&format!("{percent_value:.2}%"));
+    out.push_str("</td></tr>");
+    out
+}
+
+fn file_display_path(path: &str, directory: &str) -> String {
+    let directory = normalize_directory(directory);
+    if directory.is_empty() {
+        path.to_string()
+    } else {
+        path.strip_prefix(&format!("{directory}/"))
+            .unwrap_or(path)
+            .to_string()
+    }
 }
 
 fn file_detail(file: &UiFile) -> String {
     html_escape(&format!(
-        "{} units | {} / {} lines | {} hazards | {} tests | {} mutant-killed tests",
+        "{} units | {} / {} lines | {} hazards | {} SARIF | {} tests | {} mutant-killed tests",
         file.units,
         file.covered_lines,
         file.tracked_lines,
         file.hazards,
+        file.sarif_findings,
         file.distinct_tests,
         file.mutant_killed_tests
     ))
@@ -2498,10 +5195,22 @@ fn render_warning_banner(warnings: &[UiWarning]) -> String {
 
     let mut out = String::new();
     out.push_str("<section class=\"warning-banner\" aria-label=\"verification warnings\">");
-    for warning in warnings {
-        out.push_str("<article class=\"warning ");
+    for (index, warning) in warnings.iter().enumerate() {
+        let key = warning_dismiss_key(warning);
+        let input_id = format!("warning-dismiss-{index}-{}", stable_slug(&key));
+        out.push_str("<input class=\"warning-dismiss-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&html_escape(&input_id));
+        out.push_str("\" data-dismiss-key=\"");
+        out.push_str(&html_escape(&key));
+        out.push_str("\"><article class=\"warning ");
         out.push_str(&html_escape(&warning.level));
-        out.push_str("\"><strong>");
+        out.push_str("\" data-dismiss-key=\"");
+        out.push_str(&html_escape(&key));
+        out.push_str("\"><label class=\"warning-dismiss\" for=\"");
+        out.push_str(&html_escape(&input_id));
+        out.push_str("\" data-dismiss-key=\"");
+        out.push_str(&html_escape(&key));
+        out.push_str("\" aria-label=\"Dismiss warning\">x</label><strong>");
         out.push_str(&html_escape(&warning.label));
         out.push_str("</strong><p>");
         out.push_str(&html_escape(&warning.detail));
@@ -2511,12 +5220,40 @@ fn render_warning_banner(warnings: &[UiWarning]) -> String {
     out
 }
 
-fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
+fn warning_dismiss_key(warning: &UiWarning) -> String {
+    let raw = format!("{}:{}:{}", warning.level, warning.label, warning.detail);
+    format!("lineage.warning.{}", stable_slug(&raw))
+}
+
+fn stable_slug(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').chars().take(96).collect()
+}
+
+fn render_source_view(
+    payload: &UiSourcePayload,
+    filter: &str,
+    branch_context: &UiBranchContext,
+) -> String {
     let annotations = payload
         .annotations
         .iter()
         .map(|annotation| (annotation.line, annotation))
         .collect::<BTreeMap<_, _>>();
+    let blame = payload
+        .blame
+        .iter()
+        .map(|blame| (blame.line, blame))
+        .collect::<BTreeMap<_, _>>();
+    let comment_folds = detect_comment_folds(&payload.path, &payload.lines);
+    let comment_fold_lines = comment_fold_lines(&comment_folds);
     let covered = payload
         .annotations
         .iter()
@@ -2527,24 +5264,54 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         .iter()
         .filter(|annotation| annotation.mutant_tested)
         .count();
-    let hazards: usize = payload.annotations.iter().map(|annotation| annotation.hazards.len()).sum();
+    let hazards: usize = payload
+        .annotations
+        .iter()
+        .map(|annotation| annotation.hazards.len())
+        .sum();
     let dark_arms: usize = payload
         .annotations
         .iter()
         .map(|annotation| annotation.dark_arms.len())
         .sum();
+    let findings: usize = payload
+        .annotations
+        .iter()
+        .map(|annotation| annotation.findings.len())
+        .sum();
 
     let mut out = String::new();
+    out.push_str("<section class=\"source-view\">");
+    out.push_str(
+        "<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-gutter-highlights\" checked data-persist-key=\"lineage.layer.gutter-highlights\">",
+    );
+    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-gutter-icons\" checked data-persist-key=\"lineage.layer.gutter-icons\">");
+    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-blame\" data-persist-key=\"lineage.layer.blame\">");
+    out.push_str("<input class=\"layer-toggle\" type=\"checkbox\" id=\"layer-comment-folding\" checked data-persist-key=\"lineage.layer.comment-folding\">");
+    out.push_str(
+        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-coverage\" checked data-persist-key=\"lineage.view.mode\">",
+    );
+    out.push_str(
+        "<input class=\"mode-radio\" type=\"radio\" name=\"lineage-view-mode\" id=\"mode-churn\" data-persist-key=\"lineage.view.mode\">",
+    );
     out.push_str("<div class=\"topbar\"><div><div class=\"title\">");
     out.push_str(&html_escape(&payload.path));
     out.push_str("</div><div class=\"subtle\">");
     out.push_str(&format!(
-        "{} covered lines | {} mutant lines | {} hazards | {} dark arms",
-        covered, mutant, hazards, dark_arms
+        "{} covered lines | {} mutant lines | {} hazards | {} partial | {} SARIF",
+        covered, mutant, hazards, dark_arms, findings
     ));
+    out.push_str("</div></div><div class=\"source-actions\">");
+    out.push_str(
+        "<div class=\"view-toggle\" aria-label=\"line color mode\"><label for=\"mode-coverage\">Coverage Quality</label><label for=\"mode-churn\">Churn Heat</label></div>",
+    );
+    out.push_str(&render_layers_menu());
     out.push_str("</div></div>");
-    out.push_str(&render_history(payload, filter));
-    out.push_str("</div>");
+    out.push_str(&render_branch_context(
+        branch_context,
+        &source_coverage_context(payload),
+        filter,
+    ));
     out.push_str(&render_warning_banner(&payload.warnings));
     out.push_str("<div class=\"viewer\"><div class=\"code\">");
     for (index, line) in payload.lines.iter().enumerate() {
@@ -2554,33 +5321,59 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
             line_no,
             line,
             annotations.get(&line_no).copied(),
+            blame.get(&line_no).copied(),
+            comment_fold_lines.get(&line_no),
         ));
     }
     out.push_str("</div></div>");
+    out.push_str(&render_history(payload, filter));
+    out.push_str("</section>");
+    out
+}
+
+fn render_layers_menu() -> String {
+    let mut out = String::new();
+    out.push_str("<details class=\"layers-menu\"><summary><i class=\"fa-solid fa-layer-group\" aria-hidden=\"true\"></i><span>Layers</span></summary><div class=\"layers-panel\">");
+    out.push_str("<label class=\"gutter-highlight-layer\" for=\"layer-gutter-highlights\"><span><span class=\"gutter-churn-label\">Gutter highlights (Churn)</span><span class=\"gutter-coverage-label\">Gutter highlights (Coverage)</span></span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
+    out.push_str("<label class=\"blame-layer\" for=\"layer-blame\"><span>Blame</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
+    out.push_str("<label class=\"gutter-icon-layer\" for=\"layer-gutter-icons\"><span>Gutter icons</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
+    out.push_str("<label class=\"comment-fold-layer\" for=\"layer-comment-folding\"><span>Expand/collapse comments</span><span class=\"switch-state switch-on\">On</span><span class=\"switch-state switch-off\">Off</span></label>");
+    out.push_str("</div></details>");
     out
 }
 
 fn render_history(payload: &UiSourcePayload, filter: &str) -> String {
     let mut out = String::new();
-    out.push_str("<details class=\"history\"><summary>History");
+    out.push_str("<details class=\"history-drawer\"><summary><span>File history");
     if !payload.versions.is_empty() {
         out.push_str(&format!(" ({})", payload.versions.len()));
     }
-    out.push_str("</summary><div class=\"history-list\">");
-    out.push_str(&format!(
-        "<a href=\"{}\">current working tree</a>",
-        html_escape(&page_href(&payload.path, None, filter))
-    ));
+    out.push_str("</span><span>Open history</span></summary><div class=\"history-list\">");
+    out.push_str("<a class=\"history-row current\" href=\"");
+    out.push_str(&html_escape(&page_href(&payload.path, None, filter)));
+    out.push_str("\"><code>current</code><span>working tree</span><span></span><span>");
+    out.push_str(&html_escape(&payload.path));
+    out.push_str("</span><span></span></a>");
     for version in &payload.versions {
         let href = page_href(&payload.path, Some(&version.commit_hash), filter);
         out.push_str("<a href=\"");
         out.push_str(&html_escape(&href));
-        out.push_str("\"><code>");
+        out.push_str("\" class=\"history-row\"><code>");
         out.push_str(&html_escape(&short_commit(&version.commit_hash)));
-        out.push_str("</code> ");
+        out.push_str("</code><span>");
+        out.push_str(&html_escape(&date_utc(version.timestamp)));
+        out.push_str("</span><span>");
         out.push_str(&html_escape(&version.event_type.to_ascii_lowercase()));
-        out.push_str(" ");
+        out.push_str("</span><span>");
         out.push_str(&html_escape(&version.name));
+        out.push_str("</span><span>");
+        out.push_str(&format!(
+            "{}-{} {}",
+            version.start_line,
+            version.end_line,
+            if version.semantic_change { "semantic" } else { "non-semantic" }
+        ));
+        out.push_str("</span>");
         out.push_str("</a>");
     }
     out.push_str("</div></details>");
@@ -2592,6 +5385,8 @@ fn render_code_line(
     line_no: u32,
     source: &str,
     annotation: Option<&UiLineAnnotation>,
+    blame: Option<&UiLineBlame>,
+    comment_fold: Option<&CommentFoldLine>,
 ) -> String {
     let mut classes = vec!["row"];
     if annotation.map(|a| a.covered).unwrap_or(false) {
@@ -2603,6 +5398,15 @@ fn render_code_line(
     if annotation.map(annotation_has_dark_arms).unwrap_or(false) {
         classes.push("dark-arm");
     }
+    if annotation.map(|a| a.semantic_churn > 0.0).unwrap_or(false) {
+        classes.push("has-churn");
+    }
+    if annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false) {
+        classes.push("has-bugs");
+    }
+    if comment_fold.map(|fold| !fold.is_start).unwrap_or(false) {
+        classes.push("comment-fold-child");
+    }
     if let Some(annotation) = annotation {
         if !annotation.hazards.is_empty() {
             if annotation.hazards.iter().all(|hazard| hazard.verified) {
@@ -2613,57 +5417,433 @@ fn render_code_line(
         }
     }
 
+    let style = annotation
+        .map(row_style)
+        .filter(|style| !style.is_empty())
+        .map(|style| format!(" style=\"{}\"", html_escape(&style)))
+        .unwrap_or_default();
+    let hazard_title = annotation
+        .map(hazard_rail_title)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" title=\"{}\"", html_escape(&title)))
+        .unwrap_or_default();
+    let gutter_title = annotation
+        .map(gutter_title)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" title=\"{}\"", html_escape(&title)))
+        .unwrap_or_default();
+
+    let bug_id = format!("L{line_no}-fixes");
+    let meta_id = format!("L{line_no}-details");
+    let hazard_id = format!("L{line_no}-hazards");
+    let has_bug_history = annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false);
+    let has_line_details = annotation.map(line_has_details).unwrap_or(false);
+    let has_hazards = annotation.map(|a| !a.hazards.is_empty()).unwrap_or(false);
+    let finding_tools = annotation
+        .map(first_party_finding_tools)
+        .unwrap_or_default();
+    let fold_input_id = comment_fold
+        .filter(|fold| fold.is_start)
+        .map(|fold| format!("comment-fold-{}", fold.id));
+
+    let fold_child_attr = comment_fold
+        .filter(|fold| !fold.is_start)
+        .map(|fold| format!(" data-comment-fold-child=\"{}\"", fold.id))
+        .unwrap_or_default();
     let mut out = format!(
-        "<div class=\"{}\"><span class=\"gutter\">",
+        "<div id=\"L{}\" class=\"{}\"{}{}>",
+        line_no,
         classes.join(" "),
+        fold_child_attr,
+        style,
     );
+    if let Some(input_id) = &fold_input_id {
+        out.push_str("<input class=\"comment-fold-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&html_escape(input_id));
+        out.push_str("\" checked data-persist-key=\"lineage.comment-fold.");
+        out.push_str(&html_escape(path));
+        out.push('.');
+        out.push_str(&line_no.to_string());
+        out.push_str("\" data-fold-id=\"");
+        out.push_str(&comment_fold.map(|fold| fold.id).unwrap_or_default().to_string());
+        out.push_str("\">");
+    }
+    if has_bug_history {
+        out.push_str("<input class=\"line-toggle bug-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&bug_id);
+        out.push_str("\">");
+    }
+    if has_line_details {
+        out.push_str("<input class=\"line-toggle meta-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&meta_id);
+        out.push_str("\">");
+    }
+    if has_hazards {
+        out.push_str("<input class=\"line-toggle hazard-toggle\" type=\"checkbox\" id=\"");
+        out.push_str(&hazard_id);
+        out.push_str("\" data-panel-class=\"hazard-panel-open\">");
+    }
+    for tool in &finding_tools {
+        let id = finding_panel_id(line_no, *tool);
+        out.push_str("<input class=\"line-toggle tool-toggle ");
+        out.push_str(tool.toggle_class());
+        out.push_str("\" type=\"checkbox\" id=\"");
+        out.push_str(&id);
+        out.push_str("\" data-panel-class=\"");
+        out.push_str(tool.open_class());
+        out.push_str("\">");
+    }
+    out.push_str("<span class=\"hazard-rail\"");
+    out.push_str(&hazard_title);
+    out.push_str("></span><span class=\"gutter\"");
+    out.push_str(&gutter_title);
+    out.push_str(">");
     if let Some(annotation) = annotation {
-        for hazard in &annotation.hazards {
+        if has_hazards {
+            out.push_str(&render_hazard_control(annotation, &hazard_id));
+        }
+        for tool in &finding_tools {
+            let id = finding_panel_id(line_no, *tool);
+            out.push_str(&render_finding_control(annotation, *tool, &id));
+        }
+        if has_bug_history {
+            out.push_str(&render_bug_history_control(annotation, &bug_id));
+        }
+        if has_line_details {
+            out.push_str(&render_line_details_control(&meta_id));
+        }
+    }
+    out.push_str("</span><span class=\"ln\">");
+    if let (Some(input_id), Some(fold)) = (&fold_input_id, comment_fold) {
+        out.push_str("<label class=\"comment-fold-control\" for=\"");
+        out.push_str(&html_escape(input_id));
+        out.push_str("\" title=\"expand/collapse ");
+        out.push_str(&format!(
+            "{}-line comment",
+            fold.end_line.saturating_sub(fold.start_line) + 1
+        ));
+        out.push_str("\"><span class=\"comment-fold-arrow\"></span></label>");
+    } else {
+        out.push_str("<span class=\"comment-fold-slot\"></span>");
+    }
+    out.push_str("<span class=\"line-number\">");
+    out.push_str(&line_no.to_string());
+    out.push_str("</span>");
+    out.push_str("</span><pre class=\"source-text\">");
+    if let Some(fold) = comment_fold {
+        if fold.is_start {
+            out.push_str("<span class=\"fold-full-source\">");
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path, line_no, source, annotation,
+            ));
+            out.push_str("</span><span class=\"fold-collapsed-source\">");
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path,
+                line_no,
+                &collapsed_comment_source(source),
+                annotation,
+            ));
+            out.push_str("</span>");
+        } else {
+            out.push_str(&highlight_source_line_with_dark_arms(
+                path, line_no, source, annotation,
+            ));
+        }
+    } else {
+        out.push_str(&highlight_source_line_with_dark_arms(
+            path, line_no, source, annotation,
+        ));
+    }
+    out.push_str("</pre>");
+    out.push_str(&render_blame_cell(blame));
+    if let Some(annotation) = annotation {
+        if has_hazards {
+            out.push_str(&render_hazard_panel(annotation));
+        }
+        if has_bug_history {
+            out.push_str(&render_bug_history_panel(annotation));
+        }
+        if has_line_details {
+            out.push_str(&render_line_details_panel(annotation));
+        }
+        for tool in &finding_tools {
+            out.push_str(&render_finding_panel(annotation, *tool));
+        }
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn render_blame_cell(blame: Option<&UiLineBlame>) -> String {
+    let Some(blame) = blame else {
+        return "<span class=\"blame-cell empty-blame\"></span>".to_string();
+    };
+    let commits_after = blame.total_commits.saturating_sub(blame.ordinal);
+    let title = format!(
+        "commit #{} of {}; {} commit(s) after this in file blame\n{}\n{}",
+        blame.ordinal,
+        blame.total_commits,
+        commits_after,
+        blame.commit_hash,
+        blame.author
+    );
+    let mut out = String::new();
+    out.push_str("<span class=\"blame-cell\" title=\"");
+    out.push_str(&html_escape(&title));
+    out.push_str("\"><code>#");
+    out.push_str(&blame.ordinal.to_string());
+    out.push(' ');
+    out.push_str(&html_escape(&short_commit(&blame.commit_hash)));
+    out.push_str("</code><span>");
+    out.push_str(&html_escape(&date_utc(blame.timestamp)));
+    out.push_str("</span><span>");
+    out.push_str(&html_escape(&blame.author));
+    out.push_str("</span></span>");
+    out
+}
+
+fn detect_comment_folds(path: &str, lines: &[String]) -> Vec<CommentFold> {
+    let language = syntax_language(path);
+    let mut folds = Vec::new();
+    let mut index = 0;
+    let mut id = 0;
+    while index < lines.len() {
+        if let Some(end) = block_comment_end(lines, index, language) {
+            if end > index + 2 {
+                id += 1;
+                folds.push(CommentFold {
+                    id,
+                    start_line: (index + 1) as u32,
+                    end_line: (end + 1) as u32,
+                });
+            }
+            index = end + 1;
+            continue;
+        }
+
+        if is_line_comment_line(&lines[index], language) {
+            let start = index;
+            index += 1;
+            while index < lines.len() && is_line_comment_line(&lines[index], language) {
+                index += 1;
+            }
+            if index.saturating_sub(start) > 3 {
+                id += 1;
+                folds.push(CommentFold {
+                    id,
+                    start_line: (start + 1) as u32,
+                    end_line: index as u32,
+                });
+            }
+            continue;
+        }
+        index += 1;
+    }
+    folds
+}
+
+fn block_comment_end(
+    lines: &[String],
+    start_index: usize,
+    language: SyntaxLanguage,
+) -> Option<usize> {
+    let line = lines.get(start_index)?;
+    let trimmed = line.trim_start();
+    for (start_marker, end_marker) in block_comment_markers(language) {
+        if !trimmed.starts_with(start_marker) {
+            continue;
+        }
+        for (index, candidate) in lines.iter().enumerate().skip(start_index) {
+            let search_start = if index == start_index {
+                candidate
+                    .find(start_marker)
+                    .map(|offset| offset + start_marker.len())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            if candidate[search_start..].contains(end_marker) {
+                return Some(index);
+            }
+        }
+        return Some(lines.len().saturating_sub(1));
+    }
+    None
+}
+
+fn block_comment_markers(language: SyntaxLanguage) -> &'static [(&'static str, &'static str)] {
+    match language {
+        SyntaxLanguage::Ruby => &[("=begin", "=end")],
+        SyntaxLanguage::Python => &[("\"\"\"", "\"\"\""), ("'''", "'''")],
+        SyntaxLanguage::Lua => &[("--[[", "]]")],
+        SyntaxLanguage::JavaScript
+        | SyntaxLanguage::TypeScript
+        | SyntaxLanguage::Go
+        | SyntaxLanguage::Rust
+        | SyntaxLanguage::Zig
+        | SyntaxLanguage::C => &[("/*", "*/")],
+        SyntaxLanguage::Plain => &[],
+    }
+}
+
+fn is_line_comment_line(line: &str, language: SyntaxLanguage) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    match language {
+        SyntaxLanguage::Ruby | SyntaxLanguage::Python => trimmed.starts_with('#'),
+        SyntaxLanguage::Lua => trimmed.starts_with("--") && !trimmed.starts_with("--[["),
+        SyntaxLanguage::JavaScript
+        | SyntaxLanguage::TypeScript
+        | SyntaxLanguage::Go
+        | SyntaxLanguage::Rust
+        | SyntaxLanguage::Zig
+        | SyntaxLanguage::C => trimmed.starts_with("//"),
+        SyntaxLanguage::Plain => false,
+    }
+}
+
+fn comment_fold_lines(folds: &[CommentFold]) -> BTreeMap<u32, CommentFoldLine> {
+    let mut by_line = BTreeMap::new();
+    for fold in folds {
+        for line in fold.start_line..=fold.end_line {
+            by_line.insert(
+                line,
+                CommentFoldLine {
+                    id: fold.id,
+                    start_line: fold.start_line,
+                    end_line: fold.end_line,
+                    is_start: line == fold.start_line,
+                },
+            );
+        }
+    }
+    by_line
+}
+
+fn collapsed_comment_source(source: &str) -> String {
+    format!("{} ...", source.trim_end())
+}
+
+fn render_line_details_control(meta_id: &str) -> String {
+    let mut out = String::new();
+    out.push_str("<label class=\"line-meta line-icon\" for=\"");
+    out.push_str(&html_escape(meta_id));
+    out.push_str("\" title=\"line verification details\" aria-label=\"line verification details\"><i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_line_details_panel(annotation: &UiLineAnnotation) -> String {
+    let rows = line_detail_rows(annotation);
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel meta-panel\">");
+    for row in rows {
+        out.push_str("<p>");
+        out.push_str(&html_escape(&row));
+        out.push_str("</p>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn render_hazard_control(annotation: &UiLineAnnotation, hazard_id: &str) -> String {
+    let mut classes = "bomb line-icon".to_string();
+    if annotation.hazards.iter().all(|hazard| hazard.verified) {
+        classes.push_str(" verified");
+    }
+    let title = hazard_panel_title(annotation);
+    let mut out = String::new();
+    out.push_str("<label class=\"");
+    out.push_str(&classes);
+    out.push_str("\" for=\"");
+    out.push_str(&html_escape(hazard_id));
+    out.push_str("\" title=\"");
+    out.push_str(&html_escape(&title));
+    out.push_str("\" aria-label=\"concurrency hazard details\"><i class=\"fa-solid fa-bomb\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_hazard_panel(annotation: &UiLineAnnotation) -> String {
+    let mut hazards = annotation.hazards.iter().collect::<Vec<_>>();
+    hazards.sort_by(|left, right| {
+        left.verified
+            .cmp(&right.verified)
+            .then_with(|| left.required_evidence.cmp(&right.required_evidence))
+            .then_with(|| left.hazard_type.cmp(&right.hazard_type))
+            .then_with(|| left.source.cmp(&right.source))
+    });
+
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel hazard-panel\">");
+    for hazard in hazards {
+        out.push_str("<p><strong>");
+        out.push_str(&html_escape(&hazard.hazard_type));
+        out.push_str("</strong> requires <strong>");
+        out.push_str(&html_escape(&hazard.required_evidence));
+        out.push_str("</strong>: ");
+        out.push_str(hazard_status_text(hazard));
+        out.push_str("</p>");
+        if !hazard.source.is_empty() {
+            out.push_str("<p class=\"hazard-source\">");
+            out.push_str(&html_escape(&hazard.source));
+            out.push_str("</p>");
+        }
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn hazard_panel_title(annotation: &UiLineAnnotation) -> String {
+    annotation
+        .hazards
+        .iter()
+        .map(|hazard| {
             let mut title = format!(
                 "{} requires {} ({})",
                 hazard.hazard_type,
                 hazard.required_evidence,
-                if hazard.verified {
-                    "evidence plus invariant mutation present"
-                } else if hazard.evidence_present {
-                    "systems evidence present; invariant mutation missing"
-                } else {
-                    "systems evidence and invariant mutation missing"
-                }
+                hazard_status_text(hazard)
             );
             if !hazard.source.is_empty() {
                 title.push('\n');
                 title.push_str(&hazard.source);
             }
-            out.push_str(&format!(
-                "<span class=\"bomb{}\" title=\"{}\">&#128163;</span>",
-                if hazard.verified { " verified" } else { "" },
-                html_escape(&title)
-            ));
-        }
-        if line_has_details(annotation) {
-            out.push_str(&render_line_details(annotation));
-        }
-    }
-    out.push_str("</span><span class=\"ln\">");
-    out.push_str(&line_no.to_string());
-    out.push_str("</span><pre>");
-    out.push_str(&highlight_source_line_with_dark_arms(
-        path, line_no, source, annotation,
-    ));
-    out.push_str("</pre></div>");
-    out
+            title
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn render_line_details(annotation: &UiLineAnnotation) -> String {
+fn hazard_status_text(hazard: &UiHazard) -> &'static str {
+    if hazard.verified {
+        "evidence plus invariant mutation present"
+    } else if hazard.evidence_present {
+        "systems evidence present; invariant mutation missing"
+    } else {
+        "systems evidence and invariant mutation missing"
+    }
+}
+
+fn line_detail_rows(annotation: &UiLineAnnotation) -> Vec<String> {
     let mut rows = Vec::new();
+    if let Some(summary) = test_type_summary(annotation) {
+        rows.push(summary);
+    }
     if annotation.covered && annotation.line_hits.is_none() && annotation.line_coverage.is_none() {
-        rows.push("covered as part of a multi-line statement; exact line-hit metadata is unavailable".to_string());
+        rows.push(
+            "covered as part of a multi-line statement; exact line-hit metadata is unavailable"
+                .to_string(),
+        );
     }
-    if !annotation.test_types.is_empty() {
-        rows.push(format!("tests: {}", annotation.test_types.join(", ")));
+    if annotation.test_type_counts.is_empty() && !annotation.test_types.is_empty() {
+        let mut detail = format!("tests by type: {}", annotation.test_types.join(", "));
+        if annotation.distinct_tests > 0 {
+            detail.push_str(&format!(" - {} total", annotation.distinct_tests));
+        }
+        rows.push(detail);
     }
-    if annotation.distinct_tests > 0 {
+    if annotation.test_type_counts.is_empty() && annotation.distinct_tests > 0 {
         rows.push(format!("{} distinct test hits", annotation.distinct_tests));
     }
     if annotation.mutant_killed_tests > 0 {
@@ -2674,7 +5854,33 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     }
     let dark_arm_labels = dark_arm_labels(annotation);
     if !dark_arm_labels.is_empty() {
-        rows.push(format!("dark arms: {}", dark_arm_labels.join(", ")));
+        rows.push(format!("partial coverage: {}", dark_arm_labels.join(", ")));
+    }
+    let effect_labels = effect_span_labels(annotation);
+    if !effect_labels.is_empty() {
+        rows.push(format!("effects: {}", effect_labels.join(", ")));
+    }
+    for finding in &annotation.findings {
+        if is_decomplex_finding(finding) {
+            rows.push(format!(
+                "SARIF {} {}: {}",
+                finding.tool,
+                finding.rule_id,
+                decomplex_display_message(finding)
+            ));
+        } else {
+            rows.push(format!(
+                "SARIF {} {}: {}{}",
+                finding.tool,
+                finding.rule_id,
+                finding.message,
+                if finding.source.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", finding.source)
+                }
+            ));
+        }
     }
     if let Some(value) = annotation.line_coverage {
         rows.push(format!("unit line coverage {:.1}%", value));
@@ -2682,15 +5888,377 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     if let Some(value) = annotation.mutant_coverage {
         rows.push(format!("unit mutant coverage {:.1}%", value));
     }
+    if annotation.semantic_churn_events > 0 {
+        rows.push(format!(
+            "{} semantic churn event(s); decayed score {:.3}",
+            annotation.semantic_churn_events,
+            annotation.semantic_churn.min(1.0)
+        ));
+    }
+    if annotation.bug_weight > 0.0 {
+        rows.push(format!(
+            "decayed fix/crash weight {:.3}",
+            annotation.bug_weight.min(1.0)
+        ));
+    }
+    rows
+}
+
+fn render_bug_history_control(annotation: &UiLineAnnotation, bug_id: &str) -> String {
+    let opacity = 0.18 + (annotation.bug_weight * 2.0).min(1.0) * 0.82;
     let mut out = String::new();
-    out.push_str("<details class=\"line-meta\"><summary title=\"line verification details\">i</summary><div>");
-    for row in rows {
+    out.push_str("<label class=\"bug-history line-icon\" for=\"");
+    out.push_str(&html_escape(bug_id));
+    out.push_str("\" aria-label=\"decayed fix history\" style=\"opacity:");
+    out.push_str(&format!("{opacity:.3}"));
+    out.push_str("\"><i class=\"fa-solid fa-bug\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_bug_history_panel(annotation: &UiLineAnnotation) -> String {
+    let events = sorted_bug_events(annotation);
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel bug-panel\">");
+    for event in events {
         out.push_str("<p>");
-        out.push_str(&html_escape(&row));
+        out.push_str(&html_escape(&bug_event_summary(event)));
         out.push_str("</p>");
     }
-    out.push_str("</div></details>");
+    out.push_str("</div>");
     out
+}
+
+fn test_type_summary(annotation: &UiLineAnnotation) -> Option<String> {
+    if annotation.test_type_counts.is_empty() {
+        return None;
+    }
+
+    let mut entries = annotation
+        .test_type_counts
+        .iter()
+        .map(|(test_type, count)| (test_type.as_str(), *count))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        test_type_rank(left.0)
+            .cmp(&test_type_rank(right.0))
+            .then_with(|| left.0.cmp(right.0))
+    });
+    let total: i64 = entries.iter().map(|(_, count)| *count).sum();
+    let parts = entries
+        .into_iter()
+        .map(|(test_type, count)| format!("{test_type} ({count})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("tests by type: {parts} - {total} total"))
+}
+
+fn test_type_rank(test_type: &str) -> usize {
+    match test_type {
+        "fuzz" => 0,
+        "integration" => 1,
+        "unit" => 2,
+        "loom" => 3,
+        "vopr" => 4,
+        "tsan" => 5,
+        _ => 100,
+    }
+}
+
+fn finding_panel_id(line_no: u32, tool: FirstPartyFindingTool) -> String {
+    format!("L{}-{}", line_no, tool.key())
+}
+
+fn first_party_finding_tools(annotation: &UiLineAnnotation) -> Vec<FirstPartyFindingTool> {
+    FirstPartyFindingTool::all()
+        .iter()
+        .copied()
+        .filter(|tool| !tool_findings(annotation, *tool).is_empty())
+        .collect()
+}
+
+fn render_finding_control(
+    annotation: &UiLineAnnotation,
+    tool: FirstPartyFindingTool,
+    panel_id: &str,
+) -> String {
+    let findings = tool_findings(annotation, tool);
+    if findings.is_empty() {
+        return String::new();
+    }
+
+    let mut title = format!("{} {} SARIF signal(s)", findings.len(), tool.title());
+    let rules = findings
+        .iter()
+        .map(|finding| finding.rule_id.as_str())
+        .collect::<BTreeSet<_>>();
+    for rule in rules {
+        title.push('\n');
+        title.push_str(rule);
+    }
+
+    let mut out = String::new();
+    out.push_str("<label class=\"");
+    out.push_str(tool.control_class());
+    out.push_str(" line-icon\" for=\"");
+    out.push_str(&html_escape(panel_id));
+    out.push_str("\" title=\"");
+    out.push_str(&html_escape(&title));
+    out.push_str("\" aria-label=\"");
+    out.push_str(tool.title());
+    out.push_str(" SARIF signals\"><i class=\"");
+    out.push_str(tool.icon_family());
+    out.push(' ');
+    out.push_str(tool.icon_class());
+    out.push_str("\" aria-hidden=\"true\"></i></label>");
+    out
+}
+
+fn render_finding_panel(annotation: &UiLineAnnotation, tool: FirstPartyFindingTool) -> String {
+    let findings = tool_findings(annotation, tool);
+    let mut out = String::new();
+    out.push_str("<div class=\"line-panel finding-panel ");
+    out.push_str(tool.panel_class());
+    out.push_str("\">");
+    for finding in findings {
+        out.push_str("<p>");
+        if let Some(tier) = finding.tier {
+            out.push_str("<span class=\"finding-tier\">tier ");
+            out.push_str(&tier.to_string());
+            out.push_str("</span> ");
+        }
+        if tool == FirstPartyFindingTool::Decomplex {
+            out.push_str("<a href=\"");
+            out.push_str(&html_escape(&decomplex_doc_url(finding)));
+            out.push_str("\" target=\"_blank\" rel=\"noopener\">");
+            out.push_str(&html_escape(&finding.rule_id));
+            out.push_str("</a>");
+        } else {
+            out.push_str("<strong>");
+            out.push_str(&html_escape(&finding.rule_id));
+            out.push_str("</strong>");
+        }
+        out.push_str(": ");
+        out.push_str(&html_escape(&finding_display_message(finding, tool)));
+        out.push_str("</p>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn finding_display_message(finding: &UiFinding, tool: FirstPartyFindingTool) -> String {
+    match tool {
+        FirstPartyFindingTool::Decomplex => decomplex_display_message(finding),
+        _ => finding.message.trim().to_string(),
+    }
+}
+
+fn decomplex_display_message(finding: &UiFinding) -> String {
+    let mut message = finding.message.trim().to_string();
+    if let Some(title) = decomplex_rule_title(&finding.rule_id) {
+        let prefix = format!("{title}:");
+        if message
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+        {
+            message = message[prefix.len()..].trim_start().to_string();
+        }
+    }
+    message
+}
+
+fn decomplex_rule_title(rule_id: &str) -> Option<String> {
+    let slug = rule_id.rsplit('.').next()?.trim();
+    if slug.is_empty() {
+        return None;
+    }
+    let words = slug
+        .split('-')
+        .filter(|word| !word.is_empty())
+        .map(title_case_ascii)
+        .collect::<Vec<_>>();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+fn title_case_ascii(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.push(first.to_ascii_uppercase());
+    out.extend(chars.map(|character| character.to_ascii_lowercase()));
+    out
+}
+
+fn tool_findings(annotation: &UiLineAnnotation, tool: FirstPartyFindingTool) -> Vec<&UiFinding> {
+    let mut findings = annotation
+        .findings
+        .iter()
+        .filter(|finding| is_tool_finding(finding, tool))
+        .collect::<Vec<_>>();
+    findings.sort_by(|left, right| {
+        left.tier
+            .unwrap_or(i64::MAX)
+            .cmp(&right.tier.unwrap_or(i64::MAX))
+            .then_with(|| left.rule_id.cmp(&right.rule_id))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    findings
+}
+
+fn is_decomplex_finding(finding: &UiFinding) -> bool {
+    is_tool_finding(finding, FirstPartyFindingTool::Decomplex)
+}
+
+fn is_tool_finding(finding: &UiFinding, tool: FirstPartyFindingTool) -> bool {
+    if tool == FirstPartyFindingTool::Lint {
+        return is_lint_finding(finding);
+    }
+    let needle = tool.key();
+    [finding.source.as_str(), finding.tool.as_str(), finding.rule_id.as_str()]
+        .iter()
+        .any(|value| value.to_ascii_lowercase().contains(needle))
+}
+
+fn is_lint_finding(finding: &UiFinding) -> bool {
+    let source = finding.source.to_ascii_lowercase();
+    let tool = finding.tool.to_ascii_lowercase();
+    let rule = finding.rule_id.to_ascii_lowercase();
+    finding.category.eq_ignore_ascii_case("lint")
+        || source.contains("lint")
+        || matches!(tool.as_str(), "rubocop" | "clippy" | "zig ast check")
+        || rule.starts_with("lint/")
+        || rule.starts_with("security/")
+        || rule.starts_with("clippy::")
+        || rule.starts_with("zig.ast-check")
+}
+
+fn decomplex_doc_url(finding: &UiFinding) -> String {
+    let rule = finding.rule_id.to_ascii_lowercase();
+    if rule.contains("false-simplicity") {
+        format!("{DECOMPLEX_DOC_BASE}/docs/false-simplicity.md")
+    } else if rule.contains("complexity") {
+        format!("{DECOMPLEX_DOC_BASE}/docs/agents/metrics-expo.md")
+    } else {
+        format!("{DECOMPLEX_DOC_BASE}/docs/agents/design.md")
+    }
+}
+
+fn bug_event_summary(event: &UiBugEvent) -> String {
+    let hash = short_commit(&event.commit_hash);
+    let date = date_utc(event.timestamp);
+    let weight = format!("{:.2}", event.weight);
+    let prefix = format!("{hash} {date} weight {weight}: ");
+    let message_budget = BUG_HISTORY_ROW_BUDGET.saturating_sub(prefix.chars().count());
+    format!(
+        "{prefix}{}",
+        truncate_chars(&one_line_text(&event.label), message_budget)
+    )
+}
+
+fn one_line_text(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    if max_chars <= 3 {
+        return "...".chars().take(max_chars).collect();
+    }
+    let mut out = input.chars().take(max_chars - 3).collect::<String>();
+    out.push_str("...");
+    out
+}
+
+fn sorted_bug_events(annotation: &UiLineAnnotation) -> Vec<&UiBugEvent> {
+    let mut events = annotation.bug_events.iter().collect::<Vec<_>>();
+    events.sort_by(|left, right| {
+        right
+            .timestamp
+            .cmp(&left.timestamp)
+            .then_with(|| right.commit_hash.cmp(&left.commit_hash))
+            .then_with(|| right.line.cmp(&left.line))
+    });
+    events
+}
+
+fn row_style(annotation: &UiLineAnnotation) -> String {
+    let coverage = coverage_background(annotation, false);
+    let gutter_coverage = coverage_background(annotation, true);
+    let churn = heat_background(annotation.semantic_churn, false);
+    let gutter_churn = heat_background(annotation.semantic_churn, true);
+    format!(
+        "--coverage-bg:{coverage};--gutter-coverage-bg:{gutter_coverage};--churn-bg:{churn};--gutter-churn-bg:{gutter_churn};"
+    )
+}
+
+fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
+    if annotation.mutant_tested || annotation.mutant_killed_tests > 0 {
+        if gutter {
+            "rgba(22, 101, 52, 0.34)".to_string()
+        } else {
+            "rgba(22, 101, 52, 0.24)".to_string()
+        }
+    } else if annotation.covered {
+        if gutter {
+            "rgba(34, 197, 94, 0.18)".to_string()
+        } else {
+            "rgba(34, 197, 94, 0.08)".to_string()
+        }
+    } else {
+        "transparent".to_string()
+    }
+}
+
+fn heat_background(weight: f64, gutter: bool) -> String {
+    let weight = weight.clamp(0.0, 1.0);
+    if weight <= 0.0 {
+        return "transparent".to_string();
+    }
+    let (red, green, blue) = if weight < 0.20 {
+        (254, 249, 195)
+    } else if weight < 0.45 {
+        (253, 186, 116)
+    } else if weight < 0.75 {
+        (248, 113, 113)
+    } else {
+        (220, 38, 38)
+    };
+    let base = if gutter { 0.18 } else { 0.08 };
+    let spread = if gutter { 0.44 } else { 0.24 };
+    let alpha = (base + weight * spread).min(if gutter { 0.70 } else { 0.42 });
+    format!("rgba({red}, {green}, {blue}, {alpha:.3})")
+}
+
+fn hazard_rail_title(annotation: &UiLineAnnotation) -> String {
+    let hazards = annotation
+        .hazards
+        .iter()
+        .filter(|hazard| !hazard.verified)
+        .map(|hazard| format!("{} requires {}", hazard.hazard_type, hazard.required_evidence))
+        .collect::<Vec<_>>();
+    hazards.join("\n")
+}
+
+fn gutter_title(annotation: &UiLineAnnotation) -> String {
+    let mut rows = Vec::new();
+    if annotation.semantic_churn_events > 0 {
+        rows.push(format!(
+            "{} semantic churn event(s), decayed score {:.3}",
+            annotation.semantic_churn_events,
+            annotation.semantic_churn.min(1.0)
+        ));
+    }
+    if annotation.covered {
+        rows.push(if annotation.mutant_tested {
+            "coverage quality: mutant tested".to_string()
+        } else {
+            "coverage quality: covered".to_string()
+        });
+    }
+    rows.join("\n")
 }
 
 fn line_has_details(annotation: &UiLineAnnotation) -> bool {
@@ -2699,9 +6267,13 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || !annotation.test_types.is_empty()
         || !annotation.dark_arms.is_empty()
         || !annotation.dark_arm_spans.is_empty()
+        || !annotation.effect_spans.is_empty()
+        || !annotation.findings.is_empty()
         || annotation.line_hits.is_some()
         || annotation.line_coverage.is_some()
         || annotation.mutant_coverage.is_some()
+        || annotation.semantic_churn_events > 0
+        || !annotation.bug_events.is_empty()
 }
 
 fn annotation_has_dark_arms(annotation: &UiLineAnnotation) -> bool {
@@ -2711,6 +6283,17 @@ fn annotation_has_dark_arms(annotation: &UiLineAnnotation) -> bool {
 fn dark_arm_labels(annotation: &UiLineAnnotation) -> Vec<String> {
     let mut labels = annotation.dark_arms.clone();
     labels.extend(annotation.dark_arm_spans.iter().map(|arm| arm.label.clone()));
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+fn effect_span_labels(annotation: &UiLineAnnotation) -> Vec<String> {
+    let mut labels = annotation
+        .effect_spans
+        .iter()
+        .map(|span| span.label.clone())
+        .collect::<Vec<_>>();
     labels.sort();
     labels.dedup();
     labels
@@ -2731,9 +6314,10 @@ enum SyntaxLanguage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct InlineDarkArmRange {
+struct InlineOverlayRange {
     start: usize,
     end: usize,
+    classes: BTreeSet<String>,
     labels: Vec<String>,
 }
 
@@ -2746,7 +6330,7 @@ fn highlight_source_line_with_dark_arms(
     let Some(annotation) = annotation else {
         return highlight_source_line(path, source);
     };
-    let ranges = inline_dark_arm_ranges(line_no, source, annotation);
+    let ranges = inline_overlay_ranges(line_no, source, annotation);
     if ranges.is_empty() {
         return highlight_source_line(path, source);
     }
@@ -2757,7 +6341,9 @@ fn highlight_source_line_with_dark_arms(
         if range.start > cursor {
             out.push_str(&highlight_source_line(path, &source[cursor..range.start]));
         }
-        out.push_str("<span class=\"dark-arm-span\" title=\"");
+        out.push_str("<span class=\"");
+        out.push_str(&html_escape(&range.classes.into_iter().collect::<Vec<_>>().join(" ")));
+        out.push_str("\" title=\"");
         out.push_str(&html_escape(&range.labels.join("\n")));
         out.push_str("\">");
         out.push_str(&highlight_source_line(path, &source[range.start..range.end]));
@@ -2770,33 +6356,48 @@ fn highlight_source_line_with_dark_arms(
     out
 }
 
-fn inline_dark_arm_ranges(
+fn inline_overlay_ranges(
     line_no: u32,
     source: &str,
     annotation: &UiLineAnnotation,
-) -> Vec<InlineDarkArmRange> {
+) -> Vec<InlineOverlayRange> {
     let mut ranges = annotation
         .dark_arm_spans
         .iter()
         .filter_map(|arm| {
             let span = arm.span?;
-            dark_arm_line_range(line_no, source, span).map(|(start, end)| InlineDarkArmRange {
+            dark_arm_line_range(line_no, source, span).map(|(start, end)| InlineOverlayRange {
                 start,
                 end,
+                classes: BTreeSet::from(["dark-arm-span".to_string()]),
                 labels: vec![arm.label.clone()],
             })
         })
         .collect::<Vec<_>>();
+    ranges.extend(annotation.effect_spans.iter().filter_map(|span| {
+        let start = clamp_to_char_boundary(source, span.start.min(source.len()));
+        let end = clamp_to_char_boundary(source, span.end.min(source.len()));
+        (end > start).then(|| InlineOverlayRange {
+            start,
+            end,
+            classes: BTreeSet::from([
+                "effect-span".to_string(),
+                format!("effect-{}", span.kind),
+            ]),
+            labels: vec![span.label.clone()],
+        })
+    }));
     if ranges.is_empty() {
         return ranges;
     }
 
     ranges.sort_by_key(|range| (range.start, range.end));
-    let mut merged = Vec::<InlineDarkArmRange>::new();
+    let mut merged = Vec::<InlineOverlayRange>::new();
     for range in ranges {
         if let Some(last) = merged.last_mut() {
             if range.start <= last.end {
                 last.end = last.end.max(range.end);
+                last.classes.extend(range.classes);
                 last.labels.extend(range.labels);
                 last.labels.sort();
                 last.labels.dedup();
@@ -3159,6 +6760,30 @@ fn directory_href(directory: &str, filter: &str) -> String {
     query
 }
 
+fn directory_sort_href(directory: &str, filter: &str, sort: CoverageSort) -> String {
+    let directory = normalize_directory(directory);
+    let mut pairs = Vec::new();
+    if !directory.is_empty() {
+        pairs.push(("dir", directory));
+    }
+    if !filter.trim().is_empty() {
+        pairs.push(("q", filter.trim().to_string()));
+    }
+    if sort != CoverageSort::Path {
+        pairs.push(("sort", sort.as_str().to_string()));
+    }
+    if pairs.is_empty() {
+        return "/".to_string();
+    }
+
+    let query = pairs
+        .into_iter()
+        .map(|(key, value)| format!("{key}={}", percent_encode(&value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("/?{query}")
+}
+
 fn percent_encode(input: &str) -> String {
     let mut out = String::new();
     for byte in input.bytes() {
@@ -3184,295 +6809,30 @@ fn short_commit(commit: &str) -> String {
     commit.chars().take(12).collect()
 }
 
-const STYLE: &str = r#"
-  :root {
-    color-scheme: light;
-    --bg: #f7f8fa;
-    --panel: #ffffff;
-    --line: #d9dee7;
-    --text: #18202f;
-    --muted: #657084;
-    --covered: rgba(34, 197, 94, 0.08);
-    --mutant: rgba(22, 101, 52, 0.24);
-    --hazard: #b42318;
-    --dark-arm: #374151;
-    --dark-arm-bg: rgba(31, 41, 55, 0.22);
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  .app {
-    display: grid;
-    grid-template-columns: minmax(260px, 22vw) 1fr;
-    height: 100vh;
-    min-height: 0;
-    overflow: hidden;
-  }
-  aside {
-    border-right: 1px solid var(--line);
-    background: var(--panel);
-    min-width: 0;
-    min-height: 0;
-    display: grid;
-    grid-template-rows: auto auto 1fr;
-  }
-  header { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
-  h1 { margin: 0; font-size: 15px; letter-spacing: 0; }
-  h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0; }
-  .subtle { color: var(--muted); font-size: 12px; }
-  .nav-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-  .home-link { color: #1d4ed8; font-size: 12px; text-decoration: none; }
-  .toolbar { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-  input {
-    width: 100%;
-    min-height: 32px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-    color: var(--text);
-    padding: 6px 8px;
-    font: inherit;
-  }
-  button {
-    min-height: 32px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #eef2f7;
-    color: var(--text);
-    padding: 0 10px;
-    font: inherit;
-  }
-  .files { min-height: 0; overflow: auto; padding: 6px; }
-  .file {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    border-radius: 6px;
-    padding: 7px 8px;
-    color: var(--text);
-    text-decoration: none;
-  }
-  .file:hover, .file.active { background: #eef2f7; }
-  .dir-up { color: var(--muted); }
-  .file-path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
-  }
-  .pills { display: inline-flex; gap: 4px; justify-content: end; align-items: center; }
-  .pill {
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--muted);
-    font-size: 11px;
-    padding: 1px 6px;
-    min-width: 22px;
-    text-align: center;
-  }
-  .coverage-pill { color: #166534; background: rgba(34, 197, 94, 0.08); }
-  main { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .topbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 34vw);
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-    align-items: start;
-  }
-  .title {
-    min-width: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .history {
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-    padding: 6px 8px;
-  }
-  .history summary { cursor: pointer; color: var(--muted); }
-  .history-list { display: grid; gap: 4px; margin-top: 6px; max-height: 180px; overflow: auto; }
-  .history-list a { color: var(--text); text-decoration: none; font-size: 12px; }
-  .crumbs { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
-  .crumbs a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
-  .viewer { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
-  .dashboard {
-    max-width: 1180px;
-    padding: 18px;
-  }
-  .metric-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
-  }
-  .metric {
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-    padding: 12px;
-  }
-  .metric div { color: var(--muted); font-size: 12px; }
-  .metric strong { display: block; margin-top: 4px; font-size: 24px; letter-spacing: 0; }
-  .metric p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-  .warning-banner {
-    display: grid;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  main > .warning-banner {
-    margin: 0;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--line);
-    background: #fff7ed;
-  }
-  .warning {
-    border: 1px solid #fed7aa;
-    border-left: 3px solid #f97316;
-    border-radius: 6px;
-    background: #fff7ed;
-    padding: 8px 10px;
-  }
-  .warning.notice {
-    border-color: #bfdbfe;
-    border-left-color: #2563eb;
-    background: #eff6ff;
-  }
-  .warning strong { display: block; font-size: 12px; }
-  .warning p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
-  .dashboard-section {
-    margin-top: 16px;
-    border-top: 1px solid var(--line);
-    padding-top: 14px;
-  }
-  .hazard-bar {
-    height: 8px;
-    max-width: 520px;
-    border-radius: 999px;
-    background: rgba(180, 35, 24, 0.14);
-    overflow: hidden;
-  }
-  .hazard-bar span {
-    display: block;
-    height: 100%;
-    background: #166534;
-  }
-  .dashboard-files {
-    display: grid;
-    max-width: 760px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-  }
-  .dashboard-files a {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--line);
-    color: var(--text);
-    text-decoration: none;
-  }
-  .dashboard-files a:last-child { border-bottom: 0; }
-  .dashboard-files .row-label { min-width: 0; display: grid; gap: 2px; }
-  .dashboard-files .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .dashboard-files small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-  .dashboard-files .metric-value { color: #166534; }
-  .dashboard-files .hazard-value { color: var(--hazard); }
-  .empty-inline { margin: 0; color: var(--muted); }
-  .code {
-    min-width: max-content;
-    padding: 10px 0 30px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.55;
-  }
-  .row {
-    display: grid;
-    grid-template-columns: 84px 56px minmax(760px, 1fr);
-    min-height: 20px;
-    border-left: 3px solid transparent;
-  }
-  .row.covered { background: var(--covered); }
-  .row.mutant { background: var(--mutant); }
-  .row.hazard-open { border-left-color: var(--hazard); }
-  .row.hazard-verified { border-left-color: #8b95a5; }
-  .ln { color: #8b95a5; text-align: right; padding-right: 10px; user-select: none; }
-  .gutter { min-width: 84px; text-align: right; padding-right: 8px; user-select: none; white-space: nowrap; }
-  .bomb {
-    cursor: help;
-    display: inline-block;
-    font-size: 13px;
-    line-height: 18px;
-    margin-right: 2px;
-  }
-  .bomb.verified { opacity: 0.35; filter: grayscale(1); }
-  .line-meta { display: inline-block; position: relative; }
-  .line-meta summary {
-    cursor: pointer;
-    color: var(--muted);
-    display: inline;
-    font-size: 11px;
-  }
-  .row.dark-arm .line-meta summary {
-    color: var(--dark-arm);
-    font-weight: 700;
-  }
-  .dark-arm-span {
-    background: var(--dark-arm-bg);
-    box-shadow: inset 0 -1px 0 rgba(31, 41, 55, 0.48);
-    border-radius: 2px;
-  }
-  .line-meta div {
-    position: absolute;
-    z-index: 2;
-    top: 18px;
-    left: 0;
-    min-width: 220px;
-    max-width: 360px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: #fff;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
-    padding: 8px;
-    text-align: left;
-    white-space: normal;
-  }
-  .line-meta p { margin: 0 0 4px; }
-  pre { margin: 0; white-space: pre; padding-right: 24px; }
-  .tok-comment { color: #7a8495; font-style: italic; }
-  .tok-string { color: #8a4b08; }
-  .tok-number { color: #0f766e; }
-  .tok-keyword { color: #1d4ed8; font-weight: 600; }
-  .tok-type { color: #7c3aed; font-weight: 600; }
-  .tok-constant { color: #b45309; font-weight: 600; }
-  .tok-function { color: #0369a1; }
-  .tok-property { color: #64748b; }
-  .empty { padding: 24px; color: var(--muted); }
-  @media (max-width: 800px) {
-    .app { grid-template-columns: 1fr; grid-template-rows: 36vh 64vh; }
-    aside { border-right: 0; border-bottom: 1px solid var(--line); }
-    .topbar { grid-template-columns: 1fr; }
-    .row { grid-template-columns: 72px 48px minmax(620px, 1fr); }
-    .gutter { min-width: 72px; padding-right: 6px; }
-  }
-"#;
+fn date_utc(timestamp: i64) -> String {
+    let days = timestamp.div_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+#[cfg(test)]
+const STYLE: &str = include_str!("../ui/assets/app.css");
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{
-        CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, TestExposureEvent,
-        UnitKind,
+        CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, QualityEvent,
+        QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
     };
     use tempfile::tempdir;
 
@@ -3559,11 +6919,114 @@ mod tests {
 
         assert_eq!(payload.lines.len(), 3);
         assert_eq!(payload.versions.len(), 1);
+        assert_eq!(payload.symbols.len(), 1);
+        assert_eq!(payload.symbols[0].name, "run");
         assert!(line.covered);
         assert!(line.mutant_tested);
         assert_eq!(line.test_types, vec!["loom"]);
+        assert_eq!(line.test_type_counts.get("loom"), Some(&1));
         assert_eq!(line.hazards.len(), 1);
         assert!(line.hazards[0].verified);
+    }
+
+    #[test]
+    fn source_payload_uses_current_source_for_outline_lines_when_db_is_stale() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/annotator/helpers")).unwrap();
+        fs::write(
+            dir.path().join("src/annotator/helpers/fixable_helpers.rb"),
+            "# typed: strict\n\
+             # comment\n\
+             # comment\n\
+             # comment\n\
+             # comment\n\
+             # comment\n\
+             # comment\n\
+             def closest_name(input)\n\
+               input\n\
+             end\n\
+             \n\
+             sig { params(a: String, b: String).returns(Integer) }\n\
+             def levenshtein(a, b)\n\
+               0\n\
+             end\n",
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let path = "src/annotator/helpers/fixable_helpers.rb";
+        let closest = LogicalUnit::new(
+            "closest_name",
+            UnitKind::Function,
+            path,
+            1,
+            1,
+            2,
+            "def closest_name",
+            "def closest_name(input)\nend",
+        );
+        let levenshtein = LogicalUnit::new(
+            "levenshtein",
+            UnitKind::Function,
+            path,
+            1,
+            3,
+            4,
+            "def levenshtein",
+            "def levenshtein(a, b)\nend",
+        );
+        storage.upsert_logical_unit(&closest, 10).unwrap();
+        storage.upsert_logical_unit(&levenshtein, 10).unwrap();
+        for (unit, stale_start, stale_end) in [(&closest, 1, 2), (&levenshtein, 3, 4)] {
+            storage
+                .insert_event(&Event {
+                    unit_id: unit.id.clone(),
+                    commit_hash: "abc".into(),
+                    event_type: EventType::Change,
+                    path: path.into(),
+                    name: unit.name.clone(),
+                    start_line: stale_start,
+                    end_line: stale_end,
+                    semantic_change: true,
+                    lines_added: 1,
+                    lines_removed: 0,
+                    timestamp: 10,
+                })
+                .unwrap();
+        }
+
+        let payload = source_payload(&storage, dir.path(), path, None).unwrap();
+        let closest = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "closest_name")
+            .unwrap();
+        let levenshtein = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "levenshtein")
+            .unwrap();
+
+        assert_eq!(closest.start_line, 8);
+        assert_eq!(levenshtein.start_line, 13);
+        let outline = render_source_outline(&payload);
+        assert!(outline.contains("href=\"#L8\""));
+        assert!(outline.contains("href=\"#L13\""));
+
+        let hotspots =
+            top_unit_hotspots(&storage, "src", &CoverageScope::all(), Some(dir.path())).unwrap();
+        let closest_hotspot = hotspots
+            .iter()
+            .find(|unit| unit.name == "closest_name")
+            .unwrap();
+        let levenshtein_hotspot = hotspots
+            .iter()
+            .find(|unit| unit.name == "levenshtein")
+            .unwrap();
+        assert_eq!(closest_hotspot.start_line, 8);
+        assert_eq!(levenshtein_hotspot.start_line, 13);
+        let links = render_unit_hotspots(&hotspots, "");
+        assert!(links.contains("src%2Fannotator%2Fhelpers%2Ffixable_helpers.rb#L8"));
+        assert!(links.contains("src%2Fannotator%2Fhelpers%2Ffixable_helpers.rb#L13"));
     }
 
     #[test]
@@ -3597,6 +7060,381 @@ mod tests {
         let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
 
         assert_eq!(line.dark_arms, vec!["genuine gap"]);
+    }
+
+    #[test]
+    fn source_payload_can_overlay_dark_arm_sarif() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  else\nend\n").unwrap();
+        let overlay = dir.path().join("overlay.sarif");
+        fs::write(
+            &overlay,
+            r#"{
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"SlopCop","rules":[]}},
+                "results":[{
+                  "ruleId":"slopcop.dark-arm.genuine",
+                  "message":{"text":"dark arm: genuine"},
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"src/demo.rb"},
+                      "region":{"startLine":2,"startColumn":3,"endLine":2,"endColumn":7}
+                    }
+                  }],
+                  "properties":{
+                    "dark_arm":true,
+                    "category":"dark arm: genuine",
+                    "file":"src/demo.rb",
+                    "line":2
+                  }
+                }],
+                "properties":{
+                  "slopcop.dark_arms":{
+                    "format":"slopcop.dark-arms.v1",
+                    "dark_arms":[{
+                      "file":"src/demo.rb",
+                      "line":2,
+                      "category":"dark arm: genuine"
+                    }]
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\nelse\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        let overlays = UiOverlays::load(&[overlay]).unwrap();
+
+        let payload =
+            source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &overlays)
+                .unwrap();
+        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+
+        assert_eq!(line.dark_arms, vec!["dark arm: genuine"]);
+        assert_eq!(line.dark_arms.len(), 1);
+        assert_eq!(line.dark_arm_spans[0].span, Some([2, 2, 2, 6]));
+    }
+
+    #[test]
+    fn source_payload_includes_persisted_sarif_findings() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  else\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\nelse\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc".into(),
+                event_type: EventType::Change,
+                path: "src/demo.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 3,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                artifact_path: "tmp/slopcop.sarif#run0".into(),
+                artifact_sha256: "abc123".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&SarifFinding {
+                artifact_id,
+                finding_key: "finding-1".into(),
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                rule_id: "slopcop.dark-arm.genuine".into(),
+                level: "warning".into(),
+                message: "dark arm: genuine".into(),
+                path: "src/demo.rb".into(),
+                start_line: 2,
+                start_column: Some(3),
+                end_line: Some(2),
+                end_column: Some(7),
+                category: "genuine".into(),
+                is_dark_arm: true,
+                unit_id: Some(unit.id),
+                fingerprint: "fp".into(),
+                properties_json: "{}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&SarifFinding {
+                artifact_id,
+                finding_key: "finding-2".into(),
+                source: "slopcop".into(),
+                tool_name: "SlopCop".into(),
+                run_format: "slopcop.report.sarif.v1".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                rule_id: "slopcop.dark-arm.dead".into(),
+                level: "note".into(),
+                message: "dark arm: dead".into(),
+                path: "src/other.rb".into(),
+                start_line: 1,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+                category: "dead".into(),
+                is_dark_arm: true,
+                unit_id: None,
+                fingerprint: "fp2".into(),
+                properties_json: "{}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+
+        let payload =
+            source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &UiOverlays::default())
+                .unwrap();
+        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let dashboard = dashboard_summary(&storage).unwrap();
+        let files = file_index(&storage).unwrap();
+
+        assert_eq!(line.findings.len(), 1);
+        assert_eq!(line.findings[0].tool, "SlopCop");
+        assert_eq!(line.dark_arm_spans[0].span, Some([2, 2, 2, 6]));
+        assert_eq!(dashboard.sarif_findings, 2);
+        assert!(files.iter().any(|file| file.path == "src/other.rb" && file.sarif_findings == 1));
+    }
+
+    #[test]
+    fn source_payload_uses_espalier_sarif_for_symbol_purity_and_effect_spans() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src/demo.rb"),
+            "def pure\n  1\nend\ndef read_state\n  @state\nend\ndef prepare\n  @state = compute(@state)\nend\ndef run\n  prepare\n  read_state\nend\n",
+        )
+        .unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let pure = LogicalUnit::new(
+            "pure",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def pure",
+            "def pure\n1\nend",
+        );
+        let prepare = LogicalUnit::new(
+            "prepare",
+            UnitKind::Function,
+            "src/demo.rb",
+            7,
+            7,
+            9,
+            "def prepare",
+            "def prepare\n@state = compute(@state)\nend",
+        );
+        let read_state = LogicalUnit::new(
+            "read_state",
+            UnitKind::Function,
+            "src/demo.rb",
+            4,
+            4,
+            6,
+            "def read_state",
+            "def read_state\n@state\nend",
+        );
+        let run = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            10,
+            10,
+            13,
+            "def run",
+            "def run\nprepare\nread_state\nend",
+        );
+        storage.upsert_logical_unit(&pure, 10).unwrap();
+        storage.upsert_logical_unit(&read_state, 10).unwrap();
+        storage.upsert_logical_unit(&prepare, 10).unwrap();
+        storage.upsert_logical_unit(&run, 10).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "espalier".into(),
+                tool_name: "Espalier".into(),
+                run_format: "espalier.manifest.sarif.v1".into(),
+                artifact_path: "tmp/espalier.sarif#run0".into(),
+                artifact_sha256: "esp123".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        for (key, unit, function) in [
+            (
+                "pure",
+                &pure,
+                serde_json::json!({
+                    "name": "pure",
+                    "span": [1, 0, 3, 3],
+                    "EFFECTS": { "reads": [], "writes": [] },
+                    "CALL_GRAPH": { "internal_calls": [] }
+                }),
+            ),
+            (
+                "read_state",
+                &read_state,
+                serde_json::json!({
+                    "name": "read_state",
+                    "span": [4, 0, 6, 3],
+                    "EFFECTS": { "reads": ["@state"], "writes": [] },
+                    "CALL_GRAPH": { "internal_calls": [] }
+                }),
+            ),
+            (
+                "prepare",
+                &prepare,
+                serde_json::json!({
+                    "name": "prepare",
+                    "span": [7, 0, 9, 3],
+                    "EFFECTS": { "reads": ["@state"], "writes": ["@state"] },
+                    "CALL_GRAPH": { "internal_calls": [] }
+                }),
+            ),
+            (
+                "run",
+                &run,
+                serde_json::json!({
+                    "name": "run",
+                    "span": [10, 0, 13, 3],
+                    "EFFECTS": { "reads": [], "writes": [] },
+                    "CALL_GRAPH": { "internal_calls": ["prepare", "read_state"] }
+                }),
+            ),
+        ] {
+            storage
+                .insert_sarif_finding(&SarifFinding {
+                    artifact_id,
+                    finding_key: format!("espalier-{key}"),
+                    source: "espalier".into(),
+                    tool_name: "Espalier".into(),
+                    run_format: "espalier.manifest.sarif.v1".into(),
+                    commit_hash: "abc".into(),
+                    timestamp: 20,
+                    rule_id: "espalier.function".into(),
+                    level: "note".into(),
+                    message: format!("function: Demo#{key}"),
+                    path: "src/demo.rb".into(),
+                    start_line: function
+                        .get("span")
+                        .and_then(Value::as_array)
+                        .and_then(|span| span.first())
+                        .and_then(Value::as_u64)
+                        .unwrap() as u32,
+                    start_column: None,
+                    end_line: function
+                        .get("span")
+                        .and_then(Value::as_array)
+                        .and_then(|span| span.get(2))
+                        .and_then(Value::as_u64)
+                        .map(|line| line as u32),
+                    end_column: None,
+                    category: "architecture".into(),
+                    is_dark_arm: false,
+                    unit_id: Some(unit.id.clone()),
+                    fingerprint: format!("espalier-{key}-fp"),
+                    properties_json: serde_json::json!({
+                        "module": "Demo",
+                        "function": function,
+                        "source_format": "espalier.manifest.v1"
+                    })
+                    .to_string(),
+                    raw_json: "{}".into(),
+                })
+                .unwrap();
+        }
+
+        let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
+        let pure_symbol = payload.symbols.iter().find(|symbol| symbol.name == "pure").unwrap();
+        let prepare_symbol = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "prepare")
+            .unwrap();
+        let read_symbol = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "read_state")
+            .unwrap();
+        let run_symbol = payload.symbols.iter().find(|symbol| symbol.name == "run").unwrap();
+        let read_line = payload.annotations.iter().find(|line| line.line == 5).unwrap();
+        let state_line = payload.annotations.iter().find(|line| line.line == 8).unwrap();
+        let call_line = payload.annotations.iter().find(|line| line.line == 11).unwrap();
+        let read_call_line = payload.annotations.iter().find(|line| line.line == 12);
+        let read_labels = effect_span_labels(read_line);
+        let state_labels = effect_span_labels(state_line);
+        let call_labels = effect_span_labels(call_line);
+        let branch_context = UiBranchContext {
+            branch: "master".to_string(),
+            commit: "abc".to_string(),
+        };
+        let html = render_source_view(&payload, "", &branch_context);
+        let outline = render_source_outline(&payload);
+
+        assert!(pure_symbol.effect_known);
+        assert!(!pure_symbol.impure);
+        assert_eq!(pure_symbol.start_line, 1);
+        assert!(read_symbol.effect_known);
+        assert!(!read_symbol.impure);
+        assert_eq!(read_symbol.start_line, 4);
+        assert!(prepare_symbol.impure);
+        assert_eq!(prepare_symbol.start_line, 7);
+        assert!(run_symbol.impure);
+        assert_eq!(run_symbol.start_line, 10);
+        assert_eq!(read_labels, vec!["state read @state"]);
+        assert!(state_labels.contains(&"state read @state".to_string()));
+        assert!(state_labels.contains(&"state write @state".to_string()));
+        assert_eq!(call_labels, vec!["impure call prepare"]);
+        assert!(read_call_line
+            .map(|line| effect_span_labels(line).is_empty())
+            .unwrap_or(true));
+        assert!(outline.contains("fa-link"));
+        assert!(html.contains("effect-state-read"));
+        assert!(html.contains("effect-state-write"));
+        assert!(html.contains("effect-impure-call"));
     }
 
     #[test]
@@ -3653,6 +7491,568 @@ mod tests {
         assert_eq!(line_one.line_hits, Some(0));
         assert!(line_two.covered);
         assert_eq!(line_two.line_hits, Some(1));
+    }
+
+    #[test]
+    fn source_payload_adds_semantic_churn_and_decayed_bug_history() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  1\n  2\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            4,
+            "def run",
+            "def run\n1\n2\nend",
+        );
+        storage.upsert_logical_unit(&unit, 1).unwrap();
+        for (hash, event_type, start_line, end_line, semantic_change, timestamp) in [
+            ("comment", EventType::Change, 2, 2, false, 10),
+            ("move", EventType::Move, 1, 4, true, 20),
+            ("change", EventType::Change, 2, 2, true, 30),
+            ("fix", EventType::Fix, 1, 4, true, 40),
+        ] {
+            storage
+                .insert_event(&Event {
+                    unit_id: unit.id.clone(),
+                    commit_hash: hash.into(),
+                    event_type,
+                    path: "src/demo.rb".into(),
+                    name: "run".into(),
+                    start_line,
+                    end_line,
+                    semantic_change,
+                    lines_added: 1,
+                    lines_removed: 0,
+                    timestamp,
+                })
+                .unwrap();
+        }
+        storage
+            .insert_crash_event(&CrashEvent {
+                unit_id: unit.id,
+                commit_hash: "crash".into(),
+                timestamp: 50,
+                error_class: "RuntimeError".into(),
+                provider_id: "evt-1".into(),
+                is_verified: true,
+                path: "src/demo.rb".into(),
+                line: 2,
+                function: "run".into(),
+            })
+            .unwrap();
+
+        let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
+        let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
+        let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+
+        assert_eq!(line_one.semantic_churn_events, 1);
+        assert_eq!(line_two.semantic_churn_events, 2);
+        assert_eq!(
+            line_one
+                .bug_events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fix"]
+        );
+        assert_eq!(
+            line_two
+                .bug_events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fix", "crash"]
+        );
+        assert!(line_two.bug_weight > line_one.bug_weight);
+    }
+
+    #[test]
+    fn source_payload_discounts_fix_history_after_large_coverage_gain() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  1\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 1).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "fix".into(),
+                event_type: EventType::Fix,
+                path: "src/demo.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 1,
+                lines_removed: 0,
+                timestamp: 20,
+            })
+            .unwrap();
+        storage
+            .record_quality_metric(&QualityEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "coverage-low".into(),
+                timestamp: 30,
+                metric_type: QualityMetric::LineCoverage,
+                old_value: None,
+                new_value: 20.0,
+            })
+            .unwrap();
+        storage
+            .record_quality_metric(&QualityEvent {
+                unit_id: unit.id,
+                commit_hash: "coverage-high".into(),
+                timestamp: 40,
+                metric_type: QualityMetric::LineCoverage,
+                old_value: None,
+                new_value: 90.0,
+            })
+            .unwrap();
+
+        let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
+        let line = payload.annotations.iter().find(|line| line.line == 1).unwrap();
+
+        assert_eq!(line.bug_events.len(), 1);
+        assert!(
+            (line.bug_events[0].weight - 0.175).abs() < 0.001,
+            "unexpected fix weight {}",
+            line.bug_events[0].weight
+        );
+        assert!(
+            (line.bug_weight - 0.175).abs() < 0.001,
+            "unexpected aggregate bug weight {}",
+            line.bug_weight
+        );
+    }
+
+    #[test]
+    fn source_view_renders_css_only_coverage_and_churn_modes() {
+        let payload = UiSourcePayload {
+            path: "src/demo.rb".into(),
+            commit: None,
+            lines: vec!["def run".into(), "  maybe_work".into(), "end".into()],
+            versions: Vec::new(),
+            symbols: vec![empty_source_symbol("function", "run", 1, 3)],
+            blame: vec![UiLineBlame {
+                line: 2,
+                commit_hash: "1234567890abcdef".to_string(),
+                ordinal: 2,
+                total_commits: 5,
+                timestamp: 86_400,
+                author: "Ada Lovelace".to_string(),
+            }],
+            annotations: vec![UiLineAnnotation {
+                line: 2,
+                covered: true,
+                mutant_tested: false,
+                test_types: vec!["fuzz".to_string(), "integration".to_string(), "unit".to_string()],
+                distinct_tests: 9,
+                mutant_verified_tests: 0,
+                mutant_killed_tests: 0,
+                line_hits: Some(3),
+                line_coverage: Some(100.0),
+                mutant_coverage: None,
+                dark_arms: Vec::new(),
+                dark_arm_spans: Vec::new(),
+                effect_spans: Vec::new(),
+                findings: vec![
+                    UiFinding {
+                        source: "decomplex".to_string(),
+                        tool: "Decomplex".to_string(),
+                        rule_id: "decomplex.false-simplicity".to_string(),
+                        level: "warning".to_string(),
+                        message: "False Simplicity: recursive_cleanup_shape?".to_string(),
+                        category: "complexity".to_string(),
+                        tier: Some(2),
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "first-party".to_string(),
+                        tool: "Decomplex".to_string(),
+                        rule_id: "decomplex.decision-pressure".to_string(),
+                        level: "warning".to_string(),
+                        message: "decision pressure".to_string(),
+                        category: "complexity".to_string(),
+                        tier: Some(1),
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "espalier".to_string(),
+                        tool: "Espalier".to_string(),
+                        rule_id: "espalier.function".to_string(),
+                        level: "note".to_string(),
+                        message: "function: Demo#run".to_string(),
+                        category: "architecture".to_string(),
+                        tier: None,
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "nil-kill".to_string(),
+                        tool: "Nil-Kill".to_string(),
+                        rule_id: "nil-kill.static.untyped-signature".to_string(),
+                        level: "warning".to_string(),
+                        message: "static signature includes an untyped or unknown type for Demo#run".to_string(),
+                        category: "nil-kill.static.untyped-signature".to_string(),
+                        tier: None,
+                        span: None,
+                    },
+                    UiFinding {
+                        source: "lint".to_string(),
+                        tool: "RuboCop".to_string(),
+                        rule_id: "Lint/DuplicateBranch".to_string(),
+                        level: "warning".to_string(),
+                        message: "Duplicate branch body detected.".to_string(),
+                        category: "lint".to_string(),
+                        tier: None,
+                        span: None,
+                    },
+                ],
+                hazards: vec![UiHazard {
+                    hazard_type: "zig_loom_atomic".to_string(),
+                    required_evidence: "loom".to_string(),
+                    source: "atomic store".to_string(),
+                    evidence_present: false,
+                    verified: false,
+                }],
+                test_type_counts: BTreeMap::from([
+                    ("fuzz".to_string(), 2),
+                    ("integration".to_string(), 1),
+                    ("unit".to_string(), 6),
+                ]),
+                semantic_churn: 0.70,
+                semantic_churn_events: 3,
+                bug_weight: 0.75,
+                bug_events: vec![
+                    UiBugEvent {
+                        event_type: "fix".to_string(),
+                        commit_hash: "abcdef1234567890".to_string(),
+                        timestamp: 100,
+                        path: "src/demo.rb".to_string(),
+                        line: 2,
+                        label: "old noisy commit body".to_string(),
+                        weight: 0.50,
+                    },
+                    UiBugEvent {
+                        event_type: "fix".to_string(),
+                        commit_hash: "fedcba9876543210".to_string(),
+                        timestamp: 86_500,
+                        path: "src/demo.rb".to_string(),
+                        line: 2,
+                        label: "new noisy commit body".to_string(),
+                        weight: 0.25,
+                    },
+                ],
+            }],
+            warnings: Vec::new(),
+        };
+
+        let branch_context = UiBranchContext {
+            branch: "master".to_string(),
+            commit: "abcdef123456".to_string(),
+        };
+        let html = render_source_view(&payload, "", &branch_context);
+
+        assert!(html.contains("id=\"mode-coverage\" checked"));
+        assert!(html.contains("id=\"mode-churn\""));
+        assert!(html.contains("Coverage Quality"));
+        assert!(html.contains("Churn Heat"));
+        assert!(html.contains("<details class=\"layers-menu\""));
+        assert!(html.contains("id=\"layer-gutter-highlights\" checked"));
+        assert!(html.contains("id=\"layer-gutter-icons\" checked"));
+        assert!(html.contains("id=\"layer-blame\""));
+        assert!(html.contains("id=\"layer-comment-folding\" checked"));
+        assert!(html.contains("data-persist-key=\"lineage.view.mode\""));
+        assert!(html.contains("data-persist-key=\"lineage.layer.comment-folding\""));
+        assert!(html.contains("Gutter highlights (Churn)"));
+        assert!(html.contains("Gutter highlights (Coverage)"));
+        assert!(html.contains("<span>Blame</span>"));
+        assert!(html.contains("Expand/collapse comments"));
+        assert!(html.contains("Branch Context"));
+        assert!(html.contains("Source: latest commit <code>abcdef123456</code>"));
+        assert!(!html.contains("All flags"));
+        assert!(html.contains("<details class=\"history-drawer\""));
+        assert!(html.contains("File history"));
+        assert!(html.contains("class=\"blame-cell\""));
+        assert!(html.contains("#2 1234567890ab"));
+        assert!(html.contains("1970-01-02"));
+        assert!(html.contains("Ada Lovelace"));
+        assert!(html.contains("hazard-rail"));
+        assert!(html.contains("hazard-open"));
+        assert!(html.contains("class=\"line-toggle hazard-toggle\""));
+        assert!(html.contains("data-panel-class=\"hazard-panel-open\""));
+        assert!(html.contains("class=\"bomb line-icon\""));
+        assert!(html.contains("<i class=\"fa-solid fa-bomb\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("class=\"line-panel hazard-panel\""));
+        assert!(html.contains("<strong>zig_loom_atomic</strong> requires <strong>loom</strong>"));
+        assert!(html.contains("systems evidence and invariant mutation missing"));
+        assert!(html.contains("atomic store"));
+        assert!(html.contains("bug-history"));
+        assert!(html.contains("decayed fix history"));
+        assert!(html.contains("<i class=\"fa-solid fa-bug\" aria-hidden=\"true\"></i>"));
+        assert!(
+            html.contains("<i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i>")
+        );
+        assert!(html.contains("<i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("<i class=\"fa-solid fa-tree\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("<i class=\"fa-solid fa-skull\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("<i class=\"fa-regular fa-note-sticky\" aria-hidden=\"true\"></i>"));
+        assert!(html.contains("class=\"line-toggle tool-toggle decomplex-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle espalier-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle nil-kill-toggle\""));
+        assert!(html.contains("class=\"line-toggle tool-toggle lint-toggle\""));
+        assert!(html.contains("class=\"decomplex-finding line-icon\""));
+        assert!(html.contains("class=\"espalier-finding line-icon\""));
+        assert!(html.contains("class=\"nil-kill-finding line-icon\""));
+        assert!(html.contains("class=\"lint-finding line-icon\""));
+        assert!(html.contains("class=\"line-panel finding-panel decomplex-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel espalier-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel nil-kill-panel\""));
+        assert!(html.contains("class=\"line-panel finding-panel lint-panel\""));
+        assert!(html.contains("Decomplex SARIF signals"));
+        assert!(html.contains("Espalier SARIF signals"));
+        assert!(html.contains("Nil-Kill SARIF signals"));
+        assert!(html.contains("Lint SARIF signals"));
+        assert!(html.contains("tier 1"));
+        assert!(html.contains("tier 2"));
+        assert!(
+            html.find("tier 1").unwrap() < html.find("tier 2").unwrap(),
+            "Decomplex findings should be ordered by tier"
+        );
+        assert!(html.contains("decomplex.decision-pressure</a>: decision pressure"));
+        assert!(html.contains("decomplex.false-simplicity</a>: recursive_cleanup_shape?"));
+        assert!(!html.contains("False Simplicity: recursive_cleanup_shape?"));
+        assert!(!html.contains("recursive_cleanup_shape? (decomplex)"));
+        assert!(!html.contains("decomplex.decision-pressure</a> warning ["));
+        assert!(html.contains("gems/decomplex/docs/false-simplicity.md"));
+        assert!(html.contains("tests by type: fuzz (2), integration (1), unit (6) - 9 total"));
+        let newer_fix = "fedcba987654 1970-01-02 weight 0.25: new noisy commit body";
+        let older_fix = "abcdef123456 1970-01-01 weight 0.50: old noisy commit body";
+        assert!(html.contains(newer_fix));
+        assert!(html.contains(older_fix));
+        assert!(html.find(newer_fix).unwrap() < html.find(older_fix).unwrap());
+        assert!(!html.contains("data-tooltip="));
+        assert!(html.contains("class=\"line-panel bug-panel\""));
+        assert!(html.contains("class=\"line-panel meta-panel\""));
+        assert!(html.contains("<pre class=\"source-text\">"));
+        assert!(STYLE.contains("#mode-coverage:checked ~ .viewer .source-text"));
+        assert!(STYLE.contains("#mode-churn:checked ~ .viewer .source-text"));
+        assert!(STYLE.contains("#layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter"));
+        assert!(STYLE.contains("#layer-gutter-icons:not(:checked) ~ .viewer .line-icon"));
+        assert!(STYLE.contains("#layer-blame:checked ~ .viewer .blame-cell"));
+        assert!(STYLE.contains(".source-view.layer-blame-on .viewer .blame-cell"));
+        assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .row.comment-fold-hidden"));
+        assert!(STYLE.contains("#layer-comment-folding:checked ~ .viewer .comment-fold-toggle:checked ~ .ln .comment-fold-arrow::before"));
+        assert!(STYLE.contains(".row.comment-fold-expanded .comment-fold-arrow::before"));
+        assert!(STYLE.contains(".comment-fold-control:hover"));
+        assert!(STYLE.contains("justify-content: space-between"));
+        assert!(STYLE.contains("margin-left: auto"));
+        assert!(!STYLE.contains("branch-path-summary"));
+        assert!(!STYLE.contains(".bug-history summary::after"));
+        assert!(!STYLE.contains(".bug-history summary:hover"));
+        assert!(!STYLE.contains(".bug-history summary:focus"));
+        assert!(STYLE.contains(".line-panel"));
+        assert!(STYLE.contains("max-width: 120ch"));
+        assert!(STYLE.contains(".bug-toggle:checked ~ .bug-panel"));
+        assert!(STYLE.contains(".meta-toggle:checked ~ .meta-panel"));
+        assert!(STYLE.contains(".hazard-toggle:checked ~ .hazard-panel"));
+        assert!(STYLE.contains(".decomplex-toggle:checked ~ .decomplex-panel"));
+        assert!(STYLE.contains(".espalier-toggle:checked ~ .espalier-panel"));
+        assert!(STYLE.contains(".nil-kill-toggle:checked ~ .nil-kill-panel"));
+        assert!(STYLE.contains(".row.hazard-panel-open .hazard-panel"));
+        assert!(STYLE.contains(".row.decomplex-open .decomplex-panel"));
+        assert!(STYLE.contains(".row.espalier-open .espalier-panel"));
+        assert!(STYLE.contains(".row.nil-kill-open .nil-kill-panel"));
+        assert!(STYLE.contains(".decomplex-finding,"));
+        assert!(STYLE.contains(".finding-panel p"));
+        assert!(STYLE.contains("white-space: normal;"));
+        assert!(STYLE.contains(".row:target"));
+        assert!(STYLE.contains(".history-drawer[open]"));
+        assert!(!html.contains("&#128027;"));
+        assert!(!html.contains("&#128163;"));
+        assert!(!STYLE.contains("#mode-coverage:checked ~ .viewer .row { background"));
+        assert!(!STYLE.contains("#mode-churn:checked ~ .viewer .row { background"));
+        assert!(html.contains("--coverage-bg:rgba(34, 197, 94, 0.08)"));
+        assert!(html.contains("--churn-bg:rgba(248, 113, 113"));
+        assert!(html.contains("--gutter-coverage-bg:rgba(34, 197, 94, 0.18)"));
+        assert!(html.contains("--gutter-churn-bg:rgba(248, 113, 113"));
+    }
+
+    #[test]
+    fn source_view_collapses_long_comment_runs_with_persisted_controls() {
+        let payload = UiSourcePayload {
+            path: "src/demo.rb".into(),
+            commit: None,
+            lines: vec![
+                "# one".into(),
+                "# two".into(),
+                "# three".into(),
+                "# four".into(),
+                "def run".into(),
+                "end".into(),
+            ],
+            versions: Vec::new(),
+            symbols: Vec::new(),
+            blame: Vec::new(),
+            annotations: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let branch_context = UiBranchContext {
+            branch: "master".to_string(),
+            commit: "abcdef123456".to_string(),
+        };
+        let folds = detect_comment_folds(&payload.path, &payload.lines);
+        let html = render_source_view(&payload, "", &branch_context);
+
+        assert_eq!(folds.len(), 1);
+        assert_eq!(folds[0].start_line, 1);
+        assert_eq!(folds[0].end_line, 4);
+        assert!(html.contains("class=\"comment-fold-toggle\""));
+        assert!(html.contains("data-persist-key=\"lineage.comment-fold.src/demo.rb.1\""));
+        assert!(html.contains("data-comment-fold-child=\"1\""));
+        assert!(html.contains("</span><span class=\"ln\"><label class=\"comment-fold-control\""));
+        assert!(!html.contains("comment-fold-control line-icon"));
+        assert!(html.contains("class=\"fold-collapsed-source\""));
+        assert!(html.contains("# one ..."));
+
+        let js_lines = vec![
+            "/* start".to_string(),
+            " * middle".to_string(),
+            " * middle".to_string(),
+            " * end".to_string(),
+            " */".to_string(),
+        ];
+        let js_folds = detect_comment_folds("src/demo.js", &js_lines);
+        assert_eq!(js_folds.len(), 1);
+        assert_eq!(js_folds[0].end_line, 5);
+    }
+
+    #[test]
+    fn warning_banner_items_are_dismissible_and_persisted() {
+        let html = render_warning_banner(&[UiWarning {
+            level: "notice".to_string(),
+            label: "Mutation verification is missing".to_string(),
+            detail: "7 covered units have no mutant-verified test exposure.".to_string(),
+        }]);
+        let js = include_str!("../ui/assets/app.js");
+
+        assert!(html.contains("data-dismiss-key=\"lineage.warning."));
+        assert!(html.contains("class=\"warning-dismiss-toggle\""));
+        assert!(html.contains("class=\"warning-dismiss\""));
+        assert!(html.contains("Dismiss warning"));
+        assert!(STYLE.contains(".warning-dismiss-toggle:checked + .warning"));
+        let dismiss_style = STYLE
+            .split(".warning-dismiss {")
+            .nth(1)
+            .and_then(|style| style.split('}').next())
+            .unwrap();
+        assert!(dismiss_style.contains("cursor: pointer;"));
+        assert!(js.contains("warning-dismiss"));
+        assert!(js.contains("control.closest(\".warning\")"));
+        assert!(js.contains("input.checked = true"));
+        assert!(js.contains("bindLayerLabel"));
+        assert!(js.contains("bindLineToggleLabel"));
+        assert!(js.contains("input.dataset.panelClass"));
+        assert!(js.contains("sourceView.classList.toggle(`${input.id}-on`, input.checked)"));
+        assert!(js.contains("write(key, \"true\")"));
+        assert!(js.contains("comment-fold-expanded"));
+    }
+
+    #[test]
+    fn index_page_loads_font_awesome_for_gutter_icons() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  1\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id,
+                commit_hash: "abc".into(),
+                event_type: EventType::Change,
+                path: "src/demo.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 3,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/demo.rb", 1, 1)
+            .unwrap();
+        let scope = CoverageScope::all();
+
+        let html = render_index_page(
+            &storage,
+            dir.path(),
+            &UiOverlays::default(),
+            &scope,
+            Some("src/demo.rb"),
+            None,
+            None,
+            "",
+            CoverageSort::Path,
+        )
+        .unwrap();
+
+        assert!(html.contains("cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"));
+        assert!(html.contains("<aside class=\"source-sidebar\">"));
+        assert!(!html.contains("list=\"lineage-search-options\""));
+        assert!(!html.contains("<nav class=\"files\">"));
+        assert!(html.contains("<nav class=\"outline\""));
+        assert!(html.contains("href=\"#L1\""));
+        assert!(html.contains("<span class=\"outline-kind\">func</span>"));
+        assert!(html.contains("class=\"outline-hotspot\""));
+        assert!(html.contains("<span class=\"outline-name\">run</span>"));
+        assert!(html.contains("class=\"coverage-bar\""));
+    }
+
+    #[test]
+    fn embedded_asset_paths_resolve_css_and_js() {
+        assert_eq!(embedded_asset_path("app.css"), "assets/app.css");
+        assert_eq!(embedded_asset_path("/app.js"), "assets/app.js");
+        assert!(EmbeddedUi::get(&embedded_asset_path("app.css")).is_some());
+        assert!(EmbeddedUi::get(&embedded_asset_path("app.js")).is_some());
+    }
+
+    #[test]
+    fn coverage_bar_splits_strong_and_weak_covered_lines() {
+        let (strong, weak) = coverage_bar_widths(10, 8, 80.0, 5, 1);
+
+        assert_eq!(strong, 50.0);
+        assert_eq!(weak, 30.0);
+
+        let (strong, weak) = coverage_bar_widths(10, 8, 80.0, 8, 2);
+
+        assert_eq!(strong, 60.0);
+        assert_eq!(weak, 20.0);
     }
 
     #[test]
@@ -3883,6 +8283,8 @@ mod tests {
                 path: "src/a.rb".into(),
                 units: 1,
                 hazards: 2,
+                sarif_findings: 0,
+                dark_arm_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 3,
@@ -3891,8 +8293,11 @@ mod tests {
                 covered_lines: 5,
                 line_coverage: 50.0,
                 mutant_coverage: 25.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,
@@ -3901,6 +8306,8 @@ mod tests {
                 path: "src/internal/b.rb".into(),
                 units: 2,
                 hazards: 1,
+                sarif_findings: 0,
+                dark_arm_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 5,
@@ -3909,8 +8316,11 @@ mod tests {
                 covered_lines: 15,
                 line_coverage: 75.0,
                 mutant_coverage: 50.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,
@@ -3919,6 +8329,8 @@ mod tests {
                 path: "zig/c.zig".into(),
                 units: 3,
                 hazards: 7,
+                sarif_findings: 0,
+                dark_arm_findings: 0,
                 evidence_covered_hazards: 0,
                 covered_hazards: 0,
                 distinct_tests: 8,
@@ -3927,8 +8339,11 @@ mod tests {
                 covered_lines: 4,
                 line_coverage: 100.0,
                 mutant_coverage: 0.0,
+                mutant_verified_covered_lines: 0,
                 mutant_killed_covered_lines: 0,
+                stochastic_mutant_verified_covered_lines: 0,
                 stochastic_mutant_killed_covered_lines: 0,
+                invariant_mutant_verified_covered_lines: 0,
                 invariant_mutant_killed_covered_lines: 0,
                 multi_type_covered_lines: 0,
                 read_model: false,
@@ -3947,6 +8362,47 @@ mod tests {
         assert_eq!(src.len(), 1);
         assert_eq!(src[0].path, "src/internal");
         assert_eq!(files_in_directory(&files, "src")[0].path, "src/a.rb");
+    }
+
+    #[test]
+    fn sorted_table_files_includes_descendant_files_and_sorts_by_metrics() {
+        let files = vec![
+            ui_file_for_sort("src/a.rb", 10, 9, 1),
+            ui_file_for_sort("src/internal/b.rb", 20, 10, 2),
+            ui_file_for_sort("src/internal/deeper/c.rb", 4, 4, 0),
+            ui_file_for_sort("zig/runtime/a.zig", 8, 1, 0),
+        ];
+
+        let by_path = sorted_table_files(&files, "", "src", CoverageSort::Path)
+            .into_iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        let by_missed = sorted_table_files(&files, "", "src", CoverageSort::Missed)
+            .into_iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        let by_percent = sorted_table_files(&files, "", "src", CoverageSort::Percent)
+            .into_iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        let filtered = sorted_table_files(&files, "deeper", "src", CoverageSort::Path)
+            .into_iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            by_path,
+            vec!["src/a.rb", "src/internal/b.rb", "src/internal/deeper/c.rb"]
+        );
+        assert_eq!(
+            by_missed,
+            vec!["src/internal/b.rb", "src/a.rb", "src/internal/deeper/c.rb"]
+        );
+        assert_eq!(
+            by_percent,
+            vec!["src/internal/deeper/c.rb", "src/a.rb", "src/internal/b.rb"]
+        );
+        assert_eq!(filtered, vec!["src/internal/deeper/c.rb"]);
     }
 
     #[test]
@@ -4014,17 +8470,30 @@ mod tests {
                 payload_json: "{}".into(),
             })
             .unwrap();
+        let test_unit = LogicalUnit::new(
+            "test_run",
+            UnitKind::Function,
+            "gems/decomplex/test/report_test.rb",
+            1,
+            1,
+            2,
+            "def test_run",
+            "def test_run\nend",
+        );
+        storage.upsert_logical_unit(&test_unit, 10).unwrap();
 
         storage.refresh_ui_summaries().unwrap();
 
         let files = file_index(&storage).unwrap();
         assert_eq!(files.len(), 1);
         assert!(files[0].read_model);
+        assert_eq!(files[0].path, "src/a.rb");
         assert_eq!(files[0].tracked_lines, 2);
         assert_eq!(files[0].covered_lines, 1);
         assert_eq!(files[0].mutant_killed_covered_lines, 1);
 
         let dashboard = dashboard_summary(&storage).unwrap();
+        assert_eq!(dashboard.files, 1);
         assert_eq!(dashboard.tracked_lines, 2);
         assert_eq!(dashboard.covered_lines, 1);
         assert_eq!(dashboard.mutant_killed_covered_percent, 100.0);
@@ -4101,7 +8570,14 @@ flags:
             mutant_coverage: None,
             dark_arms: Vec::new(),
             dark_arm_spans: Vec::new(),
+            effect_spans: Vec::new(),
+            findings: Vec::new(),
             hazards: Vec::new(),
+            test_type_counts: BTreeMap::new(),
+            semantic_churn: 0.0,
+            semantic_churn_events: 0,
+            bug_weight: 0.0,
+            bug_events: Vec::new(),
         }];
         let lines = vec![
             "result = call(".to_string(),
@@ -4132,7 +8608,7 @@ flags:
             .find(|annotation| annotation.line == 2)
             .unwrap();
         assert!(
-            render_line_details(line_two)
+            render_line_details_panel(line_two)
                 .contains("covered as part of a multi-line statement")
         );
     }
@@ -4163,7 +8639,14 @@ flags:
                 label: "dark arm: else".to_string(),
                 span: Some([1, 4, 1, 8]),
             }],
+            effect_spans: Vec::new(),
+            findings: Vec::new(),
             hazards: Vec::new(),
+            test_type_counts: BTreeMap::new(),
+            semantic_churn: 0.0,
+            semantic_churn_events: 0,
+            bug_weight: 0.0,
+            bug_events: Vec::new(),
         };
 
         let html =
@@ -4217,5 +8700,31 @@ flags:
         assert!(html.contains("<span class=\"tok-type\">Scheduler</span>"));
         assert!(html.contains("<span class=\"tok-function\">run</span>"));
         assert!(html.contains("<span class=\"tok-constant\">MAX_SIZE</span>"));
+    }
+
+    fn ui_file_for_sort(path: &str, tracked_lines: i64, covered_lines: i64, partial: i64) -> UiFile {
+        UiFile {
+            path: path.to_string(),
+            units: 1,
+            hazards: 0,
+            sarif_findings: 0,
+            dark_arm_findings: partial,
+            evidence_covered_hazards: 0,
+            covered_hazards: 0,
+            distinct_tests: 0,
+            mutant_killed_tests: 0,
+            tracked_lines,
+            covered_lines,
+            line_coverage: percent(covered_lines, tracked_lines),
+            mutant_coverage: 0.0,
+            mutant_verified_covered_lines: 0,
+            mutant_killed_covered_lines: 0,
+            stochastic_mutant_verified_covered_lines: 0,
+            stochastic_mutant_killed_covered_lines: 0,
+            invariant_mutant_verified_covered_lines: 0,
+            invariant_mutant_killed_covered_lines: 0,
+            multi_type_covered_lines: 0,
+            read_model: false,
+        }
     }
 }

@@ -1,8 +1,10 @@
 use crate::model::{BlobFile, LogicalUnit, UnitKind};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use tree_sitter::{Language, Node, Parser};
 
-pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &["rb", "zig", "py", "js", "lua", "c", "go", "S"];
+pub const DEFAULT_CODE_EXTENSIONS: &[&str] =
+    &["rb", "zig", "py", "js", "lua", "c", "go", "rs", "S"];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
     ".zig-cache",
@@ -14,6 +16,20 @@ const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     "tmp",
     "vendor",
     "zig-out",
+];
+const DEFAULT_TEST_COMPONENTS: &[&str] = &[
+    "__tests__",
+    "bench",
+    "benches",
+    "benchmarks",
+    "fuzz",
+    "fuzzers",
+    "fuzzing",
+    "spec",
+    "test",
+    "testdata",
+    "tests",
+    "testing",
 ];
 
 pub trait BoundaryExtractor {
@@ -72,6 +88,53 @@ impl SourceFilter {
     }
 }
 
+pub fn is_test_source_path(path: &str) -> bool {
+    let path = normalize_path_for_role(path);
+    if path.is_empty() {
+        return false;
+    }
+
+    let components = path.split('/').collect::<Vec<_>>();
+    if components.iter().any(|component| {
+        DEFAULT_TEST_COMPONENTS.contains(component)
+            || component.ends_with("-tests")
+            || component.ends_with("_tests")
+    }) {
+        return true;
+    }
+
+    let basename = components.last().copied().unwrap_or("");
+    if basename == "conftest.py" {
+        return true;
+    }
+    if basename.starts_with("test_") && basename.ends_with(".py") {
+        return true;
+    }
+    if basename.contains(".spec.") || basename.contains(".test.") {
+        return true;
+    }
+
+    let stem = basename
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(basename);
+    stem.ends_with("_spec")
+        || stem.ends_with("_test")
+        || stem.ends_with("-test")
+        || stem.ends_with(".spec")
+        || stem.ends_with(".test")
+}
+
+pub fn is_production_source_path(path: &str) -> bool {
+    !is_test_source_path(path)
+}
+
+fn normalize_path_for_role(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .to_ascii_lowercase()
+}
+
 impl Default for SourceFilter {
     fn default() -> Self {
         Self::code_defaults()
@@ -95,6 +158,7 @@ struct Candidate {
     kind: UnitKind,
     signature: String,
     line: u32,
+    end_line: Option<u32>,
 }
 
 impl BoundaryExtractor for HeuristicExtractor {
@@ -107,15 +171,23 @@ impl BoundaryExtractor for HeuristicExtractor {
             return Vec::new();
         }
 
-        let lines: Vec<&str> = file.contents.lines().collect();
-        let mut candidates = Vec::new();
         let ext = extension(&file.path).map(|value| normalize_extension(&value));
-        for (index, line) in lines.iter().enumerate() {
-            if let Some(candidate) = detect_candidate(line, (index + 1) as u32, ext.as_deref()) {
-                candidates.push(candidate);
+        let lines: Vec<&str> = file.contents.lines().collect();
+        let mut candidates = ext
+            .as_deref()
+            .and_then(|extension| tree_sitter_candidates(file, extension, &lines));
+
+        if candidates.as_ref().map(Vec::is_empty).unwrap_or(true) {
+            let mut detected = Vec::new();
+            for (index, line) in lines.iter().enumerate() {
+                if let Some(candidate) = detect_candidate(line, (index + 1) as u32, ext.as_deref()) {
+                    detected.push(candidate);
+                }
             }
+            candidates = Some(detected);
         }
 
+        let candidates = candidates.unwrap_or_default();
         candidates
             .iter()
             .enumerate()
@@ -126,12 +198,14 @@ impl BoundaryExtractor for HeuristicExtractor {
                 Some((index, candidate, *ordinal))
             })
             .map(|(index, candidate, ordinal)| {
-                let next_line = candidates
-                    .get(index + 1)
-                    .map(|next| next.line.saturating_sub(1))
-                    .unwrap_or(lines.len() as u32);
+                let next_line = candidate.end_line.unwrap_or_else(|| {
+                    candidates
+                        .get(index + 1)
+                        .map(|next| next.line.saturating_sub(1))
+                        .unwrap_or(lines.len() as u32)
+                });
                 let start = candidate.line.saturating_sub(1) as usize;
-                let end = next_line.min(lines.len() as u32) as usize;
+                let end = next_line.max(candidate.line).min(lines.len() as u32) as usize;
                 let body = lines[start..end].join("\n");
 
                 LogicalUnit::new(
@@ -167,8 +241,266 @@ fn detect_candidate(line: &str, line_number: u32, extension: Option<&str>) -> Op
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TreeSitterAdapter {
+    Rust,
+    Zig,
+}
+
+impl TreeSitterAdapter {
+    fn for_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "rs" => Some(Self::Rust),
+            "zig" => Some(Self::Zig),
+            _ => None,
+        }
+    }
+
+    fn language(self) -> Language {
+        match self {
+            Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Zig => tree_sitter_zig::LANGUAGE.into(),
+        }
+    }
+
+    fn candidate_for_node(
+        self,
+        node: Node<'_>,
+        source: &str,
+        lines: &[&str],
+    ) -> Option<Candidate> {
+        match self {
+            Self::Rust => rust_candidate_for_node(node, source, lines),
+            Self::Zig => zig_candidate_for_node(node, source, lines),
+        }
+    }
+}
+
+fn tree_sitter_candidates(
+    file: &BlobFile,
+    extension: &str,
+    lines: &[&str],
+) -> Option<Vec<Candidate>> {
+    let adapter = TreeSitterAdapter::for_extension(extension)?;
+    let mut parser = Parser::new();
+    parser.set_language(&adapter.language()).ok()?;
+    let tree = parser.parse(&file.contents, None)?;
+    if tree.root_node().has_error() {
+        return None;
+    }
+
+    let mut candidates = Vec::new();
+    collect_tree_sitter_candidates(tree.root_node(), adapter, &file.contents, lines, &mut candidates);
+    Some(candidates)
+}
+
+fn collect_tree_sitter_candidates(
+    node: Node<'_>,
+    adapter: TreeSitterAdapter,
+    source: &str,
+    lines: &[&str],
+    candidates: &mut Vec<Candidate>,
+) {
+    if let Some(candidate) = adapter.candidate_for_node(node, source, lines) {
+        candidates.push(candidate);
+    }
+
+    for index in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(index) {
+            collect_tree_sitter_candidates(child, adapter, source, lines, candidates);
+        }
+    }
+}
+
+fn rust_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    let kind = node.kind();
+    match kind {
+        "function_item" => {
+            let name = field_text(node, "name", source)?;
+            let name = rust_method_owner(node, source)
+                .map(|owner| format!("{owner}.{name}"))
+                .unwrap_or_else(|| name.to_string());
+            Some(tree_sitter_candidate(
+                node,
+                name,
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "mod_item" => tree_sitter_named_candidate(node, UnitKind::Module, source, lines),
+        "struct_item" | "enum_item" | "trait_item" | "union_item" | "type_item" => {
+            tree_sitter_named_candidate(node, UnitKind::Class, source, lines)
+        }
+        _ => None,
+    }
+}
+
+fn zig_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Option<Candidate> {
+    match node.kind() {
+        "function_declaration" => {
+            let name = field_text(node, "name", source)?;
+            let name = zig_container_owner(node, source)
+                .map(|owner| format!("{owner}.{name}"))
+                .unwrap_or_else(|| name.to_string());
+            Some(tree_sitter_candidate(
+                node,
+                name,
+                UnitKind::Function,
+                source,
+                lines,
+            ))
+        }
+        "variable_declaration" => zig_container_declaration_candidate(node, source, lines),
+        _ => None,
+    }
+}
+
+fn tree_sitter_named_candidate(
+    node: Node<'_>,
+    kind: UnitKind,
+    source: &str,
+    lines: &[&str],
+) -> Option<Candidate> {
+    let name = field_text(node, "name", source)?;
+    Some(tree_sitter_candidate(node, name.to_string(), kind, source, lines))
+}
+
+fn tree_sitter_candidate(
+    node: Node<'_>,
+    name: String,
+    kind: UnitKind,
+    source: &str,
+    lines: &[&str],
+) -> Candidate {
+    let start_line = node.start_position().row as u32 + 1;
+    let end_line = node.end_position().row as u32 + 1;
+    Candidate {
+        name,
+        kind,
+        signature: signature_for_node(node, source, lines),
+        line: start_line,
+        end_line: Some(end_line.max(start_line)),
+    }
+}
+
+fn signature_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> String {
+    let start_line = node.start_position().row;
+    let end_line = node.end_position().row;
+    if start_line == end_line {
+        return lines
+            .get(start_line)
+            .map(|line| line.trim().to_string())
+            .unwrap_or_default();
+    }
+
+    node.utf8_text(source.as_bytes())
+        .ok()
+        .and_then(|text| text.lines().find(|line| !line.trim().is_empty()))
+        .map(|line| line.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn field_text<'a>(node: Node<'_>, field_name: &str, source: &'a str) -> Option<&'a str> {
+    node.child_by_field_name(field_name)?
+        .utf8_text(source.as_bytes())
+        .ok()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn first_identifier_child<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    for index in 0..node.named_child_count() {
+        let child = node.named_child(index)?;
+        if child.kind() == "identifier" || child.kind() == "type_identifier" {
+            return child.utf8_text(source.as_bytes()).ok().map(str::trim);
+        }
+    }
+    None
+}
+
+fn rust_method_owner(node: Node<'_>, source: &str) -> Option<String> {
+    let impl_node = ancestor_kind(node, "impl_item")?;
+    field_text(impl_node, "type", source).map(clean_owner_name)
+}
+
+fn zig_container_owner(node: Node<'_>, source: &str) -> Option<String> {
+    let container = ancestor_any(
+        node,
+        &[
+            "struct_declaration",
+            "enum_declaration",
+            "union_declaration",
+            "opaque_declaration",
+        ],
+    )?;
+    let parent = container.parent()?;
+    if parent.kind() != "variable_declaration" {
+        return ancestor_kind(container, "function_declaration")
+            .and_then(|function| field_text(function, "name", source))
+            .map(clean_owner_name);
+    }
+    first_identifier_child(parent, source).map(clean_owner_name)
+}
+
+fn zig_container_declaration_candidate(
+    node: Node<'_>,
+    source: &str,
+    lines: &[&str],
+) -> Option<Candidate> {
+    let has_container_child = (0..node.named_child_count()).any(|index| {
+        node.named_child(index)
+            .map(|child| {
+                matches!(
+                    child.kind(),
+                    "struct_declaration"
+                        | "enum_declaration"
+                        | "union_declaration"
+                        | "opaque_declaration"
+                )
+            })
+            .unwrap_or(false)
+    });
+    if !has_container_child {
+        return None;
+    }
+
+    let name = first_identifier_child(node, source)?;
+    Some(tree_sitter_candidate(
+        node,
+        clean_owner_name(name),
+        UnitKind::Class,
+        source,
+        lines,
+    ))
+}
+
+fn ancestor_kind<'tree>(mut node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    while let Some(parent) = node.parent() {
+        if parent.kind() == kind {
+            return Some(parent);
+        }
+        node = parent;
+    }
+    None
+}
+
+fn ancestor_any<'tree>(mut node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
+    while let Some(parent) = node.parent() {
+        if kinds.contains(&parent.kind()) {
+            return Some(parent);
+        }
+        node = parent;
+    }
+    None
+}
+
+fn clean_owner_name(name: &str) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn detect_ruby_python(line: &str, line_number: u32) -> Option<Candidate> {
-    if let Some(rest) = line.strip_prefix("def ") {
+    if let Some(rest) = ruby_python_def_rest(line) {
         return named_candidate(rest, UnitKind::Function, line, line_number);
     }
     if let Some(rest) = line.strip_prefix("class ") {
@@ -178,6 +510,22 @@ fn detect_ruby_python(line: &str, line_number: u32) -> Option<Candidate> {
         return named_candidate(rest, UnitKind::Module, line, line_number);
     }
     None
+}
+
+fn ruby_python_def_rest(line: &str) -> Option<&str> {
+    if let Some(rest) = line.strip_prefix("def ") {
+        return Some(rest);
+    }
+    let (prefix, rest) = line.split_once(" def ")?;
+    let prefix = prefix.trim();
+    if matches!(
+        prefix,
+        "private" | "protected" | "public" | "private_class_method" | "module_function"
+    ) {
+        Some(rest)
+    } else {
+        None
+    }
 }
 
 fn detect_javascript(line: &str, line_number: u32) -> Option<Candidate> {
@@ -221,6 +569,7 @@ fn detect_c(line: &str, line_number: u32) -> Option<Candidate> {
         kind: UnitKind::Function,
         signature: line.trim().to_string(),
         line: line_number,
+        end_line: None,
     })
 }
 
@@ -245,6 +594,7 @@ fn detect_assembly(line: &str, line_number: u32) -> Option<Candidate> {
         kind: UnitKind::Function,
         signature: line.trim().to_string(),
         line: line_number,
+        end_line: None,
     })
 }
 
@@ -269,6 +619,7 @@ fn named_candidate(
         kind,
         signature: signature.trim().to_string(),
         line: line_number,
+        end_line: None,
     })
 }
 
@@ -281,6 +632,7 @@ fn identifier(input: &str) -> Option<&str> {
                 || ch == '_'
                 || ch == '!'
                 || ch == '?'
+                || ch == '='
                 || ch == '.'
                 || ch == ':'
             {
@@ -346,6 +698,112 @@ mod tests {
     }
 
     #[test]
+    fn extracts_rust_symbols_with_tree_sitter() {
+        let file = BlobFile {
+            path: "gems/lineage/src/demo.rs".into(),
+            contents: r#"
+pub mod storage {
+    pub struct Store {
+        count: usize,
+    }
+
+    impl Store {
+        pub fn open() -> Self {
+            Self { count: 0 }
+        }
+
+        fn insert_row(&mut self) {
+            self.count += 1;
+        }
+    }
+}
+
+fn helper() {}
+"#
+            .into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units
+            .iter()
+            .map(|unit| (unit.kind, unit.name.as_str()))
+            .collect();
+
+        assert!(names.contains(&(UnitKind::Module, "storage")));
+        assert!(names.contains(&(UnitKind::Class, "Store")));
+        assert!(names.contains(&(UnitKind::Function, "Store.open")));
+        assert!(names.contains(&(UnitKind::Function, "Store.insert_row")));
+        assert!(names.contains(&(UnitKind::Function, "helper")));
+        assert!(units.iter().any(|unit| unit.name == "Store.open" && unit.start_line == 8));
+    }
+
+    #[test]
+    fn extracts_zig_containers_and_methods_with_tree_sitter() {
+        let file = BlobFile {
+            path: "zig/demo.zig".into(),
+            contents: r#"
+const Worker = struct {
+    pub fn run(self: *Worker) void {
+        _ = self;
+    }
+};
+
+pub fn main() void {}
+"#
+            .into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units
+            .iter()
+            .map(|unit| (unit.kind, unit.name.as_str()))
+            .collect();
+
+        assert!(names.contains(&(UnitKind::Class, "Worker")));
+        assert!(names.contains(&(UnitKind::Function, "Worker.run")));
+        assert!(names.contains(&(UnitKind::Function, "main")));
+    }
+
+    #[test]
+    fn extracts_zig_methods_from_anonymous_struct_factories() {
+        let file = BlobFile {
+            path: "zig/factory.zig".into(),
+            contents: r#"
+pub fn StringMap(comptime Value: type) type {
+    return struct {
+        pub fn put(self: *@This(), key: []const u8, value: Value) void {
+            _ = self;
+            _ = key;
+            _ = value;
+        }
+    };
+}
+"#
+            .into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units.iter().map(|unit| unit.name.as_str()).collect();
+
+        assert!(names.contains(&"StringMap"));
+        assert!(names.contains(&"StringMap.put"));
+    }
+
+    #[test]
+    fn extracts_ruby_wrapped_class_methods_and_setters() {
+        let file = BlobFile {
+            path: "src/demo.rb".into(),
+            contents: "class Worker\n  private_class_method def self.build!\n    1\n  end\n  def value=(next_value)\n    @value = next_value\n  end\nend\n".into(),
+        };
+
+        let units = HeuristicExtractor::default().extract_units(&file);
+        let names: Vec<_> = units.iter().map(|unit| unit.name.as_str()).collect();
+
+        assert!(names.contains(&"self.build!"));
+        assert!(names.contains(&"value="));
+    }
+
+    #[test]
     fn source_filter_is_a_code_whitelist() {
         let filter = SourceFilter::default();
 
@@ -353,6 +811,7 @@ mod tests {
         assert!(filter.supports_path("zig/main.zig"));
         assert!(filter.supports_path("src/vm.S"));
         assert!(filter.supports_path("src/main.c"));
+        assert!(filter.supports_path("gems/lineage/src/ui.rs"));
         assert!(filter.supports_path("script/tool.lua"));
         assert!(!filter.supports_path("benchmarks/x/bench.profile/transpiled.zig"));
         assert!(!filter.supports_path("gems/lineage/target/debug/build.rs"));
@@ -361,6 +820,25 @@ mod tests {
         assert!(!filter.supports_path("gems/x/x.gemspec"));
         assert!(!filter.supports_path("Cargo.toml"));
         assert!(!filter.supports_path("src/vm.s"));
+    }
+
+    #[test]
+    fn source_role_classifier_identifies_common_test_paths() {
+        assert!(is_test_source_path("spec/affine_ownership_spec.rb"));
+        assert!(is_test_source_path("gems/decomplex/test/report_test.rb"));
+        assert!(is_test_source_path("gems/auto-type/spec/apply_spec.rb"));
+        assert!(is_test_source_path("tests/test_parser.py"));
+        assert!(is_test_source_path("src/parser.test.js"));
+        assert!(is_test_source_path("zig/runtime/scheduler-test.zig"));
+        assert!(is_test_source_path("zig/runtime/testing/vopr.zig"));
+        assert!(is_test_source_path("transpile-tests/check.rb"));
+        assert!(is_test_source_path("tools/fuzz/driver.rb"));
+        assert!(is_test_source_path("src/foo/conftest.py"));
+
+        assert!(is_production_source_path("src/ast/type.rb"));
+        assert!(is_production_source_path("gems/decomplex/lib/decomplex/report.rb"));
+        assert!(is_production_source_path("gems/lineage/src/ui.rs"));
+        assert!(is_production_source_path("zig/lib/atomic.zig"));
     }
 
     #[test]

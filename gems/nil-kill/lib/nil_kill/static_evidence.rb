@@ -1,12 +1,13 @@
 # typed: false
 # frozen_string_literal: true
 
-begin
+sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
+if File.file?("#{sibling_decomplex}/source_filter.rb") && File.file?("#{sibling_decomplex}/syntax.rb")
+  require "#{sibling_decomplex}/source_filter"
+  require "#{sibling_decomplex}/syntax"
+else
   require "decomplex/source_filter"
   require "decomplex/syntax"
-rescue LoadError
-  require_relative "../../../decomplex/lib/decomplex/source_filter"
-  require_relative "../../../decomplex/lib/decomplex/syntax"
 end
 
 module NilKill

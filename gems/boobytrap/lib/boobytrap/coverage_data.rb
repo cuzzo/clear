@@ -82,6 +82,22 @@ module Boobytrap
     module_function
 
     def load(path, root:)
+      paths = coverage_paths(path)
+      return empty_dataset(path) if paths.empty?
+      return load_one(paths.first, root: root) if paths.size == 1
+
+      root = ::File.expand_path(root)
+      cache_key = [:multi, paths.map { |entry| realish_path(entry) }, root]
+      cache[cache_key] ||= merge_datasets(path, paths.map { |entry| load_one(entry, root: root) })
+    end
+
+    def coverage_paths(path)
+      Array(path).flat_map do |entry|
+        entry.to_s.split(::File::PATH_SEPARATOR)
+      end.map(&:strip).reject(&:empty?).uniq
+    end
+
+    def load_one(path, root:)
       resolved, provider = CoverageProviders.resolve(path, root: root)
       return empty_dataset(path) unless resolved && provider && ::File.file?(resolved)
 
@@ -92,6 +108,60 @@ module Boobytrap
 
     def empty_dataset(path)
       Dataset.new(path: path, files: {})
+    end
+
+    def merge_datasets(path, datasets)
+      files = {}
+      datasets.each do |dataset|
+        dataset.files.each do |abs, coverage|
+          if (existing = files[abs])
+            merge_file_coverage!(existing, coverage)
+          else
+            files[abs] = dup_file_coverage(coverage)
+          end
+        end
+      end
+      Dataset.new(path: path, files: files)
+    end
+
+    def dup_file_coverage(coverage)
+      FileCoverage.new(
+        file: coverage.file,
+        lines: coverage.lines.dup,
+        branches: coverage.branches.to_h { |key, value| [key, value.dup] },
+        format: coverage.format,
+        branch_arms: coverage.branch_arms.map(&:dup),
+        source_path: coverage.source_path,
+        language: coverage.language
+      )
+    end
+
+    def merge_file_coverage!(target, source)
+      merge_lines!(target.lines, source.lines)
+      merge_branches!(target.branches, source.branches)
+      merge_native_branch_arms!(target.branch_arms, source.branch_arms)
+      target.format = target.format == source.format ? target.format : :multi
+      target.language = source.language if target.language.to_s.empty?
+      target.source_path = source.source_path if target.source_path.to_s.empty?
+      target
+    end
+
+    def merge_native_branch_arms!(target, source)
+      index = target.each_with_object({}) do |arm, out|
+        out[native_arm_signature(arm)] = arm
+        out[arm.arm_id] = arm unless arm.arm_id.to_s.empty?
+      end
+      source.each do |arm|
+        existing = index[native_arm_signature(arm)] || index[arm.arm_id]
+        if existing
+          existing.hits = existing.hits.to_i + arm.hits.to_i
+        else
+          copy = arm.dup
+          target << copy
+          index[native_arm_signature(copy)] = copy
+          index[copy.arm_id] = copy unless copy.arm_id.to_s.empty?
+        end
+      end
     end
 
     def resolve(path)
@@ -111,6 +181,7 @@ module Boobytrap
       when :kcov_codecov then "kcov codecov"
       when :nil_kill_branch then "Nil-Kill branch coverage"
       when :coverage_py then "coverage.py JSON"
+      when :multi then "merged coverage"
       else format.to_s
       end
     end
@@ -647,14 +718,16 @@ module Boobytrap
     def load_decomplex_syntax
       return true if defined?(Decomplex::Syntax)
 
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      if ::File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
       require "decomplex/syntax"
       true
     rescue LoadError
-      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
-      return false unless ::File.file?("#{sibling}.rb")
-
-      require sibling
-      true
+      false
     end
   end
 end

@@ -111,6 +111,8 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
   end
 
   def test_inlines_non_ruby_top_level_helper_chain_when_grammar_is_available
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python Tree-sitter WICC test" unless python_grammar_available?
+
     out = scan(<<~PY, min_score: 2, min_hidden: 1, max_depth: 2, ext: ".py")
       def run(input):
           prepare(input)
@@ -294,6 +296,18 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
   end
 
   private
+
+  def python_grammar_available?
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    return true if grammar && File.file?(grammar)
+
+    require_relative "../lib/decomplex/syntax"
+    Decomplex::Syntax::TreeSitterAdapter.new
+      .send(:grammar_candidates, :python)
+      .any? { |candidate| File.file?(candidate) }
+  rescue LoadError
+    false
+  end
 
   def scan(code, min_score:, min_hidden:, max_depth: Decomplex::WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH,
            ext: ".rb")

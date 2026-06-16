@@ -2,10 +2,11 @@
 
 require "set"
 
-begin
+sibling_syntax = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+if File.file?("#{sibling_syntax}.rb")
+  require sibling_syntax
+else
   require "decomplex/syntax"
-rescue LoadError
-  require_relative "../../../decomplex/lib/decomplex/syntax"
 end
 
 module Espalier
@@ -50,9 +51,10 @@ module Espalier
       def build_modules(doc, facts)
         modules = {}
         owner_kinds = facts[:owner_defs].to_h { |owner| [owner.name.to_s, owner.kind] }
+        owner_defs = facts[:owner_defs].to_h { |owner| [owner.name.to_s, owner] }
 
         facts[:owner_defs].each do |owner|
-          module_for(modules, owner.name.to_s, doc, owner.kind)
+          module_for(modules, owner.name.to_s, doc, owner.kind, owner)
         end
 
         method_names = facts[:function_defs].each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |fn, index|
@@ -65,7 +67,7 @@ module Espalier
 
         facts[:function_defs].each do |fn|
           owner = owner_name(doc, fn.owner)
-          mod = module_for(modules, owner, doc, owner_kinds[owner])
+          mod = module_for(modules, owner, doc, owner_kinds[owner], owner_defs[owner])
           method = {
             name: fn.name.to_s,
             signature: method_signature(doc, fn),
@@ -84,7 +86,7 @@ module Espalier
         apply_visibility!(facts, method_records_by_owner)
 
         facts[:state_declarations].each do |state|
-          mod = module_for(modules, state.owner.to_s, doc, owner_kinds[state.owner.to_s])
+          mod = module_for(modules, state.owner.to_s, doc, owner_kinds[state.owner.to_s], owner_defs[state.owner.to_s])
           mod[:states] << state.field.to_s
           mod[:ivar_types][state.field.to_s] = state.type.to_s unless state.type.to_s.empty?
         end
@@ -142,12 +144,14 @@ module Espalier
         modules
       end
 
-      def module_for(modules, owner, doc, kind)
+      def module_for(modules, owner, doc, kind, owner_def = nil)
         modules[owner] ||= begin
           mod = {
             type: module_type(kind, owner, doc),
             name: owner,
             file: @file_path,
+            line: owner_def&.line || 1,
+            span: owner_def&.span,
             states: Set.new,
             ivar_types: {},
             methods: [],

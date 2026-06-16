@@ -1,5 +1,4 @@
 ignore:
-  - "gems/nil-kill/"
   - "tools/"
   - "zig/all-tests.zig"
   - "zig/all-fuzz.zig"
@@ -49,5 +48,20 @@ flags:
   zig:
     paths:
       - zig/
+    carryforward: false
+    joined: false
+  lineage-rust:
+    paths:
+      - gems/lineage/
+    carryforward: false
+    joined: false
+  gems:
+    paths:
+      - gems/
+    carryforward: false
+    joined: false
+  zig-mutants:
+    paths:
+      - gems/zig-mutants/
     carryforward: false
     joined: false

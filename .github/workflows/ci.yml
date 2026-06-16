@@ -121,6 +121,133 @@ jobs:
         run: npm install --no-save --package-lock=false tree-sitter-ruby@0.23.1
       - run: bundle exec rspec gems/nil-kill/spec
 
+  ruby-gems-coverage:
+    name: Ruby gems coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tree-sitter grammars
+        run: |
+          npm install --no-save --package-lock=false \
+            tree-sitter-ruby@0.23.1 \
+            tree-sitter-python \
+            tree-sitter-javascript \
+            tree-sitter-typescript \
+            tree-sitter-go \
+            tree-sitter-rust \
+            @tree-sitter-grammars/tree-sitter-zig
+      - name: Run Ruby gem tests with SimpleCov
+        run: bundle exec ruby tools/run_ruby_gem_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-gems
+          path: |
+            coverage/ruby-gems/.resultset.json
+            coverage/ruby-gems/coverage.xml
+          include-hidden-files: true
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/ruby-gems/coverage.xml
+          flags: gems
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  zig-mutants-coverage:
+    name: zig-mutants coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+          kcov --version
+      - name: Run zig-mutants coverage
+        working-directory: gems/zig-mutants
+        run: zig build coverage -Dcoverage
+      - name: Normalize zig-mutants Cobertura paths
+        run: |
+          xml="$(find gems/zig-mutants/zig-out/coverage/kcov -name cobertura.xml -type f | sort | head -n 1)"
+          test -n "$xml"
+          mkdir -p tmp/zig-mutants-coverage
+          ruby -rrexml/document -e '
+            repo = File.expand_path(".")
+            xml = ARGV.fetch(0)
+            out = ARGV.fetch(1)
+            doc = REXML::Document.new(File.read(xml))
+            REXML::XPath.each(doc, "//class") do |klass|
+              filename = klass.attributes["filename"].to_s.tr("\\\\", "/")
+              rel = if filename.start_with?(repo.tr("\\\\", "/") + "/")
+                      filename[(repo.length + 1)..]
+                    elsif filename.start_with?("src/")
+                      "gems/zig-mutants/#{filename}"
+                    else
+                      filename
+                    end
+              klass.attributes["filename"] = rel
+            end
+            File.write(out, "")
+            File.open(out, "w") { |f| doc.write(f, 2) }
+          ' "$xml" tmp/zig-mutants-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-zig-mutants
+          path: tmp/zig-mutants-coverage/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/zig-mutants-coverage/cobertura.xml
+          flags: zig-mutants
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lineage-rust-coverage:
+    name: Lineage Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for Lineage
+        run: |
+          mkdir -p tmp/lineage-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/lineage/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path tmp/lineage-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/lineage-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/lineage-rust-coverage/cobertura.xml
+          flags: lineage-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   sorbet:
     name: Sorbet type-check (typed:true files only)
     needs: changes
@@ -154,6 +281,58 @@ jobs:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
       - run: bundle exec rubocop --only Sorbet/EnforceSignatures src/
+
+  lint-sarif:
+    name: Advisory lint SARIF
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_zig == 'true') }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup component add clippy
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Generate lint SARIF
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          bundle exec ruby tools/generate_lint_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/lint-sarif
+      - name: Upload RuboCop SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/lint-sarif/rubocop.sarif
+          category: rubocop-lint
+      - name: Upload Clippy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/lint-sarif/clippy.sarif
+          category: clippy-lint
+      - name: Upload Zig AST Check SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/lint-sarif/zig-ast-check.sarif
+          category: zig-ast-check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lint-sarif
+          path: tmp/lint-sarif/*.sarif
+          if-no-files-found: error
+          retention-days: 7
 
   ruby-integration:
     name: Ruby integration specs (builds binaries via clear)
@@ -1023,6 +1202,119 @@ jobs:
           path: |
             tmp/slopcop-zig-constraints.sarif
             tmp/slopcop-zig-constraints.md
+          if-no-files-found: error
+          retention-days: 7
+
+  generalized-gems-sarif:
+    name: Decomplex / Boobytrap / SlopCop / Espalier / Nil-Kill SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - ruby-gems-coverage
+      - ruby-unit
+      - ruby-integration
+      - transpile-tests
+      - examples-benchmarks-coverage-shard
+      - tools-fuzz-shard
+      - bc-lower-coverage-shard
+      - zig-coverage
+      - zig-mutants-coverage
+      - lineage-rust-coverage
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tree-sitter grammars
+        run: |
+          npm install --no-save --package-lock=false \
+            tree-sitter-ruby@0.23.1 \
+            tree-sitter-python \
+            tree-sitter-javascript \
+            tree-sitter-typescript \
+            tree-sitter-go \
+            tree-sitter-rust \
+            @tree-sitter-grammars/tree-sitter-zig
+      - name: Download Ruby coverage artifacts
+        if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ruby-coverage-*
+          path: tmp/generalized-gems-coverage
+      - name: Download Zig coverage artifacts
+        if: ${{ needs['zig-coverage'].result == 'success' || needs['zig-mutants-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/generalized-gems-coverage
+      - name: Download Lineage Rust coverage artifact
+        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/generalized-gems-coverage/lineage-rust-coverage
+      - name: Generate ordered SARIF reports
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif
+          coverage_args=()
+          while IFS= read -r path; do
+            coverage_args+=(--coverage="${path}")
+          done < <(
+            find tmp/generalized-gems-coverage -type f \
+              \( -name .resultset.json -o -name cobertura.xml -o -name codecov.json \) \
+              ! -path '*zig-coverage-loom-*' \
+              ! -path '*zig-coverage-vopr-*' \
+              | sort
+          )
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/generalized-gems-sarif \
+            --top=80 \
+            "${coverage_args[@]}"
+      - name: Upload Decomplex SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/decomplex.sarif
+          category: decomplex
+      - name: Upload Boobytrap SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/boobytrap.sarif
+          category: boobytrap
+      - name: Upload SlopCop SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/slopcop.sarif
+          category: slopcop
+      - name: Upload Espalier SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/espalier.sarif
+          category: espalier
+      - name: Upload Nil-Kill SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/generalized-gems-sarif/nil-kill.sarif
+          category: nil-kill
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generalized-gems-sarif
+          path: |
+            tmp/generalized-gems-sarif/*.sarif
+            tmp/generalized-gems-sarif/*.md
           if-no-files-found: error
           retention-days: 7
 

@@ -3,8 +3,9 @@
 require "json"
 
 module Decomplex
-  # Small SARIF 2.1.0 builder for Decomplex report findings. It keeps the
-  # output format focused on SARIF concerns while Report owns detector data.
+  # Small SARIF 2.1.0 builder shared by the generalized gems. It keeps
+  # report producers consistent without each gem hand-rolling subtly
+  # different JSON.
   module Sarif
     module_function
 
@@ -20,27 +21,30 @@ module Decomplex
         result
       end
 
+      run = compact_hash(
+        {
+          "tool" => {
+            "driver" => compact_hash(
+              {
+                "name" => tool_name,
+                "informationUri" => information_uri,
+                "rules" => normalized_rules
+              }
+            )
+          },
+          "results" => normalized_results,
+          "properties" => json_safe_value(properties)
+        }
+      )
+      # GitHub code scanning rejects SARIF runs that omit `results`, even
+      # when the tool found nothing.
+      run["results"] = normalized_results
+
       compact_hash(
         {
           "version" => "2.1.0",
           "$schema" => SCHEMA,
-          "runs" => [
-            compact_hash(
-              {
-                "tool" => {
-                  "driver" => compact_hash(
-                    {
-                      "name" => tool_name,
-                      "informationUri" => information_uri,
-                      "rules" => normalized_rules
-                    }
-                  )
-                },
-                "results" => normalized_results,
-                "properties" => json_safe_value(properties)
-              }
-            )
-          ]
+          "runs" => [run]
         }
       )
     end

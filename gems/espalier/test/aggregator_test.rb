@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tmpdir"
+require "json"
 require_relative "../lib/espalier"
 
 class AggregatorTest < Minitest::Test
@@ -99,6 +100,49 @@ class AggregatorTest < Minitest::Test
     assert_equal [{ caller: "connect", callee: "limit_reached?", type: :conditional }], mod[:call_graph][:internal_edges]
     assert_equal true, helper[:quality_metrics][:privacy_candidate]
     assert_equal :high, helper[:quality_metrics][:privacy_confidence]
+  end
+
+  def test_formatter_json_is_sarif
+    manifest = [
+      {
+        module: "ConnectionManager",
+        file: "lib/conn.rb",
+        language: :ruby,
+        type: :class,
+        state: [{ name: "@active", type: "Boolean", properties: [] }],
+        functions: [
+          {
+            name: "prepare_state",
+            signature: "def prepare_state",
+            visibility: :public,
+            line: 4,
+            span: [4, 0, 8, 3],
+            EFFECTS: { reads: [], writes: ["@active"] },
+            quality_metrics: { privacy_candidate: true, privacy_score: 8.0 }
+          },
+          {
+            name: "read_state",
+            signature: "def read_state",
+            visibility: :public,
+            line: 10,
+            span: [10, 0, 12, 3],
+            EFFECTS: { reads: ["@active"], writes: [] },
+            quality_metrics: { privacy_candidate: false }
+          }
+        ]
+      }
+    ]
+
+    sarif = JSON.parse(Espalier::Formatter.to_sarif(manifest))
+    assert_equal "2.1.0", sarif.fetch("version")
+    run = sarif.fetch("runs").first
+    assert_equal "Espalier", run.dig("tool", "driver", "name")
+    assert run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.function" }
+    assert run.fetch("results").any? { |result| result.dig("properties", "function", "name") == "read_state" }
+    assert run.fetch("results").any? { |result| result.dig("message", "text") == "read-only function: ConnectionManager#read_state" }
+    refute run.fetch("results").any? { |result| result.dig("message", "text") == "impure function: ConnectionManager#read_state" }
+    refute run.fetch("results").any? { |result| result.fetch("ruleId") == "espalier.privacy-candidate" }
+    assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
   end
 
   def test_delegations_mapped_to_concrete_type_when_available

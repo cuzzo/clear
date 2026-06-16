@@ -55,7 +55,7 @@ if ARGV[0] == "delta"
   abort no_files_message if files.empty?
   rep = Decomplex::Report.new(files)
   head = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
-  base = JSON.parse(File.read(baseline))
+  base = Decomplex::Delta.load_snapshot(baseline)
   puts Decomplex::Delta.to_markdown(Decomplex::Delta.diff(base, head))
   exit 0
 end
@@ -211,9 +211,8 @@ if ARGV[0] == "report"
   abort no_files_message if files.empty?
   rep = Decomplex::Report.new(files)
   if json_path
-    snap = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
-    File.write(json_path, JSON.dump(snap))
-    warn "wrote baseline snapshot #{json_path}"
+    File.write(json_path, rep.to_sarif)
+    warn "wrote SARIF report #{json_path}"
   end
   if sarif_path
     File.write(sarif_path, rep.to_sarif)

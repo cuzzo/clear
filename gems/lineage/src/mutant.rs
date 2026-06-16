@@ -5,7 +5,7 @@ use crate::storage::Storage;
 use crate::vcs::VcsProvider;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MutantFact {
@@ -62,31 +62,50 @@ where
     };
     let mut files = HashMap::<String, Option<BlobFile>>::new();
     let mut units = HashMap::<String, Vec<LogicalUnit>>::new();
+    let mut all_units_loaded = false;
 
     storage.begin_transaction()?;
     let result = (|| -> Result<MutantIngestStats> {
         for fact in facts {
             let normalized_path = normalizer.normalize_path(&fact.file);
-            let Some(path) = storage.resolve_current_path(&normalized_path)? else {
-                stats.skipped_files += 1;
-                continue;
-            };
-            if !files.contains_key(&path) {
-                files.insert(path.clone(), file_at_commit(vcs, commit_hash, &path)?);
+            let path = storage.resolve_current_path(&normalized_path)?;
+            if let Some(path) = path.as_ref() {
+                if !files.contains_key(path) {
+                    files.insert(path.clone(), file_at_commit(vcs, commit_hash, path)?);
+                }
+                if let Some(file) = files.get(path).and_then(Option::as_ref) {
+                    if !units.contains_key(path) {
+                        units.insert(path.clone(), extractor.extract_units(file));
+                    }
+                }
             }
-            let Some(file) = files.get(&path).and_then(Option::as_ref) else {
-                stats.skipped_files += 1;
-                continue;
-            };
-            if !units.contains_key(&path) {
-                units.insert(path.clone(), extractor.extract_units(file));
-            }
-            let matched_units = matching_units(units.get(&path).map(Vec::as_slice).unwrap_or(&[]), &fact);
+
+            let mut matched_units = path
+                .as_ref()
+                .and_then(|path| {
+                    units
+                        .get(path)
+                        .map(|path_units| matching_unit_entries(path, path_units, &fact))
+                })
+                .unwrap_or_default();
             if matched_units.is_empty() {
-                stats.skipped_facts += 1;
+                if !all_units_loaded {
+                    load_supported_units(vcs, extractor, commit_hash, &mut files, &mut units)?;
+                    all_units_loaded = true;
+                }
+                matched_units = fallback_matching_unit_entries(&units, &fact);
+            }
+            if matched_units.is_empty() {
+                if path.is_some() {
+                    stats.skipped_facts += 1;
+                } else {
+                    stats.skipped_files += 1;
+                }
                 continue;
             }
-            for unit in matched_units {
+            for unit_match in matched_units {
+                let path = &unit_match.path;
+                let unit = &unit_match.unit;
                 let Some(unit_id) = storage.resolve_unit_id(&unit.id, &path, &unit.name)? else {
                     stats.skipped_facts += 1;
                     continue;
@@ -201,6 +220,23 @@ fn mutant_fact(
     })
 }
 
+#[derive(Debug, Clone)]
+struct UnitMatch {
+    path: String,
+    unit: LogicalUnit,
+}
+
+fn matching_unit_entries(path: &str, units: &[LogicalUnit], fact: &MutantFact) -> Vec<UnitMatch> {
+    matching_units(units, fact)
+        .into_iter()
+        .cloned()
+        .map(|unit| UnitMatch {
+            path: path.to_string(),
+            unit,
+        })
+        .collect()
+}
+
 fn matching_units<'a>(units: &'a [LogicalUnit], fact: &MutantFact) -> Vec<&'a LogicalUnit> {
     if wildcard_method(&fact.method) {
         return units
@@ -216,8 +252,164 @@ fn matching_units<'a>(units: &'a [LogicalUnit], fact: &MutantFact) -> Vec<&'a Lo
         .collect()
 }
 
+fn fallback_matching_unit_entries(
+    units_by_path: &HashMap<String, Vec<LogicalUnit>>,
+    fact: &MutantFact,
+) -> Vec<UnitMatch> {
+    let Some(owner) = method_owner(&fact.method) else {
+        return Vec::new();
+    };
+    let owner_aliases = owner_aliases(&owner);
+    let mut matched = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for (path, units) in units_by_path {
+        if !units.iter().any(|unit| {
+            matches!(unit.kind.as_str(), "class" | "module")
+                && owner_aliases
+                    .iter()
+                    .any(|alias| owner_alias_matches(alias, &unit.name))
+        }) {
+            continue;
+        }
+
+        let path_matches = if wildcard_method(&fact.method) {
+            units
+                .iter()
+                .filter(|unit| unit.kind.as_str() == "function")
+                .collect::<Vec<_>>()
+        } else {
+            let aliases = method_aliases(&fact.method);
+            units
+                .iter()
+                .filter(|unit| aliases.iter().any(|alias| alias == &unit.name))
+                .collect::<Vec<_>>()
+        };
+        for unit in path_matches {
+            if seen.insert(unit.id.clone()) {
+                matched.push(UnitMatch {
+                    path: path.clone(),
+                    unit: unit.clone(),
+                });
+            }
+        }
+    }
+    if matched.is_empty() && !wildcard_method(&fact.method) {
+        matched = fallback_owner_mentioned_function_entries(units_by_path, fact, &owner);
+    }
+    if matched.is_empty() && !wildcard_method(&fact.method) {
+        matched = fallback_unique_source_function_entry(units_by_path, fact);
+    }
+    matched
+}
+
+fn fallback_owner_mentioned_function_entries(
+    units_by_path: &HashMap<String, Vec<LogicalUnit>>,
+    fact: &MutantFact,
+    owner: &str,
+) -> Vec<UnitMatch> {
+    let aliases = method_aliases(&fact.method);
+    let owner_needles = owner_text_needles(owner);
+    let mut matched = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for (path, units) in units_by_path {
+        if !(path.starts_with("src/") || path.starts_with("tools/")) {
+            continue;
+        }
+        for unit in units {
+            if unit.kind.as_str() != "function" || !aliases.iter().any(|alias| alias == &unit.name) {
+                continue;
+            }
+            if !owner_needles.iter().any(|needle| {
+                unit.signature.contains(needle) || unit.normalized_source.contains(needle)
+            }) {
+                continue;
+            }
+            if seen.insert(unit.id.clone()) {
+                matched.push(UnitMatch {
+                    path: path.clone(),
+                    unit: unit.clone(),
+                });
+            }
+        }
+    }
+    matched
+}
+
+fn fallback_unique_source_function_entry(
+    units_by_path: &HashMap<String, Vec<LogicalUnit>>,
+    fact: &MutantFact,
+) -> Vec<UnitMatch> {
+    let aliases = method_aliases(&fact.method);
+    let mut candidates = Vec::new();
+    for (path, units) in units_by_path {
+        if !(path.starts_with("src/") || path.starts_with("tools/")) {
+            continue;
+        }
+        for unit in units {
+            if unit.kind.as_str() == "function" && aliases.iter().any(|alias| alias == &unit.name)
+            {
+                candidates.push(UnitMatch {
+                    path: path.clone(),
+                    unit: unit.clone(),
+                });
+            }
+        }
+    }
+    if candidates.len() == 1 {
+        candidates
+    } else {
+        Vec::new()
+    }
+}
+
 fn wildcard_method(method: &str) -> bool {
     method.trim_end().ends_with('*')
+}
+
+fn method_owner(method: &str) -> Option<String> {
+    let raw = method.trim().trim_end_matches('*');
+    for separator in ["#", "."] {
+        if let Some((owner, _name)) = raw.rsplit_once(separator) {
+            if !owner.trim().is_empty() {
+                return Some(owner.trim().to_string());
+            }
+        }
+    }
+    raw.split("::")
+        .next()
+        .filter(|owner| !owner.trim().is_empty())
+        .map(|owner| owner.trim().to_string())
+}
+
+fn owner_aliases(owner: &str) -> Vec<String> {
+    let mut aliases = vec![owner.to_string()];
+    if let Some(name) = owner.rsplit("::").next() {
+        aliases.push(name.to_string());
+    }
+    aliases.sort();
+    aliases.dedup();
+    aliases
+}
+
+fn owner_alias_matches(owner_alias: &str, unit_name: &str) -> bool {
+    unit_name == owner_alias
+        || (unit_name.starts_with(owner_alias)
+            && unit_name
+                .get(owner_alias.len()..)
+                .and_then(|suffix| suffix.chars().next())
+                .map(|ch| ch.is_ascii_uppercase())
+                .unwrap_or(false))
+}
+
+fn owner_text_needles(owner: &str) -> Vec<String> {
+    let mut needles = vec![owner.to_string()];
+    if let Some(name) = owner.rsplit("::").next() {
+        needles.push(name.to_string());
+    }
+    needles.sort();
+    needles.dedup();
+    needles.retain(|value| !value.is_empty());
+    needles
 }
 
 fn method_aliases(method: &str) -> Vec<String> {
@@ -238,7 +430,15 @@ fn method_aliases(method: &str) -> Vec<String> {
 fn mutation_status(fact: &MutantFact) -> Option<&'static str> {
     let mutations = fact.mutations.unwrap_or(0);
     if mutations == 0 {
-        return None;
+        let gate = fact.gate_status.as_deref().unwrap_or_default().trim();
+        let verified_gate = matches!(
+            gate.to_ascii_lowercase().as_str(),
+            "hard" | "hard-gated" | "advisory" | "verified"
+        );
+        let complete = fact.kill_rate.unwrap_or(100.0) >= 100.0
+            && fact.killed.unwrap_or(0) == 0
+            && fact.alive.unwrap_or(0) == 0;
+        return (verified_gate && complete).then_some("verified");
     }
     if fact.killed.unwrap_or(0) > 0 {
         Some("killed")
@@ -301,6 +501,27 @@ fn file_at_commit<P: VcsProvider>(
     let target = path.to_string();
     let files = vcs.files_at_commit(commit_hash, &|candidate| candidate == target)?;
     Ok(files.into_iter().next())
+}
+
+fn load_supported_units<P, E>(
+    vcs: &P,
+    extractor: &E,
+    commit_hash: &str,
+    files: &mut HashMap<String, Option<BlobFile>>,
+    units: &mut HashMap<String, Vec<LogicalUnit>>,
+) -> Result<()>
+where
+    P: VcsProvider,
+    E: BoundaryExtractor,
+{
+    for file in vcs.files_at_commit(commit_hash, &|candidate| extractor.supports_path(candidate))? {
+        let path = file.path.clone();
+        units
+            .entry(path.clone())
+            .or_insert_with(|| extractor.extract_units(&file));
+        files.entry(path).or_insert(Some(file));
+    }
+    Ok(())
 }
 
 fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -415,6 +636,26 @@ mod tests {
         assert_eq!(facts[0].source, "gems/zig-mutants");
         assert_eq!(facts[0].mutation_kind, "invariant");
         assert_eq!(mutant_test_id(&facts[0]), "mutant:zig:gems/zig-mutants:poll");
+    }
+
+    #[test]
+    fn zero_mutation_hard_gates_are_mutant_verified_without_kills() {
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/demo.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 0,
+                "killed": 0,
+                "alive": 0
+            }]
+        });
+
+        let facts = parse_mutant_facts(&payload.to_string()).unwrap();
+
+        assert_eq!(mutation_status(&facts[0]), Some("verified"));
     }
 
     #[test]
@@ -537,5 +778,238 @@ mod tests {
             .unwrap();
         assert_eq!(row.0, "mutant:zig:gems/zig-mutants:poll");
         assert_eq!(row.1, "invariant");
+    }
+
+    #[test]
+    fn falls_back_to_owner_file_when_mutant_fact_reports_loader_file() {
+        let storage = Storage::open_memory().unwrap();
+        let loader = BlobFile {
+            path: "src/loader.rb".into(),
+            contents: "require_relative 'worker'\n".into(),
+        };
+        let worker = BlobFile {
+            path: "src/worker.rb".into(),
+            contents: "class Worker\n  def run\n    1\n  end\nend\n".into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        for unit in extractor.extract_units(&worker) {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider {
+            files: vec![loader, worker],
+        };
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/loader.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 2,
+                "killed": 2,
+                "alive": 0,
+                "selected_tests": 1
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "unit",
+        )
+        .unwrap();
+
+        assert_eq!(stats.facts, 1);
+        assert_eq!(stats.units, 1);
+        assert_eq!(stats.skipped_files, 0);
+        assert_eq!(stats.skipped_facts, 0);
+        let path: String = storage
+            .connection()
+            .query_row(
+                "SELECT path FROM test_exposure_events WHERE mutation_status = 'killed' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(path, "src/worker.rb");
+    }
+
+    #[test]
+    fn fallback_matches_owner_prefixed_mixin_modules() {
+        let storage = Storage::open_memory().unwrap();
+        let loader = BlobFile {
+            path: "src/loader.rb".into(),
+            contents: "require_relative 'worker_helpers'\n".into(),
+        };
+        let worker = BlobFile {
+            path: "src/worker_helpers.rb".into(),
+            contents: "module WorkerHelpers\n  def run\n    1\n  end\nend\n".into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        for unit in extractor.extract_units(&worker) {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider {
+            files: vec![loader, worker],
+        };
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/loader.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 2,
+                "killed": 2,
+                "alive": 0,
+                "selected_tests": 1
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "unit",
+        )
+        .unwrap();
+
+        assert_eq!(stats.units, 1);
+        assert_eq!(stats.skipped_facts, 0);
+    }
+
+    #[test]
+    fn fallback_matches_mixin_methods_that_bind_to_owner() {
+        let storage = Storage::open_memory().unwrap();
+        let loader = BlobFile {
+            path: "src/loader.rb".into(),
+            contents: "require_relative 'worker_mixin'\n".into(),
+        };
+        let worker = BlobFile {
+            path: "src/worker_mixin.rb".into(),
+            contents:
+                "module HelperMixin\n  def run\n    T.bind(self, Worker) rescue nil\n    1\n  end\nend\n"
+                    .into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        for unit in extractor.extract_units(&worker) {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider {
+            files: vec![loader, worker],
+        };
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/loader.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 2,
+                "killed": 2,
+                "alive": 0,
+                "selected_tests": 1
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "unit",
+        )
+        .unwrap();
+
+        assert_eq!(stats.units, 1);
+        assert_eq!(stats.skipped_facts, 0);
+    }
+
+    #[test]
+    fn fallback_matches_unique_source_function_without_owner_marker() {
+        let storage = Storage::open_memory().unwrap();
+        let loader = BlobFile {
+            path: "src/loader.rb".into(),
+            contents: "require_relative 'worker_mixin'\n".into(),
+        };
+        let worker = BlobFile {
+            path: "src/worker_mixin.rb".into(),
+            contents: "module HelperMixin\n  def run\n    1\n  end\nend\n".into(),
+        };
+        let extractor = HeuristicExtractor::default();
+        for unit in extractor.extract_units(&worker) {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider {
+            files: vec![loader, worker],
+        };
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/loader.rb",
+                "method": "Worker#run",
+                "kill_rate": 100.0,
+                "gate_status": "hard",
+                "mutations": 2,
+                "killed": 2,
+                "alive": 0,
+                "selected_tests": 1
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "unit",
+        )
+        .unwrap();
+
+        assert_eq!(stats.units, 1);
+        assert_eq!(stats.skipped_facts, 0);
     }
 }

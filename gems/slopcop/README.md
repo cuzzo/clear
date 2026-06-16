@@ -34,7 +34,8 @@ bundle exec gems/slopcop/exe/slopcop report \
   --repo=. \
   --coverage=coverage/.resultset.json \
   --output=gems/slopcop/report.md \
-  --json=/tmp/slopcop.json
+  --json=/tmp/slopcop.json \
+  --sarif=/tmp/slopcop.sarif
 ```
 
 For a narrower run:
@@ -47,13 +48,14 @@ bundle exec gems/slopcop/exe/slopcop report \
   --output=/tmp/slopcop.md
 ```
 
-For Lineage source overlays:
+For Lineage gutters/source overlays, emit the line-level dark-arm
+artifact without the ranked report pass:
 
 ```bash
 bundle exec gems/slopcop/exe/slopcop dark-arms \
   --repo=. \
   --coverage=coverage/.resultset.json \
-  --json=/tmp/slopcop-dark-arms.json
+  --json=/tmp/slopcop-dark-arms.sarif
 ```
 
 ## Outputs

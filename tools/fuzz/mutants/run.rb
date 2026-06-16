@@ -15,6 +15,7 @@ opts = {
   mutant: nil,
   all: false,
   out: File.expand_path('/tmp/clear-fuzz-mutants'),
+  exposure: nil,
   keep: false,
   list: false,
   dry_run: false,
@@ -23,11 +24,12 @@ opts = {
 }
 
 OptionParser.new do |o|
-  o.banner = 'Usage: ruby tools/fuzz/mutants/run.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
+  o.banner = 'Usage: ruby tools/fuzz/mutants/run.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--exposure FILE] [--keep] [--dry-run] [--allow-dirty]'
   o.on('--mutant NAME') { |v| opts[:mutant] = v.to_sym }
   o.on('--all') { opts[:all] = true }
   o.on('--shard INDEX/COUNT') { |v| opts[:shard] = MutationTesting.parse_shard(v) }
   o.on('--out DIR') { |v| opts[:out] = File.expand_path(v) }
+  o.on('--exposure FILE') { |v| opts[:exposure] = File.expand_path(v) }
   o.on('--keep') { opts[:keep] = true }
   o.on('--dry-run') { opts[:dry_run] = true }
   o.on('--allow-dirty') { opts[:allow_dirty] = true }
@@ -96,7 +98,7 @@ end
 
 def fuzz_run(mutant, out_dir, log_path:)
   args = [
-    'ruby', 'tools/fuzz/run.rb',
+    'bundle', 'exec', 'ruby', 'tools/fuzz/run.rb',
     '--matrix',
     '--templates', mutant.templates.join(','),
     '--out', out_dir,
@@ -193,6 +195,23 @@ def run_mutant(mutant, root_out)
   killed
 end
 
+def exposure_hits(mutant, killed)
+  status = killed ? 'killed' : 'survived'
+  MutationTesting.patch_changed_line_records(mutant.patch).map do |record|
+    record.merge(
+      test_id: "mutant:fuzz:#{mutant.name}",
+      test_type: 'fuzz',
+      mutation_status: status,
+      mutation_kind: 'invariant',
+      mutant: mutant.name.to_s,
+      invariant: mutant.invariant.to_s,
+      description: mutant.description,
+      patch: MutationTesting.relative_repo_path(mutant.patch),
+      templates: mutant.templates.map(&:to_s),
+    )
+  end
+end
+
 def selected_mutants(opts)
   mutants =
     if opts[:all]
@@ -231,5 +250,18 @@ if mutants.empty?
 end
 
 puts "fuzz mutant shard #{MutationTesting.shard_label(opts[:shard])}: #{mutants.length} mutant(s)"
-results = mutants.map { |m| run_mutant(m, opts[:out]) }
+hits = []
+results = mutants.map do |mutant|
+  killed = run_mutant(mutant, opts[:out])
+  hits.concat(exposure_hits(mutant, killed)) unless opts[:dry_run]
+  killed
+end
+if opts[:exposure] && !opts[:dry_run]
+  MutationTesting.write_test_exposure(
+    opts[:exposure],
+    source: 'tools/fuzz/mutants/run.rb',
+    hits: hits
+  )
+  puts "wrote #{opts[:exposure]}"
+end
 exit(results.all? ? 0 : 1)

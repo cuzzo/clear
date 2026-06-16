@@ -49,10 +49,12 @@ class RollupTest < Minitest::Test
       dark_arms = out[:dark_arms].select { |arm| arm[:file] == "src/m.rb" }
       assert_equal fh[:total], dark_arms.size
       assert dark_arms.all? { |arm| arm[:message].start_with?("dark arm: ") }
-      json = JSON.parse(SlopCop::Report.new(files: ["src/m.rb"], repo: dir, resultset: rsf).to_json)
-      assert_equal "slopcop.report.v1", json.fetch("format")
-      refute_empty json.fetch("dark_arms")
-      assert json.fetch("dark_arms").all? { |arm| arm.fetch("message").start_with?("dark arm: ") }
+      sarif = JSON.parse(SlopCop::Report.new(files: ["src/m.rb"], repo: dir, resultset: rsf).to_json)
+      assert_equal "2.1.0", sarif.fetch("version")
+      results = sarif.fetch("runs").first.fetch("results")
+      refute_empty results
+      assert results.any? { |result| result.fetch("ruleId").start_with?("slopcop.dark-arm.") }
+      assert results.any? { |result| result.dig("properties", "dark_arm") }
 
       report = SlopCop::Report.new(files: ["src/m.rb"], repo: dir, resultset: rsf)
       sarif = JSON.parse(report.to_sarif)
@@ -72,6 +74,9 @@ class RollupTest < Minitest::Test
       assert_equal "slopcop.dark-arms.v1", overlay.fetch("format")
       refute_empty overlay.fetch("dark_arms")
       assert overlay.fetch("dark_arms").all? { |arm| arm.fetch("category").start_with?("dark arm: ") }
+      overlay_sarif = JSON.parse(SlopCop::DarkArmOverlay.to_json(files: ["src/m.rb"], repo: dir, resultset: rsf))
+      assert_equal "2.1.0", overlay_sarif.fetch("version")
+      assert overlay_sarif.dig("runs", 0, "results").all? { |result| result.fetch("ruleId").start_with?("slopcop.dark-arm.") }
     end
   end
 

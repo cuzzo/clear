@@ -61,6 +61,18 @@ class ReportTest < Minitest::Test
     end
   end
 
+  def test_json_report_is_sarif
+    Dir.mktmpdir do |dir|
+      build_repo(dir)
+      sarif = JSON.parse(Boobytrap::Report.new(repo: dir, resultset: resultset(dir)).to_json)
+      assert_equal "2.1.0", sarif.fetch("version")
+      run = sarif.fetch("runs").first
+      assert_equal "Boobytrap", run.dig("tool", "driver", "name")
+      assert run.fetch("results").any? { |result| result.fetch("ruleId") == "boobytrap.file-hotspot" }
+      assert_equal "boobytrap.report.sarif.v1", run.dig("properties", "format")
+    end
+  end
+
   def test_missing_resultset_degrades_to_fix_only
     Dir.mktmpdir do |dir|
       build_repo(dir)
@@ -101,6 +113,34 @@ class ReportTest < Minitest::Test
       assert_includes scoped, "`src/in.rb`"
       refute_includes scoped, "`lib/out.rb`"
       assert_includes scoped, "Scope: `src/`"
+    end
+  end
+
+  def test_files_filters_ranking_to_exact_changed_sources
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      FileUtils.mkdir_p("#{dir}/lib")
+      File.write("#{dir}/src/in.rb", "1\n")
+      File.write("#{dir}/lib/out.rb", "1\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix both in and out", date: "2024-01-01T00:00:00")
+      rs = { "RSpec" => { "coverage" => {
+        "#{dir}/src/in.rb" => { "branches" => {
+          "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 0 } } },
+        "#{dir}/lib/out.rb" => { "branches" => {
+          "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 0 } } }
+      } } }
+      path = "#{dir}/.resultset.json"
+      File.write(path, JSON.dump(rs))
+
+      scoped = Boobytrap::Report.new(repo: dir, resultset: path,
+                                     files: ["src/in.rb"]).to_markdown
+      assert_includes scoped, "`src/in.rb`"
+      refute_includes scoped, "`lib/out.rb`"
+      assert_includes scoped, "Scope: `src/in.rb`"
     end
   end
 

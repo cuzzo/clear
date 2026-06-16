@@ -2,9 +2,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
     coverage_records_to_test_exposure_json, ingest_coverage_json_with_options, ingest_hazards,
-    ingest_mutant_facts_json, ingest_stack_traces, ingest_test_exposure_json, parse_coverage_input,
-    resolve_coverage_record_paths, serve_lsp, serve_ui_with_overlays, CoverageIngestOptions,
-    GitProvider, HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
+    ingest_mutant_facts_json, ingest_sarif_paths, ingest_stack_traces,
+    ingest_test_exposure_json, parse_coverage_input, resolve_coverage_record_paths, serve_lsp,
+    serve_ui_with_overlays, CoverageIngestOptions, GitProvider, HeuristicExtractor, LineageEngine,
+    RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -136,6 +137,23 @@ enum Command {
         commit: String,
         #[arg(long)]
         timestamp: Option<i64>,
+    },
+    /// Ingest SARIF artifacts into the persistent finding index.
+    IngestSarif {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long = "input")]
+        inputs: Vec<PathBuf>,
+        #[arg(long, default_value = "sarif")]
+        source: String,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        timestamp: Option<i64>,
+        #[arg(long)]
+        replace: bool,
     },
     /// Ingest provider stack traces and anchor frames to logical units.
     Ingest {
@@ -392,6 +410,33 @@ fn main() -> Result<()> {
             println!(
                 "ingested hazards: scanned_files={} hazards={} events={}",
                 stats.scanned_files, stats.hazards, stats.events
+            );
+        }
+        Command::IngestSarif {
+            db,
+            repo,
+            inputs,
+            source,
+            commit,
+            timestamp,
+            replace,
+        } => {
+            if inputs.is_empty() {
+                anyhow::bail!("ingest-sarif requires at least one --input path");
+            }
+            let storage = Storage::open(&db)?;
+            let stats = ingest_sarif_paths(
+                &storage,
+                &repo,
+                &inputs,
+                &source,
+                &commit,
+                timestamp,
+                replace,
+            )?;
+            println!(
+                "ingested SARIF: artifacts={} findings={} skipped_files={} skipped_results={}",
+                stats.artifacts, stats.findings, stats.skipped_files, stats.skipped_results
             );
         }
         Command::Ingest {

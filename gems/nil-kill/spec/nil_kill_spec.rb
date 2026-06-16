@@ -209,6 +209,89 @@ RSpec.describe NilKill do
       expect(line).not_to include(NilKill::ROOT)
     end
 
+    it "renders report JSON as SARIF" do
+      evidence = {
+        "target_dirs" => ["src"],
+        "methods" => [],
+        "actions" => [
+          {
+            "kind" => "nil_param_observed",
+            "confidence" => "high",
+            "message" => "param observed nil",
+            "path" => "src/demo.rb",
+            "line" => 7,
+          },
+        ],
+        "diagnostics" => {
+          "sorbet_errors" => ["src/demo.rb:8: type error"],
+        },
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      run = sarif.fetch("runs").first
+      expect(sarif.fetch("version")).to eq("2.1.0")
+      expect(run.dig("tool", "driver", "name")).to eq("Nil-Kill")
+      expect(run.fetch("results").map { |result| result.fetch("ruleId") }).to include(
+        "nil-kill.action.nil-param-observed",
+        "nil-kill.diagnostic.sorbet-errors",
+      )
+    end
+
+    it "renders static-only v2 evidence as SARIF findings" do
+      evidence = {
+        "schema_version" => 2,
+        "languages" => ["ruby"],
+        "static" => {
+          "files" => [],
+          "methods" => [
+            {
+              "path" => "src/demo.rb",
+              "line" => 10,
+              "owner" => "Demo",
+              "name" => "parse",
+              "kind" => "method",
+              "language" => "ruby",
+              "signature" => "sig { params(input: T.untyped).returns(T.nilable(String)) }",
+            },
+          ],
+          "fields" => [
+            {
+              "path" => "src/demo.rb",
+              "line" => 3,
+              "owner" => "Demo",
+              "name" => "@cache",
+              "language" => "ruby",
+            },
+            {
+              "path" => "src/storage.rs",
+              "line" => 16,
+              "owner" => "CurrentUnitSpan",
+              "name" => "id",
+              "language" => "rust",
+              "declared_type" => "String",
+            },
+          ],
+        },
+        "runtime" => {},
+        "actions" => [],
+        "diagnostics" => [],
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      results = sarif.fetch("runs").first.fetch("results")
+      rule_ids = results.map { |result| result.fetch("ruleId") }
+
+      expect(rule_ids).to include(
+        "nil-kill.static.untyped-signature",
+        "nil-kill.static.nullable-signature",
+        "nil-kill.static.untyped-field",
+      )
+      expect(results).not_to include(a_hash_including(
+        "ruleId" => "nil-kill.static.untyped-field",
+        "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
+      ))
+    end
+
     it "--hygiene emits only the slot summary and action counts, skipping heavy sections" do
       Dir.mktmpdir("nil-kill-hygiene-report", NilKill::ROOT) do |dir|
         report = described_class.new(["--hygiene"])

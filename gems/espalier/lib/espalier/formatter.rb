@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 require "yaml"
+require "json"
+sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
+if File.file?("#{sibling_sarif}.rb")
+  require sibling_sarif
+else
+  require "decomplex/sarif"
+end
 
 module Espalier
   # Transforms synthesized schemas into Markdown or clean structured formats
@@ -74,6 +81,75 @@ module Espalier
 
     def to_yaml(manifest)
       YAML.dump(manifest)
+    end
+
+    def to_sarif(manifest)
+      JSON.pretty_generate(to_sarif_hash(manifest))
+    end
+
+    def to_sarif_hash(manifest)
+      Decomplex::Sarif.document(
+        tool_name: "Espalier",
+        information_uri: "https://github.com/codeforreno/litedb",
+        rules: sarif_rules,
+        results: sarif_results(manifest),
+        properties: {
+          "format" => "espalier.manifest.sarif.v1",
+          "espalier.manifest" => Decomplex::Sarif.json_safe_value(manifest)
+        }
+      )
+    end
+
+    def sarif_rules
+      [
+        Decomplex::Sarif.rule(
+          id: "espalier.function",
+          name: "Impure Function",
+          short_description: "Function/method with direct state effects",
+          default_level: "note"
+        )
+      ]
+    end
+
+    def sarif_results(manifest)
+      Array(manifest).flat_map do |mod|
+        function_results(mod)
+      end
+    end
+
+    def function_results(mod)
+      Array(mod[:functions]).filter_map { |fn| impure_function_result(mod, fn) }
+    end
+
+    def impure_function_result(mod, fn)
+      effects = fn[:EFFECTS] || fn["EFFECTS"] || fn[:effects] || fn["effects"] || {}
+      reads = Array(effects[:reads] || effects["reads"])
+      writes = Array(effects[:writes] || effects["writes"])
+      return nil if reads.empty? && writes.empty?
+      effect_kind = writes.empty? ? "read-only function" : "impure function"
+
+      Decomplex::Sarif.result(
+        rule_id: "espalier.function",
+        level: "note",
+        message: "#{effect_kind}: #{mod[:module]}##{fn[:name]}",
+        path: mod[:file],
+        line: fn[:line] || span_line(fn, 0) || 1,
+        end_line: span_line(fn, 2),
+        properties: {
+          "module" => mod[:module],
+          "function" => Decomplex::Sarif.json_safe_value(fn),
+          "effects" => {
+            "reads" => reads,
+            "writes" => writes
+          },
+          "source_format" => "espalier.manifest.v1"
+        }
+      )
+    end
+
+    def span_line(fn, index)
+      span = fn[:span] || fn["span"]
+      Array(span)[index]
     end
   end
 end

@@ -342,23 +342,30 @@ module Decomplex
       out
     end
 
-    def to_sarif_hash
+    def to_sarif_hash(include_snapshot: true, include_finding_payload: true, max_results: nil)
       snapshot = Delta.snapshot(sections_data, root_clusters)
+      results = sarif_results(include_finding_payload: include_finding_payload)
+      results = ranked_sarif_results(results).first(max_results) if max_results
+      properties = {
+        "format" => "decomplex.report.sarif.v1",
+        "files" => @files
+      }
+      properties["decomplex.snapshot"] = snapshot if include_snapshot
       Decomplex::Sarif.document(
         tool_name: "Decomplex",
         information_uri: "https://github.com/cuzzo/clear",
         rules: sarif_rules,
-        results: sarif_results,
-        properties: {
-          "format" => "decomplex.report.sarif.v1",
-          "decomplex.snapshot" => snapshot,
-          "files" => @files
-        }
+        results: results,
+        properties: properties
       )
     end
 
-    def to_sarif
-      JSON.pretty_generate(to_sarif_hash)
+    def to_sarif(**kwargs)
+      JSON.pretty_generate(to_sarif_hash(**kwargs))
+    end
+
+    def to_json(*_args)
+      to_sarif
     end
 
     private
@@ -376,10 +383,31 @@ module Decomplex
       end
     end
 
-    def sarif_results
+    def ranked_sarif_results(results)
+      Array(results).sort_by do |result|
+        location = result.dig("locations", 0, "physicalLocation")
+        [
+          result.dig("properties", "tier").to_i,
+          result.fetch("ruleId", ""),
+          result.dig("message", "text").to_s,
+          location&.dig("artifactLocation", "uri").to_s,
+          location&.dig("region", "startLine").to_i
+        ]
+      end
+    end
+
+    def sarif_results(include_finding_payload: true)
       sections_data.flat_map do |title, tier, findings|
         Array(findings).flat_map do |finding|
           sarif_locations_for_finding(finding).map do |location|
+            properties = {
+              "detector" => title,
+              "tier" => tier,
+              "method" => location[:method]
+            }
+            if include_finding_payload
+              properties["decomplex_finding"] = Delta.json_safe_finding(title, finding)
+            end
             Decomplex::Sarif.result(
               rule_id: sarif_rule_id(title),
               level: tier.to_i <= 1 ? "warning" : "note",
@@ -392,12 +420,7 @@ module Decomplex
               partial_fingerprints: {
                 "decomplexFinding" => Delta.fingerprint(title, finding)
               },
-              properties: {
-                "detector" => title,
-                "tier" => tier,
-                "method" => location[:method],
-                "decomplex_finding" => Delta.json_safe_finding(title, finding)
-              }
+              properties: properties
             )
           end
         end

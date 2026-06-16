@@ -290,7 +290,7 @@ module NilKill
           bundle exec tools/nil-kill collect --instrument-source -- <command...>
           bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
           bundle exec tools/nil-kill infer [--no-sorbet]
-          bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|javascript|typescript|lua] [--output static.json] [targets...]
+          bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|typescript|rust|zig] [--output static.json] [targets...]
           bundle exec tools/nil-kill collect-runtime --language python [--target src] [--output traces/] -- <python test command...>
           bundle exec tools/nil-kill collect-python [--root DIR] [--target src] [--output traces/] -- <python test command...>
           bundle exec tools/nil-kill normalize [--root DIR] --static static.json [--traces traces/] [--output evidence.json]
@@ -298,7 +298,7 @@ module NilKill
           bundle exec tools/nil-kill trace-spec
           bundle exec tools/nil-kill espalier-evidence [--output tmp/nil-kill/espalier-evidence.json]
           bundle exec tools/nil-kill focus-hash-record STRUCT [--targets path[:path...]]
-          bundle exec tools/nil-kill report [--evidence evidence.json] [--with-links] [--output-path PATH] [--hygiene]
+          bundle exec tools/nil-kill report [--evidence evidence.json] [--format markdown|sarif|json] [--json report.sarif] [--sarif report.sarif] [--with-links] [--output-path PATH] [--hygiene]
           bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
           bundle exec tools/nil-kill doctor
 
