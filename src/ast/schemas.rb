@@ -21,10 +21,10 @@ module Schemas
       extend T::Sig
 
     attr_reader :variants, :visibility
-    sig { params(variants: T.untyped, visibility: Symbol).void }
+    sig { params(variants: T::Array[String], visibility: Symbol).void }
     def initialize(variants:, visibility: :package)
-      @variants = variants
-      @visibility = visibility
+      @variants = T.let(variants, T::Array[String])
+      @visibility = T.let(visibility, Symbol)
       freeze
     end
 
@@ -274,7 +274,7 @@ module Schemas
         Schemas::UnionSchema::VariantMap
       )
       @type_params = T.let(type_params.dup, T::Array[Symbol])
-      @visibility = visibility
+      @visibility = T.let(visibility, Symbol)
       freeze
     end
 
@@ -315,10 +315,10 @@ module Schemas
     def initialize(fields: {}, type_params: [], methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = T.let(type_params.dup, T::Array[Symbol])
-      @methods = methods
-      @visibility = visibility
-      @extern_module = extern_module
-      @as_type = as_type
+      @methods = T.let(methods, MethodsMap)
+      @visibility = T.let(visibility, Symbol)
+      @extern_module = T.let(extern_module, T.nilable(String))
+      @as_type = T.let(as_type, T.nilable(String))
       freeze
     end
 

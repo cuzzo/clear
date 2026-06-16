@@ -379,7 +379,7 @@ class Scope
   end
 
   # Mark a variable as read (used as an r-value in user code).
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).void }
   def mark_read(name)
     entry = entry_for_write(name)
     return unless entry

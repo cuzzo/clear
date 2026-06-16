@@ -48,6 +48,10 @@ module NilKill
         signatures.merge!(evidence.fetch("signatures", {}))
         type_definitions.concat(evidence.fetch("type_definitions", []))
       end
+      languages_for(files).each do |language|
+        provider = Languages.provider_for(language)
+        type_definitions.concat(provider.external_type_definitions(root: @root))
+      end
 
       state_protocols = stringify_set_map(state_protocols)
       state_param_origins = stringify_set_map(state_param_origins)

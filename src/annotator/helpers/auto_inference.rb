@@ -23,10 +23,10 @@ class AutoSlotId
     ).void
   end
   def initialize(kind:, fn_name: nil, index: nil, decl_id: nil)
-    @kind = kind
-    @fn_name = fn_name
-    @index = index
-    @decl_id = decl_id
+    @kind = T.let(kind, Symbol)
+    @fn_name = T.let(fn_name, T.nilable(String))
+    @index = T.let(index, T.nilable(Integer))
+    @decl_id = T.let(decl_id, T.nilable(Integer))
   end
 
   sig { params(fn_name: String, index: Integer).returns(AutoSlotId) }
@@ -86,8 +86,8 @@ class AutoMapShapeEntry
 
   sig { params(key: AutoSlotId, value: AutoSlotId).void }
   def initialize(key:, value:)
-    @key = key
-    @value = value
+    @key = T.let(key, AutoSlotId)
+    @value = T.let(value, AutoSlotId)
   end
 end
 
@@ -152,7 +152,7 @@ class AutoConstraintCollector
   def initialize(fn_nodes)
     # fn_nodes: { name => AST::FunctionDef }, exactly as the existing
     # annotator's signature-collection pass produces.
-    @fn_nodes = fn_nodes
+    @fn_nodes = T.let(fn_nodes, FnNodes)
     @slots = T.let({}, SlotMap)
     # Per-function map of `local_name → slot_id`, threaded through
     # the walk via @local_decls (saved/restored on FunctionDef entry).
@@ -510,7 +510,7 @@ class AutoUnifier
 
   sig { params(slots: AutoConstraintCollector::SlotMap, type_of: T.nilable(TypeResolver)).void }
   def initialize(slots, type_of: nil)
-    @slots = slots
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
     # `type_of` lets callers plug in a custom source-type resolver.
     # Default reads the finalized per-node type. The tolerant body-pass
     # populates type_info on each constraint source before this unifier runs.
@@ -701,8 +701,8 @@ class ShapeEvidenceCollector
 
   sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
-    @slots = slots
-    @fn_nodes = fn_nodes
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
+    @fn_nodes = T.let(fn_nodes, AutoConstraintCollector::FnNodes)
   end
 
   sig { returns(AutoConstraintCollector::SlotMap) }
@@ -737,7 +737,7 @@ class ShapeEvidenceCollector
     map
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, block: T.untyped).void }
   def walk_for_shape_decls(node, &block)
     return if node.nil?
     case node
@@ -758,7 +758,7 @@ class ShapeEvidenceCollector
   end
 
   # Walk the body and record evidence into shape slots.
-  sig { params(node: T.untyped, name_map: NameShapeMap).returns(T.untyped) }
+  sig { params(node: T.untyped, name_map: NameShapeMap).void }
   def walk(node, name_map)
     return if node.nil?
     case node
@@ -855,8 +855,8 @@ class OperatorEvidenceCollector
 
   sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
-    @slots = slots
-    @fn_nodes = fn_nodes
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
+    @fn_nodes = T.let(fn_nodes, AutoConstraintCollector::FnNodes)
     @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, EvidenceMap)
   end
 
@@ -868,7 +868,7 @@ class OperatorEvidenceCollector
 
   private
 
-  sig { params(fn: AST::FunctionDef).returns(T::Array[T.untyped]) }
+  sig { params(fn: AST::FunctionDef).void }
   def collect_in_function(fn)
     name_to_slot = build_name_map(fn)
     walk_binops(fn.body, name_to_slot, fn)
@@ -892,7 +892,7 @@ class OperatorEvidenceCollector
   end
 
   # Walk for Auto-typed BindExpr / VarDecl, yielding each one.
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, block: T.untyped).void }
   def walk_for_local_decls(node, &block)
     return if node.nil?
     case node
@@ -915,7 +915,7 @@ class OperatorEvidenceCollector
   # Walk for BinaryOp expressions; record `op` per slot whose
   # binding appears as an Identifier operand. Returns also recorded
   # for return-Auto when the RETURN value is a BinaryOp.
-  sig { params(node: T.untyped, name_to_slot: NameSlotMap, fn: AST::FunctionDef).returns(T.untyped) }
+  sig { params(node: T.untyped, name_to_slot: NameSlotMap, fn: AST::FunctionDef).void }
   def walk_binops(node, name_to_slot, fn)
     return if node.nil?
     case node
@@ -942,7 +942,7 @@ class OperatorEvidenceCollector
     end
   end
 
-  sig { params(binop: AST::BinaryOp, name_to_slot: NameSlotMap).returns(T::Array[T.untyped]) }
+  sig { params(binop: AST::BinaryOp, name_to_slot: NameSlotMap).void }
   def record_binop(binop, name_to_slot)
     [binop.left, binop.right].each do |operand|
       next unless operand.is_a?(AST::Identifier)

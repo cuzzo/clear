@@ -36,6 +36,11 @@ class ZigTranspiler
 
   include ZigTypeMapper
 
+  StructSchemaMap = T.type_alias { T::Hash[Symbol, Schemas::StructSchema] }
+  UnionSchemaMap = T.type_alias { T::Hash[Symbol, Schemas::UnionSchema] }
+  EnumSchemaMap = T.type_alias { T::Hash[Symbol, T::Array[String]] }
+  ModuleTypeDefs = T.type_alias { T::Array[MIR::Node] }
+
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
 
   sig { params(importer: T.nilable(ModuleImporter), source_dir: T.nilable(String)).void }
@@ -44,10 +49,10 @@ class ZigTranspiler
     @source_dir          = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
     @test_mode           = T.let(false, T::Boolean)
     @default_stack_size  = T.let(nil, T.nilable(String))
-    @struct_schemas      = T.let(nil, T.untyped)
-    @union_schemas       = T.let(nil, T.untyped)
-    @enum_schemas        = T.let(nil, T.untyped)
-    @module_type_defs    = T.let(nil, T.untyped)
+    @struct_schemas      = T.let(nil, T.nilable(StructSchemaMap))
+    @union_schemas       = T.let(nil, T.nilable(UnionSchemaMap))
+    @enum_schemas        = T.let(nil, T.nilable(EnumSchemaMap))
+    @module_type_defs    = T.let(nil, T.nilable(ModuleTypeDefs))
   end
 
   # Single-file entry point (used by the CLI and simple callers).

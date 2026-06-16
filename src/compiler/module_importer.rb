@@ -39,7 +39,7 @@ class ModuleImporter
     @compiling    = T.let(Set.new, T::Set[T.untyped])  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
     @pkg_paths    = T.let(pkg_paths.transform_keys(&:to_s), T::Hash[T.untyped, T.untyped])
-    @stdlib_root  = stdlib_root
+    @stdlib_root  = T.let(stdlib_root, String)
   end
 
   # Compile a .cht package by name and return a CompiledModule.

@@ -61,7 +61,7 @@ class BasicBlock
 
   sig { params(id: Integer).void }
   def initialize(id)
-    @id = id
+    @id = T.let(id, Integer)
     @stmts = T.let([], AST::RawBody)
     @successors = T.let([], T::Array[BasicBlock])
     @predecessors = T.let([], T::Array[BasicBlock])
@@ -86,7 +86,7 @@ class FunctionCFG
 
   sig { params(fn_name: String).void }
   def initialize(fn_name)
-    @fn_name = fn_name
+    @fn_name = T.let(fn_name, String)
     @blocks = T.let([], T::Array[BasicBlock])
     @block_counter = T.let(0, Integer)
     @entry = T.let(new_block, BasicBlock)
