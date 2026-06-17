@@ -2,8 +2,10 @@ mod decomplex;
 
 use anyhow::{bail, Context, Result};
 use decomplex::detectors::{
-    co_update, decision_pressure, flay_similarity, miner, predicate_alias, redundant_nil_guard,
-    semantic_alias, state_branch_density, state_mesh, temporal_ordering_pressure,
+    co_update, decision_pressure, derived_state, flay_similarity, implicit_control_flow,
+    inconsistent_rename_clone, local_flow, locality_drag, miner, operational_discontinuity,
+    predicate_alias, redundant_nil_guard, semantic_alias, state_branch_density, state_mesh,
+    structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use decomplex::parallel;
 use decomplex::syntax::Language;
@@ -73,6 +75,54 @@ fn main() -> Result<()> {
                 .with_context(|| "failed to scan state-mesh facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
+        Command::InconsistentRenameClone { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = inconsistent_rename_clone::scan_files(&files, language)
+                .with_context(|| "failed to scan inconsistent-rename-clone facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::DerivedState { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = derived_state::scan_files(&files, language)
+                .with_context(|| "failed to scan derived-state facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::ImplicitControlFlow { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = implicit_control_flow::scan_files(&files, language)
+                .with_context(|| "failed to scan implicit-control-flow facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::WeightedInlinedComplexity { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = weighted_inlined_cognitive_complexity::scan_files(&files, language)
+                .with_context(|| "failed to scan weighted-inlined-complexity facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::LocalityDrag { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = locality_drag::scan_files(&files, language)
+                .with_context(|| "failed to scan locality-drag facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::OperationalDiscontinuity { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = operational_discontinuity::scan_files(&files, language)
+                .with_context(|| "failed to scan operational-discontinuity facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::StructuralTopology { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = structural_topology::scan_files(&files, language)
+                .with_context(|| "failed to scan structural-topology facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        Command::LocalFlow { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let report = local_flow::scan_files(&files, language)
+                .with_context(|| "failed to scan local-flow facts")?;
+            println!("{}", serde_json::to_string(&report)?);
+        }
         Command::FlaySimilarity {
             language,
             mass,
@@ -140,6 +190,46 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    InconsistentRenameClone {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    DerivedState {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    ImplicitControlFlow {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    WeightedInlinedComplexity {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    LocalityDrag {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    OperationalDiscontinuity {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    StructuralTopology {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    LocalFlow {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
     FlaySimilarity {
         language: String,
         mass: usize,
@@ -162,6 +252,14 @@ impl Command {
             | Self::TemporalOrderingPressure { jobs, .. }
             | Self::RedundantNilGuard { jobs, .. }
             | Self::StateMesh { jobs, .. }
+            | Self::InconsistentRenameClone { jobs, .. }
+            | Self::DerivedState { jobs, .. }
+            | Self::ImplicitControlFlow { jobs, .. }
+            | Self::WeightedInlinedComplexity { jobs, .. }
+            | Self::LocalityDrag { jobs, .. }
+            | Self::OperationalDiscontinuity { jobs, .. }
+            | Self::StructuralTopology { jobs, .. }
+            | Self::LocalFlow { jobs, .. }
             | Self::FlaySimilarity { jobs, .. } => *jobs,
         }
     }
@@ -278,6 +376,94 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 bail!("state-mesh requires at least one file");
             }
             Ok(Command::StateMesh {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "inconsistent-rename-clone" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("inconsistent-rename-clone requires at least one file");
+            }
+            Ok(Command::InconsistentRenameClone {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "derived-state" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("derived-state requires at least one file");
+            }
+            Ok(Command::DerivedState {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "implicit-control-flow" | "ordered-protocol-mine" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("implicit-control-flow requires at least one file");
+            }
+            Ok(Command::ImplicitControlFlow {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "weighted-inlined-complexity" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("weighted-inlined-complexity requires at least one file");
+            }
+            Ok(Command::WeightedInlinedComplexity {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "locality-drag" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("locality-drag requires at least one file");
+            }
+            Ok(Command::LocalityDrag {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "operational-discontinuity" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("operational-discontinuity requires at least one file");
+            }
+            Ok(Command::OperationalDiscontinuity {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "structural-topology" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("structural-topology requires at least one file");
+            }
+            Ok(Command::StructuralTopology {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "local-flow" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("local-flow requires at least one file");
+            }
+            Ok(Command::LocalFlow {
                 language,
                 files,
                 jobs,

@@ -228,7 +228,9 @@ module Decomplex
     end
 
     def owner_name(node)
-      Ast.slice(node.children[0], @lines).to_s.empty? ? "(anonymous)" : Ast.slice(node.children[0], @lines)
+      name = node.children[0]
+      res = Ast.node?(name) ? Ast.slice(name, @lines) : name.to_s
+      res.empty? ? "(anonymous)" : res
     end
 
     def method_name(node)

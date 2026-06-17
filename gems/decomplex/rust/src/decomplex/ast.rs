@@ -233,24 +233,6 @@ pub fn body_stmts(defn_node: &Node) -> Vec<&Node> {
     }
 }
 
-pub fn def_push(node: &Node, stack: &[String]) -> Vec<String> {
-    let mut next = stack.to_vec();
-    match node.r#type.as_str() {
-        "DEFN" => {
-            if let Some(name) = child_to_string(node.children.first()) {
-                next.push(name);
-            }
-        }
-        "DEFS" => {
-            if let Some(name) = child_to_string(node.children.get(1)) {
-                next.push(name);
-            }
-        }
-        _ => {}
-    }
-    next
-}
-
 pub fn canon_polarity(text: &str) -> (String, bool) {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix('!') {
@@ -2762,7 +2744,7 @@ fn comparison_operator_from_text(text: &str) -> Option<String> {
     None
 }
 
-fn child_to_string(child: Option<&Child>) -> Option<String> {
+pub fn child_to_string(child: Option<&Child>) -> Option<String> {
     match child {
         Some(Child::String(value)) | Some(Child::Symbol(value)) => Some(value.clone()),
         _ => None,

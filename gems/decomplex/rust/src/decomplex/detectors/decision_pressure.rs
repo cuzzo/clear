@@ -248,7 +248,7 @@ impl Report {
             rows_map.entry(h.contract.clone()).or_default().push(h);
         }
 
-        let mut rows: Vec<_> = rows_map.into_iter().map(|(contract, hs)| {
+        let rows: Vec<_> = rows_map.into_iter().map(|(contract, hs)| {
             let mut methods_set = BTreeSet::new();
             for h in &hs {
                 methods_set.insert((&h.file, &h.defn));

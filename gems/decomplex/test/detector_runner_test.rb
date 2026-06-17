@@ -223,6 +223,154 @@ class DetectorRunnerTest < Minitest::Test
     end
   end
 
+  def test_inconsistent_rename_clone_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-rename", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def one(a, b)
+          res = a + b
+          puts res
+          res * 2
+        end
+
+        def two(x, b)
+          res = x + b
+          puts res
+          res * 2
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("inconsistent-rename-clone", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_derived_state_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-derived", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def check(a)
+          b = a + 1
+          a = 2
+          puts b
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("derived-state", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_implicit_control_flow_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-implicit", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Flow
+          def prepare; @a = 1; end
+          def validate; @b = @a; end
+          def run
+            prepare
+            validate
+          end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("implicit-control-flow", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_weighted_inlined_complexity_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-weighted", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Complex
+          def entry
+            helper_one
+            helper_two if condition?
+          end
+
+          private
+          def helper_one
+            if a; b; else; c; end
+          end
+
+          def helper_two
+            while x; y; end
+          end
+          
+          def condition?; true; end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("weighted-inlined-complexity", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_locality_drag_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-locality", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def heavy(x)
+          y = x + 1
+          # Unrelated work
+          a = 1; b = 2; c = 3; d = 4; e = 5
+          puts a, b, c, d, e
+          # Finally use y
+          puts y
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("locality-drag", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_operational_discontinuity_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-discontinuity", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def phase_shift
+          a = 1
+          b = 2
+          
+          # Phase 2
+          x = 3
+          y = 4
+          puts x, y
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("operational-discontinuity", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
   def test_decision_pressure_rust_engine_matches_ruby_engine_byte_for_byte
     skip "cargo is not available" unless cargo_available?
 

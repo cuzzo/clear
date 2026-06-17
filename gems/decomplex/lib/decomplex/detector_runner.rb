@@ -17,6 +17,12 @@ require_relative "state_mesh"
 require_relative "state_branch_density"
 require_relative "temporal_ordering_pressure"
 require_relative "redundant_nil_guard"
+require_relative "inconsistent_rename_clone"
+require_relative "derived_state"
+require_relative "ordered_protocol_mine"
+require_relative "weighted_inlined_cognitive_complexity"
+require_relative "locality_drag"
+require_relative "operational_discontinuity"
 
 module Decomplex
   # Runs one detector in isolation and emits deterministic machine output.
@@ -44,7 +50,13 @@ module Decomplex
       "state-branch-density" => :state_branch_density,
       "redundant-nil-guard" => :redundant_nil_guard,
       "state-mesh" => :state_mesh,
-      "state-heatmap" => :state_mesh
+      "state-heatmap" => :state_mesh,
+      "inconsistent-rename-clone" => :inconsistent_rename_clone,
+      "derived-state" => :derived_state,
+      "implicit-control-flow" => :implicit_control_flow,
+      "weighted-inlined-complexity" => :weighted_inlined_complexity,
+      "locality-drag" => :locality_drag,
+      "operational-discontinuity" => :operational_discontinuity
     }.freeze
     ENGINES = %w[ruby rust].freeze
 
@@ -75,6 +87,18 @@ module Decomplex
         redundant_nil_guard(files, engine: engine, jobs: jobs)
       when :state_mesh
         state_mesh(files, engine: engine, jobs: jobs)
+      when :inconsistent_rename_clone
+        inconsistent_rename_clone(files, engine: engine, jobs: jobs)
+      when :derived_state
+        derived_state(files, engine: engine, jobs: jobs)
+      when :implicit_control_flow
+        implicit_control_flow(files, engine: engine, jobs: jobs)
+      when :weighted_inlined_complexity
+        weighted_inlined_complexity(files, engine: engine, jobs: jobs)
+      when :locality_drag
+        locality_drag(files, engine: engine, jobs: jobs)
+      when :operational_discontinuity
+        operational_discontinuity(files, engine: engine, jobs: jobs)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
@@ -198,6 +222,64 @@ module Decomplex
       end
 
       StateMesh.scan(files).tap(&:run).to_json_graph
+    end
+
+    private_class_method def self.inconsistent_rename_clone(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/inconsistent_rename_clone"
+        return Native::InconsistentRenameClone.scan(files, jobs: jobs)
+      end
+
+      InconsistentRenameClone.scan(files)
+    end
+
+    private_class_method def self.derived_state(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/derived_state"
+        return Native::DerivedState.scan(files, jobs: jobs)
+      end
+
+      DerivedState.scan(files)
+    end
+
+    private_class_method def self.implicit_control_flow(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/implicit_control_flow"
+        return Native::ImplicitControlFlow.scan(files, jobs: jobs)
+      end
+
+      report = ImplicitControlFlow.scan(files)
+      {
+        "ordered_protocols" => report.ordered_protocols,
+        "order_drift" => report.drift
+      }
+    end
+
+    private_class_method def self.weighted_inlined_complexity(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/weighted_inlined_complexity"
+        return Native::WeightedInlinedComplexity.scan(files, jobs: jobs)
+      end
+
+      WeightedInlinedCognitiveComplexity.scan(files)
+    end
+
+    private_class_method def self.locality_drag(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/locality_drag"
+        return Native::LocalityDrag.scan(files, jobs: jobs)
+      end
+
+      LocalityDrag.scan(files)
+    end
+
+    private_class_method def self.operational_discontinuity(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/operational_discontinuity"
+        return Native::OperationalDiscontinuity.scan(files, jobs: jobs)
+      end
+
+      OperationalDiscontinuity.scan(files)
     end
 
     private_class_method def self.canonicalize(value)

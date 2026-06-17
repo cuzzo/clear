@@ -1,5 +1,5 @@
 use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, DecisionSite, Document, Language};
+use crate::decomplex::syntax::{self, DecisionSite, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -37,7 +37,7 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<MinerReport> 
     for doc in documents {
         sites.extend(doc.decision_sites);
     }
-    let mut m = Miner::new(sites);
+    let m = Miner::new(sites);
     Ok(MinerReport {
         missing_abstractions: m.missing_abstractions(2),
         neglected_conditions: m.neglected_conditions(3),
