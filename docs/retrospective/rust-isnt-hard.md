@@ -9,11 +9,11 @@ The problem is - those books are like ~800 pages.
 
 The point of this guide is to demystify the "hard" parts and make Rust easier to approach.  You can probably "get" Rust in this ~30 page guide, at least enough to read Rust code and understand it fully.
 
-The "hard" part of Rust is the section between:
+The "hard" part of Rust is the cross section between:
 
  1. Its Type System,
  2. Its Affine Ownership model,
- 3. The Borrow Checker / Lifetimes,
+ 3. The Borrow Checker / Memory Lifetimes,
  4. Its concurrency model, AND
  5. Its trait / interface system
 
@@ -32,7 +32,7 @@ While learning the language, if you haven’t yet fully grasped the type system 
 It’s like a catch-22, where the errors don’t make sense unless you already know the answer.  
 The problem is, when you’re learning a language… you don’t know the answers yet!
 
-How do you learn the Affine Ownership and Lifetimes before you learn the type system?  
+How do you learn the Affine Ownership and Memory Lifetimes before you learn the type system?  
 How do you understand why the type system is the way it is before you learn those models? 
 That’s the tough part.  It’s not easily broken down.  They’re all interwoven.
 
@@ -118,7 +118,7 @@ In Rust, you can’t do that.  Only one object can have the dollar!
 
 If you want to share it, you need to give it permission to be shared.
 
-This is called Aliasing, and - in practice - it’s the root of many of the toughest to debug problems.  Languages without Affine/Linear types allow Aliasing by default.  Rust does not.
+This is called **Aliasing**, and - in practice - it’s the root of many of the toughest to debug problems.  Languages without Affine/Linear types allow Aliasing by default.  Rust does not.
 
 Rust calls this Affine Movement.  When you give a dollar from one object to another, you move it (transfer ownership).
 
@@ -142,7 +142,7 @@ Average user: *I think I’ll write an if statement today...*
 
 ```rust
 fn main() {
-  let username = String::from(“brian”);
+  let username = String::from("brian");
   let is_admin = true;
 
   // A completely innocent conditional check...
@@ -181,7 +181,7 @@ This error is helpful *IFF* you get Rust. But if you don’t, it seems like psyc
  * Why does `println!` need to `borrow` it?
  * And why can’t it `borrow` it just because `login_admin` `moved` it!?
 
-As we discussed, `moved` means ownership was transferred.  A thing can only have one owner (by default).  Therefore, println!() can’t `borrow` it, because `login_admin` `moved` it (took it).  You don’t own it anymore for `println!` to borrow it from you.  `login_admin` owns it.
+As we discussed, `moved` means ownership was transferred.  A thing can only have one owner (by default).  Therefore, `println!()` can’t `borrow` it, because `login_admin` `moved` it (took it).  You don’t own it anymore for `println!` to borrow it from you.  `login_admin` owns it.
 
 ## Lifetimes Aren’t hard:
 
@@ -314,7 +314,7 @@ error[E0608]: cannot index into a value of type `std::str::Split<'_, char>`
 Average person: *WTF is `std::str::Split<'_, char>` ?!*
 
  * What is `'_` ?
- * What is Split<x, y>?
+ * What is `Split<x, y>` ?
  * How is that different from an Array of strings?
  * And why don’t I have what I clearly wanted!?
 
@@ -344,8 +344,8 @@ This error *IS* helpful, but the first was not, and the entire process is *NOT* 
 
 The average person is likely to wonder:
 
- * Is Vec<&str> what I want?
- * I think I want a Vec<String>...
+ * Is `Vec<&str>` what I want?
+ * I think I want a `Vec<String>`...
 
 But you do want a `Vec<&str>`!  This is fast!  Instead of copying all the pieces of the string to split it, you get small pointers to the sections (borrows).
 
@@ -398,7 +398,7 @@ What happens if the vector is only 8 items long?  It needs to be able to return 
 Most languages simply don’t solve this problem and make it a nightmare.  It is impossible to know if a value can be nil or not:
 
 ```go
-func GetUser() *User {
+fn GetUser() *User {
     if rand.Float64() < 0.5 {
         return nil // Legal return
     }
@@ -407,14 +407,14 @@ func GetUser() *User {
 ```
 
 This becomes a nightmare. You cannot look at the function signature and see whether or not you need to check for nil. 
-The compiler cannot tell you that you have a possible error if random() returned less than 0.5...
+The compiler cannot tell you that you have a possible error if `random()` returned less than 0.5...
 
 In scripting languages, you don’t have types at all... So, this is sort of expected, but equally nightmarish.  
 You typically know what the type of a function is supposed to be, but are often surprised when it’s nil/null, and get unexpected runtime bugs (like in C or Go).
 
 Rust solves this with:
 
-## Option<T>
+## `Option<T>`
 
 Average user: *I’ll try to work on some nilable / nullable / Option<T> object today...*
 
@@ -592,7 +592,7 @@ Go solves some of this by having functions return two values:
 
 ```go
 fn main() {
-  err, user = getUser();
+  user, err := getUser();
   if (err) { // handle error }
   // otherwise, user is set
 }
@@ -622,7 +622,7 @@ def transact(a, b, amnt):
 
 Rust solves this with:
 
-## Result<T, E>
+## `Result<T, E>`
 
 ```rust
 use std::fs::File;
@@ -716,7 +716,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 TODO - analogize...
 
-## Synconization
+## Synchronization
 
 Average user: *I think I’ll try fearless concurrency today...*
 
@@ -916,7 +916,7 @@ fn main() {
 You can run into the notorious **double spend** bug:
 
 ```rust
-Fn transfer(a: Account, b: Account, amnt: f64) {
+fn transfer(a: Account, b: Account, amnt: f64) {
   if (a.balance < amnt) { // ERROR }  // Time of check
   // do transfer - time of use
 }
@@ -964,7 +964,7 @@ Physics and hardware don’t work how you would like them to ideally, and becaus
 
 ## Interfaces Aren’t Hard:
 
-**Unless you want zero-cost abstractions...***
+**Unless you want zero-cost abstractions...**
 
 In high-level languages, interfaces or duck-typing are pure bliss. You tell the language: "If it walks like a duck and quacks like a duck, it's a duck."
 
@@ -1004,7 +1004,7 @@ Average user: *I think I’ll try to put a bunch of objects that can speak in a 
 ```rust
 fn get_speakers() {
   // A completely innocent array of objects that implement Speaker...
-  let speakers: Vec<Speaker> = vec![Human, Dog]; 
+  let speakers: Vec<Speaker> = vec![getHuman(), getDog()]; 
 }
 ```
 
@@ -1014,12 +1014,12 @@ You get an error that completely derails your evening:
 error[E0782]: trait objects must include the `dyn` keyword
  --> src/main.rs:2:23
   |
-2 |     let speakers: Vec<Speaker> = vec![Human, Dog];
+2 |     let speakers: Vec<Speaker> = vec![getHuman(), getDog()];
   |                       ^^^^^^^
   |
 help: add `dyn` keyword before the trait name
   |
-2 |     let speakers: Vec<dyn Speaker> = vec![Human, Dog];
+2 |     let speakers: Vec<dyn Speaker> = vec![getHuman(), getDog()];
   |                       +++
 ```
 
@@ -1027,7 +1027,7 @@ Average user: *Okay, fine, I don't know what dyn means, I don’t care and I wis
 
 ```rust
 fn get_speakers() {
-  let speakers: Vec<dyn Speaker> = vec![Human, Dog]; 
+  let speakers: Vec<dyn Speaker> = vec![getHuman(), getDog()]; 
 }
 ```
 
@@ -1037,7 +1037,7 @@ Now you enter the true psychobabble zone:
 error[E0277]: the size for values of type `(dyn Speaker + 'static)` cannot be known at compilation time
    --> src/main.rs:2:19
     |
-2   |     let speakers: Vec<dyn Speaker> = vec![Human, Dog];
+2   |     let speakers: Vec<dyn Speaker> = vec![getHuman(), getDog()];
     |                   ^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
     |
     = help: the trait `Sized` is not implemented for `(dyn Speaker + 'static)`
@@ -1068,16 +1068,23 @@ Rust doesn't hide that cost. Rust defaults to putting things directly on the sta
 
 For a language that needs zero cost abstractions and all cost signals visible, working with interfaces is going to require some added effort, and for you to know these details you’d probably rather not know!
 
-A Human struct might take up 0 bytes of memory. A Dog struct might have strings and take up 24 bytes of memory.
+A `Human` struct might take up 0 bytes of memory. A `Dog` struct might have strings and take up 24 bytes of memory.
 
-When you ask Rust to create a Vec, you are asking it to allocate a contiguous block of stack memory. But how can it reserve memory for an array if slot 1 requires 0 bytes and slot 2 requires 24 bytes? It can't. The compiler hits a physical hardware limitation, drops the mask of a friendly interface language, and screams at you in the math of its type system: dyn Speaker does not implement Sized.
+When you ask Rust to create a `Vec`, you are asking it to allocate a contiguous block of stack memory.
 
-To fix it, you are legally required to explicitly pay the performance tax for a heap pointer wrapper using Box:
+> [!NOTE]
+> Why?  An array needs `O(1)` lookup.  If items are randomly different sizes, you need `O(N)` lookup to find an item.
+> You *could* need to scan through *nearly* the entire array to find an item at the end.
+> If the items are all the same size, you can find the spot in memory by simply: `memPos = arrOffset + (objSize * lookupIdx)`
+
+How can it reserve memory for an array if slot 1 requires 0 bytes and slot 2 requires 24 bytes? It can't. The compiler hits a physical hardware limitation, drops the mask of a friendly interface language, and screams at you in the math of its type system: `dyn Speaker does not implement Sized`.
+
+To fix it, you must explicitly pay the performance tax for a heap pointer wrapper using `Box<T>`:
 
 ```rust
 fn get_speakers() {
     // We explicitly box them so they are uniform 8-byte pointer addresses
-    let speakers: Vec<Box<dyn Speaker>> = vec![Box::new(Human), Box::new(Dog)]; 
+    let speakers: Vec<Box<dyn Speaker>> = vec![Box::new(getHuman()), Box::new(getDog())]; 
 }
 ```
 
@@ -1191,7 +1198,7 @@ The problem is: Go isn’t safe!
 
 So pick your poison: either use ~2x more memory, accept GC gitter / unpredictability, and potential race conditions - or deal with the fact that Rust’s error messages in the killer cross section will feel like Goblygook.
 
-In the era of AI - in my opinion - Rust wins considerably.  It’s typically half as much code as Go to accomplish similar concurrent tasks, and - apples to apples - will use considerably less memory.
+In the era of AI - in my opinion - Rust wins considerably.  It’s typically half as much code as Go to accomplish similar concurrent tasks [1], and - apples to apples - will use considerably less memory.
 
 Go has the best runtime in the world. It can often beat Rust/Tokio on throughput, even though you wouldn’t think it could.
 
@@ -1202,3 +1209,5 @@ If an LLM is writing your code, you don’t need to understand the error message
 If you’ve read this guide - you should be able to understand written Rust easier than you can understand written Go, and you have far better insight into what’s safe and what’s not safe.
 
 For those reasons, I think Rust is currently the best language in the world if you’re going to have an LLM write your code.
+
+[1] [CLEAR Concurrent Benchmarks](/benchmarks/README.md)
