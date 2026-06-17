@@ -106,17 +106,18 @@ impl Report {
     }
 
     fn alias_clusters(&self) -> Vec<AliasCluster> {
-        let mut by_body: Vec<(String, Vec<&Pred>)> = Vec::new();
+        let mut keys = Vec::new();
+        let mut by_body: BTreeMap<String, Vec<&Pred>> = BTreeMap::new();
         for p in &self.preds {
-            if let Some(entry) = by_body.iter_mut().find(|(b, _)| b == &p.body) {
-                entry.1.push(p);
-            } else {
-                by_body.push((p.body.clone(), vec![p]));
+            if !by_body.contains_key(&p.body) {
+                keys.push(p.body.clone());
             }
+            by_body.entry(p.body.clone()).or_default().push(p);
         }
 
         let mut out = Vec::new();
-        for (body, ps) in by_body {
+        for body in keys {
+            let ps = by_body.remove(&body).unwrap();
             let mut names_set = BTreeSet::new();
             for p in &ps { names_set.insert(p.name.clone()); }
             let names: Vec<_> = names_set.into_iter().collect();

@@ -78,20 +78,25 @@ struct Report {
 
 impl Report {
     fn new(writes: Vec<Write>) -> Self {
-        let mut by_unit: Vec<((String, String), Vec<Write>)> = Vec::new();
+        let mut keys = Vec::new();
+        let mut map: BTreeMap<(String, String), Vec<Write>> = BTreeMap::new();
         for w in &writes {
             let key = (w.file.clone(), w.defn.clone());
-            if let Some(entry) = by_unit.iter_mut().find(|(k, _)| k == &key) {
-                entry.1.push(w.clone());
-            } else {
-                by_unit.push((key, vec![w.clone()]));
+            if !map.contains_key(&key) {
+                keys.push(key.clone());
             }
+            map.entry(key).or_default().push(w.clone());
         }
+        let by_unit = keys.into_iter().map(|k| {
+            let v = map.remove(&k).unwrap();
+            (k, v)
+        }).collect();
         Self { writes, by_unit }
     }
 
     fn co_written_pairs(&self, min_support: usize) -> Vec<CoWrittenPair> {
-        let mut counts: Vec<(Vec<String>, Vec<(String, String)>)> = Vec::new();
+        let mut keys = Vec::new();
+        let mut counts: BTreeMap<Vec<String>, Vec<(String, String)>> = BTreeMap::new();
         for (unit, ws) in &self.by_unit {
             let mut attrs: Vec<_> = ws.iter().map(|w| w.attr.clone()).collect::<BTreeSet<_>>().into_iter().collect();
             attrs.sort();
@@ -99,17 +104,17 @@ impl Report {
             for i in 0..attrs.len() {
                 for j in i+1..attrs.len() {
                     let pair = vec![attrs[i].clone(), attrs[j].clone()];
-                    if let Some(entry) = counts.iter_mut().find(|(p, _)| p == &pair) {
-                        entry.1.push(unit.clone());
-                    } else {
-                        counts.push((pair, vec![unit.clone()]));
+                    if !counts.contains_key(&pair) {
+                        keys.push(pair.clone());
                     }
+                    counts.entry(pair).or_default().push(unit.clone());
                 }
             }
         }
 
         let mut out = Vec::new();
-        for (pair, units) in counts {
+        for pair in keys {
+            let units = counts.remove(&pair).unwrap();
             if units.len() < min_support { continue; }
             out.push(CoWrittenPair {
                 pair,

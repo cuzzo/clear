@@ -150,14 +150,15 @@ impl<'a> ImplicitControlFlow<'a> {
     }
 
     fn method_paths(&self, node: &Node) -> Vec<Path> {
-        self.paths_for_statements(&ast::body_stmts(node))
+        self.paths_for_statements(&ast::body_stmts(node), 0)
     }
 
-    fn paths_for_statements(&self, statements: &[&Node]) -> Vec<Path> {
+    fn paths_for_statements(&self, statements: &[&Node], depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         let mut paths = vec![self.empty_path()];
         for stmt in statements {
             if stmt.r#type == "BEGIN" { continue; }
-            let stmt_paths = self.paths_for(stmt);
+            let stmt_paths = self.paths_for(stmt, depth + 1);
             paths = self.append_statement_paths(paths, stmt_paths);
         }
         paths
@@ -183,57 +184,62 @@ impl<'a> ImplicitControlFlow<'a> {
         combined.into_iter().take(PATH_LIMIT).collect()
     }
 
-    fn paths_for(&self, node: &Node) -> Vec<Path> {
+    fn paths_for(&self, node: &Node, depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         match node.r#type.as_str() {
-            "BLOCK" => self.paths_for_statements(&node.children.iter().filter_map(ast::node).collect::<Vec<_>>()),
-            "SCOPE" => self.paths_for(node.children.get(2).and_then(ast::node).unwrap_or(node)),
-            "IF" | "UNLESS" => self.branch_paths(node),
-            "CASE" | "CASE2" => self.case_paths(node),
+            "BLOCK" => self.paths_for_statements(&node.children.iter().filter_map(ast::node).collect::<Vec<_>>(), depth),
+            "SCOPE" => self.paths_for(node.children.get(2).and_then(ast::node).unwrap_or(node), depth),
+            "IF" | "UNLESS" => self.branch_paths(node, depth),
+            "CASE" | "CASE2" => self.case_paths(node, depth),
             "RETURN" | "BREAK" | "NEXT" | "REDO" | "RETRY" => {
-                self.generic_paths(node).into_iter().map(|mut p| { p.terminal = true; p }).collect()
+                self.generic_paths(node, depth).into_iter().map(|mut p| { p.terminal = true; p }).collect()
             }
-            _ => self.generic_paths(node),
+            _ => self.generic_paths(node, depth),
         }
     }
 
-    fn branch_paths(&self, node: &Node) -> Vec<Path> {
+    fn branch_paths(&self, node: &Node, depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         let cond = node.children.get(0).and_then(ast::node);
         let pos = node.children.get(1).and_then(ast::node);
         let neg = node.children.get(2).and_then(ast::node);
 
-        let mut alts = self.paths_for(pos.unwrap_or(node));
-        if let Some(n) = neg { alts.extend(self.paths_for(n)); } else { alts.push(self.empty_path()); }
+        let mut alts = self.paths_for(pos.unwrap_or(node), depth + 1);
+        if let Some(n) = neg { alts.extend(self.paths_for(n, depth + 1)); } else { alts.push(self.empty_path()); }
 
-        self.combine_path_lists(self.paths_for(cond.unwrap_or(node)), alts)
+        self.combine_path_lists(self.paths_for(cond.unwrap_or(node), depth + 1), alts)
     }
 
-    fn case_paths(&self, node: &Node) -> Vec<Path> {
+    fn case_paths(&self, node: &Node, depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         let (cond, first_when) = if node.r#type == "CASE2" { (None, node.children.get(0).and_then(ast::node)) } else { (node.children.get(0).and_then(ast::node), node.children.get(1).and_then(ast::node)) };
-        self.combine_path_lists(cond.map(|c| self.paths_for(c)).unwrap_or(vec![self.empty_path()]), self.when_paths(first_when))
+        self.combine_path_lists(cond.map(|c| self.paths_for(c, depth + 1)).unwrap_or(vec![self.empty_path()]), self.when_paths(first_when, depth + 1))
     }
 
-    fn when_paths(&self, node: Option<&Node>) -> Vec<Path> {
+    fn when_paths(&self, node: Option<&Node>, depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         let Some(n) = node else { return vec![self.empty_path()] };
-        if n.r#type != "WHEN" { return self.paths_for(n) }
+        if n.r#type != "WHEN" { return self.paths_for(n, depth + 1) }
 
         let pat = n.children.get(0).and_then(ast::node);
         let body = n.children.get(1).and_then(ast::node);
         let next = n.children.get(2).and_then(ast::node);
 
-        let current = self.combine_path_lists(self.paths_for(pat.unwrap_or(n)), self.paths_for(body.unwrap_or(n)));
+        let current = self.combine_path_lists(self.paths_for(pat.unwrap_or(n), depth + 1), self.paths_for(body.unwrap_or(n), depth + 1));
         let mut out = current;
-        out.extend(self.when_paths(next));
+        out.extend(self.when_paths(next, depth + 1));
         out.into_iter().take(PATH_LIMIT).collect()
     }
 
-    fn generic_paths(&self, node: &Node) -> Vec<Path> {
+    fn generic_paths(&self, node: &Node, depth: usize) -> Vec<Path> {
+        if depth > 10 { return vec![self.empty_path()]; }
         if matches!(node.r#type.as_str(), "CLASS" | "MODULE" | "DEFN" | "DEFS" | "LAMBDA") {
             return vec![self.empty_path()];
         }
 
         let mut child_paths = vec![self.empty_path()];
         for child in node.children.iter().filter_map(ast::node) {
-            child_paths = self.combine_path_lists(child_paths, self.paths_for(child));
+            child_paths = self.combine_path_lists(child_paths, self.paths_for(child, depth + 1));
         }
 
         if let Some(mid) = self.internal_protocol_call(node) {
