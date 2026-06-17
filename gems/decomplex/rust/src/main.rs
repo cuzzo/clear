@@ -2,9 +2,10 @@ mod decomplex;
 
 use anyhow::{bail, Context, Result};
 use decomplex::detectors::{
-    co_update, decision_pressure, derived_state, flay_similarity, implicit_control_flow,
-    inconsistent_rename_clone, local_flow, locality_drag, miner, operational_discontinuity,
-    predicate_alias, redundant_nil_guard, semantic_alias, state_branch_density, state_mesh,
+    co_update, decision_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
+    function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
+    miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
+    redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
     structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use decomplex::parallel;
@@ -135,6 +136,42 @@ fn main() -> Result<()> {
                 .with_context(|| "failed to scan structural similarity")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
+        Command::OversizedPredicate { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = oversized_predicate::scan_files(&files, language)
+                .with_context(|| "failed to scan oversized-predicate facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
+        Command::PathCondition { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = path_condition::scan_files(&files, language)
+                .with_context(|| "failed to scan path-condition facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
+        Command::SequenceMine { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = sequence_mine::scan_files(&files, language)
+                .with_context(|| "failed to scan sequence-mine facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
+        Command::FunctionLcom { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = function_lcom::scan_files(&files, language)
+                .with_context(|| "failed to scan function-lcom facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
+        Command::FalseSimplicity { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = false_simplicity::scan_files(&files, language)
+                .with_context(|| "failed to scan false-simplicity facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
+        Command::FatUnion { language, files, .. } => {
+            let language = Language::parse(&language)?;
+            let findings = fat_union::scan_files(&files, language)
+                .with_context(|| "failed to scan fat-union facts")?;
+            println!("{}", serde_json::to_string(&findings)?);
+        }
     }
     Ok(())
 }
@@ -237,6 +274,36 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    OversizedPredicate {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    PathCondition {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    SequenceMine {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    FunctionLcom {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    FalseSimplicity {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
+    FatUnion {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
 }
 
 impl Command {
@@ -260,7 +327,13 @@ impl Command {
             | Self::OperationalDiscontinuity { jobs, .. }
             | Self::StructuralTopology { jobs, .. }
             | Self::LocalFlow { jobs, .. }
-            | Self::FlaySimilarity { jobs, .. } => *jobs,
+            | Self::FlaySimilarity { jobs, .. }
+            | Self::OversizedPredicate { jobs, .. }
+            | Self::PathCondition { jobs, .. }
+            | Self::SequenceMine { jobs, .. }
+            | Self::FunctionLcom { jobs, .. }
+            | Self::FalseSimplicity { jobs, .. }
+            | Self::FatUnion { jobs, .. } => *jobs,
         }
     }
 }
@@ -464,6 +537,72 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 bail!("local-flow requires at least one file");
             }
             Ok(Command::LocalFlow {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "oversized-predicate" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("oversized-predicate requires at least one file");
+            }
+            Ok(Command::OversizedPredicate {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "path-condition" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("path-condition requires at least one file");
+            }
+            Ok(Command::PathCondition {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "sequence-mine" | "broken-protocol" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("sequence-mine requires at least one file");
+            }
+            Ok(Command::SequenceMine {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "function-lcom" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("function-lcom requires at least one file");
+            }
+            Ok(Command::FunctionLcom {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "false-simplicity" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("false-simplicity requires at least one file");
+            }
+            Ok(Command::FalseSimplicity {
+                language,
+                files,
+                jobs,
+            })
+        }
+        "fat-union" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("fat-union requires at least one file");
+            }
+            Ok(Command::FatUnion {
                 language,
                 files,
                 jobs,

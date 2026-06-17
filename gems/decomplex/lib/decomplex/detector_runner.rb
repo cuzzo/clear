@@ -23,6 +23,12 @@ require_relative "ordered_protocol_mine"
 require_relative "weighted_inlined_cognitive_complexity"
 require_relative "locality_drag"
 require_relative "operational_discontinuity"
+require_relative "oversized_predicate"
+require_relative "path_condition"
+require_relative "sequence_mine"
+require_relative "function_lcom"
+require_relative "false_simplicity"
+require_relative "fat_union"
 
 module Decomplex
   # Runs one detector in isolation and emits deterministic machine output.
@@ -56,7 +62,14 @@ module Decomplex
       "implicit-control-flow" => :implicit_control_flow,
       "weighted-inlined-complexity" => :weighted_inlined_complexity,
       "locality-drag" => :locality_drag,
-      "operational-discontinuity" => :operational_discontinuity
+      "operational-discontinuity" => :operational_discontinuity,
+      "oversized-predicate" => :oversized_predicate,
+      "path-condition" => :path_condition,
+      "broken-protocol" => :sequence_mine,
+      "sequence-mine" => :sequence_mine,
+      "function-lcom" => :function_lcom,
+      "false-simplicity" => :false_simplicity,
+      "fat-union" => :fat_union
     }.freeze
     ENGINES = %w[ruby rust].freeze
 
@@ -99,6 +112,18 @@ module Decomplex
         locality_drag(files, engine: engine, jobs: jobs)
       when :operational_discontinuity
         operational_discontinuity(files, engine: engine, jobs: jobs)
+      when :oversized_predicate
+        oversized_predicate(files, engine: engine, jobs: jobs)
+      when :path_condition
+        path_condition(files, engine: engine, jobs: jobs)
+      when :sequence_mine
+        sequence_mine(files, engine: engine, jobs: jobs)
+      when :function_lcom
+        function_lcom(files, engine: engine, jobs: jobs)
+      when :false_simplicity
+        false_simplicity(files, engine: engine, jobs: jobs)
+      when :fat_union
+        fat_union(files, engine: engine, jobs: jobs)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
@@ -280,6 +305,62 @@ module Decomplex
       end
 
       OperationalDiscontinuity.scan(files)
+    end
+
+    private_class_method def self.oversized_predicate(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/oversized_predicate"
+        return Native::OversizedPredicate.scan(files, jobs: jobs)
+      end
+
+      { "findings" => OversizedPredicate.scan(files).findings }
+    end
+
+    private_class_method def self.path_condition(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/path_condition"
+        return Native::PathCondition.scan(files, jobs: jobs)
+      end
+
+      report = PathCondition.scan(files)
+      { "neglected" => report.neglected }
+    end
+
+    private_class_method def self.sequence_mine(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/sequence_mine"
+        return Native::SequenceMine.scan(files, jobs: jobs)
+      end
+
+      report = SequenceMine.scan(files)
+      { "broken" => report.broken_protocol }
+    end
+
+    private_class_method def self.function_lcom(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/function_lcom"
+        return Native::FunctionLcom.scan(files, jobs: jobs)
+      end
+
+      FunctionLCOM.scan(files)
+    end
+
+    private_class_method def self.false_simplicity(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/false_simplicity"
+        return Native::FalseSimplicity.scan(files, jobs: jobs)
+      end
+
+      FalseSimplicity.scan(files).findings
+    end
+
+    private_class_method def self.fat_union(files, engine:, jobs:)
+      if engine.to_s == "rust"
+        require_relative "native/fat_union"
+        return Native::FatUnion.scan(files, jobs: jobs)
+      end
+
+      { "fat_unions" => FatUnion.scan(files).fat_unions }
     end
 
     private_class_method def self.canonicalize(value)
