@@ -40,6 +40,100 @@ module Decomplex
       node.text.to_s.strip.gsub(/\s+/, " ")
     end
 
+    # Language-specific syntax-shape decisions live here, before nodes are
+    # converted into Decomplex's shared AST vocabulary.
+    class TreeSitterNormalizationAdapter
+      BINARY_WRAPPER_KINDS = %w[
+        binary binary_expression binary_operator boolean_operator comparison_operator
+      ].freeze
+      OPERATOR_CALL_OPERATORS = %w[+ - * / % ** | & ^ << >> =~ !~].freeze
+
+      class << self
+        def for(document)
+          case document&.language&.to_sym
+          when :ruby then RubyTreeSitterNormalizationAdapter.new(document)
+          when :python then PythonTreeSitterNormalizationAdapter.new(document)
+          when :lua then LuaTreeSitterNormalizationAdapter.new(document)
+          when :typescript, :javascript then TypeScriptTreeSitterNormalizationAdapter.new(document)
+          else new(document)
+          end
+        end
+      end
+
+      attr_reader :document
+
+      def initialize(document)
+        @document = document
+      end
+
+      def binary_operator(node)
+        direct_binary_operator(node).to_s
+      end
+
+      def operator_call_expression?(node)
+        operator_call_expression_kinds.include?(node.kind) &&
+          node.named_children.size >= 2 &&
+          OPERATOR_CALL_OPERATORS.include?(binary_operator(node))
+      rescue StandardError
+        false
+      end
+
+      private
+
+      def operator_call_expression_kinds
+        %w[binary binary_expression]
+      end
+
+      def direct_binary_operator(node)
+        node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text
+      rescue StandardError
+        nil
+      end
+
+      def exact_single_named_child(node, kinds:)
+        children = node.named_children
+        return nil unless children.size == 1
+
+        child = children.first
+        return nil unless kinds.include?(child.kind)
+        return nil unless node.text.to_s == child.text.to_s
+
+        child
+      rescue StandardError
+        nil
+      end
+    end
+
+    class RubyTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+    end
+
+    class PythonTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      private
+
+      def operator_call_expression_kinds
+        super + %w[binary_operator]
+      end
+    end
+
+    class LuaTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      def binary_operator(node)
+        direct = direct_binary_operator(node)
+        return direct.to_s if direct
+
+        child = exact_single_named_child(node, kinds: BINARY_WRAPPER_KINDS)
+        child ? binary_operator(child) : ""
+      end
+
+      private
+
+      def operator_call_expression_kinds
+        super + %w[expression_list]
+      end
+    end
+
+    class TypeScriptTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+    end
+
     # Tree-sitter exposes each grammar's native node names. Decomplex's
     # detectors share a small language-neutral AST vocabulary, so this
     # adapter normalizes common syntax categories into that vocabulary:
@@ -111,6 +205,7 @@ module Decomplex
 
       def initialize(document)
         @document = document
+        @normalization_adapter = TreeSitterNormalizationAdapter.for(document)
         @local_stack = []
         @normalizing = Set.new
       end
@@ -1064,8 +1159,7 @@ module Decomplex
       end
 
       def operator_call_expression?(node)
-        %w[binary binary_expression].include?(node.kind) &&
-          OPERATOR_CALL_OPERATORS.include?(binary_operator(node))
+        normalization_adapter.operator_call_expression?(node)
       end
 
       def infix_statement?(node)
@@ -1164,7 +1258,7 @@ module Decomplex
       end
 
       def binary_operator(node)
-        node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s
+        normalization_adapter.binary_operator(node)
       end
 
       def spaced_text(node)
@@ -1226,6 +1320,10 @@ module Decomplex
 
       def ruby?
         @document.language == :ruby
+      end
+
+      def normalization_adapter
+        @normalization_adapter ||= TreeSitterNormalizationAdapter.for(@document)
       end
 
       def interpolated_string?(node)

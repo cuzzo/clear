@@ -1,7 +1,11 @@
+use crate::decomplex::syntax::Language;
 use serde::Serialize;
 use tree_sitter::Node;
 
 pub type Span = [usize; 4];
+const OPERATOR_CALL_OPERATORS: &[&str] = &[
+    "+", "-", "*", "/", "%", "**", "|", "&", "^", "<<", ">>", "=~", "!~",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, PartialOrd, Ord)]
 pub enum NormKind {
@@ -327,11 +331,103 @@ fn assignment_lhs_node(node: Node<'_>) -> bool {
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TreeSitterNormalizationAdapter {
+    Ruby,
+    Python,
+    Lua,
+    TypeScript,
+}
+
+impl TreeSitterNormalizationAdapter {
+    fn for_language(language: Language) -> Self {
+        match language {
+            Language::Ruby => Self::Ruby,
+            Language::Python => Self::Python,
+            Language::Lua => Self::Lua,
+            Language::TypeScript | Language::JavaScript => Self::TypeScript,
+        }
+    }
+
+    fn binary_operator(self, node: Node<'_>, source: &str) -> Option<String> {
+        if let Some(operator) = direct_binary_operator(node, source) {
+            return Some(operator.to_string());
+        }
+
+        if self != Self::Lua {
+            return None;
+        }
+
+        let children = named_children(node);
+        if children.len() == 1
+            && matches!(
+                children[0].kind(),
+                "binary"
+                    | "binary_expression"
+                    | "binary_operator"
+                    | "boolean_operator"
+                    | "comparison_operator"
+            )
+            && node_text(node, source) == node_text(children[0], source)
+        {
+            return self.binary_operator(children[0], source);
+        }
+
+        None
+    }
+
+    fn operator_call_expression(self, node: Node<'_>, source: &str) -> bool {
+        self.operator_call_expression_kind(node.kind())
+            && self.operator_call_operand_count(node, source) >= 2
+            && self
+                .binary_operator(node, source)
+                .map(|operator| OPERATOR_CALL_OPERATORS.contains(&operator.as_str()))
+                .unwrap_or(false)
+    }
+
+    fn operator_call_operand_count(self, node: Node<'_>, source: &str) -> usize {
+        if self == Self::Lua {
+            let children = named_children(node);
+            if children.len() == 1
+                && matches!(
+                    children[0].kind(),
+                    "binary"
+                        | "binary_expression"
+                        | "binary_operator"
+                        | "boolean_operator"
+                        | "comparison_operator"
+                )
+                && node_text(node, source) == node_text(children[0], source)
+            {
+                return named_children(children[0]).len();
+            }
+        }
+
+        named_children(node).len()
+    }
+
+    fn operator_call_expression_kind(self, kind: &str) -> bool {
+        match self {
+            Self::Python => matches!(kind, "binary" | "binary_expression" | "binary_operator"),
+            Self::Lua => matches!(kind, "binary" | "binary_expression" | "expression_list"),
+            _ => matches!(kind, "binary" | "binary_expression"),
+        }
+    }
+}
+
 pub fn binary_operator(node: Node<'_>, source: &str) -> Option<String> {
+    TreeSitterNormalizationAdapter::Ruby.binary_operator(node, source)
+}
+
+pub fn operator_call_expression(node: Node<'_>, source: &str, language: Language) -> bool {
+    TreeSitterNormalizationAdapter::for_language(language).operator_call_expression(node, source)
+}
+
+fn direct_binary_operator<'source>(node: Node<'_>, source: &'source str) -> Option<&'source str> {
     all_children(node)
         .into_iter()
         .find(|child| !child.is_named() && !matches!(node_text(*child, source), "(" | ")"))
-        .map(|child| node_text(child, source).to_string())
+        .map(|child| node_text(child, source))
 }
 
 pub fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
@@ -366,5 +462,129 @@ pub fn walk_raw(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
     f(node);
     for child in named_children(node) {
         walk_raw(child, f);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::{Language as TreeSitterLanguage, Parser, Tree};
+
+    fn language_grammar(language: Language) -> TreeSitterLanguage {
+        match language {
+            Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Language::JavaScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Language::Lua => tree_sitter_lua::LANGUAGE.into(),
+        }
+    }
+
+    fn raw_tree(source: &str, language: Language) -> Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language_grammar(language))
+            .expect("set language");
+        parser.parse(source, None).expect("parse source")
+    }
+
+    fn first_raw_node<'tree>(
+        node: Node<'tree>,
+        source: &str,
+        kind: &str,
+        text: &str,
+    ) -> Node<'tree> {
+        find_raw_node(node, source, kind, text)
+            .unwrap_or_else(|| panic!("missing {kind} node with text {text:?}"))
+    }
+
+    fn find_raw_node<'tree>(
+        node: Node<'tree>,
+        source: &str,
+        kind: &str,
+        text: &str,
+    ) -> Option<Node<'tree>> {
+        if node.kind() == kind && node_text(node, source) == text {
+            return Some(node);
+        }
+
+        for child in all_children(node) {
+            if let Some(found) = find_raw_node(child, source, kind, text) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    #[test]
+    fn operator_call_expression_matches_ruby_adapter_behavior() {
+        for (source, language, kind, text, expected) in [
+            (
+                "def calc\n  left + right\n  left && right\nend\n",
+                Language::Ruby,
+                "binary",
+                "left + right",
+                true,
+            ),
+            (
+                "def calc\n  left + right\n  left && right\nend\n",
+                Language::Ruby,
+                "binary",
+                "left && right",
+                false,
+            ),
+            (
+                "const value = left + right && other;\n",
+                Language::TypeScript,
+                "binary_expression",
+                "left + right",
+                true,
+            ),
+            (
+                "const value = left + right && other;\n",
+                Language::TypeScript,
+                "binary_expression",
+                "left + right && other",
+                false,
+            ),
+            (
+                "value = left + right and other\n",
+                Language::Python,
+                "binary_operator",
+                "left + right",
+                true,
+            ),
+            (
+                "value = left + right and other\n",
+                Language::Python,
+                "boolean_operator",
+                "left + right and other",
+                false,
+            ),
+            (
+                "local value = left + right\nlocal other = left and right\n",
+                Language::Lua,
+                "expression_list",
+                "left + right",
+                true,
+            ),
+            (
+                "local value = left + right\nlocal other = left and right\n",
+                Language::Lua,
+                "expression_list",
+                "left and right",
+                false,
+            ),
+        ] {
+            let tree = raw_tree(source, language);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+
+            assert_eq!(
+                operator_call_expression(node, source, language),
+                expected,
+                "operator_call_expression mismatch for {language:?} {kind} {text:?}"
+            );
+        }
     }
 }

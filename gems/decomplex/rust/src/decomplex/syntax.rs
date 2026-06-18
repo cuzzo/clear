@@ -10,12 +10,20 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Language {
     Ruby,
+    Python,
+    JavaScript,
+    TypeScript,
+    Lua,
 }
 
 impl Language {
     pub fn parse(value: &str) -> Result<Self> {
         match value {
             "ruby" => Ok(Self::Ruby),
+            "python" => Ok(Self::Python),
+            "javascript" => Ok(Self::JavaScript),
+            "typescript" => Ok(Self::TypeScript),
+            "lua" => Ok(Self::Lua),
             _ => bail!("unsupported Decomplex native language: {value}"),
         }
     }
@@ -78,6 +86,7 @@ pub struct SimilarityFinding {
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     match language {
         Language::Ruby => ruby::parse_file(file),
+        _ => bail!("Decomplex native parsing for {language:?} is not migrated yet"),
     }
 }
 
