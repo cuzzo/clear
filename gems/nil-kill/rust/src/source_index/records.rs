@@ -83,6 +83,16 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn container_origin_for_value(&mut self, value: Node<'_>, name: &str, frame: &mut Frame) -> Option<Value> {
+        if logical_and_node(value) {
+            return Some(json!({
+                "kind": "forwarded return",
+                "name": name,
+                "path": self.file.rel,
+                "line": line(value),
+                "code": node_text(value, self.file),
+                "callee": call_name(value, self.file).unwrap_or_default(),
+            }));
+        }
         match normalized_kind(value, self.file) {
             NormKind::Array => {
                 let types = array_elements(value)
@@ -148,11 +158,16 @@ impl<'a> FileIndexer<'a> {
         let lookup_type = self.collection_index_return_type(node, receiver_type.as_deref(), frame);
         let index_type = self.expression_type(args[0], frame);
         let origin = self.receiver_collection_origin(receiver, frame);
+        let code = if operator_assignment_index_read_node(node, self.file) {
+            assignment_lhs(node).map(|lhs| node_text(lhs, self.file)).unwrap_or_else(|| node_text(node, self.file))
+        } else {
+            node_text(node, self.file)
+        };
         self.facts.collection_index_lookups.push(json!({
             "path": self.file.rel,
             "line": line(node),
             "enclosing_scope": state.scope.join("::"),
-            "code": node_text(node, self.file),
+            "code": code,
             "receiver": node_text(receiver, self.file),
             "index": node_text(args[0], self.file),
             "receiver_type": receiver_type,
@@ -178,12 +193,17 @@ impl<'a> FileIndexer<'a> {
             if !hash_record_blocker_origin(&origin) {
                 return;
             }
+            let code = if operator_assignment_index_read_node(node, self.file) {
+                assignment_lhs(node).map(|lhs| node_text(lhs, self.file)).unwrap_or_else(|| node_text(node, self.file))
+            } else {
+                node_text(node, self.file)
+            };
             self.facts.hash_record_blockers.push(json!({
                 "path": self.file.rel,
                 "line": line(node),
                 "enclosing_scope": state.scope.join("::"),
                 "kind": "dynamic_key",
-                "code": node_text(node, self.file),
+                "code": code,
                 "receiver": node_text(receiver, self.file),
                 "index": args.first().map(|arg| node_text(*arg, self.file)),
                 "origin": origin,

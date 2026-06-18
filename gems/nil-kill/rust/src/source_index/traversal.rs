@@ -20,20 +20,20 @@ impl<'a> FileIndexer<'a> {
                     if origin.get("confidence").and_then(Value::as_str) == Some("strong") {
                         if let Some(t) = origin.get("candidate_type").and_then(Value::as_str) {
                             if useful_type(t) {
-                                self.global.static_return_types.insert(
+                                self.static_return_types.insert(
                                     updated_record["method"].as_str().unwrap_or("").to_string(), t.to_string());
                             }
                         }
                     }
                     if let Some(h) = origin.get("hash_shape") {
                         if !h.is_null() && h.get("poisoned") != Some(&Value::Bool(true)) {
-                            self.global.static_hash_return_shapes.insert(
+                            self.static_hash_return_shapes.insert(
                                 updated_record["method"].as_str().unwrap_or("").to_string(), h.clone());
                         }
                     }
                     if let Some(a) = origin.get("array_element_shape") {
                         if !a.is_null() && a.get("poisoned") != Some(&Value::Bool(true)) {
-                            self.global.static_array_element_return_shapes.insert(
+                            self.static_array_element_return_shapes.insert(
                                 updated_record["method"].as_str().unwrap_or("").to_string(), a.clone());
                         }
                     }
@@ -175,6 +175,9 @@ impl<'a> FileIndexer<'a> {
         match normalized_kind(node, self.file) {
             NormKind::Call => {
                 if lhs_element_reference_node(node) {
+                    for child in named_children(node) {
+                        self.collect_collection_index_facts(child, state, frame);
+                    }
                     return;
                 }
                 self.update_collection_builder_call(node, frame);
@@ -199,6 +202,9 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn collect_call_collection_index_facts(&mut self, node: Node<'_>, state: &ScopeState, frame: &mut Frame) {
+        if unary_arithmetic_node(node) {
+            return;
+        }
         let block = call_block(node);
         if block.is_none() || block.unwrap().child_by_field_name("body").is_none() {
             for child in named_children(node) {
@@ -253,7 +259,7 @@ impl<'a> FileIndexer<'a> {
                     if origin.get("confidence").and_then(Value::as_str) == Some("strong") {
                         if let Some(candidate) = origin.get("candidate_type").and_then(Value::as_str) {
                             if useful_type(candidate) {
-                                self.global
+                                self
                                     .static_return_types
                                     .insert(method["method"].as_str().unwrap_or("").to_string(), candidate.to_string());
                             }
@@ -261,7 +267,7 @@ impl<'a> FileIndexer<'a> {
                     }
                     if let Some(shape) = origin.get("hash_shape") {
                         if !shape.is_null() {
-                            self.global.static_hash_return_shapes.insert(
+                            self.static_hash_return_shapes.insert(
                                 method["method"].as_str().unwrap_or("").to_string(),
                                 shape.clone(),
                             );
@@ -269,7 +275,7 @@ impl<'a> FileIndexer<'a> {
                     }
                     if let Some(shape) = origin.get("array_element_shape") {
                         if !shape.is_null() {
-                            self.global.static_array_element_return_shapes.insert(
+                            self.static_array_element_return_shapes.insert(
                                 method["method"].as_str().unwrap_or("").to_string(),
                                 shape.clone(),
                             );
@@ -298,12 +304,13 @@ impl<'a> FileIndexer<'a> {
                 self.inspect_branch_guard(node, true, frame);
                 self.child_walk(node, state, frame);
             }
-            _ if logical_and_condition_node(node, self.file) => {
+            _ if logical_and_usage_node(node, self.file) => {
                 self.inspect_param_origins(node, state, frame);
                 self.child_walk(node, state, frame);
             }
             NormKind::Call => {
                 if lhs_element_reference_node(node) {
+                    self.child_walk(node, state, frame);
                     self.walk_stack.remove(&walk_key);
                     return;
                 }
@@ -351,6 +358,9 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn walk_call_children(&mut self, node: Node<'a>, state: &mut ScopeState, frame: &mut Frame) {
+        if unary_arithmetic_node(node) {
+            return;
+        }
         let block = call_block(node);
         let seed_shape = call_receiver(node, self.file).and_then(|receiver| {
             if normalized_kind(receiver, self.file) == NormKind::LocalRead
@@ -386,9 +396,23 @@ impl<'a> FileIndexer<'a> {
     }
 }
 
-fn collect_prescan(file: &SourceFile, global: &mut GlobalState) {
+fn collect_prescan(file: &mut SourceFile, global: &mut GlobalState) {
     let mut state = ScopeState::default();
-    collect_prescan_node(file, file.root_node(), &mut state, global);
+    let mut class_like_constants = BTreeSet::new();
+    let mut method_return_types = BTreeMap::new();
+    let mut non_nil_method_returns = BTreeSet::new();
+    collect_prescan_node(
+        file,
+        file.root_node(),
+        &mut state,
+        global,
+        &mut class_like_constants,
+        &mut method_return_types,
+        &mut non_nil_method_returns,
+    );
+    file.class_like_constants = class_like_constants;
+    file.method_return_types = method_return_types;
+    file.non_nil_method_returns = non_nil_method_returns;
 }
 
 fn collect_prescan_node(
@@ -396,6 +420,9 @@ fn collect_prescan_node(
     node: Node<'_>,
     state: &mut ScopeState,
     global: &mut GlobalState,
+    class_like_constants: &mut BTreeSet<String>,
+    method_return_types: &mut BTreeMap<String, BTreeSet<String>>,
+    non_nil_method_returns: &mut BTreeSet<String>,
 ) {
     match normalized_kind(node, file) {
         NormKind::Class | NormKind::Module => {
@@ -408,10 +435,20 @@ fn collect_prescan_node(
             if !name.is_empty() {
                 global.class_like_constants.insert(full.clone());
                 global.class_like_constants.insert(name.clone());
+                class_like_constants.insert(full.clone());
+                class_like_constants.insert(name.clone());
                 state.scope.push(name);
                 state.class_name = Some(full);
                 for child in named_children(node) {
-                    collect_prescan_node(file, child, state, global);
+                    collect_prescan_node(
+                        file,
+                        child,
+                        state,
+                        global,
+                        class_like_constants,
+                        method_return_types,
+                        non_nil_method_returns,
+                    );
                 }
                 state.scope.pop();
                 state.class_name = state.scope.last().cloned();
@@ -443,7 +480,13 @@ fn collect_prescan_node(
                         }
                     }
                     global.class_like_constants.insert(klass);
-                    global.class_like_constants.insert(name);
+                    global.class_like_constants.insert(name.clone());
+                    class_like_constants.insert(if state.scope.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{}::{name}", state.scope.join("::"))
+                    });
+                    class_like_constants.insert(name);
                 }
             }
         }
@@ -466,13 +509,12 @@ fn collect_prescan_node(
         NormKind::Def => {
             if let Some(sig) = sig_above(&file.lines, line(node)) {
                 if let Some(ret) = extract_return_type(&sig) {
-                    global
-                        .method_return_types
+                    method_return_types
                         .entry(method_name(node, file))
                         .or_default()
                         .insert(ret.clone());
                     if non_nil_return_sig(&sig) {
-                        global.noreturn_methods.remove(&method_name(node, file));
+                        non_nil_method_returns.insert(method_name(node, file));
                     }
                 }
             }
@@ -480,6 +522,14 @@ fn collect_prescan_node(
         _ => {}
     }
     for child in named_children(node) {
-        collect_prescan_node(file, child, state, global);
+        collect_prescan_node(
+            file,
+            child,
+            state,
+            global,
+            class_like_constants,
+            method_return_types,
+            non_nil_method_returns,
+        );
     }
 }

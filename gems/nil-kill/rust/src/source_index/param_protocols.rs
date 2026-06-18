@@ -1,6 +1,12 @@
 impl<'a> FileIndexer<'a> {
     fn inspect_param_origins(&mut self, node: Node<'_>, state: &ScopeState, frame: &mut Frame) {
+        if unary_bang_condition_and_operand(node, self.file) {
+            return;
+        }
         let Some(callee) = call_name(node, self.file) else { return };
+        if callee == "defined?" {
+            return;
+        }
         let args = call_arguments(node, self.file);
         for (idx, arg) in args.iter().enumerate() {
             if normalized_kind(*arg, self.file) == NormKind::Pair {
@@ -179,6 +185,19 @@ impl<'a> FileIndexer<'a> {
         protocols: &mut BTreeMap<String, Protocol>,
         frame: &mut Frame,
     ) {
+        if under_unary_bang_logical_and_operand(node, self.file) {
+            return;
+        }
+        if logical_and_node(node) {
+            if let Some(left) = named_children(node).first().copied() {
+                if normalized_kind(left, self.file) == NormKind::LocalRead {
+                    let name = node_text(left, self.file);
+                    if let Some(protocol) = protocols.get_mut(&name) {
+                        protocol.methods.insert("&&".to_string());
+                    }
+                }
+            }
+        }
         match normalized_kind(node, self.file) {
             NormKind::Call => {
                 if let Some(receiver) = call_receiver(node, self.file) {
@@ -249,8 +268,19 @@ impl<'a> FileIndexer<'a> {
             }
             _ => {}
         }
-        for child in named_children(node) {
-            self.collect_protocols(child, names, protocols, frame);
+        if matches!(node.kind(), "assignment" | "operator_assignment")
+            && assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
+        {
+            if let Some(value) = write_value(node) {
+                self.collect_protocols(value, names, protocols, frame);
+            }
+        } else {
+            for child in named_children(node) {
+                if negated_logical_child(node, child, self.file) {
+                    continue;
+                }
+                self.collect_protocols(child, names, protocols, frame);
+            }
         }
     }
 

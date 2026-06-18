@@ -1,6 +1,7 @@
 fn call_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
     match node.kind() {
         "element_reference" => Some("[]".to_string()),
+        "operator_assignment" if operator_assignment_index_read_node(node, file) => Some("[]".to_string()),
         "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") => {
             Some("[]=".to_string())
         }
@@ -48,6 +49,10 @@ fn call_receiver<'tree>(node: Node<'tree>, _file: &SourceFile) -> Option<Node<'t
 fn call_arguments<'tree>(node: Node<'tree>, file: &SourceFile) -> Vec<Node<'tree>> {
     match node.kind() {
         "element_reference" => named_children(node).into_iter().skip(1).collect(),
+        "unary" if unary_arithmetic_node(node) => Vec::new(),
+        "operator_assignment" if operator_assignment_index_read_node(node, file) => assignment_lhs(node)
+            .map(|lhs| named_children(lhs).into_iter().skip(1).collect())
+            .unwrap_or_default(),
         "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") => {
             let mut out = assignment_lhs(node)
                 .map(|lhs| named_children(lhs).into_iter().skip(1).collect::<Vec<_>>())
@@ -254,13 +259,14 @@ fn normalized_kind(node: Node<'_>, file: &SourceFile) -> NormKind {
         "hash" => NormKind::Hash,
         "pair" => NormKind::Pair,
         "argument_list" if looks_like_keyword_hash(node) => NormKind::KeywordHash,
-        "string" | "chained_string" => {
+        "string" => {
             if named_children(node).iter().any(|child| child.kind() == "interpolation") {
                 NormKind::InterpolatedString
             } else {
                 NormKind::String
             }
         }
+        "chained_string" => NormKind::Other,
         "bare_string" => NormKind::String,
         "simple_symbol" | "hash_key_symbol" | "symbol" => NormKind::Symbol,
         "integer" => NormKind::Integer,
@@ -516,6 +522,22 @@ fn unary_bang_node(node: Node<'_>) -> bool {
             .as_deref() == Some("!")
 }
 
+fn unary_arithmetic_node(node: Node<'_>) -> bool {
+    node.kind() == "unary"
+        && all_children(node)
+            .into_iter()
+            .find(|child| !child.is_named())
+            .map(node_text_raw)
+            .is_some_and(|op| matches!(op.as_str(), "-" | "+"))
+}
+
+fn operator_assignment_index_read_node(node: Node<'_>, file: &SourceFile) -> bool {
+    node.kind() == "operator_assignment"
+        && node_text(node, file).contains("+=")
+        && assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
+        && write_value(node).is_some_and(|value| normalized_kind(value, file) == NormKind::LocalRead)
+}
+
 fn unary_bang_condition_and_operand(node: Node<'_>, file: &SourceFile) -> bool {
     if !unary_bang_node(node) {
         return false;
@@ -532,6 +554,49 @@ fn unary_bang_condition_and_operand(node: Node<'_>, file: &SourceFile) -> bool {
         return false;
     }
     false
+}
+
+fn unary_bang_logical_and_operand(node: Node<'_>) -> bool {
+    if !unary_bang_node(node) {
+        return false;
+    }
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if logical_and_node(parent) {
+            return true;
+        }
+        if matches!(parent.kind(), "parenthesized_statements" | "parenthesized_expression") {
+            current = parent;
+            continue;
+        }
+        return false;
+    }
+    false
+}
+
+fn under_unary_bang_logical_and_operand(node: Node<'_>, file: &SourceFile) -> bool {
+    let mut current = Some(node);
+    while let Some(inner) = current {
+        if unary_bang_logical_and_operand(inner) {
+            return true;
+        }
+        if logical_and_node(inner) {
+            let needle = format!("!{}", node_text(node, file));
+            if node_text(inner, file).contains(&needle) {
+                return true;
+            }
+        }
+        current = inner.parent();
+    }
+    false
+}
+
+fn negated_logical_child(parent: Node<'_>, child: Node<'_>, file: &SourceFile) -> bool {
+    let parent_text = node_text(parent, file);
+    if !parent_text.contains("&&") && !parent_text.contains(" and ") {
+        return false;
+    }
+    parent_text.contains(&format!("!{}", node_text(child, file)))
 }
 
 fn logical_and_condition_node(node: Node<'_>, file: &SourceFile) -> bool {
@@ -556,6 +621,26 @@ fn logical_and_condition_node(node: Node<'_>, file: &SourceFile) -> bool {
     false
 }
 
+fn logical_and_assignment_value_node(node: Node<'_>) -> bool {
+    if !logical_and_node(node) {
+        return false;
+    }
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if logical_and_node(parent) || matches!(parent.kind(), "parenthesized_statements" | "parenthesized_expression") {
+            current = parent;
+            continue;
+        }
+        return matches!(parent.kind(), "assignment" | "operator_assignment")
+            && write_value(parent) == Some(current);
+    }
+    false
+}
+
+fn logical_and_usage_node(node: Node<'_>, file: &SourceFile) -> bool {
+    logical_and_condition_node(node, file) || logical_and_assignment_value_node(node)
+}
+
 fn walk_raw(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
     f(node);
     for child in named_children(node) {
@@ -573,6 +658,7 @@ fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
     let children = node.named_children(&mut cursor)
         .filter(|child| *child != node)
+        .filter(|child| child.kind() != "comment")
         .collect::<Vec<_>>();
     if node.kind() == "ensure" {
         children.first().copied().into_iter().collect()

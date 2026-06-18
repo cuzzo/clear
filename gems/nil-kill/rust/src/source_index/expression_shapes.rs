@@ -77,10 +77,11 @@ impl<'a> FileIndexer<'a> {
             let left = consequent_node(node)
                 .and_then(implicit_return_expression)
                 .and_then(|expr| self.expression_type(expr, frame));
-            let right = alternative_node(node)
-                .and_then(implicit_return_expression)
-                .and_then(|expr| self.expression_type(expr, frame))
-                .or_else(|| Some("NilClass".to_string()));
+            let right = if let Some(alternative) = alternative_node(node) {
+                implicit_return_expression(alternative).and_then(|expr| self.expression_type(expr, frame))
+            } else {
+                Some("NilClass".to_string())
+            };
             return Some(static_sorbet_type(&[left, right].into_iter().flatten().collect::<Vec<_>>()));
         }
         if kind == NormKind::While || kind == NormKind::Until {
@@ -309,7 +310,7 @@ impl<'a> FileIndexer<'a> {
             return None;
         }
         let bare = name.trim_start_matches("::").to_string();
-        if CORE_CLASS_CONSTANTS.contains(&bare.as_str()) || self.global.class_like_constants.contains(&bare) {
+        if CORE_CLASS_CONSTANTS.contains(&bare.as_str()) || self.file.class_like_constants.contains(&bare) {
             Some(format!("T.class_of({name})"))
         } else {
             None
@@ -389,7 +390,7 @@ impl<'a> FileIndexer<'a> {
                         .first()
                         .and_then(|arg| self.hash_shape_for_value(*arg, frame))
                 } else if call_receiver(value, self.file).is_none() {
-                    call_name(value, self.file).and_then(|name| self.global.static_hash_return_shapes.get(&name).cloned())
+                    call_name(value, self.file).and_then(|name| self.static_hash_return_shapes.get(&name).cloned())
                 } else {
                     self.attribute_hash_shape_for_call(value, frame)
                 }
@@ -445,7 +446,7 @@ impl<'a> FileIndexer<'a> {
                 } else if matches!(call_name(value, self.file).as_deref(), Some("select" | "reject" | "compact" | "first" | "last")) {
                     self.array_element_shape_for_receiver(call_receiver(value, self.file), frame)
                 } else if call_receiver(value, self.file).is_none() {
-                    call_name(value, self.file).and_then(|name| self.global.static_array_element_return_shapes.get(&name).cloned())
+                    call_name(value, self.file).and_then(|name| self.static_array_element_return_shapes.get(&name).cloned())
                 } else {
                     self.attribute_array_element_shape_for_call(value, frame)
                 }

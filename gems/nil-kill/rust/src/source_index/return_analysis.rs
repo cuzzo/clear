@@ -12,7 +12,7 @@ impl<'a> FileIndexer<'a> {
         let sig = sig_above(&self.file.lines, line(node));
         let method_params = params(node, sig.as_deref(), self.file);
         if let Some(ret) = sig.as_deref().and_then(extract_return_type) {
-            self.global
+            self
                 .method_return_types
                 .entry(method_name(node, self.file))
                 .or_default()
@@ -421,13 +421,12 @@ impl<'a> FileIndexer<'a> {
                 }
             }
         }
-        if let Some(ty) = self.global.static_return_types.get(method_name) {
+        if let Some(ty) = self.static_return_types.get(method_name) {
             if useful_type(ty) {
                 return Some(ty.clone());
             }
         }
         let types = self
-            .global
             .method_return_types
             .get(method_name)
             .map(|set| set.iter().cloned().collect::<Vec<_>>())
@@ -533,6 +532,7 @@ impl<'a> FileIndexer<'a> {
                 .filter(|ty| ty.starts_with("T::Hash") || ty.starts_with("T::Array")),
             "to_s" => Some("String".to_string()),
             "to_i" => Some("Integer".to_string()),
+            "to_f" => Some("Float".to_string()),
             "to_sym" => Some("Symbol".to_string()),
             "!" | "!=" | "==" | "<" | ">" | "<=" | ">=" | "eql?" | "equal?" | "===" | "frozen?" | "respond_to?" | "kind_of?" | "instance_of?" => {
                 Some("T::Boolean".to_string())
@@ -1114,9 +1114,7 @@ fn collect_explicit_returns<'tree>(node: Node<'tree>, results: &mut Vec<Node<'tr
     }
     if node.kind() == "return" || normalized_kind_by_raw(node) == NormKind::Return {
         let args = raw_return_args(node);
-        if let Some(first) = args.first() {
-            results.push(*first);
-        }
+        results.push(args.first().copied().unwrap_or(node));
         return;
     }
     for child in named_children(node) {
@@ -1148,15 +1146,33 @@ fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<Str
                 | "value?"
                 | "has_value?"
                 | "positive?"
-                | "end_with?",
+                | "end_with?"
+                | "start_with?"
+                | "match?"
+                | "!"
+                | "!="
+                | "equal?"
+                | "==="
+                | "frozen?"
+                | "respond_to?"
+                | "kind_of?"
+                | "instance_of?",
             _,
         ) => Some("T::Boolean".to_string()),
+        ("==" | "eql?", ty) if !ty.is_empty() => Some("T::Boolean".to_string()),
         ("each_with_object", _) => Some("T::Enumerator[[T.untyped, T.untyped]]".to_string()),
         ("each_index", _) => Some("T::Array[T.untyped]".to_string()),
         ("file?", _) => Some("T::Boolean".to_string()),
-        ("mktmpdir" | "realpath" | "message", _) => Some("String".to_string()),
+        ("line", _) => Some("Integer".to_string()),
+        ("mktmpdir" | "realpath" | "message" | "strip" | "lstrip" | "rstrip" | "delete_prefix" | "delete_suffix" | "tr", _) => {
+            Some("String".to_string())
+        }
         ("pretty_generate", _) => Some("::String".to_string()),
-        ("uniq" | "sort_by", _) => Some("T::Array[T.untyped]".to_string()),
+        ("sort" | "uniq" | "sort_by", _) => Some("T::Array[T.untyped]".to_string()),
+        ("[]", "String") => Some("T.nilable(String)".to_string()),
+        ("split", "String") => Some("T::Array[String]".to_string()),
+        ("join", ty) if array_receiver_type(ty) => Some("String".to_string()),
+        ("+", ty) if array_receiver_type(ty) => Some("T::Array[T.any(T.untyped, T.untyped)]".to_string()),
         ("merge", _) => Some("T::Hash[T.any(T.untyped, T.untyped), T.any(T.untyped, T.untyped)]".to_string()),
         ("map" | "filter_map" | "select" | "reject", ty) if collection_receiver_type(ty) => {
             Some("T::Array[T.untyped]".to_string())
@@ -1171,11 +1187,17 @@ fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<Str
         ("to_h", ty) if collection_receiver_type(ty) => Some("T::Hash[T.untyped, T.untyped]".to_string()),
         ("to_s", _) => Some("String".to_string()),
         ("to_i", _) => Some("Integer".to_string()),
+        ("to_f", _) => Some("Float".to_string()),
         ("to_sym", _) => Some("Symbol".to_string()),
-        ("upcase" | "downcase" | "capitalize" | "swapcase" | "strip" | "lstrip" | "rstrip" | "delete_prefix" | "delete_suffix", "String") => {
+        ("upcase" | "downcase" | "capitalize" | "swapcase", "String") => {
             Some("String".to_string())
         }
-        ("lines", _) => Some("T::Array[String]".to_string()),
+        ("lines" | "readlines", _) => Some("T::Array[String]".to_string()),
+        ("to_set", _) => Some("T::Set[T.untyped]".to_string()),
+        ("new", "Struct") => Some("Struct".to_string()),
+        ("raise", _) => Some("T.noreturn".to_string()),
+        ("run", _) => Some("Thread".to_string()),
+        ("sub", "String") => Some("String".to_string()),
         ("nil?", _) => Some("T::Boolean".to_string()),
         ("bytes", "String") => Some("T::Array[Integer]".to_string()),
         ("*", "String") => Some("String".to_string()),

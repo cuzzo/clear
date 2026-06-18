@@ -390,14 +390,32 @@ fn collect_return_usage_site_context(
             && !(assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
                 && node_text(node, file).contains("||=")) =>
         {
-            if node.kind() == "operator_assignment"
-                && assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
-            {
+            if operator_assignment_index_read_node(node, file) {
                 if let Some(lhs) = assignment_lhs(node) {
-                    collect_return_usage_site_context(lhs, file, context, current_method, current_handler, sites, handlers, direct_usage);
+                    collect_return_usage_site_context(lhs, file, "statement", current_method, current_handler, sites, handlers, direct_usage);
+                }
+            } else if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") {
+                if let Some(name) = call_name(node, file).filter(|name| !name.is_empty()) {
+                    sites.push(json!({
+                        "path": file.rel, "line": line(node), "name": name,
+                        "context": context, "current_method": current_method,
+                        "handler_line": current_handler,
+                        "code": first_line(&node_text(node, file)),
+                    }));
+                }
+                if let Some(receiver) = call_receiver(node, file) {
+                    collect_return_usage_site_context(receiver, file, "value", current_method, current_handler, sites, handlers, direct_usage);
+                }
+                for arg in call_arguments(node, file) {
+                    collect_return_usage_site_context(arg, file, "value", current_method, current_handler, sites, handlers, direct_usage);
                 }
             } else if let Some(value) = write_value(node) {
-                collect_return_usage_site_context(value, file, context, current_method, current_handler, sites, handlers, direct_usage);
+                let value_context = if node_text(node, file).contains("||=") || node_text(node, file).contains("&&=") {
+                    context
+                } else {
+                    "value"
+                };
+                collect_return_usage_site_context(value, file, value_context, current_method, current_handler, sites, handlers, direct_usage);
             }
         }
         _ if unary_bang_condition_and_operand(node, file) => {
@@ -408,7 +426,7 @@ fn collect_return_usage_site_context(
                 "code": first_line(&node_text(node, file)),
             }));
         }
-        _ if logical_and_condition_node(node, file) => {
+        _ if logical_and_usage_node(node, file) => {
             if let Some(name) = call_name(node, file).filter(|name| !name.is_empty()) {
                 sites.push(json!({
                     "path": file.rel, "line": line(node), "name": name,

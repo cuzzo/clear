@@ -360,7 +360,7 @@ impl<'a> FileIndexer<'a> {
             }
             NormKind::Call => !safe_navigation(node)
                 && call_name(node, self.file)
-                    .is_some_and(|name| self.global.method_return_types.get(&name).is_some_and(|types| types.len() == 1 && !types.contains("NilClass"))),
+                    .is_some_and(|name| self.file.non_nil_method_returns.contains(&name)),
             NormKind::SelfNode => true,
             _ => self.non_nil_literal(node, frame),
         }

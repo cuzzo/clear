@@ -66,10 +66,6 @@ struct GlobalState {
     class_like_constants: BTreeSet<String>,
     struct_fields_by_name: BTreeMap<String, Vec<String>>,
     struct_full_by_name: BTreeMap<String, String>,
-    method_return_types: BTreeMap<String, BTreeSet<String>>,
-    static_return_types: BTreeMap<String, String>,
-    static_hash_return_shapes: BTreeMap<String, Value>,
-    static_array_element_return_shapes: BTreeMap<String, Value>,
     attribute_hash_shapes: BTreeMap<String, Value>,
     attribute_array_element_shapes: BTreeMap<String, Value>,
     struct_field_hash_shapes: BTreeMap<(String, String), Value>,
@@ -89,6 +85,9 @@ struct SourceFile {
     lines: Vec<String>,
     tree: tree_sitter::Tree,
     local_names_by_scope: BTreeMap<ScopeKey, BTreeSet<String>>,
+    class_like_constants: BTreeSet<String>,
+    method_return_types: BTreeMap<String, BTreeSet<String>>,
+    non_nil_method_returns: BTreeSet<String>,
 }
 
 impl SourceFile {
@@ -106,6 +105,9 @@ impl SourceFile {
             lines,
             tree,
             local_names_by_scope: BTreeMap::new(),
+            class_like_constants: BTreeSet::new(),
+            method_return_types: BTreeMap::new(),
+            non_nil_method_returns: BTreeSet::new(),
         };
         file.local_names_by_scope = build_local_name_cache(&file);
         file
@@ -418,6 +420,10 @@ struct FileIndexer<'a> {
     method_nodes: Vec<(Node<'a>, Value)>,
     walk_stack: BTreeSet<WalkKey>,
     ivar_container_origins: BTreeMap<String, Value>,
+    method_return_types: BTreeMap<String, BTreeSet<String>>,
+    static_return_types: BTreeMap<String, String>,
+    static_hash_return_shapes: BTreeMap<String, Value>,
+    static_array_element_return_shapes: BTreeMap<String, Value>,
 }
 
 impl<'a> FileIndexer<'a> {
@@ -429,6 +435,10 @@ impl<'a> FileIndexer<'a> {
             method_nodes: Vec::new(),
             walk_stack: BTreeSet::new(),
             ivar_container_origins: BTreeMap::new(),
+            method_return_types: file.method_return_types.clone(),
+            static_return_types: BTreeMap::new(),
+            static_hash_return_shapes: BTreeMap::new(),
+            static_array_element_return_shapes: BTreeMap::new(),
         }
     }
 
