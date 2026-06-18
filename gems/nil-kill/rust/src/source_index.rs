@@ -417,6 +417,7 @@ struct FileIndexer<'a> {
     facts: FileFacts,
     method_nodes: Vec<(Node<'a>, Value)>,
     walk_stack: BTreeSet<WalkKey>,
+    ivar_container_origins: BTreeMap<String, Value>,
 }
 
 impl<'a> FileIndexer<'a> {
@@ -427,6 +428,7 @@ impl<'a> FileIndexer<'a> {
             facts: FileFacts::new(),
             method_nodes: Vec::new(),
             walk_stack: BTreeSet::new(),
+            ivar_container_origins: BTreeMap::new(),
         }
     }
 

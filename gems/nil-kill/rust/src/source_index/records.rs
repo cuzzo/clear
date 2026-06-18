@@ -77,7 +77,7 @@ impl<'a> FileIndexer<'a> {
         let Some(name) = write_name(node, self.file) else { return };
         if let Some(value) = write_value(node) {
             if let Some(origin) = self.container_origin_for_value(value, &name, frame) {
-                frame.ivar_container_origins.insert(name, origin);
+                self.ivar_container_origins.insert(name, origin);
             }
         }
     }
@@ -117,6 +117,7 @@ impl<'a> FileIndexer<'a> {
             NormKind::IvarRead | NormKind::ClassVarRead | NormKind::GlobalVarRead => frame
                 .ivar_container_origins
                 .get(&node_text(value, self.file))
+                .or_else(|| self.ivar_container_origins.get(&node_text(value, self.file)))
                 .map(|origin| merge_value(origin, &[("name", json!(name)), ("alias_of", json!(node_text(value, self.file)))])),
             NormKind::Call => Some(json!({
                 "kind": "forwarded return",
@@ -282,7 +283,10 @@ impl<'a> FileIndexer<'a> {
             }
             NormKind::IvarRead | NormKind::ClassVarRead | NormKind::GlobalVarRead => {
                 let name = node_text(node, self.file);
-                frame.ivar_container_origins.get(&name).cloned().unwrap_or_else(|| {
+                frame.ivar_container_origins.get(&name)
+                    .or_else(|| self.ivar_container_origins.get(&name))
+                    .cloned()
+                    .unwrap_or_else(|| {
                     json!({"kind": "instance variable", "name": name})
                 })
             }

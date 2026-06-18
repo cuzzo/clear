@@ -296,13 +296,8 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn static_expression_type(&mut self, node: Node<'_>, frame: &mut Frame) -> Option<String> {
-        self.constant_expression_type(node).or_else(|| literal_type(node, self.file)).or_else(|| {
-            if normalized_kind(node, self.file) == NormKind::Call {
-                self.expression_type(node, frame)
-            } else {
-                None
-            }
-        })
+        let _ = frame;
+        self.constant_expression_type(node).or_else(|| literal_type(node, self.file))
     }
 
     fn constant_expression_type(&self, node: Node<'_>) -> Option<String> {

@@ -285,21 +285,35 @@ fn collect_return_usage_site_context(
         }
         NormKind::Statements => {
             let body = statement_expressions(node);
-            let has_rescue = named_children(node)
-                .into_iter()
-                .any(|child| child.kind() == "rescue");
+            let children = named_children(node);
+            let handler_line = children
+                .iter()
+                .find(|child| child.kind() == "rescue")
+                .map(|child| line(*child));
+            if let Some(handler_line) = handler_line {
+                handlers.push(json!({
+                    "path": file.rel,
+                    "line": handler_line,
+                    "kind": "rescue",
+                    "method": current_method,
+                }));
+            }
+            let protected_handler = handler_line.or(current_handler);
             let last = body.len().saturating_sub(1);
             for (idx, child) in body.into_iter().enumerate() {
-                let child_context = if has_rescue || idx != last { "statement" } else { context };
-                collect_return_usage_site_context(child, file, child_context, current_method, current_handler, sites, handlers, direct_usage);
+                let child_context = if idx == last { context } else { "statement" };
+                collect_return_usage_site_context(child, file, child_context, current_method, protected_handler, sites, handlers, direct_usage);
             }
-            for child in named_children(node) {
+            for child in children {
                 match child.kind() {
                     "rescue" => {
                         collect_return_usage_site_context(child, file, "statement", current_method, None, sites, handlers, direct_usage);
                     }
+                    "else" => {
+                        collect_return_usage_site_context(child, file, context, current_method, protected_handler, sites, handlers, direct_usage);
+                    }
                     "ensure" => {
-                        collect_return_usage_site_context(child, file, context, current_method, current_handler, sites, handlers, direct_usage);
+                        collect_return_usage_site_context(child, file, context, current_method, protected_handler, sites, handlers, direct_usage);
                     }
                     _ => {}
                 }
@@ -329,11 +343,89 @@ fn collect_return_usage_site_context(
                 collect_return_usage_site_context(child, file, child_context, current_method, current_handler, sites, handlers, direct_usage);
             }
         }
+        NormKind::Begin => {
+            let children = named_children(node);
+            let handler_line = children
+                .iter()
+                .find(|child| child.kind() == "rescue")
+                .map(|child| line(*child));
+            if let Some(handler_line) = handler_line {
+                handlers.push(json!({
+                    "path": file.rel,
+                    "line": handler_line,
+                    "kind": "rescue",
+                    "method": current_method,
+                }));
+            }
+            let protected_handler = handler_line.or(current_handler);
+            let body = statement_expressions(node);
+            let last = body.len().saturating_sub(1);
+            for (idx, child) in body.into_iter().enumerate() {
+                let child_context = if idx == last { context } else { "statement" };
+                collect_return_usage_site_context(child, file, child_context, current_method, protected_handler, sites, handlers, direct_usage);
+            }
+            for child in children {
+                match child.kind() {
+                    "rescue" => {
+                        collect_return_usage_site_context(child, file, "statement", current_method, None, sites, handlers, direct_usage);
+                    }
+                    "else" => {
+                        collect_return_usage_site_context(child, file, context, current_method, protected_handler, sites, handlers, direct_usage);
+                    }
+                    "ensure" => {
+                        collect_return_usage_site_context(child, file, context, current_method, protected_handler, sites, handlers, direct_usage);
+                    }
+                    _ => {}
+                }
+            }
+        }
         NormKind::Rescue => {
             for child in named_children(node) {
                 if matches!(child.kind(), "body_statement" | "block_body" | "then") {
                     collect_return_usage_site_context(child, file, "statement", current_method, current_handler, sites, handlers, direct_usage);
                 }
+            }
+        }
+        _ if node.kind() == "operator_assignment"
+            && !(assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
+                && node_text(node, file).contains("||=")) =>
+        {
+            if node.kind() == "operator_assignment"
+                && assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
+            {
+                if let Some(lhs) = assignment_lhs(node) {
+                    collect_return_usage_site_context(lhs, file, context, current_method, current_handler, sites, handlers, direct_usage);
+                }
+            } else if let Some(value) = write_value(node) {
+                collect_return_usage_site_context(value, file, context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+        }
+        _ if unary_bang_condition_and_operand(node, file) => {
+            sites.push(json!({
+                "path": file.rel, "line": line(node), "name": "!",
+                "context": context, "current_method": current_method,
+                "handler_line": current_handler,
+                "code": first_line(&node_text(node, file)),
+            }));
+        }
+        _ if logical_and_condition_node(node, file) => {
+            if let Some(name) = call_name(node, file).filter(|name| !name.is_empty()) {
+                sites.push(json!({
+                    "path": file.rel, "line": line(node), "name": name,
+                    "context": context, "current_method": current_method,
+                    "handler_line": current_handler,
+                    "code": first_line(&node_text(node, file)),
+                }));
+            }
+            if let Some(receiver) = call_receiver(node, file) {
+                collect_return_usage_site_context(receiver, file, "value", current_method, current_handler, sites, handlers, direct_usage);
+            }
+            let arg_context = if direct_usage { "return" } else { "value" };
+            for arg in call_arguments(node, file) {
+                collect_return_usage_site_context(arg, file, arg_context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+            if let Some(block) = call_block(node) {
+                collect_return_usage_site_context(block, file, "value", current_method, current_handler, sites, handlers, direct_usage);
             }
         }
         NormKind::Call => {

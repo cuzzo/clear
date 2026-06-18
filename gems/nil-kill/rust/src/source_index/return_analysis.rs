@@ -527,11 +527,22 @@ impl<'a> FileIndexer<'a> {
             "compact" => receiver_type
                 .as_deref()
                 .and_then(collection_compact_return_type),
+            "select" | "reject" => receiver_type.filter(|ty| collection_receiver_type(ty)),
+            "to_a" => receiver_type.filter(|ty| collection_receiver_type(ty)),
+            "to_h" => receiver_type
+                .filter(|ty| ty.starts_with("T::Hash") || ty.starts_with("T::Array")),
             "to_s" => Some("String".to_string()),
             "to_i" => Some("Integer".to_string()),
             "to_sym" => Some("Symbol".to_string()),
             "!" | "!=" | "==" | "<" | ">" | "<=" | ">=" | "eql?" | "equal?" | "===" | "frozen?" | "respond_to?" | "kind_of?" | "instance_of?" => {
                 Some("T::Boolean".to_string())
+            }
+            "<=>" => {
+                if call_receiver(node, self.file).is_some() {
+                    Some("T.nilable(Integer)".to_string())
+                } else {
+                    None
+                }
             }
             "hash" => Some("Integer".to_string()),
             "inspect" => Some("String".to_string()),
@@ -1123,19 +1134,56 @@ fn collection_builder_kind(kind: &str) -> CollectionBuilderKind {
 }
 
 fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<String> {
-    match (method, receiver_type.unwrap_or("")) {
+    let receiver_type = receiver_type.unwrap_or("");
+    match (method, receiver_type) {
+        (
+            "empty?"
+                | "any?"
+                | "all?"
+                | "none?"
+                | "one?"
+                | "include?"
+                | "key?"
+                | "has_key?"
+                | "value?"
+                | "has_value?"
+                | "positive?"
+                | "end_with?",
+            _,
+        ) => Some("T::Boolean".to_string()),
+        ("each_with_object", _) => Some("T::Enumerator[[T.untyped, T.untyped]]".to_string()),
+        ("each_index", _) => Some("T::Array[T.untyped]".to_string()),
+        ("file?", _) => Some("T::Boolean".to_string()),
+        ("mktmpdir" | "realpath" | "message", _) => Some("String".to_string()),
+        ("pretty_generate", _) => Some("::String".to_string()),
+        ("uniq" | "sort_by", _) => Some("T::Array[T.untyped]".to_string()),
+        ("merge", _) => Some("T::Hash[T.any(T.untyped, T.untyped), T.any(T.untyped, T.untyped)]".to_string()),
+        ("map" | "filter_map" | "select" | "reject", ty) if collection_receiver_type(ty) => {
+            Some("T::Array[T.untyped]".to_string())
+        }
+        ("flat_map", ty) if collection_receiver_type(ty) => Some("T::Enumerator[T.untyped]".to_string()),
+        ("compact", ty) if array_receiver_type(ty) => Some("T::Array[T.untyped]".to_string()),
+        ("values", ty) if hash_receiver_type(ty) => Some("T::Array[T.untyped]".to_string()),
+        ("fetch", ty) if array_receiver_type(ty) || hash_receiver_type(ty) => {
+            Some("T.any(T.untyped, T.untyped)".to_string())
+        }
+        ("to_a", ty) if collection_receiver_type(ty) => Some("T::Array[T.untyped]".to_string()),
+        ("to_h", ty) if collection_receiver_type(ty) => Some("T::Hash[T.untyped, T.untyped]".to_string()),
         ("to_s", _) => Some("String".to_string()),
         ("to_i", _) => Some("Integer".to_string()),
         ("to_sym", _) => Some("Symbol".to_string()),
-        ("upcase" | "downcase" | "capitalize" | "swapcase" | "strip" | "lstrip" | "rstrip", "String") => {
+        ("upcase" | "downcase" | "capitalize" | "swapcase" | "strip" | "lstrip" | "rstrip" | "delete_prefix" | "delete_suffix", "String") => {
             Some("String".to_string())
         }
+        ("lines", _) => Some("T::Array[String]".to_string()),
+        ("nil?", _) => Some("T::Boolean".to_string()),
         ("bytes", "String") => Some("T::Array[Integer]".to_string()),
         ("*", "String") => Some("String".to_string()),
         ("expand_path", _) => Some("String".to_string()),
         ("ruby", _) => Some("String".to_string()),
         ("spawn", _) => Some("Integer".to_string()),
-        ("sum", ty) if array_receiver_type(ty) => Some("T.all(T.untyped, Numeric)".to_string()),
+        ("sum", "String") => Some("Integer".to_string()),
+        ("sum", ty) if collection_receiver_type(ty) => Some("T.all(T.untyped, Numeric)".to_string()),
         _ => None,
     }
 }
@@ -1258,7 +1306,7 @@ fn implicit_return_expression(node: Node<'_>) -> Option<Node<'_>> {
 fn statement_expressions(node: Node<'_>) -> Vec<Node<'_>> {
     named_children(node)
         .into_iter()
-        .filter(|child| !matches!(child.kind(), "rescue" | "ensure"))
+        .filter(|child| !matches!(child.kind(), "comment" | "rescue" | "ensure"))
         .collect()
 }
 

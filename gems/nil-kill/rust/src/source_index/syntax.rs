@@ -105,7 +105,12 @@ fn block_param_names(block: Node<'_>, file: &SourceFile) -> Vec<String> {
 }
 
 fn raw_return_args(node: Node<'_>) -> Vec<Node<'_>> {
-    named_children(node)
+    let children = named_children(node);
+    if children.len() == 1 && children[0].kind() == "argument_list" {
+        named_children(children[0])
+    } else {
+        children
+    }
 }
 
 fn receiver_before_dot(node: Node<'_>) -> Option<Node<'_>> {
@@ -239,6 +244,8 @@ fn normalized_kind(node: Node<'_>, file: &SourceFile) -> NormKind {
         "element_reference" | "binary" | "unary" => {
             if node.kind() == "binary" && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "||" | "or")) {
                 NormKind::Or
+            } else if node.kind() == "binary" && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "&&" | "and")) {
+                NormKind::Other
             } else {
                 NormKind::Call
             }
@@ -247,13 +254,14 @@ fn normalized_kind(node: Node<'_>, file: &SourceFile) -> NormKind {
         "hash" => NormKind::Hash,
         "pair" => NormKind::Pair,
         "argument_list" if looks_like_keyword_hash(node) => NormKind::KeywordHash,
-        "string" => {
+        "string" | "chained_string" => {
             if named_children(node).iter().any(|child| child.kind() == "interpolation") {
                 NormKind::InterpolatedString
             } else {
                 NormKind::String
             }
         }
+        "bare_string" => NormKind::String,
         "simple_symbol" | "hash_key_symbol" | "symbol" => NormKind::Symbol,
         "integer" => NormKind::Integer,
         "float" => NormKind::Float,
@@ -494,6 +502,60 @@ fn binary_operator(node: Node<'_>) -> Option<String> {
         .map(node_text_raw)
 }
 
+fn logical_and_node(node: Node<'_>) -> bool {
+    node.kind() == "binary"
+        && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "&&" | "and"))
+}
+
+fn unary_bang_node(node: Node<'_>) -> bool {
+    node.kind() == "unary"
+        && all_children(node)
+            .into_iter()
+            .find(|child| !child.is_named())
+            .map(node_text_raw)
+            .as_deref() == Some("!")
+}
+
+fn unary_bang_condition_and_operand(node: Node<'_>, file: &SourceFile) -> bool {
+    if !unary_bang_node(node) {
+        return false;
+    }
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if logical_and_node(parent) {
+            return logical_and_condition_node(parent, file);
+        }
+        if matches!(parent.kind(), "parenthesized_statements" | "parenthesized_expression") {
+            current = parent;
+            continue;
+        }
+        return false;
+    }
+    false
+}
+
+fn logical_and_condition_node(node: Node<'_>, file: &SourceFile) -> bool {
+    if !logical_and_node(node) {
+        return false;
+    }
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if logical_and_node(parent) {
+            current = parent;
+            continue;
+        }
+        let condition_parent = matches!(
+            normalized_kind(parent, file),
+            NormKind::If | NormKind::Unless | NormKind::While | NormKind::Until
+        ) || matches!(
+            parent.kind(),
+            "if_modifier" | "unless_modifier" | "modifier_if" | "modifier_unless" | "conditional"
+        );
+        return condition_parent && condition_node(parent) == Some(current);
+    }
+    false
+}
+
 fn walk_raw(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
     f(node);
     for child in named_children(node) {
@@ -509,9 +571,18 @@ fn end_line(node: Node<'_>) -> usize {
 
 fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
-    node.named_children(&mut cursor)
+    let children = node.named_children(&mut cursor)
         .filter(|child| *child != node)
-        .collect()
+        .collect::<Vec<_>>();
+    if node.kind() == "ensure" {
+        children.first().copied().into_iter().collect()
+    } else if matches!(node.kind(), "body_statement" | "block_body" | "then")
+        && node.parent().is_some_and(|parent| parent.kind() == "ensure")
+    {
+        children.first().copied().into_iter().collect()
+    } else {
+        children
+    }
 }
 
 fn all_children(node: Node<'_>) -> Vec<Node<'_>> {

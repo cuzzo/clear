@@ -4,37 +4,51 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn recompute_return_origins(&mut self) {
-        let nodes: Vec<_> = self.method_nodes.iter().map(|&(n, ref r)| (n, r.clone())).collect();
+        let mut nodes: Vec<_> = self.method_nodes.iter().map(|&(n, ref r)| (n, r.clone())).collect();
+        let mut latest_origins = Vec::new();
         for _ in 0..2 {
-            for &(node, ref record) in &nodes {
-                let mut frame = self.scoped_facts(record);
+            latest_origins.clear();
+            let mut next_nodes = Vec::with_capacity(nodes.len());
+            for (node, record) in nodes {
+                let mut frame = self.scoped_facts(&record);
                 if let Some(body) = method_body(node) {
                     self.collect_local_type_facts(body, &mut frame);
                 }
-                if let Some(origin) = self.analyze_return_origin(node, record, &mut frame) {
+                let origin = self.analyze_return_origin(node, &record, &mut frame);
+                let mut updated_record = record;
+                if let Some(origin) = origin {
                     if origin.get("confidence").and_then(Value::as_str) == Some("strong") {
                         if let Some(t) = origin.get("candidate_type").and_then(Value::as_str) {
                             if useful_type(t) {
                                 self.global.static_return_types.insert(
-                                    record["method"].as_str().unwrap_or("").to_string(), t.to_string());
+                                    updated_record["method"].as_str().unwrap_or("").to_string(), t.to_string());
                             }
                         }
                     }
                     if let Some(h) = origin.get("hash_shape") {
                         if !h.is_null() && h.get("poisoned") != Some(&Value::Bool(true)) {
                             self.global.static_hash_return_shapes.insert(
-                                record["method"].as_str().unwrap_or("").to_string(), h.clone());
+                                updated_record["method"].as_str().unwrap_or("").to_string(), h.clone());
                         }
                     }
                     if let Some(a) = origin.get("array_element_shape") {
                         if !a.is_null() && a.get("poisoned") != Some(&Value::Bool(true)) {
                             self.global.static_array_element_return_shapes.insert(
-                                record["method"].as_str().unwrap_or("").to_string(), a.clone());
+                                updated_record["method"].as_str().unwrap_or("").to_string(), a.clone());
                         }
                     }
+                    object_insert(&mut updated_record, "return_origin", origin.clone());
+                    latest_origins.push(origin);
+                } else {
+                    object_insert(&mut updated_record, "return_origin", Value::Null);
                 }
+                next_nodes.push((node, updated_record));
             }
+            nodes = next_nodes;
         }
+        self.facts.return_origins = latest_origins;
+        self.facts.methods = nodes.iter().map(|(_, record)| record.clone()).collect();
+        self.method_nodes = nodes;
     }
 
     fn recompute_collection_index_lookups_with_inferred_shapes(&mut self) {
@@ -160,6 +174,9 @@ impl<'a> FileIndexer<'a> {
         if nested_scope_node(node, self.file) { return; }
         match normalized_kind(node, self.file) {
             NormKind::Call => {
+                if lhs_element_reference_node(node) {
+                    return;
+                }
                 self.update_collection_builder_call(node, frame);
                 self.inspect_index_lookup(node, state, frame);
                 self.inspect_hash_record_blocker(node, state, frame);
@@ -279,6 +296,10 @@ impl<'a> FileIndexer<'a> {
             }
             NormKind::Unless => {
                 self.inspect_branch_guard(node, true, frame);
+                self.child_walk(node, state, frame);
+            }
+            _ if logical_and_condition_node(node, self.file) => {
+                self.inspect_param_origins(node, state, frame);
                 self.child_walk(node, state, frame);
             }
             NormKind::Call => {
