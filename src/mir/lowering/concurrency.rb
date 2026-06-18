@@ -8,6 +8,24 @@ module MIRLoweringConcurrency
 
   requires_ancestor { MIRLowering }
 
+  BgTransformValue = T.type_alias do
+    T.nilable(T.any(
+      AST::BgBlock,
+      String,
+      Integer,
+      Symbol,
+      T::Boolean,
+      T::Hash[String, Type],
+      T::Hash[String, Schemas::ResourceClosePlan],
+      T::Set[String],
+      T::Array[MIR::ContextFieldDecl],
+      T::Array[MIR::StructInitField],
+      T::Array[String],
+      T::Array[MIR::CaptureCleanupAction],
+      T::Array[MIR::Emittable],
+    ))
+  end
+
   class NextExprPlan < T::Struct
     extend T::Sig
 
@@ -98,9 +116,9 @@ module MIRLoweringConcurrency
     const :pointer_captures, T::Set[String]
     const :rt_name, String
 
-    sig { returns(T::Hash[Symbol, T.nilable(Object)]) }
+    sig { returns(T::Hash[Symbol, BgTransformValue]) }
     def to_transform_hash
-      result = T.let({}, T::Hash[Symbol, T.nilable(Object)])
+      result = T.let({}, T::Hash[Symbol, BgTransformValue])
       result[:node] = node
       result[:blk_label] = names.blk_label
       result[:ctx_type] = names.ctx_type
@@ -470,7 +488,7 @@ module MIRLoweringConcurrency
     do_block
   end
 
-  sig { params(expr: T.untyped, mir: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(expr: AST::Node, mir: MIR::Node).returns(T::Array[MIR::Node]) }
   def do_branch_stmt_nodes(expr, mir)
     T.bind(self, MIRLowering) rescue nil
     if mir.is_a?(MIR::BgBlock)
@@ -491,7 +509,7 @@ module MIRLoweringConcurrency
       ]
     end
 
-    [wrap_step_as_stmt(AST::ThenStep.new(expr: expr, binding: nil), mir)]
+    [T.must(wrap_step_as_stmt(AST::ThenStep.new(expr: expr, binding: nil), mir))]
   end
 
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }
@@ -917,7 +935,7 @@ module MIRLoweringConcurrency
     result_alloc = escaping_value_alloc(inner_t)
     last_mir = T.cast(with_decl_alloc(result_alloc) { lower(step.expr) }, MIR::Node)
     last_mir = place_value_for_destination(last_mir, step.expr, result_alloc, inner_t)
-    last_mir = T.cast(hoist_alloc(last_mir, step.expr, err_cleanup: true), MIR::Node) if mir_allocates?(last_mir)
+    last_mir = hoist_alloc(last_mir, step.expr, err_cleanup: true) if mir_allocates?(last_mir)
     last_pending = flush_pending
     body_mir.concat(last_pending)
     result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
@@ -1141,11 +1159,11 @@ module MIRLoweringConcurrency
   def lower_yield(node)
     T.bind(self, MIRLowering) rescue nil
     stream_local = capture_state.current_stream_local || "__stream_local"
-    lowered = T.cast(with_decl_alloc(:heap) do
+    lowered = with_decl_alloc(:heap) do
       value = lower(node.expr)
       place_value_for_destination(value, node.expr, :heap, node.expr.full_type!)
-    end, MIR::Node)
-    lowered = T.cast(hoist_alloc(lowered, node.expr, err_cleanup: true), MIR::Node) if mir_allocates?(lowered)
+    end
+    lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if mir_allocates?(lowered)
     transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
     # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend

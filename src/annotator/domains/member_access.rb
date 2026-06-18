@@ -57,7 +57,7 @@ module Annotator
         nil
       end
 
-      sig { params(node: AST::GetField).returns(T.nilable(Object)) }
+      sig { params(node: AST::GetField).returns(T.nilable(T.any(Type, Symbol))) }
       def visit_GetField(node)
         T.bind(self, SemanticAnnotator)
 
@@ -379,6 +379,7 @@ module Annotator
               error!(node, :STRUCT_FIELD_UNRESOLVABLE, struct: node.name, field: field_name)
             end
           end
+          raw_expected = T.must(raw_expected)
 
           # Check if this field is declared BORROWED in the struct definition
           field_is_borrowed = schema.borrowed_fields&.include?(field_name)

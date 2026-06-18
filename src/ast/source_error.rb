@@ -2,6 +2,11 @@
 require "sorbet-runtime"
 
 require_relative 'diagnostic_registry'
+require_relative 'lexer'
+
+# Diagnostics may be anchored by real lexer tokens or small token-like
+# objects from fix/lint tooling that expose line/column.
+DiagnosticToken = T.type_alias { T.nilable(T.any(Lexer::Token, Struct, Object)) }
 
 module ErrorDefinitions
   # Backward-compat view: the legacy `MESSAGES` hash now derives from
@@ -49,8 +54,13 @@ module ErrorHelper
 
     # 3. Raise the specific error class
     err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
+    source_token = source_error_token(token)
 
-    raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
+    raise err_class.new(
+      source_token,
+      message,
+      T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+    )
   end
 
   # Try the hash form first when applicable; fall back to positional;
@@ -151,7 +161,12 @@ module ErrorHelper
       FixCollector.push(finding)
       return unless raise_in_collector
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, rendered_message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
+      source_token = source_error_token(token)
+      raise err_class.new(
+        source_token,
+        rendered_message,
+        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+      )
     end
 
     case level
@@ -161,15 +176,29 @@ module ErrorHelper
       $stderr.puts "#{tag} #{rendered_message}#{loc}"
     when :error
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, rendered_message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
+      source_token = source_error_token(token)
+      raise err_class.new(
+        source_token,
+        rendered_message,
+        T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String))
+      )
     end
   end
-  sig { params(node_or_token: T.untyped).returns(T.untyped) }
+  sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }
   def diagnostic_token(node_or_token)
-    node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    T.cast(token, DiagnosticToken)
   end
 
-  private :format_diagnostic_template, :diagnostic_token
+  sig { params(token: DiagnosticToken).returns(T.nilable(Lexer::Token)) }
+  def source_error_token(token)
+    return token if token.is_a?(Lexer::Token)
+    return nil unless token && token.respond_to?(:line) && token.respond_to?(:column)
+
+    Lexer::Token.new(:ANCHOR, nil, T.unsafe(token).line, T.unsafe(token).column)
+  end
+
+  private :format_diagnostic_template, :diagnostic_token, :source_error_token
 
 end
 
@@ -178,9 +207,9 @@ class SourceError < StandardError
 
   attr_reader :token, :original_message, :source_code
 
-  sig { params(token: T.untyped, message: String, source_code: T.nilable(String)).void }
+  sig { params(token: T.nilable(Lexer::Token), message: String, source_code: T.nilable(String)).void }
   def initialize(token, message, source_code)
-    @token = token
+    @token = T.let(token, T.nilable(Lexer::Token))
     @original_message = message
     @source_code = source_code
     super(build_message)

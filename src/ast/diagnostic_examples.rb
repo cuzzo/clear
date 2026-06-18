@@ -183,7 +183,7 @@ module DiagnosticExamples
   # The heredoc body starts on the line AFTER the `<<~CLEAR` (or
   # legacy `<<~FLUX`) marker and ends at the next line whose only
   # non-whitespace is the matching marker name.
-  sig { params(body: T.untyped).returns(T.nilable(String)) }
+  sig { params(body: String).returns(T.nilable(String)) }
   def self.extract_heredoc(body)
     return nil unless body =~ /<<~(CLEAR|FLUX)\b/
     marker = $~[1]

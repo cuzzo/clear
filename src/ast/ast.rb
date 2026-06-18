@@ -12,19 +12,27 @@ require_relative "../annotator/helpers/intrinsic_registry"
 module AST
   extend T::Sig
 
+  RawBody = T.type_alias { T::Array[AST::Node] }
+  HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
+  BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
+  ScalarLiteralCandidate = T.type_alias do
+    T.nilable(T.any(AST::Node, RawBody, Struct, Type, String, Symbol, Numeric, TrueClass, FalseClass))
+  end
+  StructKwargs = T.type_alias { BasicObject }
+
   class BodySlot
     extend T::Sig
 
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(AST::RawBody) }
     attr_reader :body
 
-    sig { params(body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    sig { params(body: AST::RawBody, writer: T.proc.params(body: AST::RawBody).void).void }
     def initialize(body, writer)
-      @body = T.let(body, T::Array[T.untyped])
-      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+      @body = T.let(body, AST::RawBody)
+      @writer = T.let(writer, T.proc.params(body: AST::RawBody).void)
     end
 
-    sig { params(body: T::Array[T.untyped]).void }
+    sig { params(body: AST::RawBody).void }
     def replace(body)
       @body = body
       @writer.call(body)
@@ -32,8 +40,12 @@ module AST
   end
 
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, String, FunctionSignature) }
-  CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
+  CoerceTypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
   CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
+  InitArgs = T.type_alias { T.untyped }
+  SchemaLookup = T.type_alias { T.proc.params(type_name: T.any(String, Symbol)).returns(T.untyped) }
+  PrecedenceInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Array[String])] }
+  LambdaBody = T.type_alias { T.any(AST::Node, RawBody) }
   PipelineRewriteMetadataIvars = T.let([
     :@type_object,
     :@coerced_type_object,
@@ -114,7 +126,7 @@ module AST
                      keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       t = self[:type]
@@ -141,7 +153,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       # mutable/takes/comptime arrive from match! (a Token when the
@@ -191,7 +203,7 @@ module AST
                          keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:body] = [] if self[:body].nil?
@@ -250,7 +262,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
@@ -303,7 +315,7 @@ module AST
                           keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
@@ -380,7 +392,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: T.untyped, visitor: T.proc.params(node: T.untyped).void).void }
+  sig { params(body: T.nilable(T.any(AST::Node, T::Array[AST::Node])), visitor: T.proc.params(node: AST::Node).void).void }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -393,11 +405,12 @@ module AST
   # Walk every AST Locatable reachable from a root object. This is the
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
-  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
+  sig { params(root: BasicObject, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
   def self.each_locatable(root, descend_functions: false, &visitor)
-    stack = root.is_a?(Array) ? root.reverse : [root]
+    raw_root = T.unsafe(root)
+    stack = raw_root.is_a?(Array) ? raw_root.reverse : [raw_root]
     until stack.empty?
-      node = stack.pop
+      node = T.unsafe(stack.pop)
       next unless node
       if node.is_a?(Array)
         node.reverse_each { |child| stack << child }
@@ -559,7 +572,7 @@ module AST
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
   end
 
-  sig { params(node: Object).returns(T::Boolean) }
+  sig { params(node: ScalarLiteralCandidate).returns(T::Boolean) }
   def self.scalar_literal_value?(node)
     node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
       node.is_a?(TrueClass) || node.is_a?(FalseClass)
@@ -609,7 +622,7 @@ module AST
       node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[T::Array[T.any(AST::Node, Struct)]]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[RawBody]) }
   def self.child_bodies(node)
     node.is_a?(AST::HasBodies) ? node.child_bodies : []
   end
@@ -659,7 +672,7 @@ module AST
   # recursion, and those drifted apart — e.g. one handled UnionVariantLit
   # and another didn't (docs/agents/bug9-forensic.md). Add a new wrapper
   # shape here once and every consumer descends it consistently.
-  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T::Array[AST::Node]) }
   def self.wrapped_children(expr)
     case expr
     when StructLit, UnionVariantLit
@@ -676,7 +689,7 @@ module AST
 
   # Immediate expression children for semantic expression walks. This excludes
   # statement bodies; callers that need bodies should use child_bodies/walk_body.
-  sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct)), skip_copy: T::Boolean).returns(T::Array[AST::Node]) }
   def self.expression_children(node, skip_copy: false)
     return [] unless node
 
@@ -702,12 +715,22 @@ module AST
     when ListLit
       node.items.compact
     when HashLit
-      node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
+      hash_lit_pair_nodes(node.pairs)
     when Assert
       [node.condition].compact
     else
       []
     end
+  end
+
+  sig { params(pairs: HashLitPairs).returns(T::Array[AST::Node]) }
+  def self.hash_lit_pair_nodes(pairs)
+    nodes = T.let([], T::Array[AST::Node])
+    pairs.each do |key, value|
+      nodes << key if key.is_a?(AST::Locatable)
+      nodes << value if value.is_a?(AST::Locatable)
+    end
+    nodes
   end
 
   # Yield every BgBlock / BgStreamBlock reachable from `body`, including
@@ -716,14 +739,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).void }
+  sig { params(body: T.nilable(T.any(AST::Node, T::Array[AST::Node])), block: T.proc.params(node: BgNode).void).void }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).void }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -741,7 +764,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).void }
+  sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -758,7 +781,7 @@ module AST
     when ListLit
       expr.items.each { |v| _expr_each_bg_block_recursive(v, &block) }
     when HashLit
-      expr.entries.each { |k, v| _expr_each_bg_block_recursive(k, &block); _expr_each_bg_block_recursive(v, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_recursive(node, &block) }
     when BinaryOp
       _expr_each_bg_block_recursive(expr.left, &block)
       _expr_each_bg_block_recursive(expr.right, &block)
@@ -773,7 +796,7 @@ module AST
   # gets its own transform_body call which handles its BGs separately;
   # nested BGs capture from their parent BG body's scope, not this
   # stmt's scope.
-  sig { params(stmt: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(stmt: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self.each_bg_block_in_stmt(stmt, &block)
     case stmt
     when BgBlock, BgStreamBlock
@@ -788,7 +811,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.nilable(AST::Node), block: T.proc.params(node: BgNode).void).void }
   def self._expr_each_bg_block_shallow(expr, &block)
     return unless expr
     case expr
@@ -805,7 +828,7 @@ module AST
     when ListLit
       expr.items.each { |v| _expr_each_bg_block_shallow(v, &block) }
     when HashLit
-      expr.entries.each { |k, v| _expr_each_bg_block_shallow(k, &block); _expr_each_bg_block_shallow(v, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_shallow(node, &block) }
     when BinaryOp
       _expr_each_bg_block_shallow(expr.left, &block)
       _expr_each_bg_block_shallow(expr.right, &block)
@@ -820,7 +843,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T::Array[Object], block: T.proc.params(analysis: Object).void).void }
+  sig { params(body: RawBody, block: T.proc.params(analysis: T.untyped).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -835,7 +858,7 @@ module AST
     end
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: T.untyped).void).void }
   def self._expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
@@ -866,9 +889,18 @@ module AST
     # Override in including classes. Returns Array of stmt lists (each
     # itself an Array of statements). Nil/empty entries are filtered by
     # the walker via `Array(...)`/`.compact`.
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       []
+    end
+  end
+
+  module HasExpression
+    extend T::Sig
+
+    sig { returns(AST::Node) }
+    def expression
+      T.unsafe(self)[:expression]
     end
   end
 
@@ -1010,7 +1042,7 @@ module AST
       !full_type.untyped?
     end
 
-    sig { params(val: T.untyped).returns(T.nilable(Type)) }
+    sig { params(val: CoerceTypeInput).returns(T.nilable(Type)) }
     def coerced_type=(val)
       return @coerced_type_object = T.let(nil, T.nilable(Type)) if val.nil?
 
@@ -1018,7 +1050,7 @@ module AST
       @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
     end
 
-    sig { returns(T.untyped) }
+    sig { returns(CoerceTypeInput) }
     def coerced_type
       @coerced_type_object&.raw
     end
@@ -1049,7 +1081,8 @@ module AST
       return [declared_type, nil] if declared_type == inferred
 
       # Check if coercion is valid
-      error = Type.coerce_error(T.must(@type_object), declared_type)
+      coerce_target = T.let(declared_type.is_a?(FunctionSignature) ? Type.new(declared_type) : declared_type, Type::TypeInput)
+      error = Type.coerce_error(T.must(@type_object), coerce_target)
       return [nil, error] if error
 
       # Valid coercion - set coerced_type and return declared
@@ -1065,7 +1098,7 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
-    sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.untyped).returns(Symbol) }
+    sig { params(final_type: T.any(Symbol, Type), schema_lookup: SchemaLookup).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
       # Normalize the Symbol|Type input to a Type once at the seam, so
@@ -1218,6 +1251,11 @@ module AST
 
   Node = T.type_alias { Locatable }
 
+  sig { params(body: LambdaBody).returns(RawBody) }
+  def self.lambda_body_nodes(body)
+    body.is_a?(Array) ? body : [body]
+  end
+
   class PipelineShardContext < T::Struct
     extend T::Sig
 
@@ -1304,6 +1342,20 @@ module AST
     const :resource, T::Boolean, default: false
   end
 
+  module DeferredDropsField
+    extend T::Sig
+
+    sig { returns(T::Array[AST::DeferredDrop]) }
+    def deferred_drops
+      T.unsafe(self)[:deferred_drops] ||= []
+    end
+
+    sig { params(val: T.nilable(T::Array[AST::DeferredDrop])).void }
+    def deferred_drops=(val)
+      T.unsafe(self)[:deferred_drops] = val || []
+    end
+  end
+
   class ReturnFact < T::Struct
     const :storage, T.nilable(Symbol)
     const :type, Symbol
@@ -1338,7 +1390,8 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
 
     # Seam: a function's declared/inferred return is always a Type
@@ -1347,7 +1400,7 @@ module AST
     # Struct init from parser/synthetic builders) and post-parse
     # assignment (return inference, auto-infer) so no reader needs
     # an `is_a?(Type)` Symbol/Type discriminator.
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       rt = self[:return_type]
@@ -1381,7 +1434,7 @@ module AST
       self[:return_type] || Type.new(:Void)
     end
 
-    sig { params(val: T::Array[T.untyped]).void }
+    sig { params(val: T::Array[AST::Param]).void }
     def params=(val)
       self[:params] = val
     end
@@ -1546,7 +1599,7 @@ module AST
   StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:borrowed] = false if self[:borrowed].nil?
@@ -1573,7 +1626,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:type_params] ||= []
@@ -1597,7 +1650,7 @@ module AST
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       t = self[:type]
@@ -1615,9 +1668,9 @@ module AST
     const :var, String
     const :sync, Symbol
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.nilable(AutoLockPlan)).returns(T::Boolean) }
     def ==(other)
-      other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync
+      !!(other && other.var == var && other.sync == sync)
     end
     alias eql? ==
 
@@ -1650,7 +1703,7 @@ module AST
     # always a Type (or nil when unannotated). Coerced at construction
     # and post-parse assignment so no reader needs an `is_a?(Type)`
     # Symbol/Type discriminator.
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       t = self[:type]
@@ -1752,6 +1805,9 @@ module AST
     extend T::Sig
     include Locatable
 
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+
     sig { returns(Type) }
     def full_type
       Type.new(type_info)
@@ -1782,15 +1838,26 @@ module AST
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
     extend T::Sig
     include Locatable
-    sig { params(args: T.untyped).void }
+    include DeferredDropsField
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:params] = self[:params] || []
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
     def params=(val)
       self[:params] = val || []
+    end
+
+    sig { returns(LambdaBody) }
+    def body
+      self[:body]
+    end
+
+    sig { params(val: LambdaBody).returns(LambdaBody) }
+    def body=(val)
+      self[:body] = val
     end
   end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
@@ -1798,7 +1865,7 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
@@ -1812,7 +1879,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:bindings] = [] if self[:bindings].nil?
@@ -1828,7 +1895,8 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
@@ -1838,7 +1906,8 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -1942,8 +2011,9 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+    include DeferredDropsField
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:capabilities] = [] if self[:capabilities].nil?
@@ -1954,7 +2024,7 @@ module AST
       self[:capabilities] = val
     end
 
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
@@ -2003,14 +2073,14 @@ module AST
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
-  SelectOp     = Struct.new(:token, :expression) { include Locatable }
-  WhereOp      = Struct.new(:token, :expression) { include Locatable }
-  IndexOp      = Struct.new(:token, :expression) { include Locatable }
-  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
-  OrderByOp    = Struct.new(:token, :expression) { include Locatable }
+  SelectOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
+  OrderByOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   LimitOp      = Struct.new(:token, :count) { include Locatable }
-  UnnestOp     = Struct.new(:token, :expression) { include Locatable }
-  DistinctOp   = Struct.new(:token, :expression) { include Locatable }
+  UnnestOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  DistinctOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   # EachOp: side-effect iteration over a collection.
   # Uses `_` as the implicit item binding. Body is a list of statements.
   # Syntax: collection |> EACH { _.field = value; };
@@ -2027,28 +2097,28 @@ module AST
   # to `lhs.next()` (same shape as NEXT for ~T promises).
   CollectOp    = Struct.new(:token) { include Locatable }
   # TAKE_WHILE: take elements from the front while predicate is true.
-  TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
+  TakeWhileOp = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
-  WindowOp = Struct.new(:token, :size, :expression) { include Locatable }
+  WindowOp = Struct.new(:token, :size, :expression) { include Locatable; include HasExpression }
   # WINDOW(size: N, time: 'Xms'): batch/tumbling window. _ is a T[] batch.
   # options = { "size" => size_node, "time" => time_node } (at least one required)
-  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable }
+  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable; include HasExpression }
   # JOIN(right_source) key_expr_or_lambda
   # Equi-join: shared key applied to both sides, or lambda(a, b) -> Bool.
   # Result: anonymous struct { left: L, right: ?R } for each left element.
   JoinOp = Struct.new(:token, :right_source, :key_expr) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
-  FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
-  AnyOp    = Struct.new(:token, :expression) { include Locatable } # Bool
-  AllOp    = Struct.new(:token, :expression) { include Locatable } # Bool
-  CountOp  = Struct.new(:token, :expression) { include Locatable } # Int64
+  FindOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression } # ?ElemType
+  AnyOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
+  AllOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
+  CountOp  = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Int64
   # Phase 4 numeric aggregation operators — expression must be numeric.
   # SUM/AVERAGE return 0 for empty list; MIN/MAX panic on empty list.
-  SumOp     = Struct.new(:token, :expression) { include Locatable } # Number
-  AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
-  MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
-  MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  SumOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
+  AverageOp = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
+  MinOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
+  MaxOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
   # ShardOp: route items to owning schedulers by key hash.
   # Syntax: collection |> SHARD(key_expr, target_map) |> CONCURRENT EACH { body }
   # key_expr uses `_` as the implicit item binding (consistent with SELECT/WHERE).
@@ -2109,7 +2179,7 @@ module AST
                            keyword_init: true) do
     extend T::Sig
 
-    sig { params(kw: T.untyped).void }
+    sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
       self[:items]           = [] if self[:items].nil?
@@ -2307,7 +2377,7 @@ module AST
     extend T::Sig
     include Locatable
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:fields] = [] if self[:fields].nil?
@@ -2340,7 +2410,7 @@ module AST
       @fn_type_params
     end
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:params] = self[:params] || []
@@ -2360,7 +2430,7 @@ module AST
       @fn_type_params = value.dup
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T::Array[AST::Param])).returns(T::Array[AST::Param]) }
     def params=(val)
       self[:params] = val || []
     end
@@ -2389,7 +2459,7 @@ module AST
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       @type_params = T.let([], T::Array[Symbol])
@@ -2446,7 +2516,7 @@ module AST
     end
     attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       @type_params = T.let([], T::Array[String])
@@ -2475,7 +2545,7 @@ module AST
     const :stack_size, T.nilable(Symbol), default: nil
     const :can_smash, T::Boolean, default: false
     prop :computed_stack_tier, T.nilable(Symbol), default: nil
-    prop :capture_analysis, T.nilable(Object), default: nil
+    prop :capture_analysis, T.untyped, default: nil
   end
 
   # DoBlock: fork-join parallel execution.
@@ -2498,7 +2568,8 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
@@ -2536,7 +2607,8 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
@@ -2549,13 +2621,25 @@ module AST
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
   # Only valid inside a BgStreamBlock body. expr: the value to yield.
   YieldExpr         = Struct.new(:token, :expr) do
+    extend T::Sig
     include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
     end
+  end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
   NextExpr          = Struct.new(:token, :expr) do
+    extend T::Sig
     include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
+    end
   end
 
   # MatchStatement: pattern-matching on a value.
@@ -2568,7 +2652,7 @@ module AST
     include Locatable
     include HasBodies
 
-    sig { params(args: T.untyped).void }
+    sig { params(args: InitArgs).void }
     def initialize(*args)
       super
       self[:cases] = [] if self[:cases].nil?
@@ -2579,7 +2663,12 @@ module AST
       self[:cases] = val
     end
 
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
+    end
+
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       bodies = cases.map(&:body)
       bodies << default_case if default_case
@@ -2598,7 +2687,8 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :tight
   end
@@ -2609,7 +2699,8 @@ module AST
     include Locatable
     include StatementVoidType
     include HasBodies
-    sig { returns(T::Array[T::Array[T.untyped]]) }
+    include DeferredDropsField
+    sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -2622,7 +2713,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[RawBody]) }
     def child_bodies
       bodies = []
       bodies << setup if setup
@@ -2670,7 +2761,15 @@ module AST
   # top of every TEST THAT in the enclosing block, so each test sees
   # an independent value. WHEN-level LETs override TEST-level LETs of
   # the same name (the inner declaration wins).
-  LetBinding = Struct.new(:token, :name, :expr) { include Locatable }
+  LetBinding = Struct.new(:token, :name, :expr) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(AST::Node) }
+    def expr
+      self[:expr]
+    end
+  end
 
   # TEST THAT "description" DO body... END
   TestThat = Struct.new(:token, :description, :body) do
@@ -2689,16 +2788,127 @@ module AST
   end
 
   # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr
-  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable }
+  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable; include HasExpression }
 
   # BENCHMARK expr x<N>
-  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable }
+  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable; include HasExpression }
 
   # SMASH expr
-  SmashStmt = Struct.new(:token, :expression) { include Locatable }
+  SmashStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
 
   # PROFILE expr
-  ProfileStmt = Struct.new(:token, :expression) { include Locatable }
+  ProfileStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+
+  class SelectOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class WhereOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class IndexOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class ReduceOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class OrderByOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class UnnestOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class DistinctOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class TakeWhileOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class WindowOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class BatchWindowOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class FindOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AnyOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AllOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class CountOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class SumOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AverageOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class MinOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class MaxOp
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class AssertRaises
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class BenchmarkStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class SmashStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
+  class ProfileStmt
+    extend T::Sig
+    sig { returns(AST::Node) }
+    def expression; self[:expression]; end
+  end
 
   # STUB fn RETURNS value | STUB fn CAPTURES var | STUB fn SEQUENCE [...] | STUB fn WITH lambda
   StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }
@@ -2711,18 +2921,26 @@ module AST
                      :UInt8, :UInt16, :UInt32, :UInt64,
                      :Float32]
 
+  sig { params(ops: T::Array[String], assoc: Symbol).returns(PrecedenceInfo) }
+  def self.precedence_info(ops:, assoc:)
+    info = T.let({}, PrecedenceInfo)
+    info[:ops] = ops
+    info[:assoc] = assoc
+    info
+  end
+
   PRECEDENCE_MAP = T.let({
-    8 => { ops: ['**'], assoc: :right },
-    7 => { ops: ['*', '/', 'MOD'], assoc: :left },
-    6 => { ops: ['+', '-'], assoc: :left },
-    5 => { ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left },
-    4 => { ops: ['&&'], assoc: :left },
-    3 => { ops: ['||'], assoc: :left },
+    8 => precedence_info(ops: ['**'], assoc: :right),
+    7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
+    6 => precedence_info(ops: ['+', '-'], assoc: :left),
+    5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
+    4 => precedence_info(ops: ['&&'], assoc: :left),
+    3 => precedence_info(ops: ['||'], assoc: :left),
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
-    1 => { ops: ['OR', '|>', 'AS'], assoc: :left }
-  }, T::Hash[T.untyped, T.untyped])
-  MAX_PRECEDENCE = T.let(PRECEDENCE_MAP.keys.max, Integer)
+    1 => precedence_info(ops: ['OR', '|>', 'AS'], assoc: :left)
+  }, T::Hash[Integer, PrecedenceInfo])
+  MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 
   OP_CODE_SENDABLE_SYMS = T.let({
     :SUB => :-,
@@ -2737,7 +2955,7 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
-  }, T::Hash[T.untyped, T.untyped])
+  }, T::Hash[Symbol, Symbol])
 
   # Canonical definitions are in Type class. These aliases maintain backward compat.
   NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
@@ -2768,7 +2986,7 @@ module AST
     '!+' => :CHECK_ADD,
     '!-' => :CHECK_SUB,
     '!*' => :CHECK_MUL,
-  }, T::Hash[T.untyped, T.untyped])
+  }, T::Hash[String, Symbol])
 
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
 end

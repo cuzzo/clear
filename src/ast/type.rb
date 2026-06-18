@@ -22,7 +22,7 @@ class TypeCapabilities < T::Struct
   MaybeSymbol = T.type_alias { T.any(TypeCapabilityUnset, Symbol, NilClass) }
   MaybeInteger = T.type_alias { T.any(TypeCapabilityUnset, Integer, NilClass) }
   MaybeBoolean = T.type_alias { T.any(TypeCapabilityUnset, T::Boolean) }
-  MaybeObject = T.type_alias { T.any(TypeCapabilityUnset, Object, NilClass) }
+  MaybeToken = T.type_alias { T.any(TypeCapabilityUnset, Lexer::Token, NilClass) }
 
   const :ownership, T.nilable(Symbol), default: nil
   const :sync, T.nilable(Symbol), default: nil
@@ -36,7 +36,7 @@ class TypeCapabilities < T::Struct
   const :link_source, T.nilable(Symbol), default: nil
   const :observable, T::Boolean, default: false
   const :observable_terminal, T.nilable(Symbol), default: nil
-  const :observable_token, T.nilable(Object), default: nil
+  const :observable_token, T.nilable(Lexer::Token), default: nil
   const :polymorphic_shared, T::Boolean, default: false
 
   sig { returns(TypeCapabilities) }
@@ -58,7 +58,7 @@ class TypeCapabilities < T::Struct
       link_source: MaybeSymbol,
       observable: MaybeBoolean,
       observable_terminal: MaybeSymbol,
-      observable_token: MaybeObject,
+      observable_token: MaybeToken,
       polymorphic_shared: MaybeBoolean
     ).returns(TypeCapabilities)
   end
@@ -90,7 +90,7 @@ class TypeCapabilities < T::Struct
     next_link_source = T.let(link_source.equal?(UNSET) ? self.link_source : T.cast(link_source, T.nilable(Symbol)), T.nilable(Symbol))
     next_observable = T.let(observable.equal?(UNSET) ? self.observable : T.cast(observable, T::Boolean), T::Boolean)
     next_observable_terminal = T.let(observable_terminal.equal?(UNSET) ? self.observable_terminal : T.cast(observable_terminal, T.nilable(Symbol)), T.nilable(Symbol))
-    next_observable_token = T.let(observable_token.equal?(UNSET) ? self.observable_token : observable_token, T.nilable(Object))
+    next_observable_token = T.let(observable_token.equal?(UNSET) ? self.observable_token : T.cast(observable_token, T.nilable(Lexer::Token)), T.nilable(Lexer::Token))
     next_polymorphic_shared = T.let(polymorphic_shared.equal?(UNSET) ? self.polymorphic_shared : T.cast(polymorphic_shared, T::Boolean), T::Boolean)
 
     TypeCapabilities.new(
@@ -195,7 +195,7 @@ class TypeShape < T::Struct
     const :generic_args_raw, T::Array[Symbol], default: []
   end
 
-  const :raw, Object
+  const :raw, T.untyped
   const :array, T::Boolean, default: false
   const :map, T::Boolean, default: false
   const :optional, T::Boolean, default: false
@@ -383,9 +383,10 @@ class TypeId < T::Struct
 end
 
 class Type
-    extend T::Sig
+  extend T::Sig
 
   TypeInput = T.type_alias { T.any(Type, Symbol, String) }
+  TypeNodeInput = T.type_alias { T.nilable(T.any(TypeInput, AST::Locatable, Struct)) }
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
 
   sig { returns(TypeShape) }
@@ -455,7 +456,7 @@ class Type
   OBSERVABLE_TERMINALS_CACHE = T.let({}, ObservableTerminalRegistry)
   OBSERVABLE_WRAPPERS_CACHE = T.let({}, ObservableWrapperRegistry)
 
-  sig { params(value: Object).returns(T::Boolean) }
+  sig { params(value: T.untyped).returns(T::Boolean) }
   def self.indirect_type?(value)
     return false unless value.is_a?(Type)
 
@@ -765,7 +766,7 @@ class Type
 
   sig do
     params(
-      raw_input: Object,
+      raw_input: T.untyped,
       ownership: T.nilable(Symbol),
       sync: T.nilable(Symbol),
       layout: T.nilable(Symbol),
@@ -1010,13 +1011,13 @@ class Type
     @capabilities.observable_terminal
   end
 
-  sig { params(value: T.nilable(Object)).returns(T.nilable(Object)) }
+  sig { params(value: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
   def observable_token=(value)
     apply_capabilities!(observable_token: value)
     value
   end
 
-  sig { returns(T.nilable(Object)) }
+  sig { returns(T.nilable(Lexer::Token)) }
   def observable_token
     @capabilities.observable_token
   end
@@ -1046,7 +1047,7 @@ class Type
       link_source: TypeCapabilities::MaybeSymbol,
       observable: TypeCapabilities::MaybeBoolean,
       observable_terminal: TypeCapabilities::MaybeSymbol,
-      observable_token: TypeCapabilities::MaybeObject,
+      observable_token: TypeCapabilities::MaybeToken,
       polymorphic_shared: TypeCapabilities::MaybeBoolean
     ).returns(TypeCapabilities)
   end
@@ -1231,7 +1232,7 @@ class Type
     )
   end
 
-  sig { params(soa: T::Boolean, elem_ownership: T.nilable(Symbol), elem_sync: T.nilable(Symbol), observable_token: T.nilable(Object)).returns(TypeCapabilities) }
+  sig { params(soa: T::Boolean, elem_ownership: T.nilable(Symbol), elem_sync: T.nilable(Symbol), observable_token: T.nilable(Lexer::Token)).returns(TypeCapabilities) }
   def apply_type_annotation_extras!(soa:, elem_ownership:, elem_sync:, observable_token:)
     apply_capabilities!(
       soa: soa ? true : TypeCapabilities::UNSET,
@@ -1437,7 +1438,7 @@ class Type
     resolved == other.to_sym || raw == other
   end
 
-  sig { returns(Object) }
+  sig { returns(T.untyped) }
   def raw
     shape.raw
   end
@@ -1494,7 +1495,7 @@ class Type
   sig { returns(T::Boolean) }
   def generic_type_parameter?
     raw = shape.raw
-    raw.is_a?(Symbol) && raw.to_s.length == 1 && raw.to_s >= "A" && raw.to_s <= "Z"
+    !!(raw.is_a?(Symbol) && raw.to_s.length == 1 && raw.to_s >= "A" && raw.to_s <= "Z")
   end
 
   sig { returns(T::Boolean) }
@@ -2143,14 +2144,18 @@ class Type
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
   ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(Schemas::ResourceClosePlan)] }
+  SchemaLookupResult = T.type_alias do
+    T.nilable(T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema))
+  end
+  SchemaLookup = T.type_alias { T.proc.params(name: Symbol).returns(SchemaLookupResult) }
 
-  sig { params(schema_lookup: T.nilable(T.proc.params(name: Symbol).returns(T.nilable(Object)))).returns(ResourceCloseResult) }
+  sig { params(schema_lookup: T.nilable(SchemaLookup)).returns(ResourceCloseResult) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
     return [true, Schemas::ResourceClosePlan.method("deinit")] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
-    schema = T.let((schema_lookup.call(resolved) rescue nil), T.nilable(Object))
+    schema = T.let((schema_lookup.call(resolved) rescue nil), SchemaLookupResult)
 
     if schema.is_a?(Schemas::ResourceSchema)
       return [true, schema.close_plan]
@@ -2161,7 +2166,7 @@ class Type
       actions = T.let([], T::Array[Schemas::ResourceCloseAction])
       schema.fields.each do |fname, fdef|
         f_resolved = fdef.type.resolved
-        f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), T.nilable(Object))
+        f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), SchemaLookupResult)
         if f_schema.is_a?(Schemas::ResourceSchema)
           actions.concat(f_schema.close_plan.for_field(fname).actions)
         end
@@ -3087,10 +3092,10 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
-  sig { params(node: T.untyped).returns(T.nilable(Type)) }
+  sig { params(node: TypeNodeInput).returns(T.nilable(Type)) }
   def self.from_node(node)
     return nil unless node
-    t = node.respond_to?(:full_type) ? node.full_type : node
+    t = node.respond_to?(:full_type) ? T.unsafe(node).full_type : node
     return nil unless t
     return t if t.is_a?(Type)
     begin
@@ -3100,7 +3105,7 @@ class Type
     end
   end
 
-  sig { params(node: T.untyped, context: String).returns(Type) }
+  sig { params(node: TypeNodeInput, context: String).returns(Type) }
   def self.from_node!(node, context: "post-annotation MIR")
     t = from_node(node)
     raise "#{context}: missing type info for #{node.class}" unless t
@@ -3183,7 +3188,7 @@ class Type
 
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
-  sig { params(schema: T.nilable(Object), blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  sig { params(schema: T.nilable(Schemas::StructSchema), blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
   def schema_struct_any?(schema, &blk)
     fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : {}
     fields.any? { |_, v|
@@ -3286,7 +3291,7 @@ class Type
     dynamic? && other_type.dynamic?
   end
 
-  sig { params(raw_input: Object, auto: T::Boolean).void }
+  sig { params(raw_input: T.untyped, auto: T::Boolean).void }
   def parse_raw_input(raw_input, auto: false)
     if raw_input.is_a?(FunctionSignature) || raw_input.is_a?(Array)
       @shape = TypeShape.new(raw: raw_input, auto: auto)
@@ -3669,8 +3674,10 @@ module TypeHelper
   # Called after coercion context is known for integer literals and constant-foldable
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
   # target type. No-op for non-integer or non-literal nodes.
-  sig { params(node: T.untyped, effective_type: T.untyped).returns(NilClass) }
+  sig { params(node: AST::Node, effective_type: T.nilable(Type::TypeInput)).returns(NilClass) }
   def check_prefixed_int_range!(node, effective_type)
+    return if effective_type.nil?
+
     T.bind(self, SemanticAnnotator) rescue nil
     val = integer_literal_range_value(node)
     return if val.nil?
@@ -3683,7 +3690,7 @@ module TypeHelper
     min = Type::INT_TYPE_MIN[t] || 0
 
     if val < min || val > max
-      if respond_to?(:emit_int_overflow_error!)
+      if node.is_a?(AST::Literal) && respond_to?(:emit_int_overflow_error!)
         emit_int_overflow_error!(node, val, t, min, max)
       else
         error!(node, :INT_LITERAL_OVERFLOW, val: val, type: t, min: min, max: max)
@@ -3691,30 +3698,36 @@ module TypeHelper
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(Integer)) }
+  sig { params(node: AST::Node).returns(T.nilable(Integer)) }
   def integer_literal_range_value(node)
     if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
       node.value
     elsif AST.negative_integer_literal?(node)
-      -node.right.value
+      unary = T.cast(node, AST::UnaryOp)
+      -unary.right.value
     else
       nil
     end
   end
 
-  sig { params(effective_type: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(effective_type: Type::TypeInput).returns(T.nilable(Symbol)) }
   def integer_range_target_type(effective_type)
     # Unwrap error unions so fallible integer returns range-check against the
     # underlying payload type.
-    if effective_type.respond_to?(:error_union?) && effective_type.error_union? &&
-       effective_type.respond_to?(:payload_type)
-      effective_type = effective_type.payload_type
+    if effective_type.is_a?(Type) && effective_type.error_union?
+      payload_type = effective_type.payload_type
+      return nil unless payload_type
+      effective_type = payload_type
     end
 
-    return effective_type.resolved if effective_type.respond_to?(:resolved)
-    return effective_type.to_sym if effective_type.respond_to?(:to_sym)
-
-    nil
+    case effective_type
+    when Type
+      effective_type.resolved
+    when Symbol
+      effective_type
+    when String
+      effective_type.to_sym
+    end
   end
 
   private :integer_literal_range_value, :integer_range_target_type

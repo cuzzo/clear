@@ -21,9 +21,20 @@ module GenericAnalysis
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   TypeShape = T.type_alias { T.any(Type, Symbol, String) }
   GenericSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
+  GenericCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
+  GenericCallArgs = T.type_alias { T::Array[AST::Locatable] }
+  AnnotationNode = T.type_alias { T.any(AST::Locatable, Struct) }
+  GenericDeclarationNode = T.type_alias { T.any(AST::FunctionDef, AST::StructDef, AST::UnionDef) }
+  GenericBinding = T.type_alias { T.any(Type, Symbol) }
+  GenericSubstitution = T.type_alias { T::Hash[Symbol, GenericBinding] }
+
+  class SharedGenericArg < T::Struct
+    const :name, String
+    const :type, Type
+  end
 
   class TypeAnnotationFacts < T::Struct
-    const :node, Object
+    const :node, AnnotationNode
     const :type_obj, Type
     const :is_param, T::Boolean
     const :inner, Type
@@ -40,7 +51,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
-  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).void }
+  sig { params(node: GenericDeclarationNode, type_params: T::Array[String], kind: String).void }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
@@ -79,7 +90,7 @@ module GenericAnalysis
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
-  sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
+  sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, SemanticAnnotator) rescue nil
     return if type_obj.fn_type?
@@ -93,7 +104,7 @@ module GenericAnalysis
     nil
   end
 
-  sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
+  sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
   def type_annotation_facts(node, type_obj, is_param)
     T.bind(self, SemanticAnnotator)
     TypeAnnotationFacts.new(
@@ -237,7 +248,7 @@ module GenericAnalysis
     error!(facts.node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
   end
 
-  sig { params(node: Object, base_name: Symbol).returns(T.nilable(GenericSchema)) }
+  sig { params(node: AnnotationNode, base_name: Symbol).returns(T.nilable(GenericSchema)) }
   def annotation_schema_for!(node, base_name)
     T.bind(self, SemanticAnnotator) rescue nil
     schema = T.cast(lookup_type_schema(base_name), T.nilable(GenericSchema))
@@ -257,7 +268,7 @@ module GenericAnalysis
     nil
   end
 
-  sig { params(node: Object).returns(T.nilable(Lexer::Token)) }
+  sig { params(node: AnnotationNode).returns(T.nilable(Lexer::Token)) }
   def type_annotation_token(node)
     return nil unless node.respond_to?(:token)
 
@@ -282,15 +293,15 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(GenericSubstitution) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
-    subst = {}
+    subst = T.let({}, GenericSubstitution)
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
       param_type = param.type
-      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "generic call argument")
+      actual_type = arg.full_type!(context: "generic call argument")
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
     enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
@@ -302,38 +313,38 @@ module GenericAnalysis
     subst
   end
 
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(NilClass) }
+  sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
-    shared_args = T.let([], T::Array[T.untyped])
+    shared_args = T.let([], T::Array[SharedGenericArg])
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
       param_type = param.type
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
-      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "shared generic call argument")
+      actual_type = arg.full_type!(context: "shared generic call argument")
       next unless actual_type.shared?
-      shared_args << {
+      shared_args << SharedGenericArg.new(
         name: param.name,
         type: generic_shared_payload_binding(actual_type)
-      }
+      )
     end
     return if shared_args.size < 2
 
     first = shared_args.first
     return unless first
-    mismatch = shared_args.find { |arg| !same_shared_call_capability?(first[:type], arg[:type]) }
+    mismatch = shared_args.find { |arg| !same_shared_call_capability?(first.type, arg.type) }
     return unless mismatch
 
     error!(node, :POLY_SHARED_INCONSISTENT,
       fn: node.name,
-      first: first[:name], first_cap: shared_call_capability_display(first[:type]),
-      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]))
+      first: first.name, first_cap: shared_call_capability_display(first.type),
+      second: mismatch.name, second_cap: shared_call_capability_display(mismatch.type))
   end
 
   # Recursively match param_type against actual_type to bind type params.
   # Handles both direct uses (T) and nested generic uses (Cache<T>).
-  sig { params(node: AST::FuncCall, param_type: Type, actual_type: Type, type_params: T::Array[Symbol], subst: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(node: GenericCallNode, param_type: Type, actual_type: Type, type_params: T::Array[Symbol], subst: GenericSubstitution).void }
   def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     p_res = param_type.resolved
@@ -364,7 +375,7 @@ module GenericAnalysis
   # Apply a substitution map to a type object.
   # e.g. apply_type_subst(Type(:T), { T: :Number }) → Type(:Number)
   #      apply_type_subst(Type(:"Cache<T>"), { T: :Number }) → Type(:"Cache<Number>")
-  sig { params(type_obj: T.untyped, subst: T::Hash[Symbol, T.untyped]).returns(Type) }
+  sig { params(type_obj: Type::TypeInput, subst: GenericSubstitution).returns(Type) }
   def apply_type_subst(type_obj, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     return Type.new(:Any) if type_obj.nil?
@@ -388,7 +399,7 @@ module GenericAnalysis
       if str.end_with?('[]')
         inner = T.must(str[0..-3]).to_sym
         if subst.key?(inner)
-          return Type.new(:"#{subst[inner]}[]")
+          return Type.new(:"#{generic_binding_source(T.must(subst[inner]))}[]")
         end
       end
 
@@ -397,7 +408,7 @@ module GenericAnalysis
       if prefix
         inner = T.must(str[prefix.length..]).to_sym
         if subst.key?(inner)
-          Type.new(:"#{prefix}#{subst[inner]}")
+          Type.new(:"#{prefix}#{generic_binding_source(T.must(subst[inner]))}")
         else
           t
         end
@@ -429,7 +440,7 @@ module GenericAnalysis
     t
   end
 
-  sig { params(left: T.untyped, right: T.untyped).returns(T::Boolean) }
+  sig { params(left: GenericBinding, right: GenericBinding).returns(T::Boolean) }
   def same_generic_binding?(left, right)
     T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
@@ -461,10 +472,10 @@ module GenericAnalysis
       !type.elem_sync.nil?
   end
 
-  sig { params(type: Type).returns(String) }
+  sig { params(type: GenericBinding).returns(String) }
   def generic_binding_source(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type
+    t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
     ownership = t.ownership_surface_name
@@ -486,7 +497,7 @@ module GenericAnalysis
 
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
-  sig { params(signature: FunctionSignature, subst: T::Hash[Symbol, Symbol]).returns(FunctionSignature) }
+  sig { params(signature: FunctionSignature, subst: GenericSubstitution).returns(FunctionSignature) }
   def substitute_type_params(signature, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(
@@ -502,7 +513,7 @@ module GenericAnalysis
   # ==========================================
 
   # Validate stream type annotations on variable declarations.
-  sig { params(node: T.untyped).returns(NilClass) }
+  sig { params(node: DeclarationNode).returns(NilClass) }
   def validate_stream_type!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type&.future?
@@ -578,7 +589,7 @@ module GenericAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(node: AnnotationNode).returns(T.nilable(Symbol)) }
   def propagate_call_flags!(node)
     _ = node
     nil
@@ -587,14 +598,14 @@ module GenericAnalysis
 
   # Register container borrow in the OG when a binding receives a value
   # from container access (HashMap/Pool/List indexing, through OR).
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: DeclarationNode).returns(T.nilable(T::Boolean)) }
   def register_container_borrow!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
     ownership_graph[var_name]&.kind = :borrowed
-    node.symbol.mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
+    T.must(node.symbol).mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
     node.storage = :borrow if node.respond_to?(:storage=)
     true
@@ -603,14 +614,18 @@ module GenericAnalysis
   # Walk through OR/OR_RESCUE to find the root container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
-  sig { params(expr: T.untyped).returns(T.nilable(String)) }
+  sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def find_container_source(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
     if expr.respond_to?(:container_borrow) && expr.container_borrow
-      receiver = expr.respond_to?(:object) ? expr.object : (expr.respond_to?(:target) ? expr.target : nil)
+      receiver = if expr.respond_to?(:object)
+        T.unsafe(expr).object
+      elsif expr.respond_to?(:target)
+        T.unsafe(expr).target
+      end
       return root_variable_name(receiver) if receiver
     end
     if expr.is_a?(AST::GetIndex)

@@ -1,5 +1,6 @@
 require "tmpdir"
 require "fileutils"
+require "json"
 require "pathname"
 
 require_relative "../tools/loom_atomic_coverage" unless defined?(LoomAtomicCoverage)
@@ -659,6 +660,35 @@ RSpec.describe "coverage gap tools" do
     expect(findings.map(&:kind)).to eq(["late_ast_walk"])
     expect(findings.first.message).to include("forbidden source AST walk")
     expect(findings.first.detail).to include("SemanticIndex")
+  end
+
+  it "serializes src type guardrails as SARIF results" do
+    finding = NilKill::StaticDiffAudit::Finding.new(
+      kind: "late_ast_walk",
+      path: "src/semantic/facts.rb",
+      line: 12,
+      message: "added src line introduces forbidden source AST walk",
+      detail: "use SemanticIndex",
+      code: "AST.each_locatable(body)",
+    )
+
+    sarif = type_guardrails_sarif_hash([finding])
+    run = sarif.fetch("runs").first
+    result = run.fetch("results").first
+
+    expect(sarif.fetch("version")).to eq("2.1.0")
+    expect(run.dig("tool", "driver", "name")).to eq("Src Type Guardrails")
+    expect(run.dig("properties", "format")).to eq("src-type-guardrails.sarif.v1")
+    expect(run.dig("tool", "driver", "rules").map { |rule| rule.fetch("id") }).to eq(["late_ast_walk"])
+    expect(result.fetch("ruleId")).to eq("late_ast_walk")
+    expect(result.dig("message", "text")).to include("forbidden source AST walk")
+    expect(result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")).to eq("src/semantic/facts.rb")
+    expect(result.dig("locations", 0, "physicalLocation", "region", "startLine")).to eq(12)
+    expect(result.dig("properties", "code")).to eq("AST.each_locatable(body)")
+
+    out = File.join(@tmp, "guardrails", "src-type-guardrails.sarif")
+    write_type_guardrails_sarif(out, [finding])
+    expect(JSON.parse(File.read(out)).dig("runs", 0, "results", 0, "ruleId")).to eq("late_ast_walk")
   end
 
   it "sanitizes Zig coverage suite and run names for kcov directories" do

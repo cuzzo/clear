@@ -93,6 +93,7 @@ module NilKill
           end
 
           definitions.concat(typescript_interface_type_definitions(document, rel_path))
+          definitions.concat(typescript_type_alias_definitions(document, rel_path))
           definitions
         end
 
@@ -190,6 +191,27 @@ module NilKill
             end
           end
           definitions
+        end
+
+        def typescript_type_alias_definitions(document, rel_path)
+          document.lines.each_with_index.filter_map do |line, idx|
+            stripped = line.strip
+            match = stripped.match(/\A(?:export\s+)?type\s+([A-Za-z_$]\w*)\s*=\s*(.+?)\s*;?\s*\z/)
+            next unless match
+
+            {
+              "id" => ["typescript", rel_path, "", "type_alias", match[1], idx + 1, "typescript"].map(&:to_s).join("\u0000"),
+              "language" => "typescript",
+              "type_system" => "typescript",
+              "kind" => "type_alias",
+              "path" => rel_path,
+              "owner" => "",
+              "name" => match[1],
+              "line" => idx + 1,
+              "target" => match[2].strip,
+              "source" => "type",
+            }
+          end
         end
 
         def extract_parenthesized(source)

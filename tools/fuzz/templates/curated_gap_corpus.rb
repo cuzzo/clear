@@ -15,10 +15,15 @@ CURATED_GAP_CORPUS_SKIP = %w[
   require_types_helper.cht
 ].freeze
 
+CURATED_GAP_CORPUS_SKIP_PREFIXES = %w[
+  minivm-golden-
+].freeze
+
 CURATED_GAP_CORPUS_CELLS =
   Dir[File.join(TRANSPILE_TEST_ROOT, "*.cht")]
     .map { |path| { file: File.basename(path) } }
     .reject { |cell| CURATED_GAP_CORPUS_SKIP.include?(cell[:file]) }
+    .reject { |cell| CURATED_GAP_CORPUS_SKIP_PREFIXES.any? { |prefix| cell[:file].start_with?(prefix) } }
     .sort_by { |cell| cell[:file] }
     .freeze
 

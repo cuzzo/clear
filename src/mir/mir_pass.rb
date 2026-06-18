@@ -269,7 +269,7 @@ class MIRPass
     sig.emits_allocating? == true
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def ast_node_lowers_through_runtime?(node)
     case node
     when AST::FuncCall, AST::MethodCall
@@ -332,7 +332,7 @@ class MIRPass
     AST.recursion_yield_needed?(fn_node)
   end
 
-  sig { params(node: T.untyped, acc: T::Set[String]).void }
+  sig { params(node: T.any(AST::Node, AST::RawBody), acc: T::Set[String]).void }
   def collect_callees(node, acc)
     AST.each_locatable(node) do |child|
       case child
@@ -354,7 +354,7 @@ class MIRPass
     found
   end
 
-  sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T::Boolean) }
+  sig { params(fn: AST::FunctionDef, expr: AST::Node).returns(T::Boolean) }
   def return_expr_needs_allocator?(fn, expr)
     node = unwrap_return_expr(expr)
     return true if node.is_a?(AST::CopyNode)
@@ -374,7 +374,7 @@ class MIRPass
         ti.recursive_cleanup_shape?(@schema_lookup)))
   end
 
-  sig { params(expr: T.untyped).returns(T.untyped) }
+  sig { params(expr: AST::Node).returns(AST::Node) }
   def unwrap_return_expr(expr)
     case expr
     when AST::MoveNode, AST::Cast, AST::FreezeNode
@@ -720,9 +720,10 @@ class MIRPass
   def stamp_match_as_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.takes
-    return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
+    expr = stmt.expr
+    return unless expr.is_a?(AST::Identifier) && expr.was_moved
 
-    src_entry = live_cleanup_entry(facts, stmt.expr.name)
+    src_entry = live_cleanup_entry(facts, expr.name)
     has_as_cleanup = T.let(false, T::Boolean)
     has_source_cleanup = src_entry.needs_cleanup?
 
@@ -736,12 +737,12 @@ class MIRPass
         # Order: source suppression, then AS binding Alloc + Drop.
         mir_prefix = []
         if has_source_cleanup
-          mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
+          mir_prefix << MIR::SuppressCleanup.new(stmt.token, expr.name.to_s)
         end
         alloc_type = if c.destructure.is_a?(AST::Locatable)
           c.destructure.full_type!(context: "match AS allocation marker")
         else
-          Type.from_node!(stmt.expr, context: "match AS allocation marker")
+          Type.from_node!(expr, context: "match AS allocation marker")
         end
         mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
         drop = MIR::Drop.new(stmt.token, c.binding.to_s)

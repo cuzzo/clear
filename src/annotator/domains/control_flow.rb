@@ -219,7 +219,7 @@ module Annotator
           error!(match_node, :MATCH_NEEDS_STRUCT_TYPE, got: expr_type)
         end
 
-        schema = lookup_type_schema(expr_type)
+        schema = lookup_type_schema(T.must(expr_type))
 
         pat.fields.each do |f|
           next if f.wildcard?
@@ -407,14 +407,15 @@ module Annotator
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def consume_match_subject_if_takes!(node, plan)
         T.bind(self, SemanticAnnotator)
-        return unless node.takes && plan.union? && node.expr.is_a?(AST::Identifier)
+        expr = node.expr
+        return unless node.takes && plan.union? && expr.is_a?(AST::Identifier)
 
-        source_name = node.expr.name
+        source_name = expr.name
         graph_node = ownership_graph[source_name]
         return unless graph_node && graph_node.kind != :borrowed
 
-        node.expr.was_moved = true
-        og_set_moved(source_name, at_token: node.expr.token, action: :takes)
+        expr.was_moved = true
+        og_set_moved(source_name, at_token: expr.token, action: :takes)
       end
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Array[T.proc.returns(BasicObject)]) }
@@ -545,16 +546,17 @@ module Annotator
       sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }
       def match_payload_binding_type(plan, variant_name, raw_payload, match_case)
         T.bind(self, SemanticAnnotator)
-        if Schemas.inline_struct?(raw_payload)
+        payload = T.must(raw_payload)
+        if payload.is_a?(Schemas::InlineStructVariant)
           return Type.new(:"#{plan.type_name}_#{variant_name}")
         end
-        if raw_payload.is_a?(Type) && raw_payload.indirect?
-          inner_type = raw_payload.dup
+        if payload.is_a?(Type) && payload.indirect?
+          inner_type = payload.dup
           inner_type.strip_layout!
           match_case.indirect_payload_as = true
           return apply_type_subst(inner_type, plan.union_subst)
         end
-        apply_type_subst(raw_payload, plan.union_subst)
+        apply_type_subst(payload, plan.union_subst)
       end
 
       sig { params(binding: String).void }
@@ -665,7 +667,7 @@ module Annotator
         return unless plan.enum? || plan.union?
 
         covered = node.cases.flat_map { |match_case| match_variant_names(match_case) }.to_set
-        all_variants = plan.enum? ? match_enum_schema(plan).variants : match_union_schema(plan).variants.keys.to_set
+        all_variants = plan.enum? ? match_enum_schema(plan).variants.to_set : match_union_schema(plan).variants.keys.to_set
         missing = all_variants - covered
         return if missing.empty?
 

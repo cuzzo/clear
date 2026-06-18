@@ -271,6 +271,24 @@ RSpec.describe NilKill do
               "declared_type" => "String",
             },
           ],
+          "facts" => {
+            "alias_recommendations" => [
+              {
+                "kind" => "alias_recommendation",
+                "language" => "ruby",
+                "type_system" => "sorbet",
+                "alias" => "AST::RawBody",
+                "target" => "T::Array[AST::Node]",
+                "path" => "src/demo.rb",
+                "line" => 10,
+                "slot_count" => 1,
+                "definition" => {"path" => "src/ast/ast.rb", "line" => 15},
+                "slots" => [
+                  {"path" => "src/demo.rb", "line" => 10, "slot_kind" => "param", "slot" => "body"},
+                ],
+              },
+            ],
+          },
         },
         "runtime" => {},
         "actions" => [],
@@ -285,6 +303,7 @@ RSpec.describe NilKill do
         "nil-kill.static.untyped-signature",
         "nil-kill.static.nullable-signature",
         "nil-kill.static.untyped-field",
+        "nil-kill.static.alias-recommendation",
       )
       expect(results).not_to include(a_hash_including(
         "ruleId" => "nil-kill.static.untyped-field",
@@ -1648,6 +1667,26 @@ RSpec.describe NilKill do
       end
     end
 
+    it "uses indexed return-usage facts before falling back to AST scans" do
+      infer = infer_with_store
+      evidence = {
+        "facts" => {
+          "existing_sigs" => [
+            { "path" => "app/example.rb", "line" => 1, "class" => "Example", "method" => "answer", "kind" => "instance",
+              "sig" => "sig { returns(T.untyped) }" }
+          ],
+          "return_usage_sites" => [
+            { "path" => "spec/example_spec.rb", "line" => 3, "name" => "answer", "context" => "value", "current_method" => nil }
+          ],
+        },
+      }
+
+      expect(infer.send(:unused_return_methods, evidence)).to be_empty
+
+      evidence["facts"]["return_usage_sites"] = []
+      expect(infer.send(:unused_return_methods, evidence)).to include(a_hash_including("method" => "answer"))
+    end
+
     it "uses nested runtime shape evidence for generic narrowing" do
       infer = infer_with_store
       rec = {
@@ -2575,6 +2614,31 @@ RSpec.describe NilKill do
         end
       end
 
+      it "uses indexed hash-record escape facts when available" do
+        Dir.mktmpdir("nil-kill-indexed-append") do |dir|
+          path = File.join(dir, "parser.rb")
+          File.write(path, <<~RUBY)
+            class P
+              def parse
+                fields << { name: name, value: :wildcard, name_token: tok }
+              end
+            end
+          RUBY
+          idx = NilKill::SourceIndex.new(path)
+          infer = described_class.allocate
+          store = NilKill::Store.new
+          store.facts["hash_record_escape_sites"] = idx.hash_record_escape_sites
+          infer.instance_variable_set(:@store, store)
+          infer.define_singleton_method(:parsed_hash_record_source) { |_| raise "should use indexed facts" }
+          site_path = idx.hash_record_escape_sites.first.fetch("path")
+
+          escaping = infer.send(:hash_record_producers_escaping_into_collection,
+            [{ "path" => site_path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
+
+          expect(escaping).not_to be_empty
+        end
+      end
+
       it "blocks a producer stored via index-write" do
         Dir.mktmpdir("nil-kill-idxwrite") do |dir|
           path = File.join(dir, "pprof.rb")
@@ -3434,6 +3498,59 @@ RSpec.describe NilKill do
         "- literal/static: total 3 (75.0%) of all returns; strong 1 (33.3%); weak 1 (33.3%); untyped 1 (33.3%); nilable 0 (0.0%) within row",
         "- Ruby stdlib call: total 1 (25.0%) of all returns; strong 1 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 1 (100.0%) within row"
       )
+    end
+
+    it "reports repeated untyped slot names as pressure, not inferred types" do
+      report = described_class.allocate
+      evidence = {
+        "facts" => {
+          "existing_sigs" => [
+            { "path" => "src/a.rb", "line" => 1, "sig" => "sig { params(node: T.untyped, payload: String).returns(String) }" },
+            { "path" => "src/b.rb", "line" => 2, "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
+          ],
+          "struct_declarations" => [
+            { "class" => "Box", "path" => "src/box.rb", "line" => 4, "fields" => ["node", "payload"] },
+          ],
+          "tlet_sites" => [
+            { "path" => "src/c.rb", "line" => 5, "name" => "@node", "tlet" => true, "type" => "T.untyped" },
+          ],
+        }
+      }
+
+      rows = report.send(:untyped_slot_name_pressure, evidence)
+      node = rows.find { |row| row["name"] == "node" }
+
+      expect(node).to include("count" => 4)
+      expect(node.fetch("categories")).to include("param" => 2, "field" => 1, "var" => 1)
+      expect(rows.map { |row| row["name"] }).not_to include("payload")
+    end
+
+    it "reports static typed distributions for repeated untyped slot names when available" do
+      report = described_class.allocate
+      evidence = {
+        "facts" => {
+          "top_untyped_slot_names" => [
+            {
+              "name" => "token",
+              "count" => 2,
+              "categories" => { "param" => 1, "ivar" => 1 },
+              "examples" => ["src/a.rb:1 token"],
+              "typed_total" => 4,
+              "typed_hints" => [
+                { "type" => "Token", "count" => 3, "percent" => 75.0 },
+                { "type" => "Other", "count" => 1, "percent" => 25.0 },
+              ],
+            },
+          ],
+        },
+      }
+
+      rows = report.send(:untyped_slot_name_pressure, evidence)
+      lines = []
+      report.send(:append_untyped_slot_name_pressure, lines, evidence)
+
+      expect(rows.first.fetch("typed_hints").first).to include("type" => "Token", "percent" => 75.0)
+      expect(lines.join("\n")).to include("`Token` 3 (75.0%)")
     end
 
     it "splits addressed return fixability by type strength" do

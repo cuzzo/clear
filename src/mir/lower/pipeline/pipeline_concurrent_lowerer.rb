@@ -1385,7 +1385,7 @@ class PipelineConcurrentLowerer < T::Struct
     op = conc_op.op
     case op
     when AST::AverageOp, AST::CountOp, AST::MaxOp, AST::MinOp, AST::SelectOp, AST::SumOp, AST::WhereOp
-      T.cast(op.expression, AST::Node)
+      op.expression
     else
       raise "concurrent callback expression expected expression op, got #{op.class}"
     end
@@ -1464,12 +1464,13 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(body_stmts: T::Array[AST::Node]).returns(T::Boolean) }
   def each_body_mutates_placeholder?(body_stmts)
-    body_stmts.any? { |stmt| assignment_targets_placeholder?(T.cast(stmt, Object)) }
+    body_stmts.any? { |stmt| assignment_targets_placeholder?(stmt) }
   end
 
-  sig { params(node: T.nilable(Object)).returns(T::Boolean) }
+  AssignmentTargetScanNode = T.type_alias { T.any(AST::Node, Struct) }
+
+  sig { params(node: AssignmentTargetScanNode).returns(T::Boolean) }
   def assignment_targets_placeholder?(node)
-    return false unless node
     return target_rooted_at_placeholder?(T.cast(node.name, AST::Node)) if node.is_a?(AST::Assignment)
 
     if node.is_a?(Struct)
@@ -1478,7 +1479,7 @@ class PipelineConcurrentLowerer < T::Struct
 
         value = node[member]
         if value.is_a?(Array)
-          value.any? { |child| assignment_targets_placeholder?(child) }
+          value.any? { |child| child.is_a?(Struct) && assignment_targets_placeholder?(child) }
         elsif value.is_a?(Struct)
           assignment_targets_placeholder?(value)
         else

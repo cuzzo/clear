@@ -2137,9 +2137,9 @@ RSpec.describe "MIR gap-burn characterization" do
     borrow_left = id("borrowed_left", storage: :heap)
     borrow_left.container_borrow = true
     expect(MIRHoistFacts.container_borrow_expr?(AST::BinaryOp.new(tok, borrow_left, :OR, lit("fallback")))).to eq(true)
-    expect(low.send(:mir_allocates?, Object.new)).to eq(false)
+    expect(low.send(:mir_allocates?, nil)).to eq(false)
     expect(low.send(:hoist_alloc, MIR::Ident.new("plain"), nil)).to be_a(MIR::Ident)
-    passthrough = Object.new
+    passthrough = MIR::Lit.new("0")
     expect(low.send(:hoist_alloc, passthrough, nil)).to be(passthrough)
 
     pipeline_ast = lit("pipeline", type: :String)
@@ -2154,7 +2154,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     owned_stmt = MIR::ExprStmt.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false)
     expect(low.send(:normalize_allocating_mir_stmt!, owned_stmt)).not_to be_empty
-    expect(low.send(:normalize_stmt_child_exprs!, Object.new)).to eq([])
+    expect(low.send(:normalize_stmt_child_exprs!, MIR::Noop.new(nil))).to eq([])
     expect(low.send(:normalize_stmt_child_exprs!, MIR::ExprStmt.new(MIR::Ident.new("plain"), false))).to eq([])
 
     old_child = MIR::Ident.new("old")
@@ -2187,7 +2187,7 @@ RSpec.describe "MIR gap-burn characterization" do
     untyped_call = MIR::Call.new("make", [], false, true)
     expect { low.send(:cleanup_entry_for_ownership_effect, untyped_call, alloc: :heap) }.to raise_error(/no typed cleanup result/)
 
-    expect(low.send(:mir_ident_names, Object.new)).to eq([])
+    expect(low.send(:mir_ident_names, nil)).to eq([])
     expect(low.send(:mir_ident_names, MIR::ArrayInit.new("i64", nil, [MIR::Ident.new("a"), MIR::Ident.new("b")]))).to eq(["a", "b"])
   end
 
@@ -2628,7 +2628,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:ownership_consumption_for_node, MIR::Ident.new("plain"))).to be_nil
     expect(low.send(:ownership_consumption_for_node, expr)).to be(fact)
     expect(low.send(:ownership_consumption_for_node, MIR::ExprStmt.new(expr, false))).to be(fact)
-    expect(low.send(:ownership_contract_for_node, Object.new)).to be_nil
+    expect(low.send(:ownership_contract_for_node, MIR::Noop.new(nil))).to be_nil
     expect(low.send(:ownership_contract_for_node, MIR::Call.new("plain", [], false, false))).to be_nil
 
     expect(low.send(:ownership_consumer_requires_fact?, MIR::Ident.new("plain"))).to eq(false)
@@ -3090,8 +3090,7 @@ RSpec.describe "MIR gap-burn characterization" do
     variant_case = AST::MatchCase.new(kind: :eq, value: method_variant, body: [])
     expect(low.send(:union_match_case_variants, variant_case)).to eq(["Ok"])
 
-    malformed_return_value = Object.new
-    malformed_return_value.define_singleton_method(:full_type) { nil }
+    malformed_return_value = AST::Literal.new(tok, :INT, 1, nil)
     low.define_singleton_method(:current_function_return_payload_zig) { "*Payload" }
     expect(low.send(:return_value_already_payload_pointer?, malformed_return_value)).to eq(false)
 
@@ -3533,8 +3532,7 @@ RSpec.describe "MIR gap-burn characterization" do
     sym_source = id("sym_source", type: :Untyped, storage: :heap)
     sym_source.symbol.type = Type.new(:String)
     expect(low.send(:copy_source_type_info, sym_source).resolved).to eq(:String)
-    fallback_source = Object.new
-    fallback_source.define_singleton_method(:full_type) { Type.new(:Bool) }
+    fallback_source = lit(true, type: :Bool)
     expect(low.send(:copy_source_type_info, fallback_source).resolved).to eq(:Bool)
 
     expect { low.send(:lower_clone, AST::CloneNode.new(tok, id("plain", type: :String))) }.to raise_error(/unsupported type/)
@@ -3824,7 +3822,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(MIREmitter.new.emit(module_out)).to include("a0: i64")
 
     lambda_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    lambda_node = AST::LambdaLit.new(tok, [], ["raw_capture"], lit(1, type: :Int64), nil, nil)
+    lambda_node = AST::LambdaLit.new(tok, [], ["raw_capture"], [lit(1, type: :Int64)], nil, nil)
     lambda_node.full_type = Type.new(lambda_sig)
     lambda_out = lowering.send(:lower_lambda, lambda_node)
     expect(lambda_out.captures).to eq(["raw_capture"])

@@ -20,6 +20,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
   # string back).
   let(:lowering) {
     Class.new {
+      include FsmTransform::LoweringProtocol
+
       def lower(node); node; end
       def emit_expr(node)
         case node
@@ -177,7 +179,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
         FsmTransform::Segments::LoopBack.new(4),
         { 4 => 1 },
       )
-      passthrough = Object.new
+      passthrough = FsmTransform::Segments::Done.new(nil)
 
       expect(remapped.target_index).to eq(1)
       expect(FsmTransform::RecursiveSplitter.send(:remap_tail, passthrough, {}))

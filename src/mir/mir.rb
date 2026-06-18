@@ -29,8 +29,9 @@ module MIR
 
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def self.const_u8_literal_cast?(node)
-    node.is_a?(MIR::Cast) && node.method == :as &&
-      node.target_type == "[]const u8" && node.expr.is_a?(MIR::Lit)
+    return false unless node.is_a?(MIR::Cast)
+
+    !!(node.method == :as && node.target_type == "[]const u8" && node.expr.is_a?(MIR::Lit))
   end
 
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
@@ -328,14 +329,14 @@ module MIR
 
     const :value, Integer
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredNodeId)
 
       other.value == value
     end
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -352,14 +353,14 @@ module MIR
 
     const :node_ids, T::Array[LoweredNodeId]
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredBodyId)
 
       other.node_ids == node_ids
     end
 
-    sig { params(other: Object).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -376,6 +377,7 @@ module MIR
       extend T::Sig
 
     include Kernel
+    ChildExprValue = T.type_alias { T.nilable(T.any(MIR::Emittable, T::Array[MIR::Emittable])) }
     EMPTY_CHILD_EXPRS = T.let([].freeze, T::Array[MIR::Emittable])
     EMPTY_BODY_SLOTS = T.let([].freeze, T::Array[MIR::BodySlot])
 
@@ -406,14 +408,14 @@ module MIR
 
     private
 
-    sig { params(values: T::Array[Object]).returns(T::Array[Emittable]) }
+    sig { params(values: T::Array[ChildExprValue]).returns(T::Array[Emittable]) }
     def compact_child_exprs(values)
       children = T.let([], T::Array[Emittable])
       values.each { |value| append_child_expr(children, value) }
       children
     end
 
-    sig { params(children: T::Array[Emittable], value: Object).void }
+    sig { params(children: T::Array[Emittable], value: ChildExprValue).void }
     def append_child_expr(children, value)
       if value.is_a?(Array)
         value.each { |child| append_child_expr(children, child) }
@@ -476,6 +478,7 @@ module MIR
 
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[Node]) }
+  Body = T.type_alias { BodySlot::Body }
   DeferBody = T.type_alias { T.any(Emittable, T::Array[Emittable]) }
   DeferBodyInput = T.type_alias { T.any(DeferBody, String) }
   FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
@@ -483,7 +486,7 @@ module MIR
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
 
   class OwnershipEffect
-    OwnershipEffectInput = T.type_alias { T.nilable(T.any(Emittable, Object)) }
+    OwnershipEffectInput = T.type_alias { T.nilable(Emittable) }
 
     sig { params(node: OwnershipEffectInput).returns(OwnershipEffect) }
     def self.of(node)
@@ -544,7 +547,7 @@ module MIR
       effect_when(same_owned_alloc?(left, right), left)
     end
 
-    sig { params(sink_alloc: T.nilable(Symbol), inner: T.nilable(Object)).returns(OwnershipEffect) }
+    sig { params(sink_alloc: T.nilable(Symbol), inner: OwnershipEffectInput).returns(OwnershipEffect) }
     def self.from_pipeline(sink_alloc:, inner:)
       first_active_effect([
         [!sink_alloc.nil?, owned(alloc: sink_alloc)],
@@ -603,7 +606,7 @@ module MIR
       result_type&.needs_cleanup?(nil) == true
     end
 
-    sig { params(stmts: T::Array[Emittable], value: T.nilable(Object)).returns(OwnershipEffect) }
+    sig { params(stmts: T::Array[Emittable], value: OwnershipEffectInput).returns(OwnershipEffect) }
     private_class_method def self.transferred_break_ident_effect(stmts, value)
       ident = [value].grep(MIR::Ident).first
       name = (ident&.name || "").to_s
@@ -646,6 +649,8 @@ module MIR
     end
   end
 
+  StructInitFieldInput = T.type_alias { T.any(StructInitField, NamedMirField) }
+
   sig { params(name: T.any(String, Symbol), value: Emittable).returns(StructInitField) }
   def self.named_field(name, value)
     StructInitField.new(name: name, value: value)
@@ -659,7 +664,7 @@ module MIR
     binding
   end
 
-  sig { params(field: Object).returns(T.nilable(T.any(String, Symbol))) }
+  sig { params(field: StructInitFieldInput).returns(T.nilable(T.any(String, Symbol))) }
   def self.struct_init_field_name(field)
     return field.name if field.is_a?(StructInitField)
     return T.cast(field[:name], T.nilable(T.any(String, Symbol))) if field.is_a?(Hash)
@@ -667,7 +672,7 @@ module MIR
     nil
   end
 
-  sig { params(field: Object).returns(T.nilable(Emittable)) }
+  sig { params(field: StructInitFieldInput).returns(T.nilable(Emittable)) }
   def self.struct_init_field_value(field)
     return field.value if field.is_a?(StructInitField)
     return T.cast(field[:value], T.nilable(Emittable)) if field.is_a?(Hash)
@@ -675,7 +680,7 @@ module MIR
     nil
   end
 
-  sig { params(field: Object).returns(T.nilable(Symbol)) }
+  sig { params(field: StructInitFieldInput).returns(T.nilable(Symbol)) }
   def self.struct_init_field_alloc(field)
     return field.alloc if field.is_a?(StructInitField)
     return T.cast(field[:alloc], T.nilable(Symbol)) if field.is_a?(Hash)
@@ -865,10 +870,10 @@ module MIR
     extend T::Sig
     include Emittable
 
-    sig { returns(T::Array[Object]) }
+    sig { returns(T::Array[Emittable]) }
     attr_reader :items
 
-    sig { params(items: T::Array[Object], pass_state: T.nilable(MIRPassState)).void }
+    sig { params(items: T::Array[Emittable], pass_state: T.nilable(MIRPassState)).void }
     def initialize(items, pass_state = nil)
       @items = items
       @pass_state = T.let(pass_state, T.nilable(MIRPassState))
@@ -909,6 +914,11 @@ module MIR
     def has_own_frame? = true
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # Function parameter.
@@ -1009,6 +1019,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # ================================================================
@@ -1112,6 +1127,11 @@ module MIR
     def child_exprs = compact_child_exprs([cond, update])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # For loop over slice/range.
@@ -1123,6 +1143,11 @@ module MIR
     def child_exprs = compact_child_exprs([iter])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # Scoped block.
@@ -1132,6 +1157,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   class EnumSwitchPattern < T::Struct
@@ -1155,7 +1185,13 @@ module MIR
     # arms: [SwitchArm]
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      compact_child_exprs([subject, *(arms || []).flat_map(&:patterns)])
+      pattern_exprs = T.let([], T::Array[Emittable])
+      (arms || []).each do |arm|
+        arm.patterns.each do |pattern|
+          pattern_exprs << pattern if pattern.is_a?(Emittable)
+        end
+      end
+      compact_child_exprs([subject, pattern_exprs])
     end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
@@ -1285,6 +1321,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   TestPreamble = Struct.new(:unused) do
@@ -1296,6 +1337,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # In-place sort.
@@ -1326,6 +1372,13 @@ module MIR
   # Zig: <expr> catch @panic("message")
   TryOrPanic = Struct.new(:expr, :panic_msg) do
     include Expr
+
+    extend T::Sig
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # INDEX-bucket insert: append `value` to the list bucket of `map` at `key`,
@@ -1378,10 +1431,15 @@ module MIR
 
     sig { returns(T::Array[BodySlot]) }
     def body_slots
-      body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
+      body.is_a?(Array) ? [body_slot(:body, T.cast(body, Body), ->(new_body) { self.body = new_body })] : []
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = body.is_a?(Array) ? [] : compact_child_exprs([body])
+
+    sig { returns(DeferBody) }
+    def body
+      self[:body]
+    end
   end
 
   # Errdefer statement.
@@ -1397,10 +1455,15 @@ module MIR
 
     sig { returns(T::Array[BodySlot]) }
     def body_slots
-      body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
+      body.is_a?(Array) ? [body_slot(:body, T.cast(body, Body), ->(new_body) { self.body = new_body })] : []
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = body.is_a?(Array) ? [] : compact_child_exprs([body])
+
+    sig { returns(DeferBody) }
+    def body
+      self[:body]
+    end
   end
 
   # Expression used as statement.
@@ -1415,6 +1478,11 @@ module MIR
     def explicit_ownership_contract
       expr.is_a?(Emittable) ? expr.explicit_ownership_contract : nil
     end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Owning expression used as a statement.
@@ -1424,6 +1492,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Non-mutual THUNK trampoline body. This is still emitted as a local
@@ -1570,7 +1643,7 @@ module MIR
         code: BgBlockPlan,
         captures: T::Hash[String, Type],
         run_body: T::Array[Emittable],
-        fsm_structure: Object,
+        fsm_structure: T.nilable(Emittable),
       ).void
     end
     def initialize(code, captures = {}, run_body = [], fsm_structure = nil)
@@ -1625,6 +1698,11 @@ module MIR
     def expr?; true; end
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # ================================================================
@@ -2487,9 +2565,9 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([], T::Array[Object])
-      values << T.cast(message, Object) if message
-      values << T.cast(return_value, Object) if return_value
+      values = T.let([], T::Array[Emittable::ChildExprValue])
+      values << message if message
+      values << return_value if return_value
       compact_child_exprs(values)
     end
 
@@ -2552,7 +2630,7 @@ module MIR
     def stmt?; true; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([T.cast(acquire_call, Object), action], T::Array[Object])
+      values = T.let([acquire_call, action], T::Array[Emittable::ChildExprValue])
       compact_child_exprs(values)
     end
     sig { returns(T::Array[BodySlot]) }
@@ -2612,7 +2690,7 @@ module MIR
     end
   end
 
-  sig { params(plan: Object).returns(T::Boolean) }
+  sig { params(plan: T.untyped).returns(T::Boolean) }
   def self.structural_bg_block_plan?(plan)
     plan.is_a?(MIR::BgStackfulPlan) ||
       plan.is_a?(MIR::BgStreamPlan) ||
@@ -3113,6 +3191,11 @@ module MIR
     def child_exprs = compact_child_exprs([cell_unwrap])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
@@ -3147,7 +3230,7 @@ module MIR
     def stmt?; true; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([T.cast(cell_unwrap, Object)], T::Array[Object])
+      values = T.let([cell_unwrap], T::Array[Emittable::ChildExprValue])
       values << conflict_action if conflict_action
       compact_child_exprs(values)
     end
@@ -3156,6 +3239,11 @@ module MIR
       slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
       slots.concat(T.must(conflict_action).body_slots) if conflict_action
       slots
+    end
+
+    sig { returns(Body) }
+    def body
+      self[:body]
     end
   end
 
@@ -3181,7 +3269,7 @@ module MIR
     def stmt?; true; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([cells || []], T::Array[Object])
+      values = T.let([cells || []], T::Array[Emittable::ChildExprValue])
       values << conflict_action if conflict_action
       compact_child_exprs(values)
     end
@@ -3190,6 +3278,11 @@ module MIR
       slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
       slots.concat(T.must(conflict_action).body_slots) if conflict_action
       slots
+    end
+
+    sig { returns(Body) }
+    def body
+      self[:body]
     end
   end
 
@@ -3222,6 +3315,11 @@ module MIR
     def child_exprs = compact_child_exprs([cell])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
   end
 
   PolymorphicMutateFlow = Struct.new(
@@ -3238,6 +3336,11 @@ module MIR
       slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
       slots << body_slot(:guard_fail_body, guard_fail_body, ->(new_body) { self.guard_fail_body = new_body }) if guard_fail_body
       slots
+    end
+
+    sig { returns(Body) }
+    def body
+      self[:body]
     end
   end
 
@@ -3766,8 +3869,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([], T::Array[Object])
-      items.each { |item| values << T.cast(item, Object) }
+      values = T.let([], T::Array[Emittable::ChildExprValue])
+      items.each { |item| values << item if item.is_a?(Emittable) }
       compact_child_exprs(values)
     end
   end
@@ -3794,6 +3897,11 @@ module MIR
     def child_exprs
       compact_child_exprs([expr])
     end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Struct initialization.
@@ -3805,10 +3913,10 @@ module MIR
     # fields: [MIR::StructInitField] (legacy hash fields are still readable)
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([], T::Array[Object])
+      values = T.let([], T::Array[Emittable::ChildExprValue])
       fields&.each do |field|
         value = MIR.struct_init_field_value(field)
-        values << T.cast(value, Object) if value
+        values << value if value
       end
       compact_child_exprs(values)
     end
@@ -3895,6 +4003,12 @@ module MIR
 
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+
+    sig { returns(Body) }
+    def body
+      self[:body]
+    end
+
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.from_block_body(body, result_type: result_type)
@@ -3943,6 +4057,11 @@ module MIR
     def without_try
       expr
     end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Try expression (wraps a failable expression).
@@ -3959,6 +4078,11 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.of(expr)
+    end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
     end
   end
 
@@ -3991,8 +4115,20 @@ module MIR
         OwnershipEffect.of(catch_body),
         result_type: result_type,
         fallback_is_literal: catch_body.is_a?(Lit),
-        left_never_success: expr.is_a?(Call) && expr.never_success,
+        left_never_success: call_never_success?(expr),
       )
+    end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
+
+    private
+
+    sig { params(value: Emittable).returns(T::Boolean) }
+    def call_never_success?(value)
+      value.is_a?(Call) && value.never_success
     end
   end
 
@@ -4023,6 +4159,11 @@ module MIR
         OwnershipEffect.of(fallback),
         result_type: result_type,
       )
+    end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
     end
   end
 
@@ -4081,6 +4222,11 @@ module MIR
     def ownership_source_exprs = child_exprs
     sig { returns(T::Array[Emittable]) }
     def owned_position_source_exprs = child_exprs
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Semantic union-variant payload access.
@@ -4117,6 +4263,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Address-of.
@@ -4126,6 +4277,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Dereference.
@@ -4135,6 +4291,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Pointer cast with Zig's required alignment assertion.
@@ -4144,6 +4305,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Const-removing cast for APIs that legitimately mutate through a slice.
@@ -4153,6 +4319,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Default bounded-channel capacity for streaming CONCURRENT.
@@ -4227,6 +4398,11 @@ module MIR
     def ownership_source_exprs = child_exprs
     sig { returns(T::Array[Emittable]) }
     def owned_position_source_exprs = child_exprs
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Range literal.
@@ -4258,6 +4434,11 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Items accessor (ArrayList -> slice).
@@ -4271,6 +4452,11 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def ownership_source_exprs = child_exprs
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
+    end
   end
 
   # Transfer an ArrayList-backed value into an owned slice.
@@ -4278,7 +4464,7 @@ module MIR
   OwnedSlice = Struct.new(:expr, :alloc) do
     extend T::Sig
     include Expr
-    sig { params(expr: T.untyped, alloc: Symbol).void }
+    sig { params(expr: Emittable, alloc: Symbol).void }
     def initialize(expr, alloc)
       super(expr, alloc)
     end
@@ -4290,6 +4476,11 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect
       owned_effect_for_alloc(alloc)
+    end
+
+    sig { returns(Emittable) }
+    def expr
+      self[:expr]
     end
   end
 
@@ -4364,8 +4555,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      children = T.let([], T::Array[Object])
-      args.each { |arg| children << T.cast(arg.expr, Object) }
+      children = T.let([], T::Array[Emittable::ChildExprValue])
+      args.each { |arg| children << arg.expr }
       compact_child_exprs(children)
     end
 
@@ -4459,10 +4650,10 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      children = T.let([], T::Array[Object])
-      children << T.cast(target, Object)
-      children << T.cast(index, Object)
-      children << T.cast(value, Object)
+      children = T.let([], T::Array[Emittable::ChildExprValue])
+      children << target
+      children << index
+      children << value
       compact_child_exprs(children)
     end
 
@@ -4523,11 +4714,11 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      children = T.let([], T::Array[Object])
+      children = T.let([], T::Array[Emittable::ChildExprValue])
       current_receiver = receiver
-      children << T.cast(current_receiver, Object) if current_receiver
-      comptime_args.each { |arg| children << T.cast(arg, Object) }
-      runtime_args.each { |arg| children << T.cast(arg.expr, Object) }
+      children << current_receiver if current_receiver
+      comptime_args.each { |arg| children << arg }
+      runtime_args.each { |arg| children << arg.expr }
       compact_child_exprs(children)
     end
 

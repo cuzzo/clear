@@ -33,6 +33,21 @@ module MIRLoweringCapabilities
 
   CapabilitySpec = T.type_alias { CapabilityPlan::CapabilityTransition }
   CapabilityVarNode = T.type_alias { T.any(AST::Identifier, AST::GetField, AST::GetIndex) }
+  FieldPathNode = T.type_alias { T.any(AST::Identifier, AST::GetField) }
+  AstReturnSearchNode = T.type_alias do
+    T.nilable(T.any(
+      AST::Node,
+      AST::RawBody,
+      T::Hash[BasicObject, BasicObject],
+      Symbol,
+      String,
+      Integer,
+      Float,
+      TrueClass,
+      FalseClass,
+      Type,
+    ))
+  end
   WithBindingNode = T.type_alias { T.any(String, MIR::Emittable, T::Array[MIR::Emittable]) }
 
   class FallibleClauseFact < T::Struct
@@ -147,7 +162,7 @@ module MIRLoweringCapabilities
 
   # Recursively build the Zig string for a (possibly nested) field path.
   # Stops at the root Identifier; intermediate GetFields chain via `.`.
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: FieldPathNode).returns(String) }
   def build_field_path_zig(node)
     T.bind(self, MIRLowering) rescue nil
     case node
@@ -769,7 +784,7 @@ module MIRLoweringCapabilities
     ast_contains_return?(node.body)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AstReturnSearchNode).returns(T::Boolean) }
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
     case node
@@ -782,7 +797,7 @@ module MIRLoweringCapabilities
     when AST::ReturnNode
       true
     else
-      node.respond_to?(:each_pair) && node.each_pair.any? { |_, v| ast_contains_return?(v) }
+      node.respond_to?(:each_pair) && T.unsafe(node).each_pair.any? { |_, v| ast_contains_return?(v) }
     end
   end
 

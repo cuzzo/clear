@@ -600,7 +600,7 @@ class PipelineHost
     PipelinePlaceholderUsage.statements_use_placeholder?(stmts)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def ast_node_uses_placeholder?(node)
     PipelinePlaceholderUsage.node_uses_placeholder?(node)
   end
@@ -652,7 +652,7 @@ class PipelineHost
     when PipelineExecutionKind::BatchWindow
       lower_batch_window(plan.site, T.cast(plan.rhs, AST::BatchWindowOp))
     when PipelineExecutionKind::SetIndex
-      lower_index(plan.site, T.cast(T.cast(plan.rhs, AST::IndexOp).expression, AST::Node))
+      lower_index(plan.site, T.cast(plan.rhs, AST::IndexOp).expression)
     when PipelineExecutionKind::Each
       lower_each(plan.site, T.cast(plan.rhs, AST::EachOp))
     when PipelineExecutionKind::Concurrent
@@ -714,7 +714,7 @@ class PipelineHost
     end
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def ast_uses_bare_placeholder?(node)
     PipelinePlaceholderUsage.node_uses_bare_placeholder?(node)
   end

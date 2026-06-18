@@ -3,6 +3,7 @@ require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative '../semantic/capability_plan'
 require_relative 'fsm_ops'
+require_relative 'fsm_transform/lowering_protocol'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
 # so the helpers share the lowering's explicit function/capture state and
@@ -27,10 +28,13 @@ require_relative 'fsm_ops'
 #                                          no ON clause is present
 module FsmLowering
     extend T::Sig
+  include FsmTransform::LoweringProtocol
   include Kernel
 
   FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, CapabilityPlan::CapabilityTransition) }
   FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
+  FsmAstResultNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+  FsmCapturedMap = T.type_alias { T::Hash[String, Type] }
   class FsmLockErrorArmSplit < T::Struct
     const :body_stmts, T::Array[MIR::Node]
     const :exit_kind, Symbol
@@ -106,7 +110,8 @@ module FsmLowering
         expr_type = last_step.expr.full_type!
         expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
         result_alloc = escaping_value_alloc(expr_t)
-        last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
+        raw_last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
+        last_mir = T.let(raw_last_mir.is_a?(MIR::Emittable) ? raw_last_mir : nil, T.nilable(MIR::Node))
         last_mir = place_value_for_destination(last_mir, last_step.expr, result_alloc, expr_t) if last_mir
         last_mir = hoist_alloc(last_mir, last_step.expr, err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
@@ -115,7 +120,7 @@ module FsmLowering
         last_is_assign = last_step.expr.is_a?(AST::Assignment)
         is_step_void = ast_void_type?(expr_type)
 
-        if last_is_assign || is_step_void
+        if last_mir && (last_is_assign || is_step_void)
           stmt_mir = wrap_step_as_stmt(AST::ThenStep.new(expr: last_step.expr, binding: nil), last_mir)
           result_mir << stmt_mir if stmt_mir
         elsif last_mir
@@ -257,7 +262,7 @@ module FsmLowering
     facts
   end
 
-  sig { params(node: T.untyped).returns(T::Array[String]) }
+  sig { params(node: FsmAstResultNode).returns(T::Array[String]) }
   def fsm_ast_result_consumed_roots(node)
     names = T.let([], T::Array[String])
     case node
@@ -395,7 +400,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: CapabilityPlan::CapabilityTransition, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Object]).returns(T.nilable(FsmCapMetadata)) }
+  sig { params(cap: CapabilityPlan::CapabilityTransition, with_node: AST::WithBlock, ctx_id: Integer, captured: FsmCapturedMap).returns(T.nilable(FsmCapMetadata)) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap.capability == :EXCLUSIVE ||

@@ -379,7 +379,7 @@ class Scope
   end
 
   # Mark a variable as read (used as an r-value in user code).
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).void }
   def mark_read(name)
     entry = entry_for_write(name)
     return unless entry
@@ -402,7 +402,7 @@ class Scope
     @bindings[name] = local
   end
 
-  sig { params(node: T.untyped).returns(T::Array[Symbol]) }
+  sig { params(node: AST::Node).returns(T::Array[Symbol]) }
   def get_path_to_root(node)
     path = []
     curr = T.let(node, T.untyped)

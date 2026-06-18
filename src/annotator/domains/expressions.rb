@@ -71,7 +71,7 @@ module Annotator
           sigil: sigil, n: node.n, variant_hint: variant_hint)
       end
 
-      sig { params(node: AST::UnaryOp).returns(T.nilable(Object)) }
+      sig { params(node: AST::UnaryOp).returns(T.any(Type, Symbol)) }
       def visit_UnaryOp(node)
         T.bind(self, SemanticAnnotator)
 
@@ -88,7 +88,7 @@ module Annotator
       # ==========================================
       # LITERALS & BINARY OPS
       # ==========================================
-      sig { params(node: AST::Literal).returns(T.nilable(Object)) }
+      sig { params(node: AST::Literal).returns(Type) }
       def visit_Literal(node)
         T.bind(self, SemanticAnnotator)
 
@@ -135,7 +135,7 @@ module Annotator
         stamp_type!(node, :Any)
       end
 
-      sig { params(node: AST::BinaryOp).returns(T.nilable(Object)) }
+      sig { params(node: AST::BinaryOp).returns(T.nilable(T.any(Type, Symbol, Integer))) }
       def visit_BinaryOp(node)
         T.bind(self, SemanticAnnotator)
 
@@ -175,6 +175,7 @@ module Annotator
           ti = node.full_type!(context: "binary result")
           ti.mark_frame_allocated! if ti.is_a?(Type)
         end
+        result.type
       end
 
       sig { params(node: AST::Placeholder).returns(T.nilable(SymbolEntry)) }

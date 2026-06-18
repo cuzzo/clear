@@ -307,7 +307,7 @@ class FunctionSignature
     params(
       return_type: Type,
       allocates: T::Boolean,
-      borrows: T.nilable(T.any(Symbol, T::Array[T.untyped])),
+      borrows: T.nilable(T.any(Symbol, T::Array[Symbol])),
       can_fail: T.nilable(T::Boolean),
       return_alloc: T.nilable(Symbol),
     ).returns(FunctionSignature)

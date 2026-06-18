@@ -46,6 +46,8 @@ module NilKill
           "nil_guards" => Array(raw["nil_guards"]),
           "type_assertions" => Array(raw["type_assertions"]),
           "collections" => Array(raw["collections"]),
+          "facts" => Hash(raw["facts"] || {}),
+          "summary" => Hash(raw["summary"] || {}),
           "language_capabilities" => Hash(raw["language_capabilities"] || {}),
           "language_extensions" => Hash(raw["language_extensions"] || {}),
         }.tap do |out|

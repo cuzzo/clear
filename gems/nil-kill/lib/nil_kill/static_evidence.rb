@@ -32,6 +32,7 @@ module NilKill
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
       signatures = {}
       type_definitions = []
+      hash_shapes = []
       files = target_files
 
       files.each do |file|
@@ -47,6 +48,11 @@ module NilKill
         merge_set_map!(state_param_origins, evidence.fetch("state_param_origins", {}))
         signatures.merge!(evidence.fetch("signatures", {}))
         type_definitions.concat(evidence.fetch("type_definitions", []))
+        hash_shapes.concat(evidence.fetch("hash_shapes", []))
+      end
+      languages_for(files).each do |language|
+        provider = Languages.provider_for(language)
+        type_definitions.concat(provider.external_type_definitions(root: @root))
       end
 
       state_protocols = stringify_set_map(state_protocols)
@@ -55,7 +61,11 @@ module NilKill
         [definition["language"], definition["path"], definition["owner"], definition["kind"],
           definition["name"], definition["line"], definition["type_system"]]
       end
+      alias_recommendations = AliasRecommendations.build(type_definitions: type_definitions)
       typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
+      hash_shapes = hash_shapes.uniq do |shape|
+        [shape["path"], shape["line"], Array(shape["keys"]), Array(shape["value_types"])]
+      end
 
       {
         "version" => 2,
@@ -76,6 +86,8 @@ module NilKill
           "state_param_origins" => state_param_origins,
           "signatures" => Hash[signatures.sort],
           "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
+          "alias_recommendations" => alias_recommendations,
+          "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -89,6 +101,8 @@ module NilKill
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
           "type_definitions" => type_definitions.size,
+          "alias_recommendations" => alias_recommendations.size,
+          "hash_shapes" => hash_shapes.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },

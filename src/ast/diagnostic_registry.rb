@@ -47,8 +47,33 @@ module DiagnosticRegistry
   extend T::Sig
 
   DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+  DiagnosticEntryValue = T.type_alias { T.nilable(T.any(String, Symbol, T::Boolean)) }
+  DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
+
+  sig do
+    params(
+      severity: Symbol,
+      category: Symbol,
+      template: String,
+      summary: String,
+      cause: T.nilable(String),
+      fix_hint: T.nilable(String),
+      pending: T::Boolean,
+    ).returns(DiagnosticEntry)
+  end
+  def self.entry(severity:, category:, template:, summary:, cause: nil, fix_hint: nil, pending: false)
+    out = T.let({}, DiagnosticEntry)
+    out[:severity] = severity
+    out[:category] = category
+    out[:template] = template
+    out[:summary] = summary
+    out[:cause] = cause if cause
+    out[:fix_hint] = fix_hint if fix_hint
+    out[:pending] = pending if pending
+    out
+  end
 
   DIAGNOSTICS = T.let({
     # ===================================================================
@@ -154,11 +179,12 @@ module DiagnosticRegistry
       cause: "A struct field assignment (`p.field = v`) requires the receiver binding `p` to be declared MUTABLE. CLEAR is immutable-by-default; without `MUTABLE p = ...`, no field of `p` can be reassigned.",
       fix_hint: "Add `MUTABLE` at the receiver's declaration. Capability-wrapped bindings (`@locked`, `@alwaysMutable`) also permit field writes through their unwrapping rules.",
     },
-    ILLEGAL_FIELD_LOOKUP: {
-      severity: :error, category: :type,
-      template: "Type Error: Cannot determine struct type for field access '%{field}'. Object is '%{type}'.",
-      summary:  "Field access on a non-struct (or unresolved-type) target.",
-    },
+    ILLEGAL_FIELD_LOOKUP: entry(
+      severity: :error,
+      category: :type,
+      template: "Type Error: Cannot determine struct type for field access '%{field}'. Receiver is '%{type}'.",
+      summary: "Field access on a non-struct (or unresolved-type) target.",
+    ),
     STRUCT_FIELD_UNRESOLVABLE: {
       severity: :error, category: :type,
       template: "Type Error: Struct '%{struct}' has no field '%{field}'",
@@ -2952,8 +2978,6 @@ module DiagnosticRegistry
     REPLACE_AUTO_WITH_INFERRED: "Replace `Auto` with the inferred type `%{type}`.",
   }.freeze, T::Hash[Symbol, String])
 
-
-  DiagnosticEntry = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   sig { params(code: Symbol).returns(T.nilable(DiagnosticEntry)) }
   def self.lookup(code)

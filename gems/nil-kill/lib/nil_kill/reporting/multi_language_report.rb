@@ -21,10 +21,11 @@ module NilKill
           "- Param observations: #{param_observation_count}",
           "- Return observations: #{return_observation_count}",
           "- Field observations: #{field_observation_count}",
+          "- Alias recommendations: #{alias_recommendations.size}",
           "- Actions: #{actions.size}",
           "- Diagnostics: #{diagnostics.size}",
           "",
-        ] + action_lines + diagnostic_lines + observation_lines
+        ] + alias_recommendation_lines + action_lines + diagnostic_lines + observation_lines
       end
 
       private
@@ -61,6 +62,12 @@ module NilKill
         Array(@evidence["diagnostics"])
       end
 
+      def alias_recommendations
+        facts = static["facts"]
+        facts = static.dig("language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+        Array(facts && facts["alias_recommendations"])
+      end
+
       def param_observation_count
         Hash(runtime["param_observations"]).sum { |_id, params| Hash(params).size }
       end
@@ -85,6 +92,22 @@ module NilKill
           lines << "- #{path}:#{line} #{action["kind"]} [#{action["confidence"]}]: #{action["message"]}"
         end
         lines << "- ... #{actions.size - 100} more" if actions.size > 100
+        lines << ""
+        lines
+      end
+
+      def alias_recommendation_lines
+        lines = ["## Alias Recommendations", ""]
+        if alias_recommendations.empty?
+          lines << "- None"
+          return lines + [""]
+        end
+        alias_recommendations.first(50).each do |recommendation|
+          slots = recommendation["slot_count"].to_i
+          definition = recommendation["definition"] || {}
+          lines << "- #{recommendation["alias"]}: #{recommendation["target"]} (#{slots} slot#{slots == 1 ? "" : "s"}, defined at #{definition["path"]}:#{definition["line"]})"
+        end
+        lines << "- ... #{alias_recommendations.size - 50} more" if alias_recommendations.size > 50
         lines << ""
         lines
       end

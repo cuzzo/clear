@@ -2,6 +2,25 @@
 require "sorbet-runtime"
 require_relative "../../ast/ast"
 
+AutoInferenceWalkNode = T.type_alias do
+  T.nilable(T.any(
+    AST::Node,
+    AST::RawBody,
+    T::Hash[BasicObject, BasicObject],
+    Struct,
+    T::Struct,
+    SymbolEntry,
+    Symbol,
+    String,
+    Numeric,
+    TrueClass,
+    FalseClass,
+    Lexer::Token,
+    Type,
+  ))
+end
+AutoInferenceDeclBlock = T.type_alias { T.proc.params(decl: T.any(AST::BindExpr, AST::VarDecl)).void }
+
 class AutoSlotId
     extend T::Sig
 
@@ -23,10 +42,10 @@ class AutoSlotId
     ).void
   end
   def initialize(kind:, fn_name: nil, index: nil, decl_id: nil)
-    @kind = kind
-    @fn_name = fn_name
-    @index = index
-    @decl_id = decl_id
+    @kind = T.let(kind, Symbol)
+    @fn_name = T.let(fn_name, T.nilable(String))
+    @index = T.let(index, T.nilable(Integer))
+    @decl_id = T.let(decl_id, T.nilable(Integer))
   end
 
   sig { params(fn_name: String, index: Integer).returns(AutoSlotId) }
@@ -86,8 +105,8 @@ class AutoMapShapeEntry
 
   sig { params(key: AutoSlotId, value: AutoSlotId).void }
   def initialize(key:, value:)
-    @key = key
-    @value = value
+    @key = T.let(key, AutoSlotId)
+    @value = T.let(value, AutoSlotId)
   end
 end
 
@@ -152,7 +171,7 @@ class AutoConstraintCollector
   def initialize(fn_nodes)
     # fn_nodes: { name => AST::FunctionDef }, exactly as the existing
     # annotator's signature-collection pass produces.
-    @fn_nodes = fn_nodes
+    @fn_nodes = T.let(fn_nodes, FnNodes)
     @slots = T.let({}, SlotMap)
     # Per-function map of `local_name → slot_id`, threaded through
     # the walk via @local_decls (saved/restored on FunctionDef entry).
@@ -211,11 +230,11 @@ class AutoConstraintCollector
   # FunctionDef entry, resets @local_decls (per-function map of
   # local-name → slot-id) so reassignments only match decls in the
   # same function body.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
+  sig { params(node: AutoInferenceWalkNode, current_fn: T.nilable(AST::FunctionDef)).void }
   def walk(node, current_fn:)
     return if node.nil?
     case node
-    when Symbol, String, Numeric, TrueClass, FalseClass, Type
+    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry
       # leaf
     when Array
       node.each { |c| walk(c, current_fn: current_fn) }
@@ -230,7 +249,7 @@ class AutoConstraintCollector
         @local_decls = {}
       end
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk(v, current_fn: next_fn) }
+        T.unsafe(node).each_pair { |_, v| walk(v, current_fn: next_fn) }
       end
       @local_decls = saved_local_decls if node.is_a?(AST::FunctionDef)
     end
@@ -238,7 +257,7 @@ class AutoConstraintCollector
 
   # Per-node-type constraint recording. Each branch corresponds to
   # one of the constraint sources from §4.1 of the spec.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
+  sig { params(node: AutoInferenceWalkNode, current_fn: T.nilable(AST::FunctionDef)).void }
   def record_constraint(node, current_fn)
     case node
     when AST::FuncCall
@@ -510,7 +529,7 @@ class AutoUnifier
 
   sig { params(slots: AutoConstraintCollector::SlotMap, type_of: T.nilable(TypeResolver)).void }
   def initialize(slots, type_of: nil)
-    @slots = slots
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
     # `type_of` lets callers plug in a custom source-type resolver.
     # Default reads the finalized per-node type. The tolerant body-pass
     # populates type_info on each constraint source before this unifier runs.
@@ -701,8 +720,8 @@ class ShapeEvidenceCollector
 
   sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
-    @slots = slots
-    @fn_nodes = fn_nodes
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
+    @fn_nodes = T.let(fn_nodes, AutoConstraintCollector::FnNodes)
   end
 
   sig { returns(AutoConstraintCollector::SlotMap) }
@@ -737,7 +756,7 @@ class ShapeEvidenceCollector
     map
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: AutoInferenceWalkNode, block: AutoInferenceDeclBlock).void }
   def walk_for_shape_decls(node, &block)
     return if node.nil?
     case node
@@ -746,19 +765,21 @@ class ShapeEvidenceCollector
       walk_for_shape_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_for_shape_decls(c, &block) }
     when Hash
       node.each_value { |v| walk_for_shape_decls(v, &block) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_for_shape_decls(v, &block) }
+        T.unsafe(node).each_pair { |_, v| walk_for_shape_decls(v, &block) }
       end
     end
   end
 
   # Walk the body and record evidence into shape slots.
-  sig { params(node: T.untyped, name_map: NameShapeMap).returns(T.untyped) }
+  sig { params(node: AutoInferenceWalkNode, name_map: NameShapeMap).void }
   def walk(node, name_map)
     return if node.nil?
     case node
@@ -771,13 +792,15 @@ class ShapeEvidenceCollector
       walk(node.value, name_map)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk(c, name_map) }
     when Hash
       node.each_value { |v| walk(v, name_map) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk(v, name_map) }
+        T.unsafe(node).each_pair { |_, v| walk(v, name_map) }
       end
     end
   end
@@ -855,8 +878,8 @@ class OperatorEvidenceCollector
 
   sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
-    @slots = slots
-    @fn_nodes = fn_nodes
+    @slots = T.let(slots, AutoConstraintCollector::SlotMap)
+    @fn_nodes = T.let(fn_nodes, AutoConstraintCollector::FnNodes)
     @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, EvidenceMap)
   end
 
@@ -868,7 +891,7 @@ class OperatorEvidenceCollector
 
   private
 
-  sig { params(fn: AST::FunctionDef).returns(T::Array[T.untyped]) }
+  sig { params(fn: AST::FunctionDef).void }
   def collect_in_function(fn)
     name_to_slot = build_name_map(fn)
     walk_binops(fn.body, name_to_slot, fn)
@@ -892,7 +915,7 @@ class OperatorEvidenceCollector
   end
 
   # Walk for Auto-typed BindExpr / VarDecl, yielding each one.
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(node: AutoInferenceWalkNode, block: AutoInferenceDeclBlock).void }
   def walk_for_local_decls(node, &block)
     return if node.nil?
     case node
@@ -901,13 +924,15 @@ class OperatorEvidenceCollector
       walk_for_local_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_for_local_decls(c, &block) }
     when Hash
       node.each_value { |v| walk_for_local_decls(v, &block) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_for_local_decls(v, &block) }
+        T.unsafe(node).each_pair { |_, v| walk_for_local_decls(v, &block) }
       end
     end
   end
@@ -915,7 +940,7 @@ class OperatorEvidenceCollector
   # Walk for BinaryOp expressions; record `op` per slot whose
   # binding appears as an Identifier operand. Returns also recorded
   # for return-Auto when the RETURN value is a BinaryOp.
-  sig { params(node: T.untyped, name_to_slot: NameSlotMap, fn: AST::FunctionDef).returns(T.untyped) }
+  sig { params(node: AutoInferenceWalkNode, name_to_slot: NameSlotMap, fn: AST::FunctionDef).void }
   def walk_binops(node, name_to_slot, fn)
     return if node.nil?
     case node
@@ -931,18 +956,20 @@ class OperatorEvidenceCollector
       walk_binops(node.value, name_to_slot, fn)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_binops(c, name_to_slot, fn) }
     when Hash
       node.each_value { |v| walk_binops(v, name_to_slot, fn) }
     else
       if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk_binops(v, name_to_slot, fn) }
+        T.unsafe(node).each_pair { |_, v| walk_binops(v, name_to_slot, fn) }
       end
     end
   end
 
-  sig { params(binop: AST::BinaryOp, name_to_slot: NameSlotMap).returns(T::Array[T.untyped]) }
+  sig { params(binop: AST::BinaryOp, name_to_slot: NameSlotMap).void }
   def record_binop(binop, name_to_slot)
     [binop.left, binop.right].each do |operand|
       next unless operand.is_a?(AST::Identifier)

@@ -115,6 +115,7 @@ module NilKill
       lines << ""
       lines << "## Hygiene Overview"
       append_type_soundness_table(lines, evidence)
+      append_untyped_slot_name_pressure(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       lines << ""
       lines << "## Action Plan Counts"
@@ -271,7 +272,14 @@ module NilKill
 
       methods = Array(evidence.dig("static", "methods")).flat_map { |method| static_method_findings(method) }
       fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
-      methods + fields
+      aliases = static_alias_recommendations(evidence).map { |recommendation| static_alias_finding(recommendation) }
+      methods + fields + aliases
+    end
+
+    def static_alias_recommendations(evidence)
+      facts = evidence.dig("static", "facts")
+      facts = evidence.dig("static", "language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+      Array(facts && facts["alias_recommendations"])
     end
 
     def static_method_findings(method)
@@ -325,6 +333,28 @@ module NilKill
         "owner" => field["owner"],
         "name" => field["name"] || field["field"],
         "signature" => type,
+      }
+    end
+
+    def static_alias_finding(recommendation)
+      alias_name = recommendation["alias"].to_s
+      target = recommendation["target"].to_s
+      {
+        "kind" => "alias_recommendation",
+        "level" => "note",
+        "message" => recommendation["message"].to_s.empty? ?
+          "use #{alias_name} for #{target} in static type slots" :
+          recommendation["message"].to_s,
+        "path" => recommendation["path"] || recommendation.dig("definition", "path"),
+        "line" => recommendation["line"] || recommendation.dig("definition", "line"),
+        "static_kind" => "type_alias",
+        "language" => recommendation["language"],
+        "type_system" => recommendation["type_system"],
+        "alias" => alias_name,
+        "target" => target,
+        "definition" => recommendation["definition"],
+        "slot_count" => recommendation["slot_count"],
+        "slots" => recommendation["slots"],
       }
     end
 
@@ -1176,6 +1206,17 @@ module NilKill
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
       return usage if names.empty?
 
+      if evidence.dig("facts")&.key?("return_direct_usage_sites")
+        Array(evidence.dig("facts", "return_direct_usage_sites")).each do |site|
+          name = site["name"].to_s
+          next unless names.include?(name)
+          context = site["context"].to_s
+          next unless usage[name].key?(context)
+          usage[name][context] += 1
+        end
+        return usage
+      end
+
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
@@ -1365,6 +1406,12 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges } if candidate_names.empty?
+
+      if evidence.dig("facts")&.key?("return_usage_sites")
+        apply_return_usage_sites(Array(evidence.dig("facts", "return_usage_sites")), candidate_names, method_return_types, used, return_edges)
+        propagate_return_usage!(used, return_edges)
+        return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges }
+      end
 
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
@@ -1711,6 +1758,7 @@ module NilKill
       lines << ""
       lines << "## Hygiene Overview"
       append_type_soundness_table(lines, evidence)
+      append_untyped_slot_name_pressure(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       append_union_decomplexity(lines, evidence)
       append_deterministic_guard_collapse(lines, evidence)
@@ -2430,6 +2478,77 @@ module NilKill
       end
       lines << ""
       lines << "Total = Strong + Weak + Untyped. Nilable is a cross-cut sub-count (a `T.nilable(String)` slot is Strong and Nilable, not a fourth bucket). Collection-typed slots (`T::Array[...]` etc.) are counted only in the Arrays/Sets/Hashmaps row, so the four categories are mutually exclusive. The Param/Returns/Struct Untyped columns equal the per-row denominators in the Untyped Cause Breakdown below."
+    end
+
+    def append_untyped_slot_name_pressure(lines, evidence)
+      rows = untyped_slot_name_pressure(evidence)
+      lines << ""
+      lines << "### Top Untyped Slot Names"
+      lines << "- Repeated names are prioritization pressure only; Nil-Kill does not infer a type from a name."
+      if rows.empty?
+        lines << "- none"
+        return
+      end
+
+      lines << ""
+      lines << "| Name | Slots | Categories | Type hints | Example sites |"
+      lines << "|---|---:|---|---|---|"
+      rows.first(20).each do |row|
+        categories = row["categories"].sort.map { |kind, count| "#{kind} #{count}" }.join(", ")
+        hints = Array(row["typed_hints"]).map do |hint|
+          "`#{hint["type"]}` #{hint["count"]} (#{hint["percent"]}%)"
+        end.join(", ")
+        hints = "-" if hints.empty?
+        examples = row["examples"].first(3).join("; ")
+        lines << "| `#{row["name"]}` | #{row["count"]} | #{categories} | #{hints} | #{examples} |"
+      end
+      lines << "- ... #{rows.size - 20} more repeated name(s)" if rows.size > 20
+    end
+
+    def untyped_slot_name_pressure(evidence)
+      static_rows = Array(evidence.dig("facts", "top_untyped_slot_names"))
+      return static_rows unless static_rows.empty?
+
+      rows = Hash.new do |hash, name|
+        hash[name] = {"name" => name, "count" => 0, "categories" => Hash.new(0), "examples" => []}
+      end
+      add = lambda do |name, category, site|
+        clean_name = name.to_s.sub(/\A@/, "")
+        return if clean_name.empty?
+
+        row = rows[clean_name]
+        row["count"] += 1
+        row["categories"][category] += 1
+        row["examples"] << site if row["examples"].size < 3
+      end
+
+      Array(evidence.dig("facts", "existing_sigs")).each do |method|
+        extract_param_entries(method["sig"].to_s).each do |name, type|
+          next unless untyped_type?(strip_nilable(type.to_s))
+
+          add.(name, "param", "#{method["path"]}:#{method["line"]} param `#{name}`")
+        end
+      end
+
+      rbi_types = struct_rbi_types
+      Array(evidence.dig("facts", "struct_declarations")).each do |decl|
+        Array(decl["fields"]).each do |field|
+          type = rbi_types[[decl["class"], field]] || "T.untyped"
+          next unless untyped_type?(strip_nilable(type.to_s))
+
+          add.(field, "field", "#{decl["path"]}:#{decl["line"]} #{decl["class"]}.#{field}")
+        end
+      end
+
+      Array(evidence.dig("facts", "tlet_sites")).each do |site|
+        next unless site["tlet"] && untyped_type?(strip_nilable(site["type"].to_s))
+
+        add.(site["name"], "var", "#{site["path"]}:#{site["line"]} #{site["name"]}")
+      end
+
+      rows.values
+        .select { |row| row["count"] > 1 }
+        .sort_by { |row| [-row["count"], row["name"]] }
     end
 
     # Ordered cause taxonomy. First match wins (most-actionable first).
@@ -3419,6 +3538,12 @@ module NilKill
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
+      if evidence.dig("facts")&.key?("return_usage_sites")
+        apply_return_usage_sites(Array(evidence.dig("facts", "return_usage_sites")), candidate_names, method_return_types, used, return_edges)
+        propagate_return_usage!(used, return_edges)
+        return (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
+      end
+
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
@@ -3426,6 +3551,27 @@ module NilKill
       end
       propagate_return_usage!(used, return_edges)
       (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
+    end
+
+    def apply_return_usage_sites(sites, candidate_names, method_return_types, used, return_edges)
+      sites.each do |site|
+        name = site["name"].to_s.to_sym
+        next unless candidate_names.include?(name)
+        context = site["context"].to_s
+        current_method_name = site["current_method"].to_s
+        current_method = current_method_name.empty? ? nil : current_method_name.to_sym
+        if context == "return" && current_method && candidate_names.include?(current_method)
+          if typed_value_return?(method_return_types[current_method])
+            used << name
+          else
+            return_edges[current_method] << name
+          end
+        elsif context == "return" && method_return_types[current_method] != "void"
+          used << name
+        elsif context == "value"
+          used << name
+        end
+      end
     end
 
     def unambiguous_method_return_types(evidence)

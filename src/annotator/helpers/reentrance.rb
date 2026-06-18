@@ -99,7 +99,7 @@ module ReentranceBridge
         "EFFECTS REENTRANT:TAIL_CALL",
         "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"
       ]
-    elsif ThunkTransform::RecursiveSplitter.split(fn_node.body, fn_node.name, self)
+    elsif ThunkTransform::RecursiveSplitter.split(fn_node.body, fn_node.name)
       suggestion_reason = [
         "EFFECTS REENTRANT:THUNK",
         "the body matches the simple-recurrence shape; heap CPS keeps the fiber stack at depth=1"
@@ -499,7 +499,7 @@ module ReentranceBridge
     plans = T.let({}, T::Hash[String, ThunkTransform::RecursiveSplitter::MutualPlan])
     concrete_cycle_fns.each do |f|
       partners = cycle_names - [f.name]
-      mp = ThunkTransform::RecursiveSplitter.split_mutual(f.body, f.name, partners, self)
+      mp = ThunkTransform::RecursiveSplitter.split_mutual(f.body, f.name, partners)
       return false if mp.nil?
       plans[f.name] = mp
     end

@@ -110,7 +110,7 @@ module Annotator
           final_type = value.type_object
         end
 
-        check_prefixed_int_range!(value, value.coerced_type || final_type)
+        check_prefixed_int_range!(value, value.coerced_type_info || final_type)
         propagate_declared_type_to_value!(node, final_type)
 
         storage = finalize_decl_storage!(node, final_type)

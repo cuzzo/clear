@@ -64,6 +64,11 @@ module LSP
     # (level, message, token, category, fixes).
     SyntheticFinding = Struct.new(:level, :message, :token, :category, :fixes, keyword_init: true) do
       extend T::Sig
+      sig { returns(T.any(Lexer::Token, SyntheticToken)) }
+      def token
+        self[:token]
+      end
+
       sig { returns(T::Boolean) }
       def fatal?
         level == :error

@@ -100,7 +100,7 @@ module ThunkTransform
 
     # Synthesize a structural MIR trampoline body for a function whose
     # AST::FunctionDef has a thunk_plan (set by Phase 4c detection).
-    sig { params(fn_node: AST::FunctionDef, lowering: Object).returns(MIR::ThunkTrampoline) }
+    sig { params(fn_node: AST::FunctionDef, lowering: T.untyped).returns(MIR::ThunkTrampoline) }
     def self.build_trampoline(fn_node, lowering)
       plan = thunk_plan!(fn_node)
       return_type = return_type_info(fn_node, lowering)
@@ -147,7 +147,7 @@ module ThunkTransform
     # Lower an AST expression through the surrounding MIRLowering, rewrite
     # frame-bound param references structurally, and leave rendering to
     # MIREmitter.
-    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(MIR::Node) }
+    sig { params(ast_expr: AST::Node, lowering: T.untyped, context: FrameBindingContext).returns(MIR::Node) }
     def self.lower_frame_expr(ast_expr, lowering, context)
       lowering_api = T.unsafe(lowering)
       mir = lowering_api.lower(ast_expr)
@@ -247,7 +247,7 @@ module ThunkTransform
       end
     end
 
-    sig { params(fn_node: AST::FunctionDef, _lowering: Object).returns(Type) }
+    sig { params(fn_node: AST::FunctionDef, _lowering: T.untyped).returns(Type) }
     def self.return_type_info(fn_node, _lowering)
       rt = fn_node.return_type
       return Type.new(:Void) if rt.nil?
@@ -312,7 +312,7 @@ module ThunkTransform
     # Each cycle member emits its own trampoline (same union layout,
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
-    sig { params(fn_node: AST::FunctionDef, lowering: Object).returns(MIR::MutualThunkTrampoline) }
+    sig { params(fn_node: AST::FunctionDef, lowering: T.untyped).returns(MIR::MutualThunkTrampoline) }
     def self.build_mutual_trampoline(fn_node, lowering)
       mtp = mutual_thunk_plan!(fn_node)
 
@@ -349,7 +349,7 @@ module ThunkTransform
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
-    sig { params(cf: AST::FunctionDef, _mtp: ThunkTransform::RecursiveSplitter::MutualThunkPlan, lowering: Object).returns(MIR::MutualThunkArm) }
+    sig { params(cf: AST::FunctionDef, _mtp: ThunkTransform::RecursiveSplitter::MutualThunkPlan, lowering: T.untyped).returns(MIR::MutualThunkArm) }
     def self.build_mutual_arm(cf, _mtp, lowering)
       own_plan = mutual_thunk_plan!(cf).own_plan
       context = mutual_frame_context(cf)

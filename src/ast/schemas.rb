@@ -20,13 +20,26 @@ module Schemas
   class EnumSchema
       extend T::Sig
 
-    attr_reader :variants, :visibility
-    sig { params(variants: T.untyped, visibility: Symbol).void }
+    VariantInput = T.type_alias { T.any(T::Array[T.any(String, Symbol)], T::Set[T.any(String, Symbol)]) }
+
+    sig { returns(T::Set[String]) }
+    attr_reader :variants
+    sig { returns(Symbol) }
+    attr_reader :visibility
+    sig { params(variants: VariantInput, visibility: Symbol).void }
     def initialize(variants:, visibility: :package)
-      @variants = variants
-      @visibility = visibility
+      @variants = T.let(normalize_variants(variants).freeze, T::Set[String])
+      @visibility = T.let(visibility, Symbol)
       freeze
     end
+
+    sig { params(variants: VariantInput).returns(T::Set[String]) }
+    def normalize_variants(variants)
+      variants.each_with_object(T.let(Set.new, T::Set[String])) do |variant, normalized|
+        normalized << variant.to_s
+      end
+    end
+    private :normalize_variants
 
     sig { returns(T.nilable(Symbol)) }
     def kind = :enum
@@ -274,7 +287,7 @@ module Schemas
         Schemas::UnionSchema::VariantMap
       )
       @type_params = T.let(type_params.dup, T::Array[Symbol])
-      @visibility = visibility
+      @visibility = T.let(visibility, Symbol)
       freeze
     end
 
@@ -315,10 +328,10 @@ module Schemas
     def initialize(fields: {}, type_params: [], methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = T.let(type_params.dup, T::Array[Symbol])
-      @methods = methods
-      @visibility = visibility
-      @extern_module = extern_module
-      @as_type = as_type
+      @methods = T.let(methods, MethodsMap)
+      @visibility = T.let(visibility, Symbol)
+      @extern_module = T.let(extern_module, T.nilable(String))
+      @as_type = T.let(as_type, T.nilable(String))
       freeze
     end
 

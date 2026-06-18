@@ -2,9 +2,32 @@
 
 require "sorbet-runtime"
 require "set"
+require_relative "../../ast/type"
+require_relative "lowering_protocol"
 require_relative "../mir"
 
 module FsmTransform
+  CapturedMap = T.type_alias { T::Hash[String, Type] }
+  TransformValue = T.type_alias do
+    T.nilable(T.any(
+      AST::BgBlock,
+      String,
+      Integer,
+      Symbol,
+      T::Boolean,
+      CapturedMap,
+      T::Hash[String, Schemas::ResourceClosePlan],
+      T::Set[String],
+      T::Array[MIR::ContextFieldDecl],
+      T::Array[MIR::StructInitField],
+      T::Array[String],
+      T::Array[MIR::CaptureCleanupAction],
+      T::Array[MIR::Emittable],
+    ))
+  end
+  ContextMap = T.type_alias { T::Hash[Symbol, TransformValue] }
+  LoweringApi = T.type_alias { FsmTransform::LoweringProtocol }
+
   module Emit
     class FsmEmitContext < T::Struct
       extend T::Sig
@@ -21,7 +44,7 @@ module FsmTransform
       const :rt_name, String
       const :promoted_decls, T::Array[MIR::Emittable]
       const :capture_inits, T::Array[MIR::StructInitField]
-      const :captured, T::Hash[String, Object]
+      const :captured, FsmTransform::CapturedMap
       const :capture_close_plans, T::Hash[String, Schemas::ResourceClosePlan]
       const :pointer_captures, T::Set[String]
       const :extra_ctx_fields, T::Array[MIR::ContextFieldDecl]

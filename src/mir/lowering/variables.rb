@@ -119,7 +119,7 @@ module MIRLoweringVariables
   # `alloc`        : :heap | :frame | :static — used by arcCreate/rcCreate.
   #
   # Returns the wrapped MIR node (typically MIR::CapWrap).
-  sig { params(inner_mir: T.untyped, bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.untyped) }
+  sig { params(inner_mir: MIR::Node, bare_zig_t: String, ft: Type, alloc: Symbol).returns(MIR::Node) }
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
     T.bind(self, MIRLowering) rescue nil
     # AtomicPtr and primitive Atomic use distinct constructors.
@@ -143,7 +143,7 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(node: AST::VarDecl).returns(T.untyped) }
+  sig { params(node: AST::VarDecl).returns(MIR::NodeRoot) }
   def lower_var_decl(node)
     T.bind(self, MIRLowering) rescue nil
     facts = var_decl_facts(node)
@@ -184,17 +184,17 @@ module MIRLoweringVariables
       node,
       facts,
       safe_name,
-      T.cast(init, MIR::Node),
+      init,
       let_node
     ).statements
 
     owner_marks = field_owner_move_marks(node)
     nodes.concat(owner_marks)
 
-    nodes.size == 1 ? nodes.first : nodes
+    nodes.size == 1 ? T.must(nodes.first) : nodes
   end
 
-  sig { params(init: T.untyped, facts: VarDeclFacts, ast_value: T.untyped).returns(T.untyped) }
+  sig { params(init: MIR::Node, facts: VarDeclFacts, ast_value: AST::Node).returns(MIR::Node) }
   def ensure_cleanup_binding_owns_string_init(init, facts, ast_value)
     return init unless facts.has_mir_drop
     return init unless facts.ft.string?
@@ -302,15 +302,15 @@ module MIRLoweringVariables
     )
   end
 
-  sig { params(type_info: Type, value: T.untyped).returns(T::Boolean) }
+  sig { params(type_info: Type, value: AST::Node).returns(T::Boolean) }
   def optional_nil_initializer?(type_info, value)
     return false unless type_info.optional?
-    node = T.let(value, T.untyped)
+    node = T.let(value, AST::Node)
     node = node.value while node.is_a?(AST::Cast)
     node.is_a?(AST::Literal) && node.type == :NIL ? true : false
   end
 
-  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(value: AST::Node).returns(T.nilable(Symbol)) }
   def owned_binding_source_alloc(value)
     T.bind(self, MIRLowering) rescue nil
     return nil if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
@@ -375,7 +375,7 @@ module MIRLoweringVariables
     safe_name
   end
 
-  sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: T.untyped).returns(T.nilable(String)) }
+  sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: MIR::Node).returns(T.nilable(String)) }
   def var_decl_suppression(safe_name, node, facts, init)
     lowering = T.unsafe(self)
     owned_cleanup_value = (facts.has_mir_drop ||
@@ -392,7 +392,7 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(init: T.untyped, safe_name: String, decl_alloc: Symbol).void }
+  sig { params(init: MIR::Node, safe_name: String, decl_alloc: Symbol).void }
   def stamp_var_decl_init_target!(init, safe_name, decl_alloc)
     T.bind(self, MIRLowering) rescue nil
     if mir_allocates?(init)
@@ -553,7 +553,7 @@ module MIRLoweringVariables
       bare_zig: String,
       has_caps: T::Boolean,
       decl_alloc: Symbol
-    ).returns(T.untyped)
+    ).returns(MIR::Node)
   end
   def lower_var_decl_init(node, ft, bare_zig, has_caps, decl_alloc)
     T.bind(self, MIRLowering) rescue nil
@@ -614,9 +614,9 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(source_node: T.untyped, target_type: Type).returns(T::Boolean) }
+  sig { params(source_node: AST::Node, target_type: Type).returns(T::Boolean) }
   def source_already_has_declared_capability?(source_node, target_type)
-    node = T.let(source_node, T.untyped)
+    node = T.let(source_node, AST::Node)
     node = node.value while node.is_a?(AST::Cast)
     return false if node.is_a?(AST::CapabilityWrap)
 
@@ -628,7 +628,7 @@ module MIRLoweringVariables
     true
   end
 
-  sig { params(rhs: T.untyped).returns(T::Boolean) }
+  sig { params(rhs: AST::Node).returns(T::Boolean) }
   def list_collection_copy?(rhs)
     (rhs.is_a?(AST::CopyNode) || rhs.is_a?(AST::CloneNode)) &&
       rhs.value.full_type!(context: "collection copy source").list_collection?
@@ -695,8 +695,8 @@ module MIRLoweringVariables
 
   sig { params(node: AST::Node).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_ast_binding(node)
-    symbol = T.let(nil, T.untyped)
-    symbol = node.symbol if node.respond_to?(:symbol)
+    symbol = T.let(nil, T.nilable(SymbolEntry))
+    symbol = T.unsafe(node).symbol if node.respond_to?(:symbol)
     decl = symbol&.reg
     if decl && decl.respond_to?(:mir_binding_entry)
       entry = decl.mir_binding_entry
@@ -705,7 +705,7 @@ module MIRLoweringVariables
     nil
   end
 
-  sig { params(node: AST::BindExpr).returns(T.untyped) }
+  sig { params(node: AST::BindExpr).returns(MIR::NodeRoot) }
   def lower_bind_expr(node)
     T.bind(self, MIRLowering) rescue nil
     if node.mode == :decl
@@ -791,7 +791,7 @@ module MIRLoweringVariables
     function_state.rename_map.fetch(safe, safe)
   end
 
-  sig { params(name: String, value: T.untyped).returns(T::Boolean) }
+  sig { params(name: String, value: MIR::Node).returns(T::Boolean) }
   def fallible_self_fallback_reassign?(name, value)
     expr = value
     expr = expr.expr if expr.is_a?(MIR::Cast)
@@ -843,7 +843,7 @@ module MIRLoweringVariables
     MIR::ExprStmt.new(method_call, discard)
   end
 
-  sig { params(node: AST::Assignment).returns(T.untyped) }
+  sig { params(node: AST::Assignment).returns(MIR::Node) }
   def lower_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     special_result = special_assignment_result(node)
@@ -913,12 +913,12 @@ module MIRLoweringVariables
 
   sig { params(field: AST::GetField).returns(T.nilable(AST::Identifier)) }
   def field_assignment_root_identifier(field)
-    root = T.let(field.target, Object)
+    root = T.let(field.target, T.untyped)
     root = root.target while root.is_a?(AST::GetField)
     root.is_a?(AST::Identifier) ? root : nil
   end
 
-  sig { params(value: T.untyped, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::Stmt]) }
+  sig { params(value: MIR::Node, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::Stmt]) }
   def ownership_marks_for_transferred_temp(value, target_alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     return [] unless value.is_a?(MIR::Ident)
@@ -930,7 +930,7 @@ module MIRLoweringVariables
     ownership_transfer_marks(name, :owned_sink, target_alloc: alloc, move_guarded: guarded)
   end
 
-  sig { params(node: AST::Assignment).returns(T.untyped) }
+  sig { params(node: AST::Assignment).returns(MIR::Node) }
   def lower_indexed_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     target_node = node.name.target
@@ -1006,10 +1006,10 @@ module MIRLoweringVariables
   sig do
     params(
       node: AST::Assignment,
-      target_node: T.untyped,
+      target_node: AST::Node,
       receiver_type: Type,
-      target: T.untyped,
-      idx: T.untyped,
+      target: MIR::Node,
+      idx: MIR::Node,
       kind: Symbol,
       op: FunctionSignature
     ).returns(MIR::ShardedMapPut)
@@ -1067,13 +1067,13 @@ module MIRLoweringVariables
   sig do
     params(
       node: AST::Assignment,
-      target_node: T.untyped,
+      target_node: AST::Node,
       receiver_type: Type,
-      target: T.untyped,
-      idx: T.untyped,
+      target: MIR::Node,
+      idx: MIR::Node,
       kind: Symbol,
       op: FunctionSignature
-    ).returns(T.untyped)
+    ).returns(MIR::Node)
   end
   def lower_template_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
     T.bind(self, MIRLowering) rescue nil
@@ -1156,7 +1156,7 @@ module MIRLoweringVariables
     params(
       kind: Symbol,
       receiver_type: Type,
-      target_node: T.untyped,
+      target_node: AST::Node,
       assignment: AST::Assignment,
       op: FunctionSignature
     ).returns(IndexedAssignmentDispatch)
@@ -1187,7 +1187,7 @@ module MIRLoweringVariables
     )
   end
 
-  sig { params(target_node: T.untyped).returns(T.nilable(String)) }
+  sig { params(target_node: AST::Node).returns(T.nilable(String)) }
   def indexed_assignment_target_var(target_node)
     target_node.is_a?(AST::Identifier) ? target_node.name.to_s : nil
   end
@@ -1250,7 +1250,7 @@ module MIRLoweringVariables
     MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), assign])
   end
 
-  sig { params(node: AST::Assignment).returns(T.untyped) }
+  sig { params(node: AST::Assignment).returns(MIR::Node) }
   def lower_auto_lock_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     facts = auto_lock_assignment_facts(node)
@@ -1274,7 +1274,7 @@ module MIRLoweringVariables
           MIR::Let.new("__old", get_field, false, nil, nil),
           T.cast(with_ownership_consumption_for_value(MIR::Set.new(get_field, value), value, node.value, "MIR::Set",
             target_alloc: facts.alloc_sym), MIR::Set),
-        ], T::Array[T.untyped])
+        ], T::Array[MIR::Node])
         stmts << len_guard.call("__old", facts.cleanup_alloc)
         return MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body(stmts))
       else
@@ -1299,7 +1299,7 @@ module MIRLoweringVariables
       MIR::Let.new(facts.alias_var, MIR::MethodCall.new(MIR::Ident.new(facts.guard_var), "get", [], false,
         MIR::CallableContract.no_ownership(0)), false, nil, nil),
       *value_pending,
-    ], T::Array[T.untyped])
+    ], T::Array[MIR::Node])
     if facts.cleanup_alloc
       stmts << MIR::Let.new("__old", alias_field, false, nil, nil)
       stmts << T.cast(with_ownership_consumption_for_value(MIR::Set.new(alias_field, value), value, node.value, "MIR::Set",
@@ -1330,7 +1330,7 @@ module MIRLoweringVariables
     )
   end
 
-  sig { params(node: AST::Assignment, alloc_sym: Symbol).returns(T.untyped) }
+  sig { params(node: AST::Assignment, alloc_sym: Symbol).returns(MIR::Node) }
   def auto_lock_assignment_value(node, alloc_sym)
     T.bind(self, MIRLowering) rescue nil
     value = with_decl_alloc(alloc_sym) do

@@ -3,6 +3,217 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::SlotCoverage do
+  it "does not assign built-in types from repeated project slot names" do
+    path, = repo_tmp_file("slot_coverage_names_fixture.rb", <<~RUBY)
+      class SlotCoverageNamesFixture
+        Record = Struct.new(:name, :line, :body)
+      end
+    RUBY
+
+    summary = described_class.new([path]).summaries.fetch(0)
+
+    expect(summary.fetch("struct_fields")).to include("total" => 3, "strong" => 0, "weak" => 0, "untyped" => 3)
+  end
+
+  it "applies explicit slot type override rules when a project opts in" do
+    path, = repo_tmp_file("slot_coverage_override_fixture.rb", <<~RUBY)
+      class SlotCoverageOverrideFixture
+        Record = Struct.new(:payload)
+      end
+    RUBY
+    config, = repo_tmp_file("slot_coverage_overrides.json", JSON.generate({
+      "slot_types" => [
+        {
+          "path" => "slot_coverage_override_fixture\\.rb\\z",
+          "name" => "\\Apayload\\z",
+          "type" => "String"
+        }
+      ]
+    }))
+
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config) do
+      summary = described_class.new([path]).summaries.fetch(0)
+
+      expect(summary.fetch("struct_fields")).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+    end
+  end
+
+  it "reports static type distributions for repeated untyped slot names" do
+    path, = repo_tmp_file("slot_coverage_hint_fixture.rb", <<~RUBY)
+      class SlotCoverageHintFixture
+        sig { params(node: AST::Node, payload: Alpha).void }
+        def first(node, payload); end
+
+        sig { params(node: AST::Node, payload: Beta).void }
+        def second(node, payload); end
+
+        sig { params(node: MIR::Node, payload: Gamma).void }
+        def third(node, payload); end
+
+        sig { params(node: ExtraNode, payload: Delta).void }
+        def fourth(node, payload); end
+
+        sig { params(node: MIR::Node, payload: Epsilon).void }
+        def fifth(node, payload); end
+
+        def missing_one(node, payload); end
+        def missing_two(node, payload); end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+    node = rows.find { |row| row["name"] == "node" }
+    payload = rows.find { |row| row["name"] == "payload" }
+
+    expect(node).to include("count" => 2, "typed_total" => 5)
+    expect(node.fetch("typed_hints")).to eq([
+      { "type" => "AST::Node", "count" => 2, "percent" => 40.0 },
+      { "type" => "MIR::Node", "count" => 2, "percent" => 40.0 },
+      { "type" => "Other", "count" => 1, "percent" => 20.0 },
+    ])
+    expect(payload).to include("count" => 2, "typed_total" => 5)
+    expect(payload).not_to have_key("typed_hints")
+  end
+
+  it "includes repeated untyped hash fields in slot-name pressure" do
+    path, = repo_tmp_file("slot_coverage_hash_field_fixture.rb", <<~RUBY)
+      class SlotCoverageHashFieldFixture
+        def first
+          { token: compute_token, name: "ready" }
+        end
+
+        def second
+          { token: other_token, name: "done" }
+        end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+    token = rows.find { |row| row["name"] == "token" }
+
+    expect(token).to include("count" => 2)
+    expect(token.fetch("categories")).to include("hash_field" => 2)
+    expect(token.fetch("examples")).to include(match(/hash field token/))
+    expect(token.fetch("typed_total")).to eq(0)
+  end
+
+  it "does not report hash fields whose literal values have typed shapes" do
+    path, = repo_tmp_file("slot_coverage_typed_hash_field_fixture.rb", <<~RUBY)
+      class SlotCoverageTypedHashFieldFixture
+        ERROR_ID = 12
+
+        def first
+          { codes: %i[A B], id: ERROR_ID, col: 7, name: "ready" }
+        end
+
+        def second
+          { codes: %i[C D], id: ERROR_ID, col: 8, name: "done" }
+        end
+      end
+    RUBY
+
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+
+    expect(rows.map { |row| row["name"] }).not_to include("codes", "id", "col", "name")
+  end
+
+  it "credits typed accessors from included modules to Ruby struct fields" do
+    path, = repo_tmp_file("slot_coverage_included_accessor_fixture.rb", <<~RUBY)
+      module IncludedAccessorFixture
+        module DropField
+          extend T::Sig
+
+          sig { returns(T::Array[String]) }
+          def drops
+            self[:drops] ||= []
+          end
+        end
+
+        Item = Struct.new(:drops) do
+          include DropField
+        end
+      end
+    RUBY
+
+    summary = described_class.new([path]).summaries.fetch(0)
+    rows = described_class.new([path]).analysis.fetch("top_untyped_slot_names")
+
+    expect(summary.fetch("struct_fields")).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+    expect(rows.map { |row| row["name"] }).not_to include("drops")
+  end
+
+  it "qualifies Ruby struct owners under modules without popping on method ends" do
+    path, = repo_tmp_file("slot_coverage_nested_structs.rb", <<~RUBY)
+      module Sample
+        def self.helper
+          :ok
+        end
+
+        module Nested
+          Item = Struct.new(:token)
+        end
+
+        Item = Struct.new(:token) do
+          extend T::Sig
+
+          sig { returns(String) }
+          def token
+            self[:token].to_s
+          end
+        end
+
+        class Record < T::Struct
+          const :value, String
+
+          def helper
+            :ok
+          end
+
+          prop :after_method, Integer
+        end
+      end
+    RUBY
+
+    type_definitions = NilKill::StaticEvidence.build([path], root: NilKill::ROOT)
+                                             .dig("facts", "type_definitions")
+
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Item",
+      "name" => "token",
+      "type_system" => "ruby-struct"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Nested::Item",
+      "name" => "token",
+      "type_system" => "ruby-struct"
+    ))
+    expect(type_definitions).not_to include(a_hash_including(
+      "owner" => "Sample::Sample::Nested::Item"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "method_signature",
+      "owner" => "Sample::Item",
+      "name" => "token",
+      "return_type" => "String"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Record",
+      "name" => "value",
+      "declared_type" => "String",
+      "type_system" => "sorbet"
+    ))
+    expect(type_definitions).to include(a_hash_including(
+      "kind" => "state_field",
+      "owner" => "Sample::Record",
+      "name" => "after_method",
+      "declared_type" => "Integer",
+      "type_system" => "sorbet"
+    ))
+  end
+
   it "counts typed, weak, and untyped slots per file without regex source scanning" do
     path, rel = repo_tmp_file("slot_coverage_fixture.rb", <<~RUBY)
       class CoverageFixture

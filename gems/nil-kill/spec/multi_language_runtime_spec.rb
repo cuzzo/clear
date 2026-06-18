@@ -198,11 +198,12 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     canonical = NilKill::Schema::EvidenceBundle.canonical_static(
       "kind" => "espalier_static_evidence",
       "methods" => [],
-      "facts" => {},
+      "facts" => {"alias_recommendations" => [{"alias" => "AST::RawBody"}]},
       "summary" => {},
       "language_capabilities" => {"zig" => NilKill::Languages.capability_for("zig")}
     )
 
+    expect(canonical.dig("facts", "alias_recommendations")).to eq([{"alias" => "AST::RawBody"}])
     expect(canonical.dig("language_capabilities", "zig", "runtime_tracing")).to be(false)
     expect(canonical.dig("language_extensions", "nil_kill_static_evidence", "language_capabilities", "zig", "runtime_tracing")).to be(false)
   end

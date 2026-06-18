@@ -25,7 +25,9 @@ module PreMirTypeCheck
 
   class InternalTypeResolutionError < StandardError; end
 
-  LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze
+  LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass, Lexer::Token, SymbolEntry].freeze
+  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Struct, T::Struct, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  Violation = T.type_alias { T::Hash[Symbol, String] }
 
 
   sig { params(program: AST::Program).returns(NilClass) }
@@ -67,6 +69,7 @@ module PreMirTypeCheck
   # Generic structural recursion: AST nodes are Structs (each_pair),
   # bodies are Arrays, some carry Hashes. Type / Token and scalars are
   # leaves. object_id memo guards shared-reference cycles.
+  sig { params(node: WalkNode, violations: T::Array[Violation], seen: T::Hash[Integer, T::Boolean]).void }
   def self.walk(node, violations, seen)
     return if node.nil? || LEAVES.any? { |k| node.is_a?(k) }
     return if defined?(Type) && node.is_a?(Type)
@@ -85,7 +88,7 @@ module PreMirTypeCheck
     elsif node.is_a?(Hash)
       node.each_value { |v| walk(v, violations, seen) }
     elsif node.respond_to?(:each_pair) # Struct AST node
-      node.each_pair do |member, value|
+      T.unsafe(node).each_pair do |member, value|
         next if node.is_a?(AST::FunctionDef) && member == :return_lifetime
         walk(value, violations, seen)
       end

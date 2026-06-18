@@ -11,6 +11,7 @@ module PipeAnalysis
   requires_ancestor { SemanticAnnotator }
 
   ConcurrentOptions = T.type_alias { T::Hash[String, AST::Node] }
+  ShardScanNode = T.type_alias { T.nilable(T.any(AST::Locatable, AST::RawBody)) }
 
   class PipeArityPlan < T::Struct
     extend T::Sig
@@ -168,7 +169,7 @@ module PipeAnalysis
     lift_to_observable_if_terminal!(node, **T.unsafe({terminal: terminal, raw: raw, **type_kwargs}))
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
   def bounded_stream_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.full_type!(context: "pipeline result").bounded_stream?
@@ -514,10 +515,11 @@ module PipeAnalysis
       with_new_scope do
         current_scope.declare(left_name, nil, left_type, false, false, nil, :stack)
         current_scope.declare(right_name, nil, right_type, false, false, nil, :stack)
-        visit(key_expr.body)
+        AST.lambda_body_nodes(key_expr.body).each { |stmt| visit(stmt) }
       end
-      unless key_expr.body.resolved_type == :Bool
-        error!(key_expr, :JOIN_LAMBDA_NEEDS_BOOL, got: key_expr.body.resolved_type)
+      key_result = AST.lambda_body_nodes(key_expr.body).last
+      unless key_result&.resolved_type == :Bool
+        error!(key_expr, :JOIN_LAMBDA_NEEDS_BOOL, got: key_result&.resolved_type)
       end
       # The JOIN key lambda IS a predicate ((left,right)->Bool). Type
       # the LambdaLit via the standard lambda-signature builder (same
@@ -1170,7 +1172,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).void }
+  sig { params(node: ShardScanNode, names: T::Set[String]).void }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(node) do |n|
@@ -1273,7 +1275,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, blk: T.proc.params(n: AST::Locatable).void).void }
+  sig { params(node: ShardScanNode, blk: T.proc.params(n: AST::Locatable).void).void }
   def each_shard_scan_node(node, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
     if node.is_a?(Array)
@@ -1307,7 +1309,7 @@ module PipeAnalysis
     sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.resolve_entry(node.name))
   end
 
-  sig { params(node: T.untyped, context: String).returns(T.nilable(AST::PipelineShardedAccess)) }
+  sig { params(node: AST::Locatable, context: String).returns(T.nilable(AST::PipelineShardedAccess)) }
   def sharded_get_index_access(node, context:)
     return nil unless node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
     return nil unless sharded_unsynced_identifier?(node.target)
@@ -1378,7 +1380,7 @@ module PipeAnalysis
   VALID_CONCURRENT_OPTIONS = %w[workers capacity batch parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
-  sig { params(name: String, expr: T.untyped).void }
+  sig { params(name: String, expr: AST::Node).void }
   def validate_positive_numeric_concurrent_option!(name, expr)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(expr)
@@ -1392,7 +1394,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(expr: T.untyped).returns(Float) }
+  sig { params(expr: AST::Node).returns(T.nilable(Float)) }
   def numeric_literal_value(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     if expr.is_a?(AST::Literal)

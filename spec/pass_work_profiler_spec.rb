@@ -20,7 +20,7 @@ RSpec.describe PassWorkProfiler do
 
   it "counts AST nodes through arrays and hashes without following non-AST metadata" do
     child = ast_node
-    root = ast_node(children: [child], metadata: { ignored: Object.new })
+    root = ast_node(children: [child], metadata: { ignored: :metadata })
 
     expect(described_class.count_ast_nodes(root)).to eq(2)
     expect(described_class.count_ast_nodes([root, { again: child }])).to eq(2)

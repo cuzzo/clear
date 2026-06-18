@@ -2,12 +2,14 @@
 # frozen_string_literal: true
 
 require "json"
+require "fileutils"
 require "optparse"
 require "rexml/document"
 require "set"
 
 ROOT = File.expand_path("..", __dir__)
 require_relative "../gems/nil-kill/lib/nil_kill"
+require_relative "../gems/decomplex/lib/decomplex/sarif"
 require_relative "loom_atomic_coverage"
 require_relative "src_ast_walk_guardrail"
 require_relative "vopr_coverage"
@@ -27,9 +29,10 @@ def parse_options(argv)
     src_visibility: false,
     src_visibility_only: false,
     src_visibility_path: "src",
+    type_guardrails_sarif: nil,
   }
   OptionParser.new do |parser|
-    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown] [--src-visibility]"
+    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown] [--src-visibility] [--type-guardrails-sarif PATH]"
     parser.on("--format FORMAT", %w[text markdown], "Output format") { |value| options[:format] = value }
     parser.on("--src-visibility", "Append src/**/*.rb public/private/OTHER code-line breakdown") do
       options[:src_visibility] = true
@@ -41,6 +44,9 @@ def parse_options(argv)
     parser.on("--src-visibility-path PATH", "Directory to scan for --src-visibility (default: src)") do |value|
       options[:src_visibility] = true
       options[:src_visibility_path] = value
+    end
+    parser.on("--type-guardrails-sarif PATH", "Write src type guardrail findings as SARIF") do |value|
+      options[:type_guardrails_sarif] = value
     end
   end.parse!(argv)
   options[:base] = argv.shift
@@ -1080,6 +1086,55 @@ def print_type_guardrails_markdown(findings)
   puts "_#{findings.length - 30} more findings omitted._" if findings.length > 30
 end
 
+def type_guardrails_sarif_hash(findings)
+  sorted = Array(findings).sort_by { |finding| [finding.path.to_s, finding.line.to_i, finding.kind.to_s] }
+  rules = sorted.map(&:kind).uniq.sort.map do |kind|
+    Decomplex::Sarif.rule(
+      id: kind,
+      name: kind.tr("_", " "),
+      short_description: "Src type guardrail",
+      full_description: "A changed src/**/*.rb line tripped a type-system guardrail.",
+      default_level: "warning",
+      properties: { "category" => "src-type-guardrails" }
+    )
+  end
+  results = sorted.map do |finding|
+    message = [finding.message.to_s, finding.detail.to_s].reject(&:empty?).join("; ")
+    location_path = finding.line.to_i.positive? ? finding.path : nil
+    Decomplex::Sarif.result(
+      rule_id: finding.kind,
+      level: "warning",
+      message: message.empty? ? finding.kind.to_s : message,
+      path: location_path,
+      line: finding.line,
+      properties: {
+        "path" => finding.path,
+        "line" => finding.line,
+        "kind" => finding.kind,
+        "detail" => finding.detail,
+        "code" => finding.code,
+      }
+    )
+  end
+
+  Decomplex::Sarif.document(
+    tool_name: "Src Type Guardrails",
+    rules: rules,
+    results: results,
+    properties: {
+      "format" => "src-type-guardrails.sarif.v1",
+      "source" => "tools/diff_bucket_summary.rb",
+    }
+  )
+end
+
+def write_type_guardrails_sarif(path, findings)
+  return if path.to_s.empty?
+
+  FileUtils.mkdir_p(File.dirname(path))
+  File.write(path, JSON.pretty_generate(type_guardrails_sarif_hash(findings)))
+end
+
 def print_special_coverage_text(alerts)
   puts
   puts "Zig special coverage alerts:"
@@ -1135,6 +1190,7 @@ if $PROGRAM_NAME == __FILE__
   guardrail_findings = type_guardrail_findings(adds_by_path)
   special_alerts = special_coverage_alerts(adds_by_path)
   src_visibility = options[:src_visibility] ? src_ruby_visibility_breakdown(directory: options[:src_visibility_path]) : nil
+  write_type_guardrails_sarif(options[:type_guardrails_sarif], guardrail_findings) if options[:type_guardrails_sarif]
 
   bucket_order = [
     [:total, "total"],
@@ -1180,13 +1236,13 @@ if $PROGRAM_NAME == __FILE__
   if options[:format] == "markdown"
     print_markdown(base, rows)
     print_src_ruby_visibility_markdown(src_visibility) if src_visibility
-    print_type_guardrails_markdown(guardrail_findings)
+    print_type_guardrails_markdown(guardrail_findings) unless options[:type_guardrails_sarif]
     print_special_coverage_markdown(special_alerts)
   else
     puts "Diff base: #{base}...HEAD"
     print_table(rows)
     print_src_ruby_visibility_text(src_visibility) if src_visibility
-    print_type_guardrails_text(guardrail_findings)
+    print_type_guardrails_text(guardrail_findings) unless options[:type_guardrails_sarif]
     print_special_coverage_text(special_alerts)
   end
 end

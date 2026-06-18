@@ -41,7 +41,20 @@ module FsmWrapperEmitter
   # through `mir_emitter.emit` to produce Zig text, then concatenate
   # with indentation. NO renderer-specific knowledge of statement
   # types -- the emitter is the single source of truth.
-  sig { params(body: T.untyped).returns(String) }
+  FsmTail = T.type_alias do
+    T.any(
+      MIR::FsmTailDone,
+      MIR::FsmTailYield,
+      MIR::FsmTailRegisterYield,
+      MIR::FsmTailJump,
+      MIR::FsmTailCondJump,
+      MIR::FsmTailLockTry,
+      MIR::FsmTailWokenCheck,
+      MIR::FsmTailRetryOrError,
+    )
+  end
+
+  sig { params(body: MIR::FsmBody).returns(String) }
   def self.render(body)
     case body
     when MIR::FsmIoBody      then render_io_body(body)
@@ -52,7 +65,7 @@ module FsmWrapperEmitter
     end
   end
 
-  sig { params(body: T.untyped).returns(String) }
+  sig { params(body: MIR::FsmIoBody).returns(String) }
   def self.render_io_body(body)
     T.bind(self, T.untyped) rescue nil
     mir_emitter = MIREmitter.new
@@ -69,7 +82,7 @@ module FsmWrapperEmitter
   # `runBody` (anyerror!void) plus a fixed-shape resumeFn that
   # calls it once, propagates errors into inner.result, and
   # returns Done. No switch / no suspend.
-  sig { params(body: T.untyped).returns(String) }
+  sig { params(body: MIR::FsmB1Body).returns(String) }
   def self.render_b1_body(body)
     T.bind(self, T.untyped) rescue nil
     mir_emitter = MIREmitter.new
@@ -82,7 +95,7 @@ module FsmWrapperEmitter
     parts.join("\n")
   end
 
-  sig { params(s: T.untyped, mir_emitter: MIREmitter).returns(String) }
+  sig { params(s: MIR::FsmB1CtxStruct, mir_emitter: MIREmitter).returns(String) }
   def self.render_b1_ctx_struct(s, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     parts = []
@@ -103,7 +116,7 @@ module FsmWrapperEmitter
     parts.join("\n")
   end
 
-  sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
+  sig { params(step: MIR::FsmStep, mir_emitter: MIREmitter).returns(String) }
   def self.render_run_body(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, step.bg_rt) do
@@ -119,7 +132,7 @@ module FsmWrapperEmitter
     ].compact.join("\n")
   end
 
-  sig { params(ctx_id: T.untyped).returns(String) }
+  sig { params(ctx_id: Integer).returns(String) }
   def self.render_b1_resume_fn(ctx_id)
     T.bind(self, T.untyped) rescue nil
     <<~ZIG.chomp.lines.map { |l| "        #{l}" }.join.chomp
@@ -160,7 +173,7 @@ module FsmWrapperEmitter
     ZIG
   end
 
-  sig { params(type_name: T.untyped).returns(String) }
+  sig { params(type_name: String).returns(String) }
   def self.render_ctx_size_gate(type_name)
     T.bind(self, T.untyped) rescue nil
     <<~ZIG.chomp.lines.map { |l| "    #{l}" }.join.chomp
@@ -174,7 +187,7 @@ module FsmWrapperEmitter
 
   # ----- struct decl with member fns ----------------------------------------
 
-  sig { params(s: T.untyped, mir_emitter: MIREmitter).returns(String) }
+  sig { params(s: MIR::FsmCtxStruct, mir_emitter: MIREmitter).returns(String) }
   def self.render_ctx_struct(s, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     parts = []
@@ -208,7 +221,7 @@ module FsmWrapperEmitter
   # We skip emissions that come back empty / nil so verification-only
   # nodes (AllocMark, ReturnMark, ...) don't leave blank lines.
 
-  sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
+  sig { params(step: MIR::FsmStep, mir_emitter: MIREmitter).returns(String) }
   def self.render_step(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, step.bg_rt) do
@@ -245,7 +258,7 @@ module FsmWrapperEmitter
 
   # ----- generic body (LOOP / WITH / NEXT-CHAIN) ---------------------------
 
-  sig { params(body: T.untyped).returns(String) }
+  sig { params(body: MIR::FsmGenericBody).returns(String) }
   def self.render_generic_body(body)
     T.bind(self, T.untyped) rescue nil
     mir_emitter = MIREmitter.new
@@ -297,7 +310,7 @@ module FsmWrapperEmitter
   # resumeFn). The output matches what the legacy build_*_resume_fn
   # helpers used to construct as raw Zig strings -- byte-for-byte
   # equivalent for shapes that have been migrated to FsmDispatch.
-  sig { params(d: T.untyped).returns(String) }
+  sig { params(d: MIR::FsmDispatch).returns(String) }
   def self.render_dispatch(d)
     T.bind(self, T.untyped) rescue nil
     arms_zig = d.arms.map { |arm| render_dispatch_arm(arm, d.ctx_id) }.join("\n")
@@ -330,7 +343,7 @@ module FsmWrapperEmitter
     ].join("\n")
   end
 
-  sig { params(arm: T.untyped, ctx_id: T.untyped).returns(String) }
+  sig { params(arm: MIR::FsmStateArm, ctx_id: Integer).returns(String) }
   def self.render_dispatch_arm(arm, ctx_id)
     T.bind(self, T.untyped) rescue nil
     body_lines = []
@@ -384,7 +397,7 @@ module FsmWrapperEmitter
 
   # Does this arm emit a `continue :__sw` (in tail or pre_body_skip)?
   # Determines whether the dispatch needs a `__sw:` labeled loop.
-  sig { params(arm: T.untyped).returns(T::Boolean) }
+  sig { params(arm: MIR::FsmStateArm).returns(T::Boolean) }
   def self.arm_uses_continue?(arm)
     T.bind(self, T.untyped) rescue nil
     return true if arm.pre_body_skip
@@ -397,7 +410,7 @@ module FsmWrapperEmitter
     end
   end
 
-  sig { params(t: T.untyped, ctx_id: T.untyped).returns(String) }
+  sig { params(t: FsmTail, ctx_id: Integer).returns(String) }
   def self.render_tail(t, ctx_id)
     T.bind(self, T.untyped) rescue nil
     case t
@@ -493,7 +506,7 @@ module FsmWrapperEmitter
     end
   end
 
-  sig { params(fn: T.untyped, mir_emitter: MIREmitter).returns(String) }
+  sig { params(fn: MIR::FsmMemberFn, mir_emitter: MIREmitter).returns(String) }
   def self.render_member_fn(fn, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, fn.bg_rt) do
@@ -516,7 +529,7 @@ module FsmWrapperEmitter
 
   # ----- post-struct alloc + spawn + break ----------------------------------
 
-  sig { params(s: MIR::FsmSpawnSetup, blk_label: T.untyped).returns(String) }
+  sig { params(s: MIR::FsmSpawnSetup, blk_label: String).returns(String) }
   def self.render_spawn_setup(s, blk_label)
     T.bind(self, T.untyped) rescue nil
     mir_emitter = MIREmitter.new
@@ -567,7 +580,7 @@ module FsmWrapperEmitter
 
   # ----- helpers ------------------------------------------------------------
 
-  sig { params(s: T.untyped).returns(T::Boolean) }
+  sig { params(s: T.nilable(String)).returns(T::Boolean) }
   def self.empty?(s)
     T.bind(self, T.untyped) rescue nil
     s.nil? || s.strip.empty?
@@ -688,7 +701,7 @@ module FsmWrapperEmitter
     "if (__ctx_#{ctx_id}.#{action.guard_field}) #{mir_emitter.emit(action.lock_ref)}.#{action.unlock_method}();"
   end
 
-  sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(Object)).returns(Object) }
+  sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def self.with_rt_name(mir_emitter, rt_name, &blk)
     previous = T.let("rt", String)
     previous = mir_emitter.rt_name
@@ -701,7 +714,7 @@ module FsmWrapperEmitter
   # Re-indent every line of `text` by `n` spaces. Preserves blank
   # lines as truly blank (no trailing whitespace) so the rendered
   # Zig stays readable when diff'd.
-  sig { params(text: T.untyped, n: Integer).returns(String) }
+  sig { params(text: String, n: Integer).returns(String) }
   def self.indent_block(text, n)
     T.bind(self, T.untyped) rescue nil
     return "" if empty?(text)

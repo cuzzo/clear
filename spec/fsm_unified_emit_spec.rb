@@ -30,6 +30,14 @@ RSpec.describe FsmTransform::Emit do
     FsmWrapperEmitter.render(result.body)
   end
 
+  def fsm_lowering_double(&block)
+    klass = Class.new do
+      include FsmTransform::LoweringProtocol
+    end
+    klass.class_eval(&block) if block
+    klass.new
+  end
+
   def ctx_decl(name, type_zig, default_value = MIR::Undef.new(nil))
     MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
   end
@@ -93,9 +101,9 @@ RSpec.describe FsmTransform::Emit do
   end
 
   let(:lowering_double) {
-    Class.new {
+    fsm_lowering_double do
       def capture_inits_fsm(_); ""; end
-    }.new
+    end
   }
 
   let(:base_ctx) { fsm_context }
@@ -104,7 +112,7 @@ RSpec.describe FsmTransform::Emit do
     spec = {
       index:      0,
       body_stmts: [],
-      tail:       FsmTransform::Segments::LockSuspend.new(nil, {}, [], 0, 1),
+      tail:       FsmTransform::Segments::LockSuspend.new(nil, :cap, [], 0, 1),
       descriptor: nil,
     }
 

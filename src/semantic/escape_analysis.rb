@@ -11,6 +11,7 @@ require_relative "../ast/type"
 require_relative "../ast/ast"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator/phases/body_analysis"
+require_relative "../annotator/helpers/capabilities"
 require_relative "../annotator/helpers/function_signature"
 require_relative "local_binding_facts"
 require_relative "ownership_identity"
@@ -23,10 +24,15 @@ module EscapeAnalysis
   HoistBindings = T.type_alias { T::Hash[String, T::Array[AST::VarDecl]] }
   CallSitesByCallee = T.type_alias { T::Hash[String, T::Array[Semantic::CallSiteFact]] }
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
+  LambdaIdentifierRefs = T.type_alias { Annotator::Phases::LambdaIdentifierRefs }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
   AssignmentTarget = T.type_alias { T.any(String, Symbol, AST::Node) }
+  NodeClass = T.type_alias { T::Module[T.anything] }
+  NodeValue = T.type_alias { T.nilable(AST::Node) }
+  NodeStack = T.type_alias { T::Array[NodeValue] }
+  DynamicValue = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
 
   class EscapePlacementFact < T::Struct
     extend T::Sig
@@ -55,6 +61,7 @@ module EscapeAnalysis
     const :return_values, T::Array[AST::Node]
     const :assignment_nodes, T::Array[AssignmentNode]
     const :escape_nodes, T::Array[AST::Locatable]
+    const :lambda_body_identifier_refs, LambdaIdentifierRefs, default: {}
 
     sig { returns(Integer) }
     def heap_symbol_count
@@ -123,12 +130,12 @@ module EscapeAnalysis
     extend T::Sig
 
     const :name, Symbol
-    const :node_classes, T::Array[T.untyped]
+    const :node_classes, T::Array[NodeClass]
     const :handler, Symbol
 
-    sig { params(node: T.untyped).returns(T::Boolean) }
+    sig { params(node: BasicObject).returns(T::Boolean) }
     def matches?(node)
-      node_classes.any? { |klass| node.is_a?(klass) }
+      node_classes.any? { |klass| T.unsafe(node).is_a?(klass) }
     end
   end
 
@@ -376,7 +383,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(sink: EscapeSink, node: T.untyped, context: EscapeContext).void }
+  sig { params(sink: EscapeSink, node: AST::Locatable, context: EscapeContext).void }
   private_class_method def self.apply_escape_sink!(sink, node, context)
     send(sink.handler, node, context)
     nil
@@ -384,10 +391,12 @@ module EscapeAnalysis
 
   sig { params(node: AST::ReturnNode, context: EscapeContext).void }
   private_class_method def self.apply_return_escape_sink!(node, context)
-    return unless owning_return_needs_heap_placement?(context.fn, node.value, context.schema_lookup)
+    value = node.value
+    return unless value
+    return unless owning_return_needs_heap_placement?(context.fn, value, context.schema_lookup)
 
-    mark_expr_identifiers_heap!(node.value) unless returned_call_result?(node.value)
-    mark_heap_return!(T.must(context.facts), node.value) if context.facts
+    mark_expr_identifiers_heap!(value) unless returned_call_result?(value)
+    mark_heap_return!(T.must(context.facts), value) if context.facts
   end
 
   sig { params(node: AST::Assignment, context: EscapeContext).void }
@@ -416,7 +425,7 @@ module EscapeAnalysis
 
   sig { params(node: AST::LambdaLit, context: EscapeContext).void }
   private_class_method def self.apply_lambda_escape_sink!(node, context)
-    mark_lambda_captures_heap!(node, context.bg_heap)
+    mark_lambda_captures_heap!(node, context.bg_heap, context.facts)
   end
 
   sig { params(node: AST::FuncCall, context: EscapeContext).void }
@@ -490,7 +499,7 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(body: T::Array[T.untyped]).void }
+  sig { params(body: AST::RawBody).void }
   private_class_method def self.mark_loop_receiver_allocations_heap!(body)
     body.each do |stmt|
       AST.child_bodies(stmt).each do |child_body|
@@ -500,7 +509,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(body: T::Array[T.untyped]).void }
+  sig { params(body: AST::RawBody).void }
   private_class_method def self.mark_receiver_allocations_in_loop!(body)
     return unless loop_body_has_frame_allocation_candidate?(body)
 
@@ -535,27 +544,28 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(body: T::Array[T.untyped], blk: T.proc.params(arg0: T.untyped).void).void }
+  sig { params(body: AST::RawBody, blk: T.proc.params(arg0: AST::Locatable).void).void }
   private_class_method def self.walk_body(body, &blk)
     AST.each_locatable(body, &blk)
   end
 
-  sig { params(expr: T.untyped).void }
+  sig { params(expr: NodeValue).void }
   private_class_method def self.mark_expr_roots_heap!(expr)
-    root = AST.root_identifier(unwrap_value(expr))
+    unwrapped = unwrap_value(expr)
+    root = unwrapped.is_a?(AST::Locatable) ? AST.root_identifier(unwrapped) : nil
     if root
       mark_node_symbol_heap!(root)
       return
     end
 
-    node = unwrap_value(expr)
+    node = unwrapped
     mark_node_symbol_heap!(node) if node.is_a?(AST::Identifier)
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.mark_expr_identifiers_heap!(expr)
     changed = T.let(false, T::Boolean)
-    stack = T.let([expr], T::Array[T.untyped])
+    stack = T.let([expr], NodeStack)
     until stack.empty?
       node = stack.pop
       next if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
@@ -575,9 +585,9 @@ module EscapeAnalysis
     changed
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: DynamicValue).returns(DynamicValue) }
   private_class_method def self.unwrap_value(node)
-    current = T.let(node, T.untyped)
+    current = T.let(node, DynamicValue)
     while current.is_a?(AST::Locatable) && AST.ownership_wrapper?(current)
       wrapper = T.cast(current, T.any(
         AST::MoveNode,
@@ -592,7 +602,7 @@ module EscapeAnalysis
     current
   end
 
-  sig { params(node: AST::Locatable, stack: T::Array[T.untyped]).void }
+  sig { params(node: AST::Locatable, stack: NodeStack).void }
   private_class_method def self.push_locatable_children!(node, stack)
     AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
     node.class.members.each do |member|
@@ -607,12 +617,10 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(analysis: T.untyped, bg_heap: T::Set[String]).void }
+  sig { params(analysis: T.nilable(CapabilityHelper::CaptureAnalysis), bg_heap: T::Set[String]).void }
   private_class_method def self.mark_capture_analysis_heap!(analysis, bg_heap)
     return unless analysis
-    symbols = analysis.respond_to?(:capture_symbols) ? analysis.capture_symbols : nil
-    return unless symbols.respond_to?(:each)
-    symbols.each do |name, sym|
+    analysis.capture_symbols.each do |name, sym|
       mark_symbol_heap!(sym, bg_heap, name.to_s)
     end
   end
@@ -628,7 +636,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], schema_lookup: T.nilable(Proc)).void }
+  sig { params(args: T::Array[AST::Node], params: T::Array[AST::Param], schema_lookup: T.nilable(Proc)).void }
   private_class_method def self.mark_takes_args_heap!(args, params, schema_lookup)
     params.each_with_index do |param, idx|
       arg = args[idx]
@@ -670,7 +678,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(body: AST::RawBody).returns(T::Boolean) }
   private_class_method def self.loop_body_has_frame_allocation_candidate?(body)
     found = T.let(false, T::Boolean)
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
@@ -686,7 +694,8 @@ module EscapeAnalysis
     return false if node.respond_to?(:symbol) && node.symbol&.heap_storage?
 
     value = node.respond_to?(:value) ? node.value : nil
-    return true if string_concat_expr?(unwrap_value(value))
+    unwrapped = unwrap_value(value)
+    return true if unwrapped.is_a?(AST::Locatable) && string_concat_expr?(unwrapped)
 
     entry = MIR::LocalBindingAnalysis.binding_entry(node)
     return true if entry&.present? && entry.frame?
@@ -697,7 +706,7 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  sig { params(body: AST::RawBody).returns(T::Set[String]) }
   private_class_method def self.loop_body_declared_names(body)
     names = T.let(Set.new, T::Set[String])
     each_loop_body_node(body) do |node|
@@ -707,9 +716,9 @@ module EscapeAnalysis
     names
   end
 
-  sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: AST::Node).void).void }
+  sig { params(body: AST::RawBody, block: T.proc.params(arg0: AST::Node).void).void }
   private_class_method def self.each_loop_body_node(body, &block)
-    stack = T.let(body.reverse, T::Array[T.untyped])
+    stack = T.let(body.reverse, T::Array[AST::Node])
     until stack.empty?
       node = stack.pop
       next unless node.is_a?(AST::Locatable)
@@ -724,7 +733,7 @@ module EscapeAnalysis
     nil
   end
 
-  sig { params(arg: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  sig { params(arg: NodeValue, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.ownership_bearing_transfer_expr?(arg, schema_lookup)
     if arg.is_a?(AST::MoveNode)
       return type_requires_owned_storage?(arg.value.full_type!(context: "moved transfer value"), schema_lookup)
@@ -738,17 +747,18 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(arg: T.untyped).returns(T::Boolean) }
+  sig { params(arg: NodeValue).returns(T::Boolean) }
   private_class_method def self.heap_owned_transfer_source?(arg)
     return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
-    root = AST.root_identifier(unwrap_value(arg))
+    unwrapped = unwrap_value(arg)
+    root = unwrapped.is_a?(AST::Locatable) ? AST.root_identifier(unwrapped) : nil
     sym = root&.symbol
     symbol_heap?(sym)
   rescue StandardError
     false
   end
 
-  sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param]).void }
+  sig { params(receiver: AST::Node, args: T::Array[AST::Node], params: T::Array[AST::Param]).void }
   private_class_method def self.mark_receiver_scope_escapes!(receiver, args, params)
     receiver_root = AST.root_identifier(receiver)
     receiver_depth = receiver_root&.symbol&.scope_depth
@@ -757,6 +767,7 @@ module EscapeAnalysis
     params.each_with_index do |param, idx|
       next unless param.takes || param.mutable
       arg = args[idx]
+      next unless arg
       arg_root = AST.root_identifier(arg)
       arg_depth = arg_root&.symbol&.scope_depth
       next unless arg_depth.is_a?(Integer) && arg_depth > receiver_depth
@@ -780,7 +791,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: AST::Node).returns(T::Boolean) }
   private_class_method def self.heap_binding_carries_sources?(value)
     node = value
     return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
@@ -824,20 +835,21 @@ module EscapeAnalysis
     return false unless node.respond_to?(:value)
     value = node.value
     return true if ownership_transferring_expr?(value, include_allocating_expr: false)
-    return false if string_concat_expr?(unwrap_value(value))
+    unwrapped = unwrap_value(value)
+    return false if unwrapped.is_a?(AST::Locatable) && string_concat_expr?(unwrapped)
     return true if expr_has_owned_inline_value?(value)
     call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: facts_by_name)
   end
 
-  sig { params(expr: T.untyped, include_allocating_expr: T::Boolean).returns(T::Boolean) }
+  sig { params(expr: NodeValue, include_allocating_expr: T::Boolean).returns(T::Boolean) }
   private_class_method def self.ownership_transferring_expr?(expr, include_allocating_expr:)
     value = unwrap_value(expr)
     value = unwrap_value(value.left) if value.is_a?(AST::BinaryOp) && value.op == :OR_RESCUE
     return true if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
-    return true if expr_has_heap_identifier?(value)
-    return true if include_allocating_expr && string_concat_expr?(value)
-    return true if value.respond_to?(:heap_storage?) && value.heap_storage?
-    return true if value.respond_to?(:symbol) && value.symbol&.heap_storage?
+    return true if value.is_a?(AST::Locatable) && expr_has_heap_identifier?(value)
+    return true if include_allocating_expr && value.is_a?(AST::Locatable) && string_concat_expr?(value)
+    return true if T.unsafe(value).respond_to?(:heap_storage?) && T.unsafe(value).heap_storage?
+    return true if T.unsafe(value).respond_to?(:symbol) && T.unsafe(value).symbol&.heap_storage?
     return false unless value.is_a?(AST::Locatable)
     ti = value.full_type!(context: "ownership transferring expression")
     !!(!ti.string? && !ti.rodata? && ti.provenance != :borrow && ti.heap_ptr?)
@@ -845,7 +857,7 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.string_concat_expr?(expr)
     expr.is_a?(AST::StringConcat) ||
       (expr.is_a?(AST::BinaryOp) && expr.op == :ADD && expr.string_concat == true)
@@ -862,7 +874,7 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.borrow_return_expr?(expr)
     call = unwrap_value(expr)
     return false unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
@@ -870,7 +882,7 @@ module EscapeAnalysis
     !!sig && !sig.return_lifetime.empty?
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.expr_has_heap_identifier?(expr)
     found = T.let(false, T::Boolean)
     AST.each_locatable(expr) do |raw|
@@ -882,7 +894,7 @@ module EscapeAnalysis
     found
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.expr_has_owned_inline_value?(expr)
     root = unwrap_value(expr)
     AST.each_locatable(expr) do |raw|
@@ -933,6 +945,7 @@ module EscapeAnalysis
         return_values: return_values,
         assignment_nodes: assignment_nodes,
         escape_nodes: escape_nodes,
+        lambda_body_identifier_refs: summary.lambda_body_identifier_refs,
       )
     end
 
@@ -958,6 +971,7 @@ module EscapeAnalysis
       return_values: return_values,
       assignment_nodes: assignment_nodes,
       escape_nodes: escape_nodes,
+      lambda_body_identifier_refs: collect_lambda_identifier_refs(fn.body),
     )
   end
 
@@ -983,18 +997,50 @@ module EscapeAnalysis
     !!(sym && sym.respond_to?(:is_param) && sym.is_param)
   end
 
-  sig { params(node: AST::LambdaLit, bg_heap: T::Set[String]).void }
-  private_class_method def self.mark_lambda_captures_heap!(node, bg_heap)
+  sig { params(node: AST::LambdaLit, bg_heap: T::Set[String], facts: T.nilable(FunctionFacts)).void }
+  private_class_method def self.mark_lambda_captures_heap!(node, bg_heap, facts)
     names = T.let(Set.new, T::Set[String])
     node.captures.each { |capture| names << capture.name.to_s }
     return if names.empty?
 
-    body = node.body.is_a?(Array) ? node.body : [node.body]
-    walk_body(body) do |child|
-      next unless child.is_a?(AST::Identifier)
+    identifiers = facts&.lambda_body_identifier_refs&.fetch(node.object_id, nil)
+    identifiers ||= collect_lambda_body_identifiers(node)
+    identifiers.each do |child|
       next unless names.include?(child.name.to_s)
       mark_symbol_heap!(child.symbol, bg_heap, child.name.to_s)
     end
+  end
+
+  sig { params(body: AST::RawBody).returns(LambdaIdentifierRefs) }
+  private_class_method def self.collect_lambda_identifier_refs(body)
+    refs = T.let({}, LambdaIdentifierRefs)
+    AST.each_locatable(body, descend_functions: false) do |node|
+      next unless node.is_a?(AST::LambdaLit)
+
+      refs[node.object_id] = collect_lambda_body_identifiers(node)
+    end
+    refs
+  end
+
+  sig { params(node: AST::LambdaLit).returns(T::Array[AST::Identifier]) }
+  private_class_method def self.collect_lambda_body_identifiers(node)
+    out = T.let([], T::Array[AST::Identifier])
+    stack = T.let(AST.lambda_body_nodes(node.body).reverse, T::Array[AST::Node])
+    until stack.empty?
+      current = unwrap_value(stack.pop)
+      next unless current.is_a?(AST::Locatable)
+      if current.is_a?(AST::Identifier)
+        out << current
+        next
+      end
+      next if current.is_a?(AST::FunctionDef) || current.is_a?(AST::LambdaLit)
+
+      AST.expression_children(current).reverse_each { |child| stack << child }
+      AST.child_bodies(current).reverse_each do |child_body|
+        child_body.reverse_each { |child| stack << child }
+      end
+    end
+    out
   end
 
   sig { params(call: AST::FuncCall, fn_nodes: FnNodes).returns(T::Array[AST::Param]) }
@@ -1011,7 +1057,7 @@ module EscapeAnalysis
     sig ? sig.params : []
   end
 
-  sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T::Boolean) }
+  sig { params(fn: AST::FunctionDef, expr: AST::Node).returns(T::Boolean) }
   private_class_method def self.borrowed_return?(fn, expr)
     return false unless fn.return_lifetime
     returned = T.let(Set.new, T::Set[String])
@@ -1028,7 +1074,7 @@ module EscapeAnalysis
     !(returned & borrowed).empty?
   end
 
-  sig { params(fn: AST::FunctionDef, expr: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  sig { params(fn: AST::FunctionDef, expr: AST::Node, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.owning_return_needs_heap_placement?(fn, expr, schema_lookup)
     return false if borrowed_return?(fn, expr)
     ti = owning_return_type(fn, expr)
@@ -1048,7 +1094,7 @@ module EscapeAnalysis
       ti.needs_explicit_cleanup?(:heap, schema_lookup)
   end
 
-  sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
+  sig { params(fn: AST::FunctionDef, expr: AST::Node).returns(T.nilable(Type)) }
   private_class_method def self.owning_return_type(fn, expr)
     declared = fn.declared_return_type
     declared || (expr.is_a?(AST::Locatable) ? expr.full_type!(context: "owning return expression") : nil)
@@ -1074,7 +1120,7 @@ module EscapeAnalysis
   private_class_method def self.returned_call_result?(expr)
     node = unwrap_value(expr)
     node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    AST.call?(node)
+    !!(node.is_a?(AST::Locatable) && AST.call?(node))
   end
 
   sig { params(facts: FunctionFacts, names: T::Set[String]).void }
@@ -1095,9 +1141,9 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(expr: T.untyped, names: T::Set[String]).void }
+  sig { params(expr: AST::Node, names: T::Set[String]).void }
   private_class_method def self.collect_identifier_names!(expr, names)
-    stack = T.let([expr], T::Array[T.untyped])
+    stack = T.let([expr], T::Array[AST::Node])
     until stack.empty?
       node = unwrap_value(stack.pop)
       next unless node.is_a?(AST::Locatable)
@@ -1138,7 +1184,7 @@ module EscapeAnalysis
   private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: {})
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
-    return false unless AST.call?(call)
+    return false unless call.is_a?(AST::Locatable) && AST.call?(call)
     call = T.cast(call, T.any(AST::FuncCall, AST::MethodCall))
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
@@ -1167,12 +1213,12 @@ module EscapeAnalysis
       function_facts_have_heap_return_binding?(callee_facts)
   end
 
-  sig { params(call: T.untyped, sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall), sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
   private_class_method def self.signature_heap_return_from_args?(call, sig_obj)
     heap_return_from_args?(call.args, sig_obj.params, sig_obj.heap_carry_return_vars, sig_obj.return_type, nil)
   end
 
-  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], returned_names: T.untyped, return_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Boolean)) }
+  sig { params(args: T::Array[AST::Node], params: T::Array[AST::Param], returned_names: T.nilable(T::Set[String]), return_type: T.nilable(Type::TypeInput), schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Boolean)) }
   private_class_method def self.heap_return_from_args?(args, params, returned_names, return_type = nil, schema_lookup = nil)
     return nil unless returned_names && !returned_names.empty?
     by_name = T.let({}, T::Hash[String, Integer])
@@ -1196,15 +1242,15 @@ module EscapeAnalysis
     nil
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: NodeValue).returns(T::Boolean) }
   private_class_method def self.expr_produces_heap?(expr)
     node = unwrap_value(expr)
     node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    return false if node.respond_to?(:storage) && [:rodata, :borrow].include?(node.storage)
-    return false if node.respond_to?(:rodata_provenance?) && node.rodata_provenance?
-    return false if node.respond_to?(:borrow_provenance?) && node.borrow_provenance?
-    return true if node.respond_to?(:heap_storage?) && node.heap_storage?
-    return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
+    return false if T.unsafe(node).respond_to?(:storage) && [:rodata, :borrow].include?(T.unsafe(node).storage)
+    return false if T.unsafe(node).respond_to?(:rodata_provenance?) && T.unsafe(node).rodata_provenance?
+    return false if T.unsafe(node).respond_to?(:borrow_provenance?) && T.unsafe(node).borrow_provenance?
+    return true if T.unsafe(node).respond_to?(:heap_storage?) && T.unsafe(node).heap_storage?
+    return true if T.unsafe(node).respond_to?(:symbol) && T.unsafe(node).symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
     return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
     return false unless node.is_a?(AST::Locatable)
@@ -1247,10 +1293,10 @@ module EscapeAnalysis
     true
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: BasicObject).returns(T::Boolean) }
   private_class_method def self.mark_node_symbol_heap!(node)
-    changed = mark_symbol_heap!(node.respond_to?(:symbol) ? node.symbol : nil)
-    decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    changed = mark_symbol_heap!(T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil)
+    decl = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol&.reg : nil
     decl.container_borrow = false if changed && decl.respond_to?(:container_borrow=)
     changed
   end

@@ -143,13 +143,12 @@ module Annotator
         end
 
         unless matched_def.intrinsic_varargs?
-          call_node = Struct.new(:token, :name, :args).new(node.token, node.name, args)
-          verify_function_signature!(call_node, matched_def.intrinsic_call_validation_signature)
+          verify_function_signature!(node, matched_def.intrinsic_call_validation_signature, args)
         end
 
         reject_when = matched_def.intrinsic_reject_when
-        if reject_when && reject_arg_type_matches?(args.first, reject_when)
-          first_arg = T.must(args.first)
+        first_arg = args.first
+        if reject_when && first_arg && reject_arg_type_matches?(first_arg, reject_when)
           reason = matched_def.intrinsic_reject_error ||
                    "#{node.name}() is not valid for #{first_arg.resolved_type}"
           error!(node, :INTRINSIC_REJECTED, detail: reason)

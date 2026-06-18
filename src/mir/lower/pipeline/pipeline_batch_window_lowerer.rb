@@ -70,7 +70,7 @@ class PipelineBatchWindowLowerer < T::Struct
       element_zig: self.transpile_type.call(batch_element_type(lhs_type).to_s),
       result_zig: self.transpile_type.call(bw_node.expression.full_type!.to_s),
       size_mir: batch_size_mir(bw_node),
-      expr_mir: self.visit_mir_with_placeholder.call(T.cast(bw_node.expression, AST::Node), placeholder_var),
+      expr_mir: self.visit_mir_with_placeholder.call(bw_node.expression, placeholder_var),
       alloc: self.pipeline_alloc.call(smooth_node),
       placeholder_var: placeholder_var,
       timeout_ns: batch_window_timeout_ns(bw_node),

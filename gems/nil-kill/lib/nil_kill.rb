@@ -24,6 +24,7 @@ end
 
 require_relative "nil_kill/syntax"
 require_relative "nil_kill/util"
+require_relative "nil_kill/alias_recommendations"
 require_relative "nil_kill/schema/runtime_type"
 require_relative "nil_kill/schema/evidence_bundle"
 require_relative "nil_kill/actions/record"

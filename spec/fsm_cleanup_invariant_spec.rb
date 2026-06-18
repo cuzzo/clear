@@ -38,25 +38,28 @@ RSpec.describe FsmTransform::Emit do
     MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
   end
 
-  let(:liveness_double) {
-    Class.new {
-      def initialize(names) ; @names = names ; end
-      def cross_segment_vars
-        @names.to_h do |n|
-          [n, FsmTransform::Liveness::CrossSegmentVarFact.new(
-            type_info: nil,
-            first_def_seg: 0,
-            last_use_seg: 1,
-          )]
-        end
+  def liveness_result(names)
+    FsmTransform::Liveness::Result.new(
+      names.to_h do |name|
+        [name, FsmTransform::Liveness::CrossSegmentVarFact.new(
+          type_info: nil,
+          first_def_seg: 0,
+          last_use_seg: 1,
+        )]
       end
-    }
-  }
+    )
+  end
 
   def fake_seg(idx)
-    s = Object.new
-    s.define_singleton_method(:index) { idx }
-    s
+    FsmTransform::Segments::Segment.new(idx, [], FsmTransform::Segments::Done.new(nil))
+  end
+
+  def fsm_lowering_double(&block)
+    klass = Class.new do
+      include FsmTransform::LoweringProtocol
+    end
+    klass.class_eval(&block) if block
+    klass.new
   end
 
   def cleanup(name)
@@ -95,6 +98,9 @@ RSpec.describe FsmTransform::Emit do
       profile_line: nil,
       profile_column: nil,
     }.merge(overrides)
+    captured = raw.fetch(:captured).transform_values do |type|
+      type.is_a?(Type) ? type : Type.new(:Any)
+    end
     FsmTransform::Emit::FsmEmitContext.new(
       id: raw.fetch(:id),
       bg_rt: raw.fetch(:bg_rt),
@@ -108,7 +114,7 @@ RSpec.describe FsmTransform::Emit do
       rt_name: raw.fetch(:rt_name),
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
-      captured: raw.fetch(:captured),
+      captured: captured,
       capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       extra_ctx_fields: raw.fetch(:extra_ctx_fields),
@@ -139,7 +145,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0), fake_seg(1)],
-          liveness_double.new([]), {}, []
+          liveness_result([]), {}, []
         )
       }.not_to raise_error
     end
@@ -151,7 +157,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
-          liveness_double.new([]), {}, []
+          liveness_result([]), {}, []
         )
       }.not_to raise_error
     end
@@ -161,7 +167,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
-          liveness_double.new(["list"]), {}, []
+          liveness_result(["list"]), {}, []
         )
       }.to raise_error(/cross-segment ctx field/)
     end
@@ -172,11 +178,11 @@ RSpec.describe FsmTransform::Emit do
       # (before the body completes) so the captured collection is
       # deinit'd while the body still references it.
       seg_codes = [[cleanup("s")]]
-      captured = { "s" => :stub }
+      captured = { "s" => Type.new(:Any) }
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
-          liveness_double.new([]), captured, []
+          liveness_result([]), captured, []
         )
       }.to raise_error(/cross-segment ctx field/)
     end
@@ -186,7 +192,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
-          liveness_double.new(["X"]), {}, []
+          liveness_result(["X"]), {}, []
         )
       }.to raise_error(/cross-segment ctx field/)
     end
@@ -196,7 +202,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
-          liveness_double.new([]), {}, ["promoted"]
+          liveness_result([]), {}, ["promoted"]
         )
       }.to raise_error(/cross-segment ctx field/)
     end
@@ -206,7 +212,7 @@ RSpec.describe FsmTransform::Emit do
       expect {
         FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0), fake_seg(7)],
-          liveness_double.new([]), { "s" => :stub }, []
+          liveness_result([]), { "s" => Type.new(:Any) }, []
         )
       }.to raise_error(/seg 7 /)
     end
@@ -214,11 +220,11 @@ RSpec.describe FsmTransform::Emit do
 
   describe ".build_recursive cleanup registration" do
     it "routes resource capture close code through destroyTask" do
-      lowering = Class.new {
+      lowering = fsm_lowering_double do
         def capture_inits_fsm(_capture_inits)
           ""
         end
-      }.new
+      end
       segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
         segments: [
           FsmTransform::Segments::Segment.new(
@@ -267,11 +273,11 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "routes FreshHeapCopy capture cleanup through structural destroyTask actions" do
-      lowering = Class.new {
+      lowering = fsm_lowering_double do
         def capture_inits_fsm(_capture_inits)
           ""
         end
-      }.new
+      end
       segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
         segments: [
           FsmTransform::Segments::Segment.new(
@@ -323,7 +329,7 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "passes destroy-action ctx fields into segment ownership lowering" do
-      lowering = Class.new {
+      lowering = fsm_lowering_double do
         attr_reader :contexts
 
         def initialize
@@ -355,8 +361,7 @@ RSpec.describe FsmTransform::Emit do
         def last_fsm_result_transfer_facts
           []
         end
-
-      }.new
+      end
       expr = AST::Literal.new(nil, :NUMBER, 1, nil)
       expr.full_type = :Int64
       segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
@@ -435,13 +440,13 @@ RSpec.describe FsmTransform::Emit do
         FsmTransform::Segments::NextSuspend.new(promise, "payload", 1),
       )
 
-      guards = FsmTransform::Emit.send(:fsm_owned_result_guards, [segment], Object.new)
+      guards = FsmTransform::Emit.send(:fsm_owned_result_guards, [segment], fsm_lowering_double)
 
       expect(guards).to eq("payload" => "__owned_payload_init")
     end
 
     it "lowers non-void Done segments with result capture enabled" do
-      lowering = Class.new {
+      lowering = fsm_lowering_double do
         attr_reader :calls
 
         def initialize
@@ -474,8 +479,7 @@ RSpec.describe FsmTransform::Emit do
         def last_fsm_result_transfer_facts
           []
         end
-
-      }.new
+      end
       result_expr = AST::Literal.new(nil, :NUMBER, 1, nil)
       result_expr.full_type = :Int64
       segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(

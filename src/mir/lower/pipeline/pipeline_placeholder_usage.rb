@@ -13,17 +13,17 @@ class PipelinePlaceholderUsage
     stmts.any? { |stmt| node_uses_placeholder?(stmt) }
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.node_uses_placeholder?(node)
     contains_placeholder?(node, bare: false)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.node_uses_bare_placeholder?(node)
     contains_placeholder?(node, bare: true)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Object)), bare: T::Boolean).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node), bare: T::Boolean).returns(T::Boolean) }
   def self.contains_placeholder?(node, bare:)
     return false unless node.is_a?(AST::Locatable)
     return false if bare && AST.soa_placeholder_field?(node)

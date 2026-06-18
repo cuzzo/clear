@@ -28,6 +28,7 @@
 # resolver in SuspendResolvers (or expansion in Emit for fan-out
 # kinds like LOCK). NEVER a new top-level emit function.
 
+require_relative "fsm_transform/context"
 require_relative "fsm_transform/segments"
 require_relative "fsm_transform/recursive_splitter"
 require_relative "fsm_transform/liveness"
@@ -132,7 +133,7 @@ module FsmTransform
                   default_value: MIR::Undef.new(nil),
                 )
               end
-    raw_ctx = T.cast(ctx, T::Hash[Symbol, T.nilable(Object)])
+    raw_ctx = T.cast(ctx, FsmTransform::ContextMap)
     emit_ctx = Emit::FsmEmitContext.new(
       id: T.cast(raw_ctx.fetch(:id), Integer),
       bg_rt: T.cast(raw_ctx.fetch(:bg_rt), String),
@@ -146,7 +147,7 @@ module FsmTransform
       rt_name: T.cast(raw_ctx.fetch(:rt_name), String),
       promoted_decls: coerce_promoted_decls(raw_ctx[:promoted_decls]),
       capture_inits: coerce_context_inits(raw_ctx[:capture_inits]),
-      captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, Object]),
+      captured: T.cast(raw_ctx[:captured] || {}, FsmTransform::CapturedMap),
       capture_close_plans: T.cast(raw_ctx[:capture_close_plans] || {}, T::Hash[String, Schemas::ResourceClosePlan]),
       pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
       extra_ctx_fields: ext_ctx,
@@ -164,7 +165,14 @@ module FsmTransform
     Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering)
   end
 
-  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::ContextFieldDecl]) }
+  ContextFieldList = T.type_alias { T::Array[T.any(MIR::ContextFieldDecl, T::Array[MIR::ContextFieldDecl])] }
+  ContextInitList = T.type_alias { T::Array[T.any(MIR::StructInitField, T::Array[MIR::StructInitField])] }
+  PromotedDeclList = T.type_alias { T::Array[T.any(MIR::Emittable, T::Array[MIR::Emittable])] }
+  ContextFieldInput = T.type_alias { T.nilable(T.any(MIR::ContextFieldDecl, ContextFieldList)) }
+  ContextInitInput = T.type_alias { T.nilable(T.any(MIR::StructInitField, ContextInitList)) }
+  PromotedDeclInput = T.type_alias { T.nilable(T.any(MIR::Emittable, PromotedDeclList)) }
+
+  sig { params(raw: ContextFieldInput).returns(T::Array[MIR::ContextFieldDecl]) }
   def self.coerce_context_fields(raw)
     return [] if raw.nil?
 
@@ -175,20 +183,20 @@ module FsmTransform
     raise TypeError, "FSM context fields must be MIR::ContextFieldDecl values, got #{raw.class}"
   end
 
-  sig { params(raw: Object).returns(T::Array[MIR::ContextFieldDecl]) }
+  sig { params(raw: T.any(MIR::ContextFieldDecl, ContextFieldList)).returns(T::Array[MIR::ContextFieldDecl]) }
   def self.coerce_context_field(raw)
     if raw.is_a?(MIR::ContextFieldDecl)
       return [raw]
     end
 
     if raw.is_a?(Array)
-      return raw.flat_map { |field| coerce_context_field(field) }
+      return raw.flat_map { |field| field.is_a?(Array) ? coerce_context_fields(field) : coerce_context_field(field) }
     end
 
     raise TypeError, "FSM context field must be MIR::ContextFieldDecl, got #{raw.class}"
   end
 
-  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::StructInitField]) }
+  sig { params(raw: ContextInitInput).returns(T::Array[MIR::StructInitField]) }
   def self.coerce_context_inits(raw)
     return [] if raw.nil?
 
@@ -207,7 +215,7 @@ module FsmTransform
     raise TypeError, "FSM context inits must be MIR::StructInitField values, got #{raw.class}"
   end
 
-  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::Emittable]) }
+  sig { params(raw: PromotedDeclInput).returns(T::Array[MIR::Emittable]) }
   def self.coerce_promoted_decls(raw)
     return [] if raw.nil?
 
@@ -247,7 +255,7 @@ module FsmTransform
     out
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(PromotedLocalFact)) }
+  sig { params(node: AST::Node).returns(T.nilable(PromotedLocalFact)) }
   def self.local_entry_for_node(node)
     T.bind(self, T.untyped) rescue nil
     case node

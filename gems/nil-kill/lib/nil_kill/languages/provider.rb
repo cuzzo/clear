@@ -166,6 +166,7 @@ module NilKill
           "state_protocols" => stringify_set_map(state_protocols),
           "state_param_origins" => stringify_set_map(state_param_origin_map),
           "signatures" => signatures,
+          "hash_shapes" => hash_shapes(document: document, facts: facts, rel_path: rel_path),
           "type_definitions" => type_definitions(
             document: document,
             facts: facts,
@@ -238,6 +239,37 @@ module NilKill
         []
       end
 
+      def hash_shapes(document:, facts:, rel_path:)
+        shapes = []
+        constant_types = literal_constant_types(document.root)
+        walk_tree(document.root) do |node|
+          next unless hash_literal_node?(node)
+
+          pairs = hash_pair_nodes(node)
+          next if pairs.empty?
+
+          keys = []
+          value_types = []
+          pairs.each do |pair|
+            key = hash_key_name(hash_pair_key(pair))
+            next unless key
+
+            keys << key
+            value_types << literal_value_type(hash_pair_value(pair), constant_types)
+          end
+          next if keys.empty?
+
+          shapes << {
+            "path" => rel_path,
+            "line" => node_line(node),
+            "keys" => keys,
+            "value_types" => value_types,
+            "code" => node_text(node),
+          }
+        end
+        shapes
+      end
+
       def static_method_signature(function_def)
         function_def.signature.to_s
       end
@@ -294,6 +326,148 @@ module NilKill
           "declared_type" => state.respond_to?(:type) && !state.type.to_s.empty? ? state.type.to_s : nil,
           "static_origin" => state.respond_to?(:type) ? "state_declaration" : "state_write",
         }
+      end
+
+      def walk_tree(node, &block)
+        return unless node && node.respond_to?(:children)
+
+        yield node
+        node.children.each { |child| walk_tree(child, &block) }
+      end
+
+      def hash_literal_node?(node)
+        return true if %w[hash dictionary object map literal_value].include?(node.kind.to_s)
+
+        text = node_text(node)
+        text.start_with?("{") && text.end_with?("}") && hash_pair_nodes(node).any?
+      end
+
+      def hash_pair_nodes(node)
+        Array(node.named_children).select do |child|
+          %w[pair hash_pair pair_pattern keyed_element field_initializer].include?(child.kind.to_s) ||
+            child.child_by_field_name("key")
+        rescue StandardError
+          false
+        end
+      end
+
+      def hash_pair_key(pair)
+        named_child(pair, "key") || pair.named_children.first
+      end
+
+      def hash_pair_value(pair)
+        named_child(pair, "value") || named_child(pair, "field") || pair.named_children[1]
+      end
+
+      def hash_key_name(node)
+        text = node_text(node)
+        return nil if text.empty?
+        return Regexp.last_match(1) if text.match?(/\A:([A-Za-z_]\w*[!?=]?)\z/)
+        return Regexp.last_match(1) if text.match?(/\A([A-Za-z_]\w*)\s*:\z/)
+        return Regexp.last_match(1) if text.match?(/\A["']([^"']+)["']\z/)
+        return text if text.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
+
+        nil
+      end
+
+      def literal_constant_types(root)
+        types = {}
+        walk_tree(root) do |node|
+          next unless node.kind.to_s == "assignment"
+
+          name = constant_assignment_name(node)
+          next if name.to_s.empty?
+
+          type = literal_value_type(constant_assignment_value(node), types)
+          types[name] = type unless type == "T.untyped"
+        end
+        types
+      end
+
+      def constant_assignment_name(node)
+        target = named_child(node, "left") || node.named_children.first
+        return nil unless target && target.kind.to_s == "constant"
+
+        node_text(target)
+      end
+
+      def constant_assignment_value(node)
+        named_child(node, "right") || node.named_children[1]
+      end
+
+      def literal_value_type(node, constant_types = {})
+        return "T.untyped" unless node
+
+        kind = node.kind.to_s
+        text = node_text(node)
+        case kind
+        when "string", "string_literal", "interpreted_string_literal", "raw_string_literal" then "String"
+        when "integer", "integer_literal" then "Integer"
+        when "float", "float_literal" then "Float"
+        when "true", "false", "true_literal", "false_literal", "boolean" then "T::Boolean"
+        when "nil", "none", "null", "nil_literal", "none_literal", "null_literal" then "NilClass"
+        when "symbol", "simple_symbol", "hash_key_symbol" then "Symbol"
+        when "symbol_array" then "T::Array[Symbol]"
+        when "string_array" then "T::Array[String]"
+        when "constant" then constant_types[text] || "T.untyped"
+        else
+          return "String" if text.match?(/\A["']/)
+          return "Symbol" if text.match?(/\A:/)
+          return "T::Array[Symbol]" if text.match?(/\A%i[\[\(\{]/)
+          return "T::Array[String]" if text.match?(/\A%w[\[\(\{]/)
+          return "Integer" if text.match?(/\A[-+]?\d+\z/)
+          return "Float" if text.match?(/\A[-+]?\d+\.\d+\z/)
+          return "T::Boolean" if %w[true false True False].include?(text)
+          return "NilClass" if %w[nil null None].include?(text)
+          if t_let_call?(node)
+            type = t_let_declared_type(node)
+            return type unless type.empty?
+          end
+          if array_literal_node?(node)
+            return array_literal_type(node, constant_types)
+          end
+          return "T::Array[T.untyped]" if array_literal_node?(node)
+          return "T::Hash[T.untyped, T.untyped]" if hash_literal_node?(node)
+
+          "T.untyped"
+        end
+      end
+
+      def array_literal_node?(node)
+        %w[array list array_literal list_literal].include?(node.kind.to_s)
+      end
+
+      def array_literal_type(node, constant_types)
+        types = Array(node.named_children).map { |child| literal_value_type(child, constant_types) }
+        return "T::Array[T.untyped]" if types.empty? || types.include?("T.untyped")
+
+        unique = types.uniq
+        unique.size == 1 ? "T::Array[#{unique.first}]" : "T::Array[T.any(#{unique.join(", ")})]"
+      end
+
+      def t_let_call?(node)
+        node.kind.to_s == "call" && node_text(node).start_with?("T.let")
+      end
+
+      def t_let_declared_type(node)
+        args = Array((named_child(node, "arguments") || node.named_children.find { |child| child.kind.to_s == "argument_list" })&.named_children)
+        args[1] ? node_text(args[1]) : ""
+      end
+
+      def named_child(node, name)
+        node.child_by_field_name(name)
+      rescue StandardError
+        nil
+      end
+
+      def node_line(node)
+        node.start_point.row + 1
+      rescue StandardError
+        1
+      end
+
+      def node_text(node)
+        node&.text.to_s.strip
       end
 
       def stringify_set_map(map)

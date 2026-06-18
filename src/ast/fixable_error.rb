@@ -29,10 +29,10 @@ class Span
 
   sig { params(file: T.nilable(String), line: Integer, col: Integer, length: Integer).void }
   def initialize(file:, line:, col:, length:)
-    @file = file
-    @line = line
-    @col = col
-    @length = length
+    @file = T.let(file, T.nilable(String))
+    @line = T.let(line, Integer)
+    @col = T.let(col, Integer)
+    @length = T.let(length, Integer)
   end
 
   # End line / column — useful for LSP-style range diagnostics. For a
@@ -58,8 +58,8 @@ class Edit
 
   sig { params(span: Span, replacement: String).void }
   def initialize(span:, replacement:)
-    @span = span
-    @replacement = replacement
+    @span = T.let(span, Span)
+    @replacement = T.let(replacement, String)
   end
 end
 
@@ -75,7 +75,7 @@ class Fix
     unless CONFIDENCES.include?(confidence)
       raise ArgumentError, "Fix.confidence must be one of #{CONFIDENCES}, got #{confidence.inspect}"
     end
-    @description = description
+    @description = T.let(description, String)
     @confidence = T.let(confidence, Symbol)
     @edits = T.let(Array(edits), T::Array[Edit])
     raise ArgumentError, "Fix needs at least one edit" if @edits.empty?
@@ -95,14 +95,14 @@ class FixableFinding
 
   attr_reader :level, :message, :token, :category, :fixes
 
-  sig { params(level: Symbol, message: String, token: T.untyped, category: Symbol, fixes: T::Array[Fix]).void }
+  sig { params(level: Symbol, message: String, token: DiagnosticToken, category: Symbol, fixes: T::Array[Fix]).void }
   def initialize(level:, message:, token:, category:, fixes:)
     raise ArgumentError, "bad level #{level.inspect}" unless LEVELS.include?(level)
     raise ArgumentError, "bad category #{category.inspect}" unless CATEGORIES.include?(category)
-    @level = level
-    @message = message
-    @token = token
-    @category = category
+    @level = T.let(level, Symbol)
+    @message = T.let(message, String)
+    @token = T.let(token, DiagnosticToken)
+    @category = T.let(category, Symbol)
     @fixes = T.let(Array(fixes), T::Array[Fix])
     # An empty `fixes` is permitted for diagnostic-only findings (e.g.
     # gradual-typing's ambiguity / unresolved-Auto reports — see

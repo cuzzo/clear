@@ -78,15 +78,16 @@ module NilKill
       parsed = Syntax.parse(source)
       return [source, nil] unless parsed.success?
       edits = []
-      collect_ivar_assignment_edits(parsed.value, edits)
+      collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
       collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
-      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT))
+      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
       write_tracepoint_fallback_plan
       return [source, nil] if edits.empty?
       kept = non_overlapping_edits(edits).sort_by { |s, _e, _r| s }
-      instrumented = apply_edits(source, edits)
+      instrumented = apply_normalized_edits(source, kept)
       src_line_count = source.lines.length
-      total_instr_lines = instrumented.count("\n") + 1
+      instrumented_offsets = line_offsets(instrumented)
+      total_instr_lines = instrumented_offsets.length
       # src line -> instrumented line of that line's first byte
       instr_line_of_src = []
       delta = 0 # net bytes inserted before the current scan offset
@@ -99,7 +100,7 @@ module NilKill
           ei += 1
         end
         instr_byte = src_byte + delta
-        instr_line_of_src[s] = instrumented.byteslice(0, instr_byte).to_s.count("\n") + 1
+        instr_line_of_src[s] = line_number_for_byte(instrumented_offsets, instr_byte)
       end
       map = []
       s = 1
@@ -116,9 +117,9 @@ module NilKill
       parsed = Syntax.parse(source)
       return source unless parsed.success?
       edits = []
-      collect_ivar_assignment_edits(parsed.value, edits)
+      collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
       collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
-      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT))
+      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
       write_tracepoint_fallback_plan
       return source if edits.empty?
       apply_edits(source, edits)
@@ -130,6 +131,20 @@ module NilKill
         offsets[idx + 1] = offsets[idx] + line.bytesize
       end
       offsets
+    end
+
+    def line_number_for_byte(offsets, byte)
+      low = 0
+      high = offsets.length
+      while low < high
+        mid = (low + high) / 2
+        if offsets[mid] <= byte
+          low = mid + 1
+        else
+          high = mid
+        end
+      end
+      [low, 1].max
     end
 
     def collect_method_edits(node, path, edits)
@@ -265,12 +280,20 @@ module NilKill
     end
 
     def apply_edits(source, edits)
+      apply_normalized_edits(source, non_overlapping_edits(edits))
+    end
+
+    def apply_normalized_edits(source, edits)
       bytes = source.b
-      edits = non_overlapping_edits(edits)
-      edits.sort_by { |start_offset, _end_offset, _replacement| -start_offset }.each do |start_offset, end_offset, replacement|
-        bytes = bytes.byteslice(0, start_offset) + replacement.b + bytes.byteslice(end_offset..).to_s
+      parts = []
+      cursor = 0
+      edits.sort_by { |start_offset, end_offset, _replacement| [start_offset, end_offset] }.each do |start_offset, end_offset, replacement|
+        parts << bytes.byteslice(cursor, start_offset - cursor).to_s if start_offset > cursor
+        parts << replacement.b
+        cursor = end_offset
       end
-      bytes
+      parts << bytes.byteslice(cursor..).to_s
+      parts.join
     end
 
     def write_tracepoint_fallback_plan
@@ -282,14 +305,16 @@ module NilKill
 
     def non_overlapping_edits(edits)
       kept = []
+      covered_until = -1
       edits.sort_by { |start_offset, end_offset, _replacement| [start_offset, -(end_offset - start_offset)] }.each do |edit|
         start_offset, end_offset, = edit
         if start_offset == end_offset
           kept << edit
           next
         end
-        next if kept.any? { |kept_start, kept_end, _| start_offset >= kept_start && end_offset <= kept_end }
+        next if end_offset <= covered_until
         kept << edit
+        covered_until = end_offset if end_offset > covered_until
       end
       kept
     end

@@ -17,13 +17,19 @@ module LSP
   # Edits (used by CodeActions).
   module Position
     extend T::Sig
+    TokenLike = T.type_alias { T.untyped }
+    SpanLike = T.type_alias { T.untyped }
+    PositionHash = T.type_alias { T::Hash[Symbol, Integer] }
+    RangeHash = T.type_alias { T::Hash[Symbol, PositionHash] }
+    WirePositionHash = T.type_alias { T::Hash[T.any(String, Symbol), Integer] }
+    WireRangeHash = T.type_alias { T::Hash[T.any(String, Symbol), WirePositionHash] }
 
     # Convert a CLEAR token + length into an LSP `Range` hash.
     # `source` is the full document text (needed for the UTF-16
     # column calculation). When `source` is nil or the line is pure
     # ASCII, this falls through to the fast byte-equals-character
     # path.
-    sig { params(token: T.untyped, length: Integer, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
+    sig { params(token: TokenLike, length: Integer, source: T.nilable(String)).returns(RangeHash) }
     def self.range_for(token, length, source = nil)
       line = token.line - 1
       col_start_byte = token.column - 1
@@ -42,7 +48,7 @@ module LSP
     # Convert a Span (file/line/col/length, with possibly multi-line
     # extent) into an LSP `Range`. CLEAR Spans currently always live
     # on a single line; if that changes, the helper extends naturally.
-    sig { params(span: T.untyped, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
+    sig { params(span: SpanLike, source: T.nilable(String)).returns(RangeHash) }
     def self.range_for_span(span, source = nil)
       start_line = span.line - 1
       end_line   = span.end_line - 1
@@ -59,11 +65,16 @@ module LSP
     end
 
     # Test whether an LSP position falls within an LSP range.
-    sig { params(position: T::Hash[T.untyped, T.untyped], range: T::Hash[T.untyped, T.untyped]).returns(T::Boolean) }
+    sig { params(position: WirePositionHash, range: WireRangeHash).returns(T::Boolean) }
     def self.position_in_range?(position, range)
-      pl, pc = position[:line] || position["line"], position[:character] || position["character"]
-      sl, sc = range[:start][:line], range[:start][:character]
-      el, ec = range[:end][:line],   range[:end][:character]
+      pl = T.must(position[:line] || position["line"])
+      pc = T.must(position[:character] || position["character"])
+      start_pos = T.must(range[:start] || range["start"])
+      end_pos = T.must(range[:end] || range["end"])
+      sl = T.must(start_pos[:line] || start_pos["line"])
+      sc = T.must(start_pos[:character] || start_pos["character"])
+      el = T.must(end_pos[:line] || end_pos["line"])
+      ec = T.must(end_pos[:character] || end_pos["character"])
       return false if pl < sl || pl > el
       return false if pl == sl && pc < sc
       return false if pl == el && pc > ec

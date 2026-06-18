@@ -73,7 +73,7 @@ module Annotator
       def register_enum_declaration(node)
         T.bind(self, SemanticAnnotator)
         declare_type_schema!(node, node.name.to_sym, Schemas::EnumSchema.new(
-          variants: node.variants.to_set,
+          variants: node.variants,
           visibility: node.visibility || :package,
         ))
         stamp_type!(node, :Void)
