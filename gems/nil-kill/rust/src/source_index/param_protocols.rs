@@ -8,7 +8,9 @@ impl<'a> FileIndexer<'a> {
             return;
         }
         let args = call_arguments(node, self.file);
-        for (idx, arg) in args.iter().enumerate() {
+        let mut positional_idx = 0usize;
+        let mut counted_keyword_group = false;
+        for arg in args.iter() {
             if normalized_kind(*arg, self.file) == NormKind::Pair {
                 let Some(key) = pair_key(*arg).and_then(|key| hash_key_name(key, self.file)) else {
                     continue;
@@ -19,19 +21,24 @@ impl<'a> FileIndexer<'a> {
                     self.record_callsite_hash_shape(&callee, "keyword", &key, value, frame);
                     self.record_callsite_array_element_shape(&callee, "keyword", &key, value, frame);
                 }
+                if !counted_keyword_group {
+                    positional_idx += 1;
+                    counted_keyword_group = true;
+                }
             } else {
                 let record = self.param_origin_record(
                     node,
                     *arg,
                     &callee,
                     "positional",
-                    &idx.to_string(),
+                    &positional_idx.to_string(),
                     state,
                     frame,
                 );
                 self.facts.param_origins.push(record);
-                self.record_callsite_hash_shape(&callee, "positional", &idx.to_string(), *arg, frame);
-                self.record_callsite_array_element_shape(&callee, "positional", &idx.to_string(), *arg, frame);
+                self.record_callsite_hash_shape(&callee, "positional", &positional_idx.to_string(), *arg, frame);
+                self.record_callsite_array_element_shape(&callee, "positional", &positional_idx.to_string(), *arg, frame);
+                positional_idx += 1;
             }
         }
     }
@@ -479,9 +486,15 @@ impl<'a> FileIndexer<'a> {
                     return;
                 }
                 reasons.insert(format!("operation {}", debug_node_name(normalized_kind(node, self.file))));
+                if normalized_kind(node, self.file) == NormKind::HiddenOr {
+                    for child in or_operands(node) {
+                        self.collect_unknown_expression_reasons(child, frame, reasons);
+                    }
+                    return;
+                }
             }
         }
-        for child in named_children(node) {
+        for child in ruby_child_nodes(node) {
             self.collect_unknown_expression_reasons(child, frame, reasons);
         }
     }

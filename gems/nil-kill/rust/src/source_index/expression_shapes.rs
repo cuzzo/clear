@@ -87,16 +87,8 @@ impl<'a> FileIndexer<'a> {
         if kind == NormKind::While || kind == NormKind::Until {
             return Some("NilClass".to_string());
         }
-        if kind == NormKind::HiddenOr {
-            if let Some(or_child) = named_children(node)
-                .into_iter()
-                .find(|child| normalized_kind(*child, self.file) == NormKind::Or)
-            {
-                return self.expression_type(or_child, frame);
-            }
-        }
-        if kind == NormKind::Or {
-            let children = named_children(node);
+        if kind == NormKind::Or || kind == NormKind::HiddenOr {
+            let children = or_operands(node);
             if children.len() >= 2 {
                 let left = self.expression_type(children[0], frame);
                 let right = self.expression_type(children[1], frame);
@@ -356,17 +348,25 @@ impl<'a> FileIndexer<'a> {
                     };
                     if let Some(key) = hash_key_name(key_node, self.file) {
                         let ty = self.expression_type(value_node, frame).unwrap_or_else(|| "T.untyped".to_string());
+                        let typed_value = useful_type(&ty) || ty == "NilClass";
+                        let shape_type = if typed_value {
+                            ty.clone()
+                        } else {
+                            "T.untyped".to_string()
+                        };
                         let entry = keys.entry(key.clone()).or_insert_with(|| json!([]));
                         if let Some(array) = entry.as_array_mut() {
-                            if !array.iter().any(|entry| entry.as_str() == Some(&ty)) {
-                                array.push(json!(ty));
+                            if !array.iter().any(|entry| entry.as_str() == Some(&shape_type)) {
+                                array.push(json!(shape_type));
                             }
                         }
-                        if let Some(nested) = self.hash_shape_for_value(value_node, frame) {
-                            value_hash_shapes.insert(key.clone(), nested);
-                        }
-                        if let Some(nested) = self.array_element_shape_for_value(value_node, frame) {
-                            value_array_shapes.insert(key, nested);
+                        if typed_value {
+                            if let Some(nested) = self.hash_shape_for_value(value_node, frame) {
+                                value_hash_shapes.insert(key.clone(), nested);
+                            }
+                            if let Some(nested) = self.array_element_shape_for_value(value_node, frame) {
+                                value_array_shapes.insert(key, nested);
+                            }
                         }
                     } else {
                         poisoned = true;
@@ -395,12 +395,8 @@ impl<'a> FileIndexer<'a> {
                     self.attribute_hash_shape_for_call(value, frame)
                 }
             }
-            NormKind::HiddenOr => named_children(value)
-                .into_iter()
-                .find(|child| normalized_kind(*child, self.file) == NormKind::Or)
-                .and_then(|child| self.hash_shape_for_value(child, frame)),
-            NormKind::Or => {
-                let children = named_children(value);
+            NormKind::HiddenOr | NormKind::Or => {
+                let children = or_operands(value);
                 match (children.first(), children.get(1)) {
                     (Some(left), Some(right)) => match (
                         self.hash_shape_for_value(*left, frame),
@@ -451,12 +447,8 @@ impl<'a> FileIndexer<'a> {
                     self.attribute_array_element_shape_for_call(value, frame)
                 }
             }
-            NormKind::HiddenOr => named_children(value)
-                .into_iter()
-                .find(|child| normalized_kind(*child, self.file) == NormKind::Or)
-                .and_then(|child| self.array_element_shape_for_value(child, frame)),
-            NormKind::Or => {
-                let children = named_children(value);
+            NormKind::HiddenOr | NormKind::Or => {
+                let children = or_operands(value);
                 match (children.first(), children.get(1)) {
                     (Some(left), Some(right)) => {
                         let left = self.array_element_shape_for_value(*left, frame);

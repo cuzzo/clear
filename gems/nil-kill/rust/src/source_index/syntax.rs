@@ -1,7 +1,6 @@
 fn call_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
     match node.kind() {
         "element_reference" => Some("[]".to_string()),
-        "operator_assignment" if operator_assignment_index_read_node(node, file) => Some("[]".to_string()),
         "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") => {
             Some("[]=".to_string())
         }
@@ -49,10 +48,8 @@ fn call_receiver<'tree>(node: Node<'tree>, _file: &SourceFile) -> Option<Node<'t
 fn call_arguments<'tree>(node: Node<'tree>, file: &SourceFile) -> Vec<Node<'tree>> {
     match node.kind() {
         "element_reference" => named_children(node).into_iter().skip(1).collect(),
-        "unary" if unary_arithmetic_node(node) => Vec::new(),
-        "operator_assignment" if operator_assignment_index_read_node(node, file) => assignment_lhs(node)
-            .map(|lhs| named_children(lhs).into_iter().skip(1).collect())
-            .unwrap_or_default(),
+        "unary" if unary_bang_node(node) => named_children(node).into_iter().take(1).collect(),
+        "unary" => Vec::new(),
         "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") => {
             let mut out = assignment_lhs(node)
                 .map(|lhs| named_children(lhs).into_iter().skip(1).collect::<Vec<_>>())
@@ -158,16 +155,61 @@ fn write_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
 }
 
 fn hidden_or_body_statement(node: Node<'_>) -> bool {
-    let _ = node;
-    false
+    if !matches!(node.kind(), "body_statement" | "block_body" | "then") {
+        return false;
+    }
+    if all_children(node).first().is_some_and(|child| {
+        matches!(
+            child.kind(),
+            "def" | "class" | "module" | "if" | "unless" | "while" | "until" | "case" | "begin" | "rescue" | "ensure"
+        )
+    }) {
+        return false;
+    }
+    if direct_named_children(node)
+        .iter()
+        .any(|child| matches!(child.kind(), "then" | "else"))
+    {
+        return false;
+    }
+    if all_children(node)
+        .into_iter()
+        .any(|child| !child.is_named() && matches!(node_text_raw(child).as_str(), "||" | "or"))
+    {
+        return true;
+    }
+    let named = named_children(node);
+    named.len() == 1
+        && named[0].kind() == "binary"
+        && binary_operator(named[0]).is_some_and(|op| matches!(op.as_str(), "||" | "or"))
+}
+
+fn or_operands(node: Node<'_>) -> Vec<Node<'_>> {
+    if matches!(node.kind(), "body_statement" | "block_body" | "then") {
+        let named = named_children(node);
+        if named.len() == 1
+            && named[0].kind() == "binary"
+            && binary_operator(named[0]).is_some_and(|op| matches!(op.as_str(), "||" | "or"))
+        {
+            return named_children(named[0]);
+        }
+        return named;
+    }
+    named_children(node)
 }
 
 fn condition_node(node: Node<'_>) -> Option<Node<'_>> {
+    if let Some(control) = wrapped_control_child(node) {
+        return condition_node(control);
+    }
     node.child_by_field_name("condition")
         .or_else(|| named_children(node).first().copied())
 }
 
 fn consequent_node(node: Node<'_>) -> Option<Node<'_>> {
+    if let Some(control) = wrapped_control_child(node) {
+        return consequent_node(control);
+    }
     node.child_by_field_name("consequence")
         .or_else(|| node.child_by_field_name("body"))
         .or_else(|| {
@@ -178,6 +220,9 @@ fn consequent_node(node: Node<'_>) -> Option<Node<'_>> {
 }
 
 fn alternative_node(node: Node<'_>) -> Option<Node<'_>> {
+    if let Some(control) = wrapped_control_child(node) {
+        return alternative_node(control);
+    }
     node.child_by_field_name("alternative")
         .or_else(|| node.child_by_field_name("else"))
         .or_else(|| named_children(node).into_iter().find(|child| child.kind() == "else"))
@@ -249,8 +294,6 @@ fn normalized_kind(node: Node<'_>, file: &SourceFile) -> NormKind {
         "element_reference" | "binary" | "unary" => {
             if node.kind() == "binary" && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "||" | "or")) {
                 NormKind::Or
-            } else if node.kind() == "binary" && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "&&" | "and")) {
-                NormKind::Other
             } else {
                 NormKind::Call
             }
@@ -330,25 +373,168 @@ fn normalized_kind_by_raw(node: Node<'_>) -> NormKind {
 }
 
 fn body_statement_kind(node: Node<'_>, _file: &SourceFile) -> NormKind {
+    if wrapped_control_statement_list(node) {
+        return NormKind::Statements;
+    }
+    let first = all_children(node).first().copied();
+    if let Some(kind) = match first.map(|child| child.kind()) {
+        Some("def") => Some(NormKind::Def),
+        Some("class") => Some(NormKind::Class),
+        Some("module") => Some(NormKind::Module),
+        Some("return") => Some(NormKind::Return),
+        Some("if") => Some(NormKind::If),
+        Some("unless") => Some(NormKind::Unless),
+        Some("while") => Some(NormKind::While),
+        Some("until") => Some(NormKind::Until),
+        Some("case") => Some(NormKind::Case),
+        Some("begin") => Some(NormKind::Begin),
+        _ => None,
+    } {
+        return kind;
+    }
     if hidden_or_body_statement(node) {
         return NormKind::HiddenOr;
     }
-    let first = all_children(node).first().copied();
-    match first.map(|child| child.kind()) {
-        Some("def") => NormKind::Def,
-        Some("class") => NormKind::Class,
-        Some("module") => NormKind::Module,
-        Some("return") => NormKind::Return,
-        Some("if") => NormKind::If,
-        Some("unless") => NormKind::Unless,
-        Some("while") => NormKind::While,
-        Some("until") => NormKind::Until,
-        Some("case") => NormKind::Case,
-        Some("begin") => NormKind::Begin,
-        _ => {
-            NormKind::Statements
-        }
+    if logical_and_body_statement(node) {
+        return NormKind::Other;
     }
+    NormKind::Statements
+}
+
+fn direct_named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| *child != node)
+        .filter(|child| child.kind() != "comment")
+        .collect()
+}
+
+fn wrapped_control_child(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() != "body_statement" {
+        return None;
+    }
+    direct_named_children(node)
+        .into_iter()
+        .find(|child| matches!(child.kind(), "if" | "unless" | "while" | "until" | "case" | "begin"))
+}
+
+fn logical_and_body_statement(node: Node<'_>) -> bool {
+    if !matches!(node.kind(), "body_statement" | "block_body" | "then") {
+        return false;
+    }
+    if all_children(node)
+        .into_iter()
+        .any(|child| !child.is_named() && matches!(node_text_raw(child).as_str(), "&&" | "and"))
+    {
+        return true;
+    }
+    let named = direct_named_children(node);
+    named.len() == 1
+        && named[0].kind() == "binary"
+        && binary_operator(named[0]).is_some_and(|op| matches!(op.as_str(), "&&" | "and"))
+}
+
+fn ruby_child_nodes(node: Node<'_>) -> Vec<Node<'_>> {
+    match node.kind() {
+        "case" => return case_child_nodes(node),
+        "when" => return when_child_nodes(node),
+        "else" => return else_statement_node(node).into_iter().collect(),
+        _ => {}
+    }
+    if let Some(children) = hidden_index_operator_assignment_children(node) {
+        return children;
+    }
+    if logical_and_chain_node(node) {
+        return named_children(node);
+    }
+    if logical_and_body_statement(node) {
+        let named = direct_named_children(node);
+        if let Some(binary) = named.first() {
+            if named.len() == 1 && binary.kind() == "binary" {
+                return named_children(*binary);
+            }
+        }
+        return named;
+    }
+    named_children(node)
+}
+
+fn case_child_nodes(node: Node<'_>) -> Vec<Node<'_>> {
+    let children = named_children(node);
+    let mut out = Vec::new();
+    if let Some(predicate) = node.child_by_field_name("value").or_else(|| children.first().copied()) {
+        out.push(predicate);
+    }
+    out.extend(children.iter().copied().filter(|child| child.kind() == "when"));
+    if let Some(else_node) = children.iter().copied().find(|child| child.kind() == "else") {
+        out.push(else_node);
+    }
+    out
+}
+
+fn when_child_nodes(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut out = named_children(node)
+        .into_iter()
+        .take_while(|child| child.kind() != "then")
+        .collect::<Vec<_>>();
+    if let Some(body) = consequent_node(node) {
+        out.push(body);
+    }
+    out
+}
+
+fn else_statement_node(node: Node<'_>) -> Option<Node<'_>> {
+    named_children(node)
+        .into_iter()
+        .find(|child| child.kind() != "comment")
+}
+
+fn hidden_index_operator_assignment_children(node: Node<'_>) -> Option<Vec<Node<'_>>> {
+    if !matches!(node.kind(), "body_statement" | "block_body" | "then") {
+        return None;
+    }
+    let children = named_children(node);
+    if children.len() != 1 || children[0].kind() != "operator_assignment" {
+        return None;
+    }
+    assignment_lhs(children[0])
+        .is_some_and(|lhs| lhs.kind() == "element_reference")
+        .then(|| named_children(children[0]))
+}
+
+fn hidden_index_operator_assignment_lhs_node(node: Node<'_>) -> bool {
+    if node.kind() != "element_reference" {
+        return false;
+    }
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "operator_assignment" || assignment_lhs(parent) != Some(node) {
+        return false;
+    }
+    parent
+        .parent()
+        .and_then(hidden_index_operator_assignment_children)
+        .is_some_and(|children| children.contains(&node))
+}
+
+fn wrapped_control_statement_list(node: Node<'_>) -> bool {
+    if node.kind() != "body_statement" {
+        return false;
+    }
+    if !all_children(node).first().is_some_and(|child| {
+        matches!(child.kind(), "if" | "unless" | "while" | "until" | "case" | "begin")
+    }) {
+        return false;
+    }
+    let named = named_children(node);
+    named.len() > 1
+        && named.first().is_some_and(|child| {
+            matches!(
+                child.kind(),
+                "body_statement" | "if" | "unless" | "while" | "until" | "case" | "begin"
+            )
+        })
 }
 
 fn assignment_kind(node: Node<'_>) -> NormKind {
@@ -511,6 +697,18 @@ fn binary_operator(node: Node<'_>) -> Option<String> {
 fn logical_and_node(node: Node<'_>) -> bool {
     node.kind() == "binary"
         && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "&&" | "and"))
+}
+
+fn logical_and_chain_node(node: Node<'_>) -> bool {
+    logical_and_node(node)
+        && named_children(node)
+            .into_iter()
+            .any(logical_and_node)
+}
+
+fn logical_and_pattern_chain_node(node: Node<'_>) -> bool {
+    logical_and_chain_node(node)
+        && node.parent().is_some_and(|parent| parent.kind() == "pattern")
 }
 
 fn unary_bang_node(node: Node<'_>) -> bool {
@@ -797,7 +995,7 @@ fn debug_node_name(kind: NormKind) -> &'static str {
         NormKind::ClassVarWrite => "ClassVariableWriteNode",
         NormKind::GlobalVarRead => "GlobalVariableReadNode",
         NormKind::GlobalVarWrite => "GlobalVariableWriteNode",
-        NormKind::Or => "HiddenOrNode",
+        NormKind::Or => "OrNode",
         NormKind::HiddenOr => "HiddenOrNode",
         NormKind::Other => "Node",
     }

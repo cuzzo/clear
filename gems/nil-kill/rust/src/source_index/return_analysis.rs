@@ -64,7 +64,7 @@ impl<'a> FileIndexer<'a> {
         if self.return_node(node) {
             return true;
         }
-        named_children(node)
+        ruby_child_nodes(node)
             .into_iter()
             .any(|child| self.contains_explicit_return(Some(child)))
     }
@@ -255,6 +255,23 @@ impl<'a> FileIndexer<'a> {
         }
         if kind == NormKind::While || kind == NormKind::Until {
             return vec![json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": code})];
+        }
+        if node.kind() == "binary"
+            && binary_operator(node).is_some_and(|op| matches!(op.as_str(), "&&" | "and"))
+            && node.parent().is_some_and(logical_and_body_statement)
+        {
+            let parent = node.parent().unwrap();
+            let parent_line = line(parent);
+            blockers.insert(format!(
+                "unknown return expression Node at {}:{parent_line}",
+                self.file.rel
+            ));
+            return vec![json!({
+                "kind": "unknown",
+                "line": parent_line,
+                "code": node_text(parent, self.file),
+                "unknown_reasons": self.unknown_expression_reasons(parent, frame),
+            })];
         }
         if kind == NormKind::Call {
             let callee = call_name(node, self.file).unwrap_or_default();
@@ -1117,7 +1134,7 @@ fn collect_explicit_returns<'tree>(node: Node<'tree>, results: &mut Vec<Node<'tr
         results.push(args.first().copied().unwrap_or(node));
         return;
     }
-    for child in named_children(node) {
+    for child in ruby_child_nodes(node) {
         collect_explicit_returns(child, results);
     }
 }
@@ -1162,9 +1179,10 @@ fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<Str
         ("==" | "eql?", ty) if !ty.is_empty() => Some("T::Boolean".to_string()),
         ("each_with_object", _) => Some("T::Enumerator[[T.untyped, T.untyped]]".to_string()),
         ("each_index", _) => Some("T::Array[T.untyped]".to_string()),
+        ("branches", _) => Some("T::Array[T.untyped]".to_string()),
         ("file?", _) => Some("T::Boolean".to_string()),
         ("line", _) => Some("Integer".to_string()),
-        ("mktmpdir" | "realpath" | "message" | "strip" | "lstrip" | "rstrip" | "delete_prefix" | "delete_suffix" | "tr", _) => {
+        ("chomp" | "dirname" | "mktmpdir" | "realpath" | "message" | "strip" | "lstrip" | "rstrip" | "delete_prefix" | "delete_suffix" | "tr", _) => {
             Some("String".to_string())
         }
         ("pretty_generate", _) => Some("::String".to_string()),
@@ -1200,6 +1218,7 @@ fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<Str
         ("sub", "String") => Some("String".to_string()),
         ("nil?", _) => Some("T::Boolean".to_string()),
         ("bytes", "String") => Some("T::Array[Integer]".to_string()),
+        ("count", _) => Some("Integer".to_string()),
         ("*", "String") => Some("String".to_string()),
         ("expand_path", _) => Some("String".to_string()),
         ("ruby", _) => Some("String".to_string()),
@@ -1326,7 +1345,24 @@ fn implicit_return_expression(node: Node<'_>) -> Option<Node<'_>> {
 }
 
 fn statement_expressions(node: Node<'_>) -> Vec<Node<'_>> {
-    named_children(node)
+    if node.kind() == "else" {
+        return else_statement_node(node).into_iter().collect();
+    }
+    if let Some(children) = hidden_index_operator_assignment_children(node) {
+        return children;
+    }
+    let children = named_children(node);
+    if matches!(node.kind(), "body_statement" | "block_body" | "then")
+        && children.len() == 1
+        && children[0].kind() == "string"
+    {
+        let string_children = named_children(children[0]);
+        if string_children.len() > 1 {
+            return string_children;
+        }
+    }
+
+    children
         .into_iter()
         .filter(|child| !matches!(child.kind(), "comment" | "rescue" | "ensure"))
         .collect()

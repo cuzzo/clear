@@ -101,7 +101,7 @@ impl<'a> FileIndexer<'a> {
     }
 
     fn child_walk(&mut self, node: Node<'a>, state: &mut ScopeState, frame: &mut Frame) {
-        for child in named_children(node) {
+        for child in ruby_child_nodes(node) {
             self.walk(child, state, frame);
         }
     }
@@ -174,8 +174,14 @@ impl<'a> FileIndexer<'a> {
         if nested_scope_node(node, self.file) { return; }
         match normalized_kind(node, self.file) {
             NormKind::Call => {
-                if lhs_element_reference_node(node) {
-                    for child in named_children(node) {
+                if logical_and_pattern_chain_node(node) {
+                    for child in ruby_child_nodes(node) {
+                        self.collect_collection_index_facts(child, state, frame);
+                    }
+                    return;
+                }
+                if lhs_element_reference_node(node) && !hidden_index_operator_assignment_lhs_node(node) {
+                    for child in ruby_child_nodes(node) {
                         self.collect_collection_index_facts(child, state, frame);
                     }
                     return;
@@ -189,12 +195,12 @@ impl<'a> FileIndexer<'a> {
             NormKind::LocalWrite => {
                 self.update_local_fact(node, frame);
                 self.inspect_local_container_origin(node, frame);
-                for child in named_children(node) {
+                for child in ruby_child_nodes(node) {
                     self.collect_collection_index_facts(child, state, frame);
                 }
             }
             _ => {
-                for child in named_children(node) {
+                for child in ruby_child_nodes(node) {
                     self.collect_collection_index_facts(child, state, frame);
                 }
             }
@@ -207,7 +213,7 @@ impl<'a> FileIndexer<'a> {
         }
         let block = call_block(node);
         if block.is_none() || block.unwrap().child_by_field_name("body").is_none() {
-            for child in named_children(node) {
+            for child in ruby_child_nodes(node) {
                 self.collect_collection_index_facts(child, state, frame);
             }
             return;
@@ -222,7 +228,7 @@ impl<'a> FileIndexer<'a> {
                 frame.hash_shapes.insert(name.clone(), clone_hash_shape(shape));
             }
         }
-        for child in named_children(node) {
+        for child in ruby_child_nodes(node) {
             self.collect_collection_index_facts(child, state, frame);
         }
         frame.hash_shapes = old_hs;
@@ -304,12 +310,18 @@ impl<'a> FileIndexer<'a> {
                 self.inspect_branch_guard(node, true, frame);
                 self.child_walk(node, state, frame);
             }
+            _ if under_unary_bang_logical_and_operand(node, self.file) => {}
             _ if logical_and_usage_node(node, self.file) => {
                 self.inspect_param_origins(node, state, frame);
                 self.child_walk(node, state, frame);
             }
             NormKind::Call => {
-                if lhs_element_reference_node(node) {
+                if logical_and_pattern_chain_node(node) {
+                    self.child_walk(node, state, frame);
+                    self.walk_stack.remove(&walk_key);
+                    return;
+                }
+                if lhs_element_reference_node(node) && !hidden_index_operator_assignment_lhs_node(node) {
                     self.child_walk(node, state, frame);
                     self.walk_stack.remove(&walk_key);
                     return;

@@ -140,8 +140,9 @@ module NilKill
       args = ["source-index", "--root", ROOT]
       NilKill.target_dirs.each { |dir| args.concat(["--target-dir", NilKill.rel(dir)]) }
       NilKill.target_exclude_dirs.each { |dir| args.concat(["--exclude-dir", NilKill.rel(dir)]) }
-      (NilKill.usage_scan_files - NilKill.target_files).each { |path| args.concat(["--usage-file", path]) }
-      args.concat(NilKill.target_files)
+      target_files = NilKill.source_index_target_files
+      (NilKill.usage_scan_files - target_files).each { |path| args.concat(["--usage-file", path]) }
+      args.concat(target_files)
 
       out, err, status = Open3.capture3(bin, *args)
       abort "nil-kill native SourceIndexer failed: #{err}" unless status.success?

@@ -275,6 +275,13 @@ fn collect_return_usage_site_context(
             }
         }
         NormKind::Block => {
+            if let Some(params) = node.child_by_field_name("parameters").or_else(|| {
+                named_children(node)
+                    .into_iter()
+                    .find(|child| child.kind() == "block_parameters")
+            }) {
+                collect_return_usage_site_context(params, file, "value", current_method, current_handler, sites, handlers, direct_usage);
+            }
             if let Some(body) = node
                 .child_by_field_name("body")
                 .or_else(|| named_children(node).into_iter().find(|child| matches!(child.kind(), "body_statement" | "block_body")))
@@ -324,7 +331,7 @@ fn collect_return_usage_site_context(
                 collect_return_usage_site_context(child, file, "return", current_method, current_handler, sites, handlers, direct_usage);
             }
         }
-        NormKind::If | NormKind::Unless => {
+        NormKind::If => {
             if let Some(condition) = condition_node(node) {
                 collect_return_usage_site_context(condition, file, "value", current_method, current_handler, sites, handlers, direct_usage);
             }
@@ -390,11 +397,7 @@ fn collect_return_usage_site_context(
             && !(assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference")
                 && node_text(node, file).contains("||=")) =>
         {
-            if operator_assignment_index_read_node(node, file) {
-                if let Some(lhs) = assignment_lhs(node) {
-                    collect_return_usage_site_context(lhs, file, "statement", current_method, current_handler, sites, handlers, direct_usage);
-                }
-            } else if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") {
+            if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") {
                 if let Some(name) = call_name(node, file).filter(|name| !name.is_empty()) {
                     sites.push(json!({
                         "path": file.rel, "line": line(node), "name": name,
@@ -406,11 +409,14 @@ fn collect_return_usage_site_context(
                 if let Some(receiver) = call_receiver(node, file) {
                     collect_return_usage_site_context(receiver, file, "value", current_method, current_handler, sites, handlers, direct_usage);
                 }
+                let arg_context = if direct_usage { "return" } else { "value" };
                 for arg in call_arguments(node, file) {
-                    collect_return_usage_site_context(arg, file, "value", current_method, current_handler, sites, handlers, direct_usage);
+                    collect_return_usage_site_context(arg, file, arg_context, current_method, current_handler, sites, handlers, direct_usage);
                 }
             } else if let Some(value) = write_value(node) {
-                let value_context = if node_text(node, file).contains("||=") || node_text(node, file).contains("&&=") {
+                let value_context = if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "identifier") {
+                    "value"
+                } else if node_text(node, file).contains("||=") || node_text(node, file).contains("&&=") {
                     context
                 } else {
                     "value"
@@ -418,13 +424,18 @@ fn collect_return_usage_site_context(
                 collect_return_usage_site_context(value, file, value_context, current_method, current_handler, sites, handlers, direct_usage);
             }
         }
-        _ if unary_bang_condition_and_operand(node, file) => {
+        _ if unary_bang_logical_and_operand(node) || unary_bang_condition_and_operand(node, file) => {
             sites.push(json!({
                 "path": file.rel, "line": line(node), "name": "!",
                 "context": context, "current_method": current_method,
                 "handler_line": current_handler,
                 "code": first_line(&node_text(node, file)),
             }));
+        }
+        _ if logical_and_pattern_chain_node(node) => {
+            for child in ruby_child_nodes(node) {
+                collect_return_usage_site_context(child, file, "value", current_method, current_handler, sites, handlers, direct_usage);
+            }
         }
         _ if logical_and_usage_node(node, file) => {
             if let Some(name) = call_name(node, file).filter(|name| !name.is_empty()) {
@@ -467,7 +478,7 @@ fn collect_return_usage_site_context(
             }
         }
         _ => {
-            for child in named_children(node) {
+            for child in ruby_child_nodes(node) {
                 collect_return_usage_site_context(child, file, "value", current_method, current_handler, sites, handlers, direct_usage);
             }
         }

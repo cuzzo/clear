@@ -12,43 +12,62 @@ pub fn run(
     files: Vec<PathBuf>,
     usage_files: Vec<PathBuf>,
 ) -> Result<Value> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&ruby_language())
-        .context("failed to initialize tree-sitter ruby parser")?;
-
     let mut global = GlobalState::default();
     let mut indexed = Vec::new();
 
     for path in files {
+        let Some(language) = SourceLanguage::for_path(&path) else {
+            continue;
+        };
         let source = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language.tree_sitter_language())
+            .with_context(|| format!("failed to initialize tree-sitter parser for {}", language.name()))?;
         let tree = parser
             .parse(&source, None)
             .with_context(|| format!("tree-sitter produced no tree for {}", path.display()))?;
         let rel = rel_path(root, &path);
         let lines = source.lines().map(ToString::to_string).collect::<Vec<_>>();
-        let mut file = SourceFile::new(path, rel, source, lines, tree);
-        file.collect_prescan(&mut global);
+        let mut file = SourceFile::new(path, rel, source, lines, tree, language);
+        if language == SourceLanguage::Ruby {
+            file.collect_prescan(&mut global);
+        }
         indexed.push(file);
     }
 
     let mut bundle = Bundle::new(target_dirs, exclude_dirs);
     for file in &indexed {
-        let indexer = FileIndexer::new(file, &mut global);
-        let facts = indexer.index();
+        let facts = match file.language {
+            SourceLanguage::Ruby => {
+                let indexer = FileIndexer::new(file, &mut global);
+                indexer.index()
+            }
+            SourceLanguage::Rust => RustFileIndexer::new(file).index(),
+        };
         bundle.add_file(file, facts);
     }
 
     for path in usage_files {
+        let Some(language) = SourceLanguage::for_path(&path) else {
+            continue;
+        };
+        if language != SourceLanguage::Ruby {
+            continue;
+        }
         let source = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language.tree_sitter_language())
+            .with_context(|| format!("failed to initialize tree-sitter parser for {}", language.name()))?;
         let tree = parser
             .parse(&source, None)
             .with_context(|| format!("tree-sitter produced no tree for {}", path.display()))?;
         let rel = rel_path(root, &path);
         let lines = source.lines().map(ToString::to_string).collect::<Vec<_>>();
-        let file = SourceFile::new(path, rel, source, lines, tree);
+        let file = SourceFile::new(path, rel, source, lines, tree, language);
         let mut facts = FileFacts::new();
         collect_return_usage_sites(&file, &mut facts);
         bundle.add_usage_file(facts);
@@ -57,8 +76,34 @@ pub fn run(
     Ok(bundle.into_value())
 }
 
-fn ruby_language() -> Language {
-    tree_sitter_ruby::LANGUAGE.into()
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceLanguage {
+    Ruby,
+    Rust,
+}
+
+impl SourceLanguage {
+    fn for_path(path: &Path) -> Option<Self> {
+        match path.extension().and_then(|ext| ext.to_str()).unwrap_or("") {
+            "rb" => Some(Self::Ruby),
+            "rs" => Some(Self::Rust),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Ruby => "ruby",
+            Self::Rust => "rust",
+        }
+    }
+
+    fn tree_sitter_language(self) -> Language {
+        match self {
+            Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+            Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -84,6 +129,7 @@ struct SourceFile {
     source: String,
     lines: Vec<String>,
     tree: tree_sitter::Tree,
+    language: SourceLanguage,
     local_names_by_scope: BTreeMap<ScopeKey, BTreeSet<String>>,
     class_like_constants: BTreeSet<String>,
     method_return_types: BTreeMap<String, BTreeSet<String>>,
@@ -97,6 +143,7 @@ impl SourceFile {
         source: String,
         lines: Vec<String>,
         tree: tree_sitter::Tree,
+        language: SourceLanguage,
     ) -> Self {
         let mut file = Self {
             abs,
@@ -104,12 +151,15 @@ impl SourceFile {
             source,
             lines,
             tree,
+            language,
             local_names_by_scope: BTreeMap::new(),
             class_like_constants: BTreeSet::new(),
             method_return_types: BTreeMap::new(),
             non_nil_method_returns: BTreeSet::new(),
         };
-        file.local_names_by_scope = build_local_name_cache(&file);
+        if language == SourceLanguage::Ruby {
+            file.local_names_by_scope = build_local_name_cache(&file);
+        }
         file
     }
 
@@ -463,4 +513,5 @@ include!("source_index/records.rs");
 include!("source_index/observations.rs");
 include!("source_index/deterministic_guards.rs");
 include!("source_index/expression_shapes.rs");
+include!("source_index/rust_language.rs");
 include!("source_index/syntax.rs");
