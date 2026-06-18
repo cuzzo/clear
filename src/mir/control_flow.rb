@@ -1593,41 +1593,43 @@ module LoopFrameAnalysis
     found
   end
 
-  sig { params(root: T.any(AST::Locatable, T.untyped), local_names: T::Set[String], block: T.proc.params(arg0: AST::Locatable).void).void }
+  sig { params(root: AST::Locatable, local_names: T::Set[String], block: T.proc.params(arg0: AST::Locatable).void).void }
   def self.each_loop_local_locatable(root, local_names = Set.new, &block)
-    stack = T.let([root], T::Array[T.any(AST::Locatable, T.untyped)])
+    stack = T.let([root], T::Array[AST::Locatable])
     seen = T.let(Set.new, T::Set[Integer])
     until stack.empty?
-      node = stack.pop
-      next unless node
-      if node.is_a?(Array)
-        node.reverse_each { |child| stack << child }
-        next
-      end
-      if node.is_a?(Hash)
-        node.each_value { |child| stack << child }
-        next
-      end
-      next unless node.is_a?(Struct)
+      node = T.must(stack.pop)
       next unless seen.add?(node.object_id)
 
-      yield node if node.is_a?(AST::Locatable)
+      yield node
       next if !node.equal?(root) && direct_loop_expression_boundary?(node)
       next if outer_mutating_receiver_call?(node, local_names)
 
-      T.unsafe(node).class.members.reverse_each do |member|
-        value = T.unsafe(node)[member]
-        if value.is_a?(Array) || value.is_a?(Hash) || value.is_a?(Struct)
-          stack << value
-        end
-      end
+      loop_local_children(node).reverse_each { |child| stack << child }
     end
     nil
   end
 
-  sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
+  sig { params(node: AST::Locatable).returns(T::Array[AST::Locatable]) }
+  def self.loop_local_children(node)
+    children = T.let([], T::Array[AST::Locatable])
+    T.unsafe(node).class.members.each do |member|
+      value = T.unsafe(node)[member]
+      case value
+      when Array
+        value.each { |child| children << child if child.is_a?(AST::Locatable) }
+      when Hash
+        value.each_value { |child| children << child if child.is_a?(AST::Locatable) }
+      when AST::Locatable
+        children << value
+      end
+    end
+    children
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
   def self.direct_loop_expression_boundary?(node)
-    AST.loop_node?(node.is_a?(Struct) ? node : nil) ||
+    AST.loop_node?(node) ||
       node.is_a?(AST::FunctionDef) ||
       node.is_a?(AST::LambdaLit) ||
       node.is_a?(AST::BgBlock) ||
@@ -1657,7 +1659,7 @@ module LoopFrameAnalysis
     type_info.needs_cleanup? && type_info.cleanup_allocator == :frame
   end
 
-  sig { params(node: T.any(AST::Locatable, T.untyped), local_names: T::Set[String]).returns(T::Boolean) }
+  sig { params(node: AST::Locatable, local_names: T::Set[String]).returns(T::Boolean) }
   def self.outer_mutating_receiver_call?(node, local_names)
     return false unless node.is_a?(AST::MethodCall) || node.is_a?(AST::FuncCall)
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil

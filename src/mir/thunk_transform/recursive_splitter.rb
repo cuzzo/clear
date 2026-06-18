@@ -39,10 +39,7 @@ module ThunkTransform
   module RecursiveSplitter
     extend T::Sig
 
-    ThunkScanLeaf = T.type_alias { T.any(AST::Node, Symbol, String, Integer, Float, T::Boolean, Type) }
-    ThunkScanNode = T.type_alias do
-      T.nilable(T.any(ThunkScanLeaf, T::Array[ThunkScanLeaf]))
-    end
+    ThunkScanNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
     class BaseCase < T::Struct
       const :cond_ast, AST::Node
       const :value_ast, AST::Node
@@ -94,9 +91,8 @@ module ThunkTransform
     # When the shape matches but codegen isn't yet wired, the
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
-    sig { params(body: T::Array[AST::Node], fn_name: String, lowering: T.untyped).returns(T.nilable(Plan)) }
-    def self.split(body, fn_name, lowering)
-      _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
+    sig { params(body: T::Array[AST::Node], fn_name: String).returns(T.nilable(Plan)) }
+    def self.split(body, fn_name)
       return nil if body.empty?
 
       # Walk top-level statements: zero or more IF base-cases
@@ -140,9 +136,8 @@ module ThunkTransform
     # variant in place). Returns nil if the body has any non-tail
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
-    sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String], lowering: T.untyped).returns(T.nilable(MutualPlan)) }
-    def self.split_mutual(body, fn_name, partner_names, lowering)
-      _ = lowering
+    sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String]).returns(T.nilable(MutualPlan)) }
+    def self.split_mutual(body, fn_name, partner_names)
       return nil if body.empty?
       cycle = (partner_names + [fn_name]).map(&:to_s).to_set
 
@@ -199,17 +194,37 @@ module ThunkTransform
     sig { params(node: ThunkScanNode, names_set: T::Set[String]).returns(T::Boolean) }
     def self.contains_any_call?(node, names_set)
       return false if node.nil?
+
+      stack = T.let([], T::Array[AST::Node])
       case node
-      when Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef, AST::LambdaLit
-        false
       when Array
-        node.any? { |child| contains_any_call?(child, names_set) }
-      when AST::FuncCall
-        names_set.include?(node.name.to_s) || node.args.any? { |arg| contains_any_call?(arg, names_set) }
-      else
-        return false unless node.respond_to?(:each_pair)
-        T.unsafe(node).each_pair.any? { |_name, value| contains_any_call?(value, names_set) }
+        node.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
+      when AST::Locatable
+        stack << node
       end
+      until stack.empty?
+        current = T.must(stack.pop)
+        next if current.is_a?(AST::FunctionDef) || current.is_a?(AST::LambdaLit)
+        if current.is_a?(AST::FuncCall)
+          return true if names_set.include?(current.name.to_s)
+        end
+        next unless current.respond_to?(:each_pair)
+
+        T.unsafe(current).each_pair do |_name, value|
+          case value
+          when Array
+            value.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
+          when Hash
+            value.each do |key, child|
+              stack << key if key.is_a?(AST::Locatable)
+              stack << child if child.is_a?(AST::Locatable)
+            end
+          when AST::Locatable
+            stack << value
+          end
+        end
+      end
+      false
     end
 
     # An IF base case: `IF <cond> -> RETURN <expr>;` where neither

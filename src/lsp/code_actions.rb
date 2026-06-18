@@ -28,7 +28,9 @@ module LSP
     extend T::Sig
     FindingLike = T.type_alias { T.untyped }
     FixLike = T.type_alias { T.untyped }
-    LspRange = T.type_alias { T::Hash[T.untyped, T.untyped] }
+    LspKey = T.type_alias { T.any(Symbol, String) }
+    LspPosition = T.type_alias { T::Hash[LspKey, Integer] }
+    LspRange = T.type_alias { T::Hash[LspKey, LspPosition] }
     KIND_QUICKFIX = T.let("quickfix".freeze, String)
     KIND_REFACTOR = T.let("refactor".freeze, String)
 
@@ -109,10 +111,17 @@ module LSP
     def self.range_position(range, side)
       pos = range[side]
       pos ||= range[side.to_s]
-      [pos[:line] || pos["line"], pos[:character] || pos["character"]]
+      position = T.must(pos)
+      [position_component(position, :line), position_component(position, :character)]
+    end
+
+    sig { params(position: LspPosition, key: Symbol).returns(Integer) }
+    def self.position_component(position, key)
+      T.must(position[key] || position[key.to_s])
     end
   private_class_method :build_action
   private_class_method :build_text_edit
+  private_class_method :position_component
   private_class_method :range_position
   private_class_method :ranges_overlap?
 

@@ -27,7 +27,7 @@ module FsmTransform
   module Emit
     extend T::Sig
 
-    PromotableFsmValue = T.type_alias { T.any(MIR::Node, T.untyped) }
+    PromotableFsmValue = T.type_alias { T.any(MIR::Emittable, T::Array[MIR::Emittable]) }
     FsmBodyEmission = T.type_alias { MIR::Node }
     FsmTail = T.type_alias do
       T.any(
@@ -210,7 +210,7 @@ module FsmTransform
     #     descriptor's ctx_field_decls; member_fns = one per segment;
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
-    sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], promoted_field_decls: T::Array[MIR::ContextFieldDecl], lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
+    sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], promoted_field_decls: T::Array[MIR::ContextFieldDecl], lowering: FsmTransform::LoweringApi).returns(T.nilable(MIR::FsmLoweringResult)) }
     def self.build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       return nil if segment_specs.empty?
 
@@ -675,7 +675,7 @@ module FsmTransform
     #
     # `liveness` is the Liveness analysis result; promoted_field_decls
     # are derived from cross_segment_vars.
-    sig { params(ctx: FsmEmitContext, segment_list: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
+    sig { params(ctx: FsmEmitContext, segment_list: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: FsmTransform::LoweringApi).returns(T.nilable(MIR::FsmLoweringResult)) }
     def self.build_recursive(ctx, segment_list, liveness, lowering)
       segment_nodes = segment_list.segments
       return nil if segment_nodes.empty?
@@ -1028,7 +1028,9 @@ module FsmTransform
     def self.rewrite_promoted_fsm_node(node, promoted_names, id)
       case node
       when Array
-        return node.map { |child| rewrite_promoted_fsm_node(child, promoted_names, id) }
+        return node.map do |child|
+          T.cast(rewrite_promoted_fsm_node(child, promoted_names, id), MIR::Emittable)
+        end
       when MIR::Let
         promoted_name = promoted_fsm_field_name(node.name.to_s, promoted_names)
         rewritten_init = T.cast(rewrite_promoted_fsm_node(T.cast(node.init, MIR::Node), promoted_names, id), MIR::Node)
@@ -1054,7 +1056,8 @@ module FsmTransform
       return unless node.is_a?(Struct)
       node.members.each do |field|
         value = node[field]
-        next unless value.is_a?(MIR::Emittable) || value.is_a?(Array)
+        next unless value.is_a?(MIR::Emittable) ||
+          (value.is_a?(Array) && value.all? { |child| child.is_a?(MIR::Emittable) })
         node[field] = rewrite_promoted_fsm_node(value, promoted_names, id)
       end
       nil
@@ -1114,7 +1117,7 @@ module FsmTransform
       end
     end
 
-    sig { params(segments: T::Enumerable[Segments::Segment], lowering: T.untyped).returns(T::Hash[String, String]) }
+    sig { params(segments: T::Enumerable[Segments::Segment], lowering: FsmTransform::LoweringApi).returns(T::Hash[String, String]) }
     def self.fsm_owned_result_guards(segments, lowering)
       T.bind(self, T.untyped) rescue nil
       guards = {}
@@ -1160,7 +1163,7 @@ module FsmTransform
     # not Pass-4 emit defers; we don't see those in segment Zig
     # today, but the regex below requires the receiver to be a
     # bare identifier so it's robust against that case.
-    sig { params(seg_codes: T::Array[T::Array[MIR::Node]], segments: T::Array[Segments::Segment], liveness: Liveness::Result, captured: T::Hash[String, T.untyped], conservative_promoted: T::Array[String]).void }
+    sig { params(seg_codes: T::Array[T::Array[MIR::Node]], segments: T::Array[Segments::Segment], liveness: Liveness::Result, captured: FsmTransform::CapturedMap, conservative_promoted: T::Array[String]).void }
     def self.check_fsm_cleanup_invariant!(seg_codes, segments, liveness,
                                      captured, conservative_promoted)
       T.bind(self, T.untyped) rescue nil
@@ -1209,7 +1212,7 @@ module FsmTransform
     #
     # Returns nil on metadata / error-arm failure (caller falls
     # back to stackful).
-    sig { params(spec: FsmSegmentSpec, ctx: FsmEmitContext, capture_map: T::Hash[String, String], lowering: T.untyped, base_idx: Integer).returns(T.nilable(ExpandedLockSegment)) }
+    sig { params(spec: FsmSegmentSpec, ctx: FsmEmitContext, capture_map: T::Hash[String, String], lowering: FsmTransform::LoweringApi, base_idx: Integer).returns(T.nilable(ExpandedLockSegment)) }
     def self.expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
       lowering_api = T.unsafe(lowering)
       tail      = T.cast(spec.tail, Segments::LockSuspend)
@@ -1351,7 +1354,7 @@ module FsmTransform
     # Resolve a SuspendDescriptor for a segment's suspend tail. Uses
     # SuspendResolvers (which lowers under the surrounding fiber
     # capture-map).
-    sig { params(seg: Segments::Segment, ctx: FsmEmitContext, lowering: T.untyped, capture_map: T::Hash[String, String], sp_idx: T.nilable(Integer)).returns(T.nilable(MIR::SuspendDescriptor)) }
+    sig { params(seg: Segments::Segment, ctx: FsmEmitContext, lowering: FsmTransform::LoweringApi, capture_map: T::Hash[String, String], sp_idx: T.nilable(Integer)).returns(T.nilable(MIR::SuspendDescriptor)) }
     def self.build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
       lowering_api = T.unsafe(lowering)
       tail = seg.tail

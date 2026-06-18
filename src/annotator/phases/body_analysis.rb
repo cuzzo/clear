@@ -13,6 +13,7 @@ module Annotator
     AsyncBodyNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBranch) }
     AsyncValidationNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBlock) }
     WithScopeNodes = T.type_alias { T::Hash[Integer, T::Array[AST::Locatable]] }
+    LambdaIdentifierRefs = T.type_alias { T::Hash[Integer, T::Array[AST::Identifier]] }
 
     class BodyScanSummary < T::Struct
       const :definition_id, Semantic::DefId, default: Semantic::UNASSIGNED_DEF_ID
@@ -28,6 +29,7 @@ module Annotator
       const :assignment_nodes, T::Array[AssignmentNode], factory: -> { [] }
       const :escape_nodes, T::Array[AST::Locatable], factory: -> { [] }
       const :with_scope_nodes, WithScopeNodes, factory: -> { {} }
+      const :lambda_body_identifier_refs, LambdaIdentifierRefs, factory: -> { {} }
       const :with_blocks, T::Array[AST::WithBlock], factory: -> { [] }
       const :suspend_points, T::Array[Semantic::SuspendPointFact], factory: -> { [] }
       const :pipe_input_types, T::Set[String], factory: -> { Set.new }
@@ -39,6 +41,7 @@ module Annotator
       const :failure_absorbed, T::Boolean
       const :track_with_scope_stack, T::Boolean
       const :with_scope_stack, T::Array[AST::WithBlock]
+      const :lambda_body_stack, T::Array[AST::LambdaLit]
     end
 
     class BodyFactFrame < T::Struct
@@ -49,6 +52,7 @@ module Annotator
       prop :failure_absorbed, T::Boolean, default: false
       prop :track_with_scope_stack, T::Boolean, default: true
       prop :with_scope_stack, T::Array[AST::WithBlock], factory: -> { [] }
+      prop :lambda_body_stack, T::Array[AST::LambdaLit], factory: -> { [] }
       prop :next_local_ordinal, Integer, default: 0
       prop :next_place_ordinal, Integer, default: 0
       prop :next_call_site_ordinal, Integer, default: 0
@@ -76,7 +80,8 @@ module Annotator
           record_call_sites: record_call_sites,
           failure_absorbed: failure_absorbed,
           track_with_scope_stack: track_with_scope_stack,
-          with_scope_stack: with_scope_stack.dup
+          with_scope_stack: with_scope_stack.dup,
+          lambda_body_stack: lambda_body_stack.dup
         )
       end
 
@@ -86,6 +91,7 @@ module Annotator
         self.failure_absorbed = context.failure_absorbed
         self.track_with_scope_stack = context.track_with_scope_stack
         self.with_scope_stack = context.with_scope_stack.dup
+        self.lambda_body_stack = context.lambda_body_stack.dup
       end
 
     end
@@ -116,6 +122,7 @@ module Annotator
       const :assignment_nodes, T::Array[AssignmentNode], factory: -> { [] }
       const :escape_nodes, T::Array[AST::Locatable], factory: -> { [] }
       const :with_scope_nodes, WithScopeNodes, factory: -> { {} }
+      const :lambda_body_identifier_refs, LambdaIdentifierRefs, factory: -> { {} }
       const :with_blocks, T::Array[AST::WithBlock], factory: -> { [] }
       const :suspend_points, T::Array[Semantic::SuspendPointFact], factory: -> { [] }
     end
@@ -217,6 +224,24 @@ module Annotator
             frame.track_with_scope_stack = false
             frame.with_scope_stack = []
           end
+          yield
+        ensure
+          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+        end
+      end
+
+      sig do
+        type_parameters(:Result)
+          .params(node: AST::LambdaLit, block: T.proc.returns(T.type_parameter(:Result)))
+          .returns(T.type_parameter(:Result))
+      end
+      def with_body_fact_lambda_body(node, &block)
+        frames = T.let([], T::Array[BodyFactFrame])
+        snapshots = T.let([], T::Array[BodyFactContext])
+        begin
+          frames = body_fact_frames
+          snapshots = frames.map(&:context)
+          frames.each { |frame| frame.lambda_body_stack << node }
           yield
         ensure
           frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
@@ -345,6 +370,11 @@ module Annotator
             if frame.track_with_scope_stack
               frame.with_scope_stack.each { |scope| (summary.with_scope_nodes[scope.object_id] ||= []) << node }
             end
+          end
+
+          if node.is_a?(AST::Identifier)
+            lambda_node = frame.lambda_body_stack.last
+            (summary.lambda_body_identifier_refs[lambda_node.object_id] ||= []) << node if lambda_node
           end
 
           if suspend_kind && node.is_a?(AST::Locatable)

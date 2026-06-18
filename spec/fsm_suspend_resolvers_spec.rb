@@ -22,6 +22,8 @@ RSpec.describe FsmTransform::SuspendResolvers do
   # they just embed it as MIR; identity is enough for shape tests).
   let(:lowering) {
     Class.new {
+      include FsmTransform::LoweringProtocol
+
       def lower(node); node; end
     }.new
   }
@@ -54,6 +56,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
       profile_line: nil,
       profile_column: nil,
     }.merge(overrides)
+    captured = raw.fetch(:captured).transform_values do |type|
+      type.is_a?(Type) ? type : Type.new(:Any)
+    end
     FsmTransform::Emit::FsmEmitContext.new(
       id: raw.fetch(:id),
       bg_rt: raw.fetch(:bg_rt),
@@ -67,7 +72,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
       rt_name: raw.fetch(:rt_name),
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
-      captured: raw.fetch(:captured),
+      captured: captured,
       capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
@@ -409,9 +414,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
     # Fake AST::Identifier as the promise expr. The resolver lowers
     # via lowering.lower(); our double returns the input unchanged.
     let(:promise_ast) {
-      ast = Object.new
-      def ast.full_type; Type.new(:"~Int64"); end
-      ast
+      typed_identifier("promise", :"~Int64")
     }
 
     let(:next_tail_with_var) {

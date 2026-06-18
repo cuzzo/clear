@@ -15,11 +15,14 @@ module IntrinsicRegistry
   RegistryKey = T.type_alias { T.any(String, Symbol) }
   RegistryValue = T.type_alias { T.untyped }
   RawEntry = T.type_alias { T::Hash[Symbol, RegistryValue] }
+  RawArgSpecEntry = T.type_alias { T.any(Symbol, String, RawEntry) }
+  RawArgSpec = T.type_alias { T.nilable(T.any(RawArgSpecEntry, T::Array[RawArgSpecEntry])) }
   RawRegistryEntry = T.type_alias { T.any(RawEntry, T::Array[RawEntry]) }
   RawRegistry = T.type_alias { T::Hash[RegistryKey, RawRegistryEntry] }
   RegistryMap = T.type_alias { T::Hash[Symbol, RawRegistry] }
   SigsTable = T.type_alias { T::Hash[RegistryKey, LookupResult] }
   SigsCache = T.type_alias { T::Hash[Integer, SigsTable] }
+  RawEmitInput = T.type_alias { T.nilable(T.any(RawRegistryEntry, Symbol, String, Numeric, T::Boolean)) }
   ReturnDescriptor = T.type_alias { T.nilable(T.any(Type, Symbol, String, RawEntry)) }
   LifetimeInput = T.type_alias { FunctionSignature::LifetimeInput }
 
@@ -50,7 +53,7 @@ module IntrinsicRegistry
                    set_collection].freeze
 
   # registries: { Symbol => the registry Hash } (for {registry: X} ptrs)
-  sig { params(h: T.untyped, registries: RegistryMap).returns(T.nilable(IntrinsicEmit)) }
+  sig { params(h: RawEmitInput, registries: RegistryMap).returns(T.nilable(IntrinsicEmit)) }
   def self.build_emit(h, registries)
     return nil unless h.is_a?(Hash)
 
@@ -78,7 +81,7 @@ module IntrinsicRegistry
 
   # A nested sub-descriptor is either another emit Hash or a
   # {registry: <CONST>} pointer (resolved to that registry's name).
-  sig { params(v: T.untyped, registries: RegistryMap).returns(T.nilable(IntrinsicEmit)) }
+  sig { params(v: RawEmitInput, registries: RegistryMap).returns(T.nilable(IntrinsicEmit)) }
   def self.nested_emit(v, registries)
     return nil unless v.is_a?(Hash)
     if (ptr = v[:registry])
@@ -179,7 +182,7 @@ module IntrinsicRegistry
     [value]
   end
 
-  sig { params(spec: T.untyped, h: RawEntry).returns(T::Array[AST::Param]) }
+  sig { params(spec: RawArgSpec, h: RawEntry).returns(T::Array[AST::Param]) }
   def self.params_from_arg_spec(spec, h)
     arg_specs = IntrinsicArgSpec.list_from_registry(spec)
 

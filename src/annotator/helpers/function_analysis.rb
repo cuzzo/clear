@@ -195,7 +195,9 @@ module FunctionAnalysis
   def visit_LambdaLit(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return_type = with_body_fact_nested_body do
-      analyze_routine(node, node.body, :Any, true)
+      with_body_fact_lambda_body(node) do
+        analyze_routine(node, node.body, :Any, true)
+      end
     end
 
     stamp_type!(node, build_lambda_signature(node.params, T.cast(return_type, Symbol)))
@@ -268,7 +270,7 @@ module FunctionAnalysis
         validate_tail_call!(node, body_scan) if node.tail_call
 
         if node.reentrance_kind == :reentrant_thunk && !node.tail_call
-          plan = ThunkTransform::RecursiveSplitter.split(node.body, node.name, self)
+          plan = ThunkTransform::RecursiveSplitter.split(node.body, node.name)
           if plan
             node.thunk_plan = plan
           else
@@ -317,6 +319,7 @@ module FunctionAnalysis
         assignment_nodes: body_scan.assignment_nodes,
         escape_nodes: body_scan.escape_nodes,
         with_scope_nodes: body_scan.with_scope_nodes,
+        lambda_body_identifier_refs: body_scan.lambda_body_identifier_refs,
         with_blocks: body_scan.with_blocks,
         suspend_points: body_scan.suspend_points
       ))

@@ -25,7 +25,7 @@ RSpec.describe "ThunkTransform::RecursiveSplitter.split" do
 
   def split(source, fn_name)
     f = fn(parse(source), fn_name)
-    ThunkTransform::RecursiveSplitter.split(f.body, f.name, nil)
+    ThunkTransform::RecursiveSplitter.split(f.body, f.name)
   end
 
   describe "factorial-shape" do

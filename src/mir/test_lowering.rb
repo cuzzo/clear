@@ -272,7 +272,7 @@ module TestLowering
   # RHS expressions depend on. Returns the names in source-declaration
   # order so the emitted Zig declarations resolve cleanly
   # (later LETs may reference earlier ones).
-  sig { params(let_ast_map: LetAstMap, ast_subtrees: T::Array[T.untyped]).returns(T::Array[String]) }
+  sig { params(let_ast_map: LetAstMap, ast_subtrees: T::Array[AstIdentifierSearchNode]).returns(T::Array[String]) }
   def compute_used_let_names(let_ast_map, ast_subtrees)
     T.bind(self, MIRLowering) rescue nil
     return [] if let_ast_map.empty?

@@ -908,7 +908,6 @@ RSpec.describe LoopFrameAnalysis do
       expect(boundary_nodes.map { |node| LoopFrameAnalysis.direct_loop_expression_boundary?(node) })
         .to all(be(true))
       expect(LoopFrameAnalysis.direct_loop_expression_boundary?(expression)).to be(false)
-      expect(LoopFrameAnalysis.direct_loop_expression_boundary?(Object.new)).to be(false)
     end
 
     it "uses loop-local names when scanning receiver-mutating frame expressions" do

@@ -52,11 +52,13 @@ class ClearParser
   SuffixRule = T.type_alias { T.proc.params(lhs: AST::Node).returns(SuffixResult) }
   PatternItem = T.type_alias { T.any(String, Symbol, T::Hash[T.any(String, Symbol), Symbol]) }
   Pattern = T.type_alias { T::Array[PatternItem] }
-  PatternCapture = T.type_alias { T.untyped }
-  ParserSeq = T.type_alias { [Lexer::Token, T::Array[T.untyped]] }
-  EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(T::Hash[Symbol, T.untyped])] }
+  PatternCapture = T.type_alias { T.nilable(T.any(AST::Node, Type, String, Symbol, Integer, Float, T::Boolean)) }
+  EffectMetadataValue = T.type_alias { T.nilable(T.any(Lexer::Token, Integer, T::Boolean)) }
+  EffectMetadata = T.type_alias { T::Hash[Symbol, EffectMetadataValue] }
+  EffectsDecl = T.type_alias { [T.nilable(Symbol), T.nilable(EffectMetadata)] }
   ElementCapability = T.type_alias { T::Hash[Symbol, T.nilable(Symbol)] }
-  WithMatchArm = T.type_alias { T::Hash[Symbol, T.untyped] }
+  WithMatchArmValue = T.type_alias { T.nilable(T.any(Symbol, Lexer::Token, AST::RawBody, T::Array[AST::ErrorClause])) }
+  WithMatchArm = T.type_alias { T::Hash[Symbol, WithMatchArmValue] }
   CapJoin = T.type_alias { [T.nilable(Symbol), T.nilable(Symbol), T.nilable(Symbol), T.nilable(Integer)] }
   SigilAttrs = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
   SigilTable = T.type_alias { T::Hash[String, SigilAttrs] }
@@ -71,6 +73,29 @@ class ClearParser
   @@primary_rules = T.let({}, T::Hash[RuleKey, PrimaryRule])
   @@suffix_rules = T.let({}, T::Hash[RuleKey, SuffixRule])
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
+
+  sig do
+    params(
+      dim: T.nilable(Symbol),
+      val: T.nilable(Symbol),
+      stack_size: T.nilable(Symbol),
+      pinned: T::Boolean,
+      parallel: T::Boolean,
+      arena: T::Boolean,
+      can_smash: T::Boolean,
+    ).returns(SigilAttrs)
+  end
+  def self.sigil_attrs(dim: nil, val: nil, stack_size: nil, pinned: false, parallel: false, arena: false, can_smash: false)
+    attrs = T.let({}, SigilAttrs)
+    attrs[:dim] = dim if dim
+    attrs[:val] = val if val
+    attrs[:stack_size] = stack_size if stack_size
+    attrs[:pinned] = true if pinned
+    attrs[:parallel] = true if parallel
+    attrs[:arena] = true if arena
+    attrs[:can_smash] = true if can_smash
+    attrs
+  end
 
   sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: Pattern, inject: T::Array[TrueClass], block: T.nilable(StmtRule)).returns(StmtRule) }
   def self.stmt(type, value, node_class = nil, pattern = [], inject: [], &block)
@@ -404,15 +429,15 @@ class ClearParser
   # Enforced by parse_cap_join's one-per-dimension rule plus annotator-side
   # combo validation.
   CAP_SIGIL_ATTRS = T.let({
-    '@multiowned'     => { dim: :ownership, val: :multiowned  },
-    '@shared'         => { dim: :ownership, val: :shared      },
-    '@locked'         => { dim: :sync,      val: :locked      },
-    '@writeLocked'    => { dim: :sync,      val: :write_locked },
-    '@local'          => { dim: :sync,      val: :local       },
-    '@versioned'      => { dim: :sync,      val: :versioned    },
-    '@atomic'         => { dim: :sync,      val: :atomic      },
-    '@indirect'       => { dim: :layout,    val: :indirect    },
-    '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
+    '@multiowned'     => sigil_attrs(dim: :ownership, val: :multiowned),
+    '@shared'         => sigil_attrs(dim: :ownership, val: :shared),
+    '@locked'         => sigil_attrs(dim: :sync, val: :locked),
+    '@writeLocked'    => sigil_attrs(dim: :sync, val: :write_locked),
+    '@local'          => sigil_attrs(dim: :sync, val: :local),
+    '@versioned'      => sigil_attrs(dim: :sync, val: :versioned),
+    '@atomic'         => sigil_attrs(dim: :sync, val: :atomic),
+    '@indirect'       => sigil_attrs(dim: :layout, val: :indirect),
+    '@alwaysMutable'  => sigil_attrs(dim: :sync, val: :always_mutable),
   }.freeze, SigilTable)
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
@@ -517,7 +542,7 @@ class ClearParser
   ## START PATTERN DSL
   sig { params(pattern: Pattern).returns(T::Array[PatternCapture]) }
   def process_pattern(pattern)
-    captures = []
+    captures = T.let([], T::Array[PatternCapture])
 
     pattern.each do |item|
       case item
@@ -1259,7 +1284,7 @@ class ClearParser
             consume(:CHAR, ':')
             ftype = parse_type_annotation
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
-            [fname, ftype]
+            [fname, T.must(ftype)]
           end
           variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
@@ -3698,29 +3723,29 @@ class ClearParser
   # Each maps to the attribute(s) it sets on the branch hash.
   # After `:` the next word is also looked up here (with `@` prepended if absent).
   DO_BRANCH_SIGILS = T.let({
-    '@micro'    => { stack_size: :micro    },
-    '@stack'    => { stack_size: :stack    },
-    '@standard' => { stack_size: :standard },
-    '@large'    => { stack_size: :large    },
-    '@xl'       => { stack_size: :xl       },
-    '@service'  => { stack_size: :service  },
-    '@pinned'   => { pinned: true          },
-    '@parallel' => { parallel: true        },
-    '@canSmash' => { can_smash: true       },
+    '@micro'    => sigil_attrs(stack_size: :micro),
+    '@stack'    => sigil_attrs(stack_size: :stack),
+    '@standard' => sigil_attrs(stack_size: :standard),
+    '@large'    => sigil_attrs(stack_size: :large),
+    '@xl'       => sigil_attrs(stack_size: :xl),
+    '@service'  => sigil_attrs(stack_size: :service),
+    '@pinned'   => sigil_attrs(pinned: true),
+    '@parallel' => sigil_attrs(parallel: true),
+    '@canSmash' => sigil_attrs(can_smash: true),
   }.freeze, SigilTable)
 
   # Sigils valid at the start of a BG body (stack size + pinned).
   BG_SIGILS = T.let({
-    '@micro'    => { stack_size: :micro    },
-    '@stack'    => { stack_size: :stack    },
-    '@standard' => { stack_size: :standard },
-    '@large'    => { stack_size: :large    },
-    '@xl'       => { stack_size: :xl       },
-    '@service'  => { stack_size: :service  },
-    '@pinned'   => { pinned: true          },
-    '@parallel' => { parallel: true        },
-    '@arena'    => { pinned: true, arena: true },
-    '@canSmash' => { can_smash: true       },
+    '@micro'    => sigil_attrs(stack_size: :micro),
+    '@stack'    => sigil_attrs(stack_size: :stack),
+    '@standard' => sigil_attrs(stack_size: :standard),
+    '@large'    => sigil_attrs(stack_size: :large),
+    '@xl'       => sigil_attrs(stack_size: :xl),
+    '@service'  => sigil_attrs(stack_size: :service),
+    '@pinned'   => sigil_attrs(pinned: true),
+    '@parallel' => sigil_attrs(parallel: true),
+    '@arena'    => sigil_attrs(pinned: true, arena: true),
+    '@canSmash' => sigil_attrs(can_smash: true),
   }.freeze, SigilTable)
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
@@ -3966,10 +3991,19 @@ class ClearParser
     AST::NextExpr.new(tok, expr)
   end
 
-  sig { params(type: Symbol, open: String, close: String, blk: T.proc.returns(T.untyped)).returns(ParserSeq) }
+  sig do
+    type_parameters(:Elem)
+      .params(
+        type: Symbol,
+        open: String,
+        close: String,
+        blk: T.proc.returns(T.type_parameter(:Elem)),
+      )
+      .returns([Lexer::Token, T::Array[T.type_parameter(:Elem)]])
+  end
   def parse_comma_seq(type, open, close, &blk)
     start_token = T.must(consume(type, open))
-    items = []
+    items = T.let([], T::Array[T.type_parameter(:Elem)])
     until match?(:CHAR, close)
       items << blk.call
       match!(:CHAR, ',')

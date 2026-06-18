@@ -28,6 +28,7 @@
 # resolver in SuspendResolvers (or expansion in Emit for fan-out
 # kinds like LOCK). NEVER a new top-level emit function.
 
+require_relative "fsm_transform/context"
 require_relative "fsm_transform/segments"
 require_relative "fsm_transform/recursive_splitter"
 require_relative "fsm_transform/liveness"
@@ -132,7 +133,7 @@ module FsmTransform
                   default_value: MIR::Undef.new(nil),
                 )
               end
-    raw_ctx = T.cast(ctx, T::Hash[Symbol, T.untyped])
+    raw_ctx = T.cast(ctx, FsmTransform::ContextMap)
     emit_ctx = Emit::FsmEmitContext.new(
       id: T.cast(raw_ctx.fetch(:id), Integer),
       bg_rt: T.cast(raw_ctx.fetch(:bg_rt), String),
@@ -146,7 +147,7 @@ module FsmTransform
       rt_name: T.cast(raw_ctx.fetch(:rt_name), String),
       promoted_decls: coerce_promoted_decls(raw_ctx[:promoted_decls]),
       capture_inits: coerce_context_inits(raw_ctx[:capture_inits]),
-      captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, T.untyped]),
+      captured: T.cast(raw_ctx[:captured] || {}, FsmTransform::CapturedMap),
       capture_close_plans: T.cast(raw_ctx[:capture_close_plans] || {}, T::Hash[String, Schemas::ResourceClosePlan]),
       pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
       extra_ctx_fields: ext_ctx,

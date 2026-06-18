@@ -27,7 +27,7 @@ module LSP
     extend T::Sig
     HoverResponse = T.type_alias { RPC::OutboundMessage }
     FindingLike = T.type_alias { T.untyped }
-    LspPosition = T.type_alias { T::Hash[T.untyped, T.untyped] }
+    LspPosition = T.type_alias { Position::WirePositionHash }
 
 
     # Build a hover response for the document at `position`. Returns
@@ -81,8 +81,8 @@ module LSP
       # column is nearest the cursor's column on the same line, so
       # the user can hover anywhere on the line and get something
       # relevant.
-      cursor_line = position[:line] || position["line"]
-      cursor_char = position[:character] || position["character"]
+      cursor_line = position_component(position, :line)
+      cursor_char = position_component(position, :character)
       same_line = candidates.filter_map do |f|
         diag = Diagnostics.from_finding(f, source)
         next nil unless diag[:range][:start][:line] == cursor_line
@@ -90,6 +90,11 @@ module LSP
       end
       return nil if same_line.empty?
       same_line.min_by { |_, dist| dist }.first
+    end
+
+    sig { params(position: LspPosition, key: Symbol).returns(Integer) }
+    def self.position_component(position, key)
+      T.must(position[key] || position[key.to_s])
     end
 
     sig { params(diag: RPC::OutboundMessage, entry: T.untyped, example: T.untyped).returns(String) }
@@ -160,6 +165,7 @@ module LSP
   private_class_method :build_markdown
   private_class_method :find_overlapping
   private_class_method :header_line
+  private_class_method :position_component
   private_class_method :severity_label
 
 end

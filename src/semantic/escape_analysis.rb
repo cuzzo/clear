@@ -24,6 +24,7 @@ module EscapeAnalysis
   HoistBindings = T.type_alias { T::Hash[String, T::Array[AST::VarDecl]] }
   CallSitesByCallee = T.type_alias { T::Hash[String, T::Array[Semantic::CallSiteFact]] }
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
+  LambdaIdentifierRefs = T.type_alias { Annotator::Phases::LambdaIdentifierRefs }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
@@ -60,6 +61,7 @@ module EscapeAnalysis
     const :return_values, T::Array[AST::Node]
     const :assignment_nodes, T::Array[AssignmentNode]
     const :escape_nodes, T::Array[AST::Locatable]
+    const :lambda_body_identifier_refs, LambdaIdentifierRefs, default: {}
 
     sig { returns(Integer) }
     def heap_symbol_count
@@ -423,7 +425,7 @@ module EscapeAnalysis
 
   sig { params(node: AST::LambdaLit, context: EscapeContext).void }
   private_class_method def self.apply_lambda_escape_sink!(node, context)
-    mark_lambda_captures_heap!(node, context.bg_heap)
+    mark_lambda_captures_heap!(node, context.bg_heap, context.facts)
   end
 
   sig { params(node: AST::FuncCall, context: EscapeContext).void }
@@ -943,6 +945,7 @@ module EscapeAnalysis
         return_values: return_values,
         assignment_nodes: assignment_nodes,
         escape_nodes: escape_nodes,
+        lambda_body_identifier_refs: summary.lambda_body_identifier_refs,
       )
     end
 
@@ -968,6 +971,7 @@ module EscapeAnalysis
       return_values: return_values,
       assignment_nodes: assignment_nodes,
       escape_nodes: escape_nodes,
+      lambda_body_identifier_refs: collect_lambda_identifier_refs(fn.body),
     )
   end
 
@@ -993,17 +997,50 @@ module EscapeAnalysis
     !!(sym && sym.respond_to?(:is_param) && sym.is_param)
   end
 
-  sig { params(node: AST::LambdaLit, bg_heap: T::Set[String]).void }
-  private_class_method def self.mark_lambda_captures_heap!(node, bg_heap)
+  sig { params(node: AST::LambdaLit, bg_heap: T::Set[String], facts: T.nilable(FunctionFacts)).void }
+  private_class_method def self.mark_lambda_captures_heap!(node, bg_heap, facts)
     names = T.let(Set.new, T::Set[String])
     node.captures.each { |capture| names << capture.name.to_s }
     return if names.empty?
 
-    walk_body(AST.lambda_body_nodes(node.body)) do |child|
-      next unless child.is_a?(AST::Identifier)
+    identifiers = facts&.lambda_body_identifier_refs&.fetch(node.object_id, nil)
+    identifiers ||= collect_lambda_body_identifiers(node)
+    identifiers.each do |child|
       next unless names.include?(child.name.to_s)
       mark_symbol_heap!(child.symbol, bg_heap, child.name.to_s)
     end
+  end
+
+  sig { params(body: AST::RawBody).returns(LambdaIdentifierRefs) }
+  private_class_method def self.collect_lambda_identifier_refs(body)
+    refs = T.let({}, LambdaIdentifierRefs)
+    AST.each_locatable(body, descend_functions: false) do |node|
+      next unless node.is_a?(AST::LambdaLit)
+
+      refs[node.object_id] = collect_lambda_body_identifiers(node)
+    end
+    refs
+  end
+
+  sig { params(node: AST::LambdaLit).returns(T::Array[AST::Identifier]) }
+  private_class_method def self.collect_lambda_body_identifiers(node)
+    out = T.let([], T::Array[AST::Identifier])
+    stack = T.let(AST.lambda_body_nodes(node.body).reverse, T::Array[AST::Node])
+    until stack.empty?
+      current = unwrap_value(stack.pop)
+      next unless current.is_a?(AST::Locatable)
+      if current.is_a?(AST::Identifier)
+        out << current
+        next
+      end
+      next if current.is_a?(AST::FunctionDef) || current.is_a?(AST::LambdaLit)
+
+      AST.expression_children(current).reverse_each { |child| stack << child }
+      AST.child_bodies(current).reverse_each do |child_body|
+        child_body.reverse_each { |child| stack << child }
+      end
+    end
+    out
   end
 
   sig { params(call: AST::FuncCall, fn_nodes: FnNodes).returns(T::Array[AST::Param]) }

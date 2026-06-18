@@ -23,6 +23,14 @@ RSpec.describe FsmTransform::Emit do
     MIREmitter.new.emit(expr)
   end
 
+  def fsm_lowering_double(&block)
+    klass = Class.new do
+      include FsmTransform::LoweringProtocol
+    end
+    klass.class_eval(&block) if block
+    klass.new
+  end
+
   def tok(value = "x")
     Lexer::Token.new(:IDENT, value, 1, 1)
   end
@@ -57,6 +65,9 @@ RSpec.describe FsmTransform::Emit do
       profile_column: nil,
       destroy_actions: [],
     }.merge(overrides)
+    captured = raw.fetch(:captured).transform_values do |type|
+      type.is_a?(Type) ? type : Type.new(:Any)
+    end
     FsmTransform::Emit::FsmEmitContext.new(
       id: raw.fetch(:id),
       bg_rt: raw.fetch(:bg_rt),
@@ -70,7 +81,7 @@ RSpec.describe FsmTransform::Emit do
       rt_name: raw.fetch(:rt_name),
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
-      captured: raw.fetch(:captured),
+      captured: captured,
       capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       capture_finalizers: raw.fetch(:capture_finalizers),
@@ -119,7 +130,8 @@ RSpec.describe FsmTransform::Emit do
 
     expect(ctx.id).to eq(12)
     expect(ctx.bg_rt).to eq("__rt_bg12")
-    expect(ctx.captured).to eq("payload" => :stub)
+    expect(ctx.captured.keys).to eq(["payload"])
+    expect(ctx.captured.fetch("payload")).to be_a(Type)
 
     updated = ctx.with_extra_ctx_fields([ctx_decl("payload", "i64", MIR::Lit.new("0"))])
     expect(updated.extra_ctx_fields.first.name).to eq("payload")
@@ -140,13 +152,13 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "returns nil for an empty unified FSM and skips fn-less inert segments" do
-    expect(described_class.send(:build_fsm_unified, fsm_ctx, [], [], Object.new)).to be_nil
+    expect(described_class.send(:build_fsm_unified, fsm_ctx, [], [], fsm_lowering_double)).to be_nil
 
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       def capture_inits_fsm(_capture_inits)
         ""
       end
-    }.new
+    end
     result = described_class.send(
       :build_fsm_unified,
       fsm_ctx,
@@ -164,7 +176,7 @@ RSpec.describe FsmTransform::Emit do
     expect(described_class.send(:tail_resume_target, FsmTransform::Segments::Goto.new(5))).to be_nil
     expect(described_class.send(:tail_resume_target, FsmTransform::Segments::IoSuspend.new(nil, nil, "io", 6))).to eq(6)
     expect(described_class.send(:tail_resume_target, FsmTransform::Segments::NextSuspend.new(nil, "next", 7))).to eq(7)
-    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::LockSuspend.new(nil, nil, [], 8, 9))).to eq(9)
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::LockSuspend.new(nil, :cap, [], 8, 9))).to eq(9)
     expect(described_class.send(:tail_resume_target, MIR::FsmTailJump.new(10))).to eq(10)
     expect(described_class.send(:tail_resume_target, MIR::FsmTailYield.new(11, "WaitForIo"))).to eq(11)
     expect(described_class.send(:tail_resume_target, MIR::FsmTailRegisterYield.new(12, MIR::Ident.new("ready"), "WaitForPromise"))).to eq(12)
@@ -407,7 +419,7 @@ RSpec.describe FsmTransform::Emit do
     descriptor = MIR::SuspendDescriptor.new(
       [], [], MIR::FsmTailYield.new(3, "WaitForLock"), [], nil, nil, false
     )
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       attr_reader :calls
 
       def initialize
@@ -423,7 +435,7 @@ RSpec.describe FsmTransform::Emit do
         @calls << [:capture, capture_map, rt_override]
         yield
       end
-    }.new
+    end
     allow(FsmTransform::SuspendResolvers).to receive(:resolve).and_return(descriptor)
     ctx = fsm_ctx(bg_rt: "__rt_bg3", pointer_captures: Set["payload"])
     segment = FsmTransform::Segments::Segment.new(
@@ -516,7 +528,7 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "registers structural lock release actions while expanding lock segments" do
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       def fsm_cap_metadata(_cap, _with_node, id, _captured)
         {
           try_method: "tryLockForFsm",
@@ -531,7 +543,7 @@ RSpec.describe FsmTransform::Emit do
       def default_fsm_lock_error_arm_split(_id)
         Struct.new(:body_stmts, :exit_kind).new([], :goto_post)
       end
-    }.new
+    end
     with_node = Struct.new(:lock_error_clause).new(nil)
     tail = FsmTransform::Segments::LockSuspend.new(with_node, :cap, [], 9, 10)
     spec = fsm_spec(
@@ -566,7 +578,7 @@ RSpec.describe FsmTransform::Emit do
 
   it "expands prior-lock releases and explicit lock error arms structurally" do
     error_clause = Object.new
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       attr_reader :error_calls
 
       def initialize
@@ -591,7 +603,7 @@ RSpec.describe FsmTransform::Emit do
           :done,
         )
       end
-    }.new
+    end
     with_node = Struct.new(:lock_error_clause).new(error_clause)
     tail = FsmTransform::Segments::LockSuspend.new(with_node, :current, [:prior], 9, 10, 1, [0])
     spec = fsm_spec(
@@ -629,7 +641,7 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "applies lock expansion through recursive FSM build" do
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       def capture_inits_fsm(_capture_inits)
         ""
       end
@@ -648,7 +660,7 @@ RSpec.describe FsmTransform::Emit do
       def default_fsm_lock_error_arm_split(_id)
         Struct.new(:body_stmts, :exit_kind).new([], :goto_post)
       end
-    }.new
+    end
     with_node = Struct.new(:lock_error_clause).new(nil)
     segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
       segments: [
@@ -689,12 +701,12 @@ RSpec.describe FsmTransform::Emit do
       fsm_ctx,
       segment_list,
       FsmTransform::Liveness::Result.new({}),
-      Object.new,
+      fsm_lowering_double,
     )).to be_nil
   end
 
   it "builds recursive FSM structure from captures, liveness, synthetic fields, and AST lowering" do
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       attr_reader :capture_maps, :lower_calls, :contexts
 
       def initialize
@@ -737,7 +749,7 @@ RSpec.describe FsmTransform::Emit do
       def last_fsm_result_transfer_facts
         @last_facts
       end
-    }.new
+    end
     ast_stmt = AST::Identifier.new(tok("input"), "input")
     segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
       segments: [
@@ -861,7 +873,7 @@ RSpec.describe FsmTransform::Emit do
       fsm_ctx(id: 8, bg_rt: "__rt_bg8", is_void: true, arena_init_flag: false),
       segment_list,
       FsmTransform::Liveness::Result.new({}),
-      Object.new,
+      fsm_lowering_double,
     ))
 
     body_stmts = result.body.ctx_struct.member_fns.first.body_stmts
@@ -898,12 +910,12 @@ RSpec.describe FsmTransform::Emit do
     })
 
     expect {
-      described_class.build_recursive(fsm_ctx(id: 11), segment_list, liveness, Object.new)
+      described_class.build_recursive(fsm_ctx(id: 11), segment_list, liveness, fsm_lowering_double)
     }.to raise_error(/FSM cleanup invariant violated: seg 0 emits cleanup for 'keep'/)
   end
 
   it "returns nil when recursive AST segment lowering fails" do
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       def with_fsm_segment_lowering_context(**_kwargs)
         yield
       end
@@ -921,7 +933,7 @@ RSpec.describe FsmTransform::Emit do
       def last_fsm_result_transfer_facts
         []
       end
-    }.new
+    end
     segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
       segments: [
         FsmTransform::Segments::Segment.new(
@@ -943,7 +955,7 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "threads owned suspend result guards through recursive NEXT lowering" do
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       attr_reader :contexts, :capture_maps, :bg_pointer_captures
 
       def initialize
@@ -989,7 +1001,7 @@ RSpec.describe FsmTransform::Emit do
       def mir_schema_lookup
         nil
       end
-    }.new
+    end
     promise = AST::Identifier.new(tok("future"), "future")
     promise.full_type = Type.new(:"~String")
     use_answer = AST::Identifier.new(tok("answer"), "answer")
@@ -1038,11 +1050,11 @@ RSpec.describe FsmTransform::Emit do
       synthetic_fields: [],
       alias_overrides_by_index: {},
     )
-    lowering = Class.new {
+    lowering = fsm_lowering_double do
       def with_fiber_capture_map(_capture_map, rt_override:)
         yield
       end
-    }.new
+    end
     ctx = {
       id: 4,
       bg_rt: "__rt_bg4",

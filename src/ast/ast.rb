@@ -13,6 +13,7 @@ module AST
   extend T::Sig
 
   RawBody = T.type_alias { T::Array[AST::Node] }
+  HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
   ScalarLiteralCandidate = T.type_alias do
     T.nilable(T.any(AST::Node, RawBody, Struct, Type, String, Symbol, Numeric, TrueClass, FalseClass))
@@ -722,7 +723,7 @@ module AST
     end
   end
 
-  sig { params(pairs: T.untyped).returns(T::Array[AST::Node]) }
+  sig { params(pairs: HashLitPairs).returns(T::Array[AST::Node]) }
   def self.hash_lit_pair_nodes(pairs)
     nodes = T.let([], T::Array[AST::Node])
     pairs.each do |key, value|
@@ -1667,9 +1668,9 @@ module AST
     const :var, String
     const :sync, Symbol
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: T.nilable(AutoLockPlan)).returns(T::Boolean) }
     def ==(other)
-      !!(other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync)
+      !!(other && other.var == var && other.sync == sync)
     end
     alias eql? ==
 
@@ -2920,16 +2921,24 @@ module AST
                      :UInt8, :UInt16, :UInt32, :UInt64,
                      :Float32]
 
+  sig { params(ops: T::Array[String], assoc: Symbol).returns(PrecedenceInfo) }
+  def self.precedence_info(ops:, assoc:)
+    info = T.let({}, PrecedenceInfo)
+    info[:ops] = ops
+    info[:assoc] = assoc
+    info
+  end
+
   PRECEDENCE_MAP = T.let({
-    8 => { ops: ['**'], assoc: :right },
-    7 => { ops: ['*', '/', 'MOD'], assoc: :left },
-    6 => { ops: ['+', '-'], assoc: :left },
-    5 => { ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left },
-    4 => { ops: ['&&'], assoc: :left },
-    3 => { ops: ['||'], assoc: :left },
+    8 => precedence_info(ops: ['**'], assoc: :right),
+    7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
+    6 => precedence_info(ops: ['+', '-'], assoc: :left),
+    5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
+    4 => precedence_info(ops: ['&&'], assoc: :left),
+    3 => precedence_info(ops: ['||'], assoc: :left),
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
-    1 => { ops: ['OR', '|>', 'AS'], assoc: :left }
+    1 => precedence_info(ops: ['OR', '|>', 'AS'], assoc: :left)
   }, T::Hash[Integer, PrecedenceInfo])
   MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 

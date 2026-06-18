@@ -3,6 +3,7 @@ require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative '../semantic/capability_plan'
 require_relative 'fsm_ops'
+require_relative 'fsm_transform/lowering_protocol'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
 # so the helpers share the lowering's explicit function/capture state and
@@ -27,11 +28,13 @@ require_relative 'fsm_ops'
 #                                          no ON clause is present
 module FsmLowering
     extend T::Sig
+  include FsmTransform::LoweringProtocol
   include Kernel
 
   FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, CapabilityPlan::CapabilityTransition) }
   FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
   FsmAstResultNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+  FsmCapturedMap = T.type_alias { T::Hash[String, Type] }
   class FsmLockErrorArmSplit < T::Struct
     const :body_stmts, T::Array[MIR::Node]
     const :exit_kind, Symbol
@@ -397,7 +400,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: CapabilityPlan::CapabilityTransition, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, T.untyped]).returns(T.nilable(FsmCapMetadata)) }
+  sig { params(cap: CapabilityPlan::CapabilityTransition, with_node: AST::WithBlock, ctx_id: Integer, captured: FsmCapturedMap).returns(T.nilable(FsmCapMetadata)) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap.capability == :EXCLUSIVE ||

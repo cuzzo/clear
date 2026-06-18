@@ -3,9 +3,24 @@
 
 require "csv"
 require "sorbet-runtime"
+require_relative "../ast/ast"
+require_relative "../mir/mir"
 
 module PassWorkProfiler
   extend T::Sig
+
+  ProfileScalar = T.type_alias { T.nilable(T.any(Symbol, String, Numeric, T::Boolean, Type, Lexer::Token)) }
+  ProfileStructNode = T.type_alias { T.any(AST::Locatable, MIR::Emittable, Struct) }
+  ProfileWalkValue = T.type_alias do
+    T.nilable(T.any(
+      ProfileScalar,
+      ProfileStructNode,
+      T::Array[ProfileScalar],
+      T::Array[ProfileStructNode],
+      T::Hash[Symbol, ProfileScalar],
+      T::Hash[Symbol, ProfileStructNode],
+    ))
+  end
 
   class WorkSummary < T::Struct
     const :stage, String
@@ -266,8 +281,8 @@ module PassWorkProfiler
     sig do
       params(
         label: String,
-        ast_root: T.untyped,
-        mir_root: T.untyped,
+        ast_root: T.nilable(ProfileWalkValue),
+        mir_root: T.nilable(ProfileWalkValue),
         token_count: T.nilable(Integer),
         block: T.proc.returns(T.untyped)
       ).returns(T.untyped)
@@ -517,17 +532,12 @@ module PassWorkProfiler
     end
   end
 
-  SCALAR_CLASSES = T.let(
-    [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze,
-    T::Array[T::Class[T.untyped]]
-  )
-
-  sig { params(root: T.untyped).returns(Integer) }
+  sig { params(root: ProfileWalkValue).returns(Integer) }
   def self.count_ast_nodes(root)
     count_nodes(root, "AST::", {})
   end
 
-  sig { params(root: T.untyped).returns(Integer) }
+  sig { params(root: ProfileWalkValue).returns(Integer) }
   def self.count_mir_nodes(root)
     count_nodes(root, "MIR::", {})
   end
@@ -540,7 +550,7 @@ module PassWorkProfiler
     format("%.1fm", value / 1_000_000.0)
   end
 
-  sig { params(root: T.untyped, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: ProfileWalkValue, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_nodes(root, namespace, seen)
     return 0 if scalar?(root)
     return count_array_nodes(root, namespace, seen) if root.is_a?(Array)
@@ -553,34 +563,54 @@ module PassWorkProfiler
     seen[object_id] = true
     count = T.let(1, Integer)
     T.unsafe(root).each_pair do |_member, value|
+      next unless value.nil? || value.is_a?(Array) || value.is_a?(Hash) ||
+                  value.is_a?(Struct) || value.is_a?(Symbol) ||
+                  value.is_a?(String) || value.is_a?(Numeric) ||
+                  value == true || value == false || value.is_a?(Type) ||
+                  value.is_a?(Lexer::Token)
+
       count += count_nodes(value, namespace, seen)
     end
     count
   end
   private_class_method :count_nodes
 
-  sig { params(root: T::Array[T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Array[ProfileWalkValue], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_array_nodes(root, namespace, seen)
     root.sum { |value| count_nodes(value, namespace, seen) }
   end
   private_class_method :count_array_nodes
 
-  sig { params(root: T::Hash[T.untyped, T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Hash[ProfileWalkValue, ProfileWalkValue], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_hash_nodes(root, namespace, seen)
-    root.each_value.sum { |value| count_nodes(value, namespace, seen) }
+    root.each_value.sum do |value|
+      next 0 unless value.nil? || value.is_a?(Array) || value.is_a?(Hash) ||
+                    value.is_a?(Struct) || value.is_a?(Symbol) ||
+                    value.is_a?(String) || value.is_a?(Numeric) ||
+                    value == true || value == false || value.is_a?(Type) ||
+                    value.is_a?(Lexer::Token)
+
+      count_nodes(value, namespace, seen)
+    end
   end
   private_class_method :count_hash_nodes
 
-  sig { params(root: T.untyped, namespace: String).returns(T::Boolean) }
+  sig { params(root: ProfileWalkValue, namespace: String).returns(T::Boolean) }
   def self.profiler_node?(root, namespace)
     class_name = root.class.name
-    !!class_name&.start_with?(namespace) && root.respond_to?(:each_pair)
+    return false unless class_name
+    return false unless root
+    return false unless class_name.start_with?(namespace)
+
+    root.respond_to?(:each_pair) == true
   end
   private_class_method :profiler_node?
 
-  sig { params(root: T.untyped).returns(T::Boolean) }
+  sig { params(root: ProfileWalkValue).returns(T::Boolean) }
   def self.scalar?(root)
-    SCALAR_CLASSES.any? { |klass| root.is_a?(klass) }
+    root.nil? || root.is_a?(Symbol) || root.is_a?(String) ||
+      root.is_a?(Numeric) || root == true || root == false ||
+      root.is_a?(Type) || root.is_a?(Lexer::Token)
   end
   private_class_method :scalar?
 end

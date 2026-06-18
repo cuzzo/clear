@@ -135,7 +135,7 @@ if [ "${NIL_KILL_COMBINED_CHT_CORPUS:-0}" = "1" ]; then
   fi
 fi
 
-find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
+find examples benchmarks -path '*/*.profile/*' -prune -o -type f -name '*.cht' -print0 \
   | sort -z \
   | xargs -0 -P "$jobs" -I{} bash -c '
       file="$1"

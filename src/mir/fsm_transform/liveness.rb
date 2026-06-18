@@ -25,6 +25,7 @@
 
 require "sorbet-runtime"
 require_relative "../../ast/type"
+require_relative "context"
 
 module FsmTransform
   module Liveness
@@ -42,15 +43,17 @@ module FsmTransform
 
     extend T::Sig
 
-    AstIdentWalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+    AstIdentWalkRoot = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+    BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+    DeclTypeCandidate = T.type_alias { T.nilable(Type::TypeInput) }
 
     # Returns a Result. ctx provides captured-name set + any
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
     # fields are added by the emitter, not the body).
-    sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, T.untyped]).returns(Result) }
+    sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: FsmTransform::ContextMap).returns(Result) }
     def self.analyze(segments, ctx)
-      captured = T.cast(ctx.fetch(:captured, {}), T::Hash[String, T.untyped])
+      captured = T.cast(ctx.fetch(:captured, {}), FsmTransform::CapturedMap)
       capture_names = T.let(captured.keys.to_set, T::Set[String])
 
       defs_by_seg = T.let({}, T::Hash[Integer, T::Hash[String, T.nilable(Type)]])
@@ -227,18 +230,18 @@ module FsmTransform
       end
     end
 
-    sig { params(stmt: T.untyped).returns(T.nilable(Type)) }
+    sig { params(stmt: BindingStmt).returns(T.nilable(Type)) }
     def self.stmt_decl_type(stmt)
-      candidates = T.let([], T::Array[T.untyped])
+      candidates = T.let([], T::Array[DeclTypeCandidate])
       candidates << stmt.full_type!(context: "FSM liveness declaration")
-      candidates << stmt.type                if stmt.respond_to?(:type)
-      candidates << stmt.declared_type       if stmt.respond_to?(:declared_type)
+      candidates << T.cast(T.unsafe(stmt).type, DeclTypeCandidate) if stmt.respond_to?(:type)
+      candidates << T.cast(T.unsafe(stmt).declared_type, DeclTypeCandidate) if stmt.respond_to?(:declared_type)
       value = stmt.value
       candidates << value.full_type!(context: "FSM liveness declaration value") if value
       normalize_decl_type(candidates.compact.first)
     end
 
-    sig { params(value: T.untyped).returns(T.nilable(Type)) }
+    sig { params(value: DeclTypeCandidate).returns(T.nilable(Type)) }
     def self.normalize_decl_type(value)
       return nil if value.nil?
 
@@ -251,27 +254,42 @@ module FsmTransform
       walk_idents(stmt) { |name| into << name }
     end
 
-    # Recursively walk AST nodes looking for Identifier reads.
-    # Only recurses into Arrays and AST Structs whose class lives
-    # under the AST module -- avoids descending into Type objects
-    # or other unrelated Struct-shaped values that happen to
-    # respond to each_pair.
-    sig { params(node: AstIdentWalkNode, block: T.proc.params(name: String).void).void }
+    # Recursively walk AST nodes looking for Identifier reads. We only push
+    # AST::Node children from AST structs/arrays so Type objects, tokens, and
+    # other struct-valued metadata never become scanner inputs.
+    sig { params(node: AstIdentWalkRoot, block: T.proc.params(name: String).void).void }
     def self.walk_idents(node, &block)
       return if node.nil?
-      if node.is_a?(Array)
-        node.each { |n| walk_idents(n, &block) }
-        return
+
+      stack = T.let([], T::Array[AST::Node])
+      case node
+      when Array
+        node.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
+      when AST::Locatable
+        stack << node
       end
-      return if AST.scalar_literal_value?(node)
-      if node.is_a?(AST::Identifier)
-        yield node.name
-        return
+      until stack.empty?
+        current = T.must(stack.pop)
+        if current.is_a?(AST::Identifier)
+          yield current.name
+          next
+        end
+        next unless current.respond_to?(:each_pair)
+
+        T.unsafe(current).each_pair do |_name, value|
+          case value
+          when Array
+            value.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
+          when Hash
+            value.each do |key, child|
+              stack << key if key.is_a?(AST::Locatable)
+              stack << child if child.is_a?(AST::Locatable)
+            end
+          when AST::Locatable
+            stack << value
+          end
+        end
       end
-      # Only recurse into AST Structs (skip Type, MIR nodes, etc.).
-      return unless node.class.name.to_s.start_with?("AST::")
-      return unless node.respond_to?(:each_pair)
-      T.unsafe(node).each_pair { |_, v| walk_idents(v, &block) }
     end
     private_class_method :collect_defs
     private_class_method :collect_tail_uses
