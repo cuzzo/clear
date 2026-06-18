@@ -1021,6 +1021,33 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "records shorthand keyword arguments as local param origins" do
+    Dir.mktmpdir("nil-kill-shorthand-keyword-param-origin") do |dir|
+      path = File.join(dir, "shorthand_keyword_param_origin.rb")
+      File.write(path, <<~RUBY)
+        class ShorthandKeywordParamOrigin
+          extend T::Sig
+
+          sig { params(value: T.untyped).void }
+          def sink(value:); end
+
+          sig { params(value: String).void }
+          def call(value)
+            sink(value:)
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+      origin = idx.param_origins.find { |entry| entry["callee"] == "sink" && entry["slot"] == "value" }
+
+      expect(origin).to include(
+        "origin_kind" => "local",
+        "code" => "value"
+      )
+    end
+  end
+
   it "infers static return origins for Ruby iterator and collection mutation calls" do
     Dir.mktmpdir("nil-kill-iterator-return-origin") do |dir|
       path = File.join(dir, "iterator_return_origin.rb")

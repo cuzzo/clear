@@ -217,9 +217,35 @@ module NilKill
     end
 
     def collect_hash_record_escape_sites!(root)
-      each_ast(root) do |node|
+      nodes, parents = ast_nodes_with_parents(root)
+      collection_values = {}.compare_by_identity
+      local_escape_names = Set.new
+
+      nodes.each do |node|
+        if node.is_a?(Syntax::CallNode)
+          args = node.arguments&.arguments || []
+          args.each do |arg|
+            collection_values[arg] = true if COLLECTION_APPEND_METHODS.include?(node.name.to_s)
+            local_escape_names << arg.name.to_s if arg.is_a?(Syntax::LocalVariableReadNode)
+          end
+          if node.name.to_s == "[]=" && node.arguments
+            last = node.arguments.arguments.last
+            collection_values[last] = true if last
+          end
+        elsif node.is_a?(Syntax::IndexOperatorWriteNode) || node.is_a?(Syntax::IndexAndWriteNode) ||
+            node.is_a?(Syntax::IndexOrWriteNode)
+          value = node.respond_to?(:value) ? node.value : nil
+          collection_values[value] = true if value
+        elsif node.is_a?(Syntax::ArrayNode)
+          node.elements.each do |element|
+            local_escape_names << element.name.to_s if element.is_a?(Syntax::LocalVariableReadNode)
+          end
+        end
+      end
+
+      nodes.each do |node|
         next unless node.is_a?(Syntax::HashNode)
-        reason = hash_record_escape_reason(root, node)
+        reason = indexed_hash_record_escape_reason(node, parents, collection_values, local_escape_names)
         next unless reason
         @hash_record_escape_sites << TypedRecords::HashRecordEscapeSiteRecord.new(
           path: @rel,
@@ -229,6 +255,47 @@ module NilKill
           reason: reason,
         ).to_source_index_hash
       end
+    end
+
+    def ast_nodes_with_parents(root)
+      nodes = []
+      parents = {}.compare_by_identity
+      stack = [[root, nil]]
+      until stack.empty?
+        node, parent = stack.pop
+        next unless node.is_a?(Syntax::Node)
+        nodes << node
+        parents[node] = parent if parent
+        node.compact_child_nodes.reverse_each { |child| stack << [child, node] }
+      end
+      [nodes, parents]
+    end
+
+    def indexed_hash_record_escape_reason(hash_node, parents, collection_values, local_escape_names)
+      return "array_literal" if ancestor_node?(hash_node, parents, Syntax::ArrayNode)
+      return "collection_append_or_index_write" if collection_values.key?(hash_node)
+      writer = enclosing_local_write_for_hash(hash_node, parents)
+      return nil unless writer
+
+      local_escape_names.include?(writer.name.to_s) ? "local_alias_escape" : nil
+    end
+
+    def ancestor_node?(node, parents, klass)
+      parent = parents[node]
+      while parent
+        return true if parent.is_a?(klass)
+        parent = parents[parent]
+      end
+      false
+    end
+
+    def enclosing_local_write_for_hash(hash_node, parents)
+      parent = parents[hash_node]
+      while parent
+        return parent if parent.is_a?(Syntax::LocalVariableWriteNode) && parent.value.equal?(hash_node)
+        parent = parents[parent]
+      end
+      nil
     end
 
     def hash_record_escape_reason(root, hash_node)
