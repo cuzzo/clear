@@ -37,18 +37,25 @@ const NOISE_MIDS: &[&str] = &[
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBranchDensityRow>> {
     let mut parsed = Vec::new();
     let mut global_immutable_readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> =
+        BTreeMap::new();
     let mut global_type_aliases: BTreeMap<String, String> = BTreeMap::new();
 
     for file in files {
         let (root, lines) = ast::parse_with_language(file, language)?;
         let scanner = StateBranchDensity::new(None, lines.clone(), None, None, None);
-        
+
         for (name, readers) in scanner.immutable_struct_readers(&lines) {
-            global_immutable_readers.entry(name).or_default().extend(readers);
+            global_immutable_readers
+                .entry(name)
+                .or_default()
+                .extend(readers);
         }
         for (name, reader_types) in scanner.immutable_struct_reader_types(&lines) {
-            global_immutable_reader_types.entry(name).or_default().extend(reader_types);
+            global_immutable_reader_types
+                .entry(name)
+                .or_default()
+                .extend(reader_types);
         }
         global_type_aliases.extend(scanner.type_aliases(&lines));
 
@@ -92,46 +99,52 @@ impl StateBranchDensity {
         let ir = immutable_readers.unwrap_or_else(|| BTreeMap::new()); // Simplified
         let irt = immutable_reader_types.unwrap_or_else(|| BTreeMap::new());
         let ta = type_aliases.unwrap_or_else(|| BTreeMap::new());
-        
+
         // Re-extract if not provided (matches Ruby's initialize)
-        let ir = if ir.is_empty() { 
-            let s = Self { 
-                file: file.clone().unwrap_or_default(), 
-                lines: lines.clone(), 
-                decisions: Vec::new(), 
+        let ir = if ir.is_empty() {
+            let s = Self {
+                file: file.clone().unwrap_or_default(),
+                lines: lines.clone(),
+                decisions: Vec::new(),
                 immutable_readers: BTreeMap::new(),
                 immutable_reader_types: BTreeMap::new(),
                 type_aliases: BTreeMap::new(),
                 method_param_types: BTreeMap::new(),
             };
             s.immutable_struct_readers(&lines)
-        } else { ir };
+        } else {
+            ir
+        };
 
         let irt = if irt.is_empty() {
-             let s = Self { 
-                file: file.clone().unwrap_or_default(), 
-                lines: lines.clone(), 
-                decisions: Vec::new(), 
+            let s = Self {
+                file: file.clone().unwrap_or_default(),
+                lines: lines.clone(),
+                decisions: Vec::new(),
                 immutable_readers: BTreeMap::new(),
                 immutable_reader_types: BTreeMap::new(),
                 type_aliases: BTreeMap::new(),
                 method_param_types: BTreeMap::new(),
             };
             s.immutable_struct_reader_types(&lines)
-        } else { irt };
+        } else {
+            irt
+        };
 
         let ta = if ta.is_empty() {
-             let s = Self { 
-                file: file.clone().unwrap_or_default(), 
-                lines: lines.clone(), 
-                decisions: Vec::new(), 
+            let s = Self {
+                file: file.clone().unwrap_or_default(),
+                lines: lines.clone(),
+                decisions: Vec::new(),
                 immutable_readers: BTreeMap::new(),
                 immutable_reader_types: BTreeMap::new(),
                 type_aliases: BTreeMap::new(),
                 method_param_types: BTreeMap::new(),
             };
             s.type_aliases(&lines)
-        } else { ta };
+        } else {
+            ta
+        };
 
         let mut s = Self {
             file: file.unwrap_or_default(),
@@ -186,7 +199,11 @@ impl StateBranchDensity {
                 node.last_column,
             ],
             predicate: ast::slice(cond, &self.lines),
-            state_refs: refs.into_iter().collect::<BTreeSet<_>>().into_iter().collect(),
+            state_refs: refs
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
         });
     }
 
@@ -266,19 +283,31 @@ impl StateBranchDensity {
     fn immutable_reader(&self, type_name: &str, mid: &str) -> bool {
         let resolved = self.resolve_type_alias(type_name);
         let readers = self.immutable_readers.get(&resolved).or_else(|| {
-            resolved.split("::").last().and_then(|last| self.immutable_readers.get(last))
+            resolved
+                .split("::")
+                .last()
+                .and_then(|last| self.immutable_readers.get(last))
         });
         readers.map(|r| r.contains(mid)).unwrap_or(false)
     }
 
-    fn immutable_reader_result_type(&self, recv: &Node, mid: &str, args: Option<&Child>, defn: &str) -> Option<String> {
+    fn immutable_reader_result_type(
+        &self,
+        recv: &Node,
+        mid: &str,
+        args: Option<&Child>,
+        defn: &str,
+    ) -> Option<String> {
         if !self.empty_arg_list(args) {
             return None;
         }
         let owner_type = self.immutable_receiver_type(recv, defn)?;
         let resolved = self.resolve_type_alias(&owner_type);
         let reader_types = self.immutable_reader_types.get(&resolved).or_else(|| {
-            resolved.split("::").last().and_then(|last| self.immutable_reader_types.get(last))
+            resolved
+                .split("::")
+                .last()
+                .and_then(|last| self.immutable_reader_types.get(last))
         })?;
         reader_types.get(mid).cloned()
     }
@@ -296,7 +325,8 @@ impl StateBranchDensity {
     fn immutable_struct_readers(&self, lines: &[String]) -> BTreeMap<String, BTreeSet<String>> {
         let mut readers = BTreeMap::new();
         let mut class_stack = Vec::new();
-        let class_struct_re = Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
+        let class_struct_re =
+            Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
         let const_re = Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\b").unwrap();
         let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
 
@@ -307,7 +337,10 @@ impl StateBranchDensity {
             }
             if !class_stack.is_empty() {
                 if let Some(caps) = const_re.captures(line) {
-                    readers.entry(class_stack.last().unwrap().clone()).or_insert_with(BTreeSet::new).insert(caps[1].to_string());
+                    readers
+                        .entry(class_stack.last().unwrap().clone())
+                        .or_insert_with(BTreeSet::new)
+                        .insert(caps[1].to_string());
                     continue;
                 }
             }
@@ -318,11 +351,17 @@ impl StateBranchDensity {
         readers
     }
 
-    fn immutable_struct_reader_types(&self, lines: &[String]) -> BTreeMap<String, BTreeMap<String, String>> {
+    fn immutable_struct_reader_types(
+        &self,
+        lines: &[String],
+    ) -> BTreeMap<String, BTreeMap<String, String>> {
         let mut reader_types = BTreeMap::new();
         let mut class_stack = Vec::new();
-        let class_struct_re = Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
-        let const_type_re = Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b").unwrap();
+        let class_struct_re =
+            Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
+        let const_type_re =
+            Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
+                .unwrap();
         let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
 
         for line in lines {
@@ -332,7 +371,10 @@ impl StateBranchDensity {
             }
             if !class_stack.is_empty() {
                 if let Some(caps) = const_type_re.captures(line) {
-                    reader_types.entry(class_stack.last().unwrap().clone()).or_insert_with(BTreeMap::new).insert(caps[1].to_string(), caps[2].to_string());
+                    reader_types
+                        .entry(class_stack.last().unwrap().clone())
+                        .or_insert_with(BTreeMap::new)
+                        .insert(caps[1].to_string(), caps[2].to_string());
                     continue;
                 }
             }
@@ -345,8 +387,11 @@ impl StateBranchDensity {
 
     fn type_aliases(&self, lines: &[String]) -> BTreeMap<String, String> {
         let mut aliases = BTreeMap::new();
-        let type_alias_re = Regex::new(r"^\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}").unwrap();
-        let const_alias_re = Regex::new(r"^\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b").unwrap();
+        let type_alias_re =
+            Regex::new(r"^\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}")
+                .unwrap();
+        let const_alias_re =
+            Regex::new(r"^\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b").unwrap();
 
         for line in lines {
             if let Some(caps) = type_alias_re.captures(line) {
@@ -367,7 +412,10 @@ impl StateBranchDensity {
             }
             seen.insert(current.clone());
             let target = self.type_aliases.get(&current).or_else(|| {
-                current.split("::").last().and_then(|last| self.type_aliases.get(last))
+                current
+                    .split("::")
+                    .last()
+                    .and_then(|last| self.type_aliases.get(last))
             });
             match target {
                 Some(t) => current = t.clone(),
@@ -376,7 +424,10 @@ impl StateBranchDensity {
         }
     }
 
-    fn extract_method_param_types(&self, lines: &[String]) -> BTreeMap<String, BTreeMap<String, String>> {
+    fn extract_method_param_types(
+        &self,
+        lines: &[String],
+    ) -> BTreeMap<String, BTreeMap<String, String>> {
         let mut types_by_method = BTreeMap::new();
         let mut pending_sig = String::new();
         let def_re = Regex::new(r"^\s*def\s+([A-Za-z_]\w*[!?=]?)(?:\s|\(|$)").unwrap();
@@ -399,7 +450,8 @@ impl StateBranchDensity {
 
     fn sig_param_types(&self, sig_source: &str) -> BTreeMap<String, String> {
         let params_re = Regex::new(r"params\s*\((.*?)\)").unwrap();
-        let param_pair_re = Regex::new(r"([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)").unwrap();
+        let param_pair_re =
+            Regex::new(r"([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)").unwrap();
         let mut params = BTreeMap::new();
         if let Some(p_caps) = params_re.captures(sig_source) {
             for pair in param_pair_re.captures_iter(&p_caps[1]) {
@@ -422,7 +474,10 @@ impl Report {
     fn findings(&self) -> Vec<StateBranchDensityRow> {
         let mut groups: BTreeMap<(String, String), Vec<Decision>> = BTreeMap::new();
         for d in &self.decisions {
-            groups.entry((d.file.clone(), d.defn.clone())).or_default().push(d.clone());
+            groups
+                .entry((d.file.clone(), d.defn.clone()))
+                .or_default()
+                .push(d.clone());
         }
 
         let mut rows = Vec::new();

@@ -39,15 +39,34 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FalseSimp
 
 const DISPATCH_MIDS: &[&str] = &["send", "public_send", "method", "public_method", "__send__"];
 const IO_MIDS: &[&str] = &[
-    "puts", "print", "p", "open", "read", "write", "sysread", "syswrite",
-    "recv", "send", "gets", "read_nonblock", "write_nonblock",
+    "puts",
+    "print",
+    "p",
+    "open",
+    "read",
+    "write",
+    "sysread",
+    "syswrite",
+    "recv",
+    "send",
+    "gets",
+    "read_nonblock",
+    "write_nonblock",
 ];
 const REFLECTION_MIDS: &[&str] = &[
-    "instance_eval", "class_eval", "module_eval",
-    "instance_exec", "class_exec", "module_exec",
-    "define_method", "define_singleton_method",
-    "const_get", "const_set", "const_missing",
-    "method_missing", "respond_to_missing?",
+    "instance_eval",
+    "class_eval",
+    "module_eval",
+    "instance_exec",
+    "class_exec",
+    "module_exec",
+    "define_method",
+    "define_singleton_method",
+    "const_get",
+    "const_set",
+    "const_missing",
+    "method_missing",
+    "respond_to_missing?",
 ];
 
 struct FalseSimplicity {
@@ -58,7 +77,11 @@ struct FalseSimplicity {
 
 impl FalseSimplicity {
     fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines, sites: Vec::new() }
+        Self {
+            file,
+            lines,
+            sites: Vec::new(),
+        }
     }
 
     fn walk(&mut self, node: &Node, defstack: &[String]) {
@@ -102,7 +125,13 @@ impl FalseSimplicity {
             }
             "GVAR" | "GASGN" => {
                 if let Some(name) = ast::child_to_string(node.children.get(0)) {
-                    if !name.starts_with("$PREMATCH") && !name.starts_with("$POSTMATCH") && !name.starts_with("$MATCH") && !name.starts_with("$&") && !name.starts_with("$'") && !name.starts_with("$`") {
+                    if !name.starts_with("$PREMATCH")
+                        && !name.starts_with("$POSTMATCH")
+                        && !name.starts_with("$MATCH")
+                        && !name.starts_with("$&")
+                        && !name.starts_with("$'")
+                        && !name.starts_with("$`")
+                    {
                         self.add_site("context_dependency", &name, node, defstack);
                     }
                 }
@@ -134,7 +163,9 @@ impl FalseSimplicity {
     }
 
     fn receiver_is_explicit(&self, node: &Node) -> bool {
-        if matches!(node.r#type.as_str(), "FCALL" | "VCALL") { return false; }
+        if matches!(node.r#type.as_str(), "FCALL" | "VCALL") {
+            return false;
+        }
         if let Some(recv) = node.children.get(0).and_then(ast::node) {
             recv.r#type != "SELF"
         } else {
@@ -147,9 +178,17 @@ impl FalseSimplicity {
             kind: kind.to_string(),
             detail: detail.to_string(),
             file: self.file.clone(),
-            defn: defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+            defn: defstack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "(top-level)".to_string()),
             line: node.first_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
         });
     }
 }
@@ -159,18 +198,25 @@ struct Report {
 }
 
 impl Report {
-    fn new(sites: Vec<Site>) -> Self { Self { sites } }
+    fn new(sites: Vec<Site>) -> Self {
+        Self { sites }
+    }
 
     fn findings(&self) -> Vec<FalseSimplicityRow> {
         let mut groups: BTreeMap<(String, String), Vec<&Site>> = BTreeMap::new();
         for s in &self.sites {
-            groups.entry((s.kind.clone(), s.detail.clone())).or_default().push(s);
+            groups
+                .entry((s.kind.clone(), s.detail.clone()))
+                .or_default()
+                .push(s);
         }
 
         let mut out = Vec::new();
         for ((kind, detail), sts) in groups {
             let mut defns = BTreeSet::new();
-            for s in &sts { defns.insert((s.file.clone(), s.defn.clone())); }
+            for s in &sts {
+                defns.insert((s.file.clone(), s.defn.clone()));
+            }
             let scatter = defns.len();
 
             let mut sites = Vec::new();
@@ -192,7 +238,8 @@ impl Report {
             });
         }
         out.sort_by(|a, b| {
-            b.scatter.cmp(&a.scatter)
+            b.scatter
+                .cmp(&a.scatter)
                 .then_with(|| b.support.cmp(&a.support))
                 .then_with(|| a.kind.cmp(&b.kind))
                 .then_with(|| a.detail.cmp(&b.detail))

@@ -2,7 +2,7 @@ use crate::decomplex::ast::{self, Child, Node, Span};
 use crate::decomplex::syntax::Language;
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::{BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -56,7 +56,7 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSum
     let mut out = Vec::new();
     for file in files {
         let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = LocalFlow::new(file.to_string_lossy().to_string(), lines);
+        let mut detector = LocalFlow::new(file.to_string_lossy().to_string(), lines, language);
         out.extend(detector.scan(&root));
     }
     Ok(out)
@@ -65,11 +65,16 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSum
 struct LocalFlow {
     file: String,
     lines: Vec<String>,
+    language: Language,
 }
 
 impl LocalFlow {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines }
+    fn new(file: String, lines: Vec<String>, language: Language) -> Self {
+        Self {
+            file,
+            lines,
+            language,
+        }
     }
 
     fn scan(&mut self, root: &Node) -> Vec<MethodSummary> {
@@ -122,7 +127,12 @@ impl LocalFlow {
             name: self.method_name(node),
             file: self.file.clone(),
             line: node.first_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
             node: node.clone(),
             boundaries: self.structural_boundaries(&statements),
             statements,
@@ -134,7 +144,12 @@ impl LocalFlow {
             index,
             line: node.first_lineno,
             end_line: node.last_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
             source: ast::slice(node, &self.lines),
             reads: self.local_reads(node),
             writes: self.local_writes(node),
@@ -168,7 +183,11 @@ impl LocalFlow {
 
         let mut blank = None;
         for line_number in first_line..=last_line {
-            let text = self.lines.get(line_number - 1).map(|s| s.as_str()).unwrap_or("");
+            let text = self
+                .lines
+                .get(line_number - 1)
+                .map(|s| s.as_str())
+                .unwrap_or("");
             let stripped = text.trim();
             if stripped.starts_with('#') {
                 return Some(RawBoundary {
@@ -194,27 +213,37 @@ impl LocalFlow {
         };
 
         let stmts = if body.r#type == "BLOCK" {
-            body.children.iter().filter_map(ast::node).collect::<Vec<_>>()
+            body.children
+                .iter()
+                .filter_map(ast::node)
+                .collect::<Vec<_>>()
         } else {
             vec![body]
         };
 
-        stmts.into_iter().flat_map(|stmt| {
-            if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
-                vec![stmt]
-            } else if self.visibility_call(stmt) {
-                self.inline_methods(stmt)
-            } else {
-                vec![]
-            }
-        }).collect()
+        stmts
+            .into_iter()
+            .flat_map(|stmt| {
+                if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
+                    vec![stmt]
+                } else if self.visibility_call(stmt) {
+                    self.inline_methods(stmt)
+                } else {
+                    vec![]
+                }
+            })
+            .collect()
     }
 
     fn inline_methods<'a>(&self, stmt: &'a Node) -> Vec<&'a Node> {
         let Some(args) = stmt.children.get(1).and_then(ast::node) else {
             return Vec::new();
         };
-        args.children.iter().filter_map(ast::node).filter(|arg| METHOD_TYPES.contains(&arg.r#type.as_str())).collect()
+        args.children
+            .iter()
+            .filter_map(ast::node)
+            .filter(|arg| METHOD_TYPES.contains(&arg.r#type.as_str()))
+            .collect()
     }
 
     fn owner_body<'a>(&self, owner_node: &'a Node) -> Option<&'a Node> {
@@ -239,13 +268,33 @@ impl LocalFlow {
         if node.r#type == "DEFS" {
             let receiver = node.children.get(0).and_then(ast::node);
             let prefix = if let Some(r) = receiver {
-                if r.r#type == "SELF" { "self".to_string() } else { ast::slice(r, &self.lines) }
+                if r.r#type == "SELF" {
+                    "self".to_string()
+                } else {
+                    ast::slice(r, &self.lines)
+                }
             } else {
                 "?".to_string()
             };
-            format!("{}.{}", prefix, node.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None }).unwrap_or(&"?".to_string()))
+            format!(
+                "{}.{}",
+                prefix,
+                node.children
+                    .get(1)
+                    .and_then(|c| match c {
+                        Child::Symbol(s) => Some(s),
+                        _ => None,
+                    })
+                    .unwrap_or(&"?".to_string())
+            )
         } else {
-            node.children.first().and_then(|c| match c { Child::Symbol(s) => Some(s.clone()), _ => None }).unwrap_or_else(|| "?".to_string())
+            node.children
+                .first()
+                .and_then(|c| match c {
+                    Child::Symbol(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "?".to_string())
         }
     }
 
@@ -256,15 +305,24 @@ impl LocalFlow {
     }
 
     fn owner_segment(&self, node: &Node) -> String {
-        let text = ast::slice(node.children.first().and_then(ast::node).unwrap_or(node), &self.lines);
-        if text.is_empty() { "(anonymous)".to_string() } else { text }
+        let text = ast::slice(
+            node.children.first().and_then(ast::node).unwrap_or(node),
+            &self.lines,
+        );
+        if text.is_empty() {
+            "(anonymous)".to_string()
+        } else {
+            text
+        }
     }
 
     fn local_reads(&self, node: &Node) -> BTreeSet<String> {
         let mut reads = Vec::new();
         self.walk_local(node, &mut |child| {
-            if LOCAL_READ_TYPES.contains(&child.r#type.as_str()) {
-                if let Some(Child::String(name)) = child.children.first() {
+            if LOCAL_READ_TYPES.contains(&child.r#type.as_str())
+                || (self.language != Language::Ruby && child.r#type == "VCALL")
+            {
+                if let Some(name) = local_read_name(child) {
                     reads.push(name.clone());
                 }
             }
@@ -326,6 +384,13 @@ impl LocalFlow {
     }
 }
 
+fn local_read_name(node: &Node) -> Option<&String> {
+    match node.children.first() {
+        Some(Child::String(name)) | Some(Child::Symbol(name)) => Some(name),
+        _ => None,
+    }
+}
+
 struct RawBoundary {
     line: usize,
     kind: String,
@@ -338,15 +403,18 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    fn summaries(source: &str, language: Language) -> Vec<MethodSummary> {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        file.write_all(source.as_bytes()).expect("write");
+        scan_files(&[file.path().to_path_buf()], language).expect("scan")
+    }
+
     #[test]
     fn extracts_python_function_local_flow() {
-        let mut file = NamedTempFile::new().expect("tempfile");
-        file.write_all(
-            b"def mixed(price, tax):\n    subtotal = price + tax\n    total = subtotal\n    return total\n",
-        )
-        .expect("write");
-
-        let summaries = scan_files(&[file.path().to_path_buf()], Language::Python).expect("scan");
+        let summaries = summaries(
+            "def mixed(price, tax):\n    subtotal = price + tax\n    total = subtotal\n    return total\n",
+            Language::Python,
+        );
         let summary = summaries
             .iter()
             .find(|summary| summary.name == "mixed")
@@ -356,7 +424,9 @@ mod tests {
         assert_eq!(summary.statements.len(), 3);
         assert_eq!(
             summary.statements[0].reads,
-            ["price".to_string(), "tax".to_string()].into_iter().collect()
+            ["price".to_string(), "tax".to_string()]
+                .into_iter()
+                .collect()
         );
         assert_eq!(
             summary.statements[1].dependencies,
@@ -366,5 +436,48 @@ mod tests {
             summary.statements[2].reads,
             ["total".to_string()].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn extracts_java_kotlin_and_swift_local_flow() {
+        let cases = [
+            (
+                Language::Java,
+                "class Billing {\n  int mixed(int price, int tax) {\n    int subtotal = price + tax;\n    int total = subtotal;\n    return total;\n  }\n}\n",
+            ),
+            (
+                Language::Kotlin,
+                "class Billing {\n  fun mixed(price: Int, tax: Int): Int {\n    val subtotal = price + tax\n    val total = subtotal\n    return total\n  }\n}\n",
+            ),
+            (
+                Language::Swift,
+                "class Billing {\n  func mixed(price: Int, tax: Int) -> Int {\n    let subtotal = price + tax\n    let total = subtotal\n    return total\n  }\n}\n",
+            ),
+        ];
+
+        for (language, source) in cases {
+            let summaries = summaries(source, language);
+            let summary = summaries
+                .iter()
+                .find(|summary| summary.name == "mixed")
+                .expect("mixed summary");
+
+            assert_eq!(summary.owner, "Billing");
+            assert_eq!(summary.statements.len(), 3);
+            assert_eq!(
+                summary.statements[0].reads,
+                ["price".to_string(), "tax".to_string()]
+                    .into_iter()
+                    .collect()
+            );
+            assert_eq!(
+                summary.statements[1].dependencies,
+                vec![("total".to_string(), "subtotal".to_string())]
+            );
+            assert_eq!(
+                summary.statements[2].reads,
+                ["total".to_string()].into_iter().collect()
+            );
+        }
     }
 }

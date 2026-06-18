@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use std::env;
-use std::sync::mpsc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::thread;
 
 static JOBS_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
@@ -24,7 +24,11 @@ pub fn job_count() -> usize {
     }
 
     env_jobs()
-        .unwrap_or_else(|| thread::available_parallelism().map(usize::from).unwrap_or(1))
+        .unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+        })
         .max(1)
 }
 

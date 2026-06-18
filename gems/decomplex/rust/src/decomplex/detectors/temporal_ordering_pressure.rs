@@ -32,7 +32,10 @@ struct MethodState {
     writes: Vec<String>,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<TemporalOrderingPressureRow>> {
+pub fn scan_files(
+    files: &[PathBuf],
+    language: Language,
+) -> Result<Vec<TemporalOrderingPressureRow>> {
     let mut rows = Vec::new();
     for file in files {
         let (root, lines) = ast::parse_with_language(file, language)?;
@@ -65,7 +68,12 @@ impl TemporalOrderingPressure {
         out
     }
 
-    fn walk_owners(&self, node: &Node, owners: &[String], out: &mut Vec<TemporalOrderingPressureRow>) {
+    fn walk_owners(
+        &self,
+        node: &Node,
+        owners: &[String],
+        out: &mut Vec<TemporalOrderingPressureRow>,
+    ) {
         if matches!(node.r#type.as_str(), "CLASS" | "MODULE") {
             let owner = self.owner_name(node);
             let methods = self.owner_methods(node);
@@ -85,7 +93,10 @@ impl TemporalOrderingPressure {
     }
 
     fn owner_name(&self, node: &Node) -> String {
-        let name = ast::slice(node.children.first().and_then(ast::node).unwrap_or(node), &self.lines);
+        let name = ast::slice(
+            node.children.first().and_then(ast::node).unwrap_or(node),
+            &self.lines,
+        );
         if name.is_empty() {
             "(anonymous)".to_string()
         } else {
@@ -99,7 +110,10 @@ impl TemporalOrderingPressure {
         };
 
         let stmts = if body.r#type == "BLOCK" {
-            body.children.iter().filter_map(ast::node).collect::<Vec<_>>()
+            body.children
+                .iter()
+                .filter_map(ast::node)
+                .collect::<Vec<_>>()
         } else {
             vec![body]
         };
@@ -151,8 +165,16 @@ impl TemporalOrderingPressure {
             })
             .unwrap_or_else(|| "(anonymous)".to_string());
 
-        let mut reads: Vec<_> = reads.into_iter().collect::<BTreeSet<_>>().into_iter().collect();
-        let mut writes: Vec<_> = writes.into_iter().collect::<BTreeSet<_>>().into_iter().collect();
+        let mut reads: Vec<_> = reads
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut writes: Vec<_> = writes
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         reads.sort();
         writes.sort();
 
@@ -190,13 +212,23 @@ impl TemporalOrderingPressure {
         }
     }
 
-    fn pressure_row(&self, owner: &str, methods: &[MethodState]) -> Option<TemporalOrderingPressureRow> {
-        let public_methods: Vec<_> = methods.iter().filter(|m| m.visibility == "public").collect();
+    fn pressure_row(
+        &self,
+        owner: &str,
+        methods: &[MethodState],
+    ) -> Option<TemporalOrderingPressureRow> {
+        let public_methods: Vec<_> = methods
+            .iter()
+            .filter(|m| m.visibility == "public")
+            .collect();
         let state_methods: Vec<_> = public_methods
             .iter()
             .filter(|m| !m.reads.is_empty() || !m.writes.is_empty())
             .collect();
-        let writers: Vec<_> = public_methods.iter().filter(|m| !m.writes.is_empty()).collect();
+        let writers: Vec<_> = public_methods
+            .iter()
+            .filter(|m| !m.writes.is_empty())
+            .collect();
 
         if state_methods.len() < 3 || writers.len() < 2 {
             return None;

@@ -70,14 +70,20 @@ impl PredicateAlias {
         };
         let scope = node.children.get(1).and_then(ast::node);
         let Some(scope) = scope else { return };
-        if scope.r#type != "SCOPE" { return };
+        if scope.r#type != "SCOPE" {
+            return;
+        };
 
         let body = scope.children.get(2).and_then(ast::node);
         let Some(body) = body else { return };
-        if body.r#type == "BLOCK" { return };
+        if body.r#type == "BLOCK" {
+            return;
+        };
 
         let txt = ast::slice(body, &self.lines);
-        if txt.is_empty() || txt.len() > 200 { return };
+        if txt.is_empty() || txt.len() > 200 {
+            return;
+        };
 
         self.preds.push(Pred {
             name: name.clone(),
@@ -85,7 +91,12 @@ impl PredicateAlias {
             file: self.file.clone(),
             defn: name,
             line: node.first_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
         });
     }
 }
@@ -119,9 +130,13 @@ impl Report {
         for body in keys {
             let ps = by_body.remove(&body).unwrap();
             let mut names_set = BTreeSet::new();
-            for p in &ps { names_set.insert(p.name.clone()); }
+            for p in &ps {
+                names_set.insert(p.name.clone());
+            }
             let names: Vec<_> = names_set.into_iter().collect();
-            if names.len() < 2 { continue; }
+            if names.len() < 2 {
+                continue;
+            }
 
             let mut sites = Vec::new();
             let mut spans = BTreeMap::new();

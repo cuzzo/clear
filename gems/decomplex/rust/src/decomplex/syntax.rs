@@ -12,7 +12,10 @@ pub enum Language {
     Ruby,
     Python,
     JavaScript,
+    Java,
     TypeScript,
+    Swift,
+    Kotlin,
     Go,
     Rust,
     Zig,
@@ -28,7 +31,10 @@ impl Language {
             "ruby" => Ok(Self::Ruby),
             "python" => Ok(Self::Python),
             "javascript" => Ok(Self::JavaScript),
+            "java" => Ok(Self::Java),
             "typescript" => Ok(Self::TypeScript),
+            "swift" => Ok(Self::Swift),
+            "kotlin" => Ok(Self::Kotlin),
             "go" => Ok(Self::Go),
             "rust" => Ok(Self::Rust),
             "zig" => Ok(Self::Zig),
@@ -133,6 +139,12 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    fn document(source: &str, language: Language) -> Document {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        file.write_all(source.as_bytes()).expect("write source");
+        parse_file(file.path().to_path_buf(), language).expect("parse file")
+    }
+
     #[test]
     fn parallel_parse_files_preserves_input_order() {
         parallel::set_jobs_for_process(Some(4)).expect("jobs");
@@ -153,5 +165,34 @@ mod tests {
         assert_eq!(docs[1].file, second.path().to_string_lossy());
         assert_eq!(docs[0].function_defs[0].name, "first");
         assert_eq!(docs[1].function_defs[0].name, "second");
+    }
+
+    #[test]
+    fn parses_java_kotlin_and_swift_function_defs() {
+        let cases = [
+            (
+                Language::Java,
+                "class Billing { int mixed(int price, int tax) { return price + tax; } }",
+            ),
+            (
+                Language::Kotlin,
+                "class Billing { fun mixed(price: Int, tax: Int): Int { return price + tax } }",
+            ),
+            (
+                Language::Swift,
+                "class Billing { func mixed(price: Int, tax: Int) -> Int { return price + tax } }",
+            ),
+        ];
+
+        for (language, source) in cases {
+            let doc = document(source, language);
+            let function = doc
+                .function_defs
+                .iter()
+                .find(|function| function.name == "mixed")
+                .expect("mixed function");
+
+            assert_eq!(function.owner, "Billing");
+        }
     }
 }

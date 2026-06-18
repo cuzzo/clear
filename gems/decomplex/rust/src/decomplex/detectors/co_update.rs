@@ -87,10 +87,13 @@ impl Report {
             }
             map.entry(key).or_default().push(w.clone());
         }
-        let by_unit = keys.into_iter().map(|k| {
-            let v = map.remove(&k).unwrap();
-            (k, v)
-        }).collect();
+        let by_unit = keys
+            .into_iter()
+            .map(|k| {
+                let v = map.remove(&k).unwrap();
+                (k, v)
+            })
+            .collect();
         Self { writes, by_unit }
     }
 
@@ -98,11 +101,16 @@ impl Report {
         let mut keys = Vec::new();
         let mut counts: BTreeMap<Vec<String>, Vec<(String, String)>> = BTreeMap::new();
         for (unit, ws) in &self.by_unit {
-            let mut attrs: Vec<_> = ws.iter().map(|w| w.attr.clone()).collect::<BTreeSet<_>>().into_iter().collect();
+            let mut attrs: Vec<_> = ws
+                .iter()
+                .map(|w| w.attr.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
             attrs.sort();
-            
+
             for i in 0..attrs.len() {
-                for j in i+1..attrs.len() {
+                for j in i + 1..attrs.len() {
                     let pair = vec![attrs[i].clone(), attrs[j].clone()];
                     if !counts.contains_key(&pair) {
                         keys.push(pair.clone());
@@ -115,11 +123,16 @@ impl Report {
         let mut out = Vec::new();
         for pair in keys {
             let units = counts.remove(&pair).unwrap();
-            if units.len() < min_support { continue; }
+            if units.len() < min_support {
+                continue;
+            }
             out.push(CoWrittenPair {
                 pair,
                 support: units.len(),
-                sites: units.into_iter().map(|(f, d)| format!("{}:{}", f, d)).collect(),
+                sites: units
+                    .into_iter()
+                    .map(|(f, d)| format!("{}:{}", f, d))
+                    .collect(),
             });
         }
         out.sort_by(|a, b| b.support.cmp(&a.support));
@@ -135,7 +148,7 @@ impl Report {
             for p in &pairs {
                 let a = &p.pair[0];
                 let b = &p.pair[1];
-                
+
                 let (has, miss) = if attrs.contains(a) && !attrs.contains(b) {
                     (Some(a), Some(b))
                 } else if attrs.contains(b) && !attrs.contains(a) {

@@ -16,109 +16,145 @@ fn main() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     parallel::set_jobs_for_process(command.jobs())?;
     match command {
-        Command::StateWrites { language, files, .. } => {
+        Command::StateWrites {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let facts = co_update::state_writes_for_files(&files, language)
                 .with_context(|| "failed to extract state-write facts")?;
             println!("{}", serde_json::to_string(&facts)?);
         }
-        Command::CoUpdate { language, files, .. } => {
+        Command::CoUpdate {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = co_update::scan_files(&files, language)
                 .with_context(|| "failed to scan co-update facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::PredicateAliases { language, files, .. } => {
+        Command::PredicateAliases {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = predicate_alias::scan_files(&files, language)
                 .with_context(|| "failed to scan predicate-alias facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::Miner { language, files, .. } => {
+        Command::Miner {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = miner::scan_files(&files, language)
                 .with_context(|| "failed to scan decision-site miner facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::SemanticAliases { language, files, .. } => {
+        Command::SemanticAliases {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = semantic_alias::scan_files(&files, language)
                 .with_context(|| "failed to scan semantic-alias facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::DecisionPressure { language, files, .. } => {
+        Command::DecisionPressure {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = decision_pressure::scan_files(&files, language)
                 .with_context(|| "failed to scan decision-pressure facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::StateBranchDensity { language, files, .. } => {
+        Command::StateBranchDensity {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = state_branch_density::scan_files(&files, language)
                 .with_context(|| "failed to scan state-branch-density facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::TemporalOrderingPressure { language, files, .. } => {
+        Command::TemporalOrderingPressure {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = temporal_ordering_pressure::scan_files(&files, language)
                 .with_context(|| "failed to scan temporal-ordering-pressure facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::RedundantNilGuard { language, files, .. } => {
+        Command::RedundantNilGuard {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = redundant_nil_guard::scan_files(&files, language)
                 .with_context(|| "failed to scan redundant-nil-guard facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::StateMesh { language, files, .. } => {
+        Command::StateMesh {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = state_mesh::scan_files(&files, language)
                 .with_context(|| "failed to scan state-mesh facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::InconsistentRenameClone { language, files, .. } => {
+        Command::InconsistentRenameClone {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = inconsistent_rename_clone::scan_files(&files, language)
                 .with_context(|| "failed to scan inconsistent-rename-clone facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::DerivedState { language, files, .. } => {
+        Command::DerivedState {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = derived_state::scan_files(&files, language)
                 .with_context(|| "failed to scan derived-state facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::ImplicitControlFlow { language, files, .. } => {
+        Command::ImplicitControlFlow {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = implicit_control_flow::scan_files(&files, language)
                 .with_context(|| "failed to scan implicit-control-flow facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::WeightedInlinedComplexity { language, files, .. } => {
+        Command::WeightedInlinedComplexity {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = weighted_inlined_cognitive_complexity::scan_files(&files, language)
                 .with_context(|| "failed to scan weighted-inlined-complexity facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::LocalityDrag { language, files, .. } => {
+        Command::LocalityDrag {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = locality_drag::scan_files(&files, language)
                 .with_context(|| "failed to scan locality-drag facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::OperationalDiscontinuity { language, files, .. } => {
+        Command::OperationalDiscontinuity {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = operational_discontinuity::scan_files(&files, language)
                 .with_context(|| "failed to scan operational-discontinuity facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::StructuralTopology { language, files, .. } => {
+        Command::StructuralTopology {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = structural_topology::scan_files(&files, language)
                 .with_context(|| "failed to scan structural-topology facts")?;
             println!("{}", serde_json::to_string(&report)?);
         }
-        Command::LocalFlow { language, files, .. } => {
+        Command::LocalFlow {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let report = local_flow::scan_files(&files, language)
                 .with_context(|| "failed to scan local-flow facts")?;
@@ -136,37 +172,49 @@ fn main() -> Result<()> {
                 .with_context(|| "failed to scan structural similarity")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::OversizedPredicate { language, files, .. } => {
+        Command::OversizedPredicate {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = oversized_predicate::scan_files(&files, language)
                 .with_context(|| "failed to scan oversized-predicate facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::PathCondition { language, files, .. } => {
+        Command::PathCondition {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = path_condition::scan_files(&files, language)
                 .with_context(|| "failed to scan path-condition facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::SequenceMine { language, files, .. } => {
+        Command::SequenceMine {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = sequence_mine::scan_files(&files, language)
                 .with_context(|| "failed to scan sequence-mine facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::FunctionLcom { language, files, .. } => {
+        Command::FunctionLcom {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = function_lcom::scan_files(&files, language)
                 .with_context(|| "failed to scan function-lcom facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::FalseSimplicity { language, files, .. } => {
+        Command::FalseSimplicity {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = false_simplicity::scan_files(&files, language)
                 .with_context(|| "failed to scan false-simplicity facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
-        Command::FatUnion { language, files, .. } => {
+        Command::FatUnion {
+            language, files, ..
+        } => {
             let language = Language::parse(&language)?;
             let findings = fat_union::scan_files(&files, language)
                 .with_context(|| "failed to scan fat-union facts")?;
@@ -617,9 +665,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut rest = cursor.collect::<Vec<_>>().into_iter();
             while let Some(arg) = rest.next() {
                 if arg == "--language" {
-                    language = rest
-                        .next()
-                        .with_context(|| "--language requires a value")?;
+                    language = rest.next().with_context(|| "--language requires a value")?;
                 } else if let Some(value) = arg.strip_prefix("--language=") {
                     language = value.to_string();
                 } else if arg == "--mass" {
@@ -637,7 +683,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         .parse()
                         .with_context(|| "--fuzzy must be an integer")?;
                 } else if let Some(value) = arg.strip_prefix("--fuzzy=") {
-                    fuzzy = value.parse().with_context(|| "--fuzzy must be an integer")?;
+                    fuzzy = value
+                        .parse()
+                        .with_context(|| "--fuzzy must be an integer")?;
                 } else if arg == "--jobs" {
                     jobs = Some(parse_jobs(
                         rest.next().with_context(|| "--jobs requires a value")?,
@@ -663,7 +711,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     }
 }
 
-fn parse_language_files_and_jobs(args: Vec<String>) -> Result<(String, Vec<PathBuf>, Option<usize>)> {
+fn parse_language_files_and_jobs(
+    args: Vec<String>,
+) -> Result<(String, Vec<PathBuf>, Option<usize>)> {
     let mut language = String::from("ruby");
     let mut jobs = None;
     let mut files = Vec::new();

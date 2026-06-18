@@ -8,7 +8,9 @@ use tree_sitter::{Language as TreeSitterLanguage, Node as TreeSitterNode, Parser
 
 pub type Span = [usize; 4];
 const COMPARISON_OPERATORS: &[&str] = &["==", "!=", "===", "!==", "<", "<=", ">", ">="];
-const OPERATOR_CALL_OPERATORS: &[&str] = &["+", "-", "*", "/", "%", "**", "|", "&", "^", "<<", ">>", "=~", "!~"];
+const OPERATOR_CALL_OPERATORS: &[&str] = &[
+    "+", "-", "*", "/", "%", "**", "|", "&", "^", "<<", ">>", "=~", "!~",
+];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RawNode {
@@ -67,9 +69,7 @@ impl RawNode {
             children = flattened;
         }
 
-        if node.kind() == "pattern"
-            && children.len() == 1
-            && children[0].kind == "scope_resolution"
+        if node.kind() == "pattern" && children.len() == 1 && children[0].kind == "scope_resolution"
         {
             children = children[0].children.clone();
         }
@@ -95,7 +95,10 @@ impl RawNode {
         if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "call" {
             children = children[0].children.clone();
         }
-        if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "conditional" {
+        if node.kind() == "body_statement"
+            && children.len() == 1
+            && children[0].kind == "conditional"
+        {
             children = children[0].children.clone();
         }
         if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "module" {
@@ -123,7 +126,10 @@ impl RawNode {
         }
         if node.kind() == "block_body"
             && children.len() == 1
-            && matches!(children[0].kind.as_str(), "array" | "binary" | "string" | "unary")
+            && matches!(
+                children[0].kind.as_str(),
+                "array" | "binary" | "string" | "unary"
+            )
         {
             children = children[0].children.clone();
         }
@@ -195,8 +201,8 @@ pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
 }
 
 pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec<String>)> {
-    let source = fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let source =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
     let mut parser = Parser::new();
     parser
         .set_language(&language_grammar(language))
@@ -214,7 +220,10 @@ fn language_grammar(language: Language) -> TreeSitterLanguage {
         Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         Language::Python => tree_sitter_python::LANGUAGE.into(),
         Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::Java => tree_sitter_java::LANGUAGE.into(),
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Swift => tree_sitter_swift::LANGUAGE.into(),
+        Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
         Language::Go => tree_sitter_go::LANGUAGE.into(),
         Language::Rust => tree_sitter_rust::LANGUAGE.into(),
         Language::Zig => tree_sitter_zig::LANGUAGE.into(),
@@ -294,9 +303,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize(mut self, root: TreeSitterNode<'_>) -> Node {
-        let children = self.with_ruby_scope(root, true, |normalizer| {
-            normalizer.normalize_children(root)
-        });
+        let children =
+            self.with_ruby_scope(root, true, |normalizer| normalizer.normalize_children(root));
         self.wrap("ROOT", children, root)
     }
 
@@ -346,8 +354,12 @@ impl<'source> TreeSitterNormalizer<'source> {
                 let children = self.normalize_children(node);
                 Some(self.wrap("ROOT", children, node))
             }
-            "method" | "function_definition" | "function_declaration" | "method_definition"
-            | "method_declaration" | "function_item" => self.normalize_function(node),
+            "method"
+            | "function_definition"
+            | "function_declaration"
+            | "method_definition"
+            | "method_declaration"
+            | "function_item" => self.normalize_function(node),
             "singleton_method" => self.normalize_singleton_function(node),
             "class" | "class_definition" | "class_declaration" | "class_specifier" => {
                 self.normalize_class(node)
@@ -360,6 +372,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             "assignment" | "assignment_expression" | "assignment_statement" => {
                 self.normalize_assignment(node)
             }
+            "local_variable_declaration"
+            | "variable_declarator"
+            | "variable_declaration"
+            | "property_declaration" => self.normalize_declaration(node),
             "call" | "call_expression" | "method_call" | "method_call_expression" => {
                 self.normalize_call(node)
             }
@@ -387,7 +403,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             "array" => Some(self.normalize_array_literal(node)),
             "interpolation" => self.normalize_interpolation(node),
             "heredoc_beginning" => Some(self.normalize_heredoc_beginning(node)),
-            "string" | "string_content" | "string_literal" | "interpreted_string_literal"
+            "string"
+            | "string_content"
+            | "string_literal"
+            | "interpreted_string_literal"
             | "raw_string_literal" => {
                 if self.interpolated_string(node) {
                     Some(self.normalize_interpolated_string(node))
@@ -430,7 +449,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_function(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let name = self.function_name(node)?;
-        let args = self.normalize_parameters(self.named_field(node, "parameters"));
+        let args = self.normalize_parameters(self.parameters_child(node));
         let body = self.with_ruby_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
@@ -455,7 +474,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .find(|child| matches!(child.kind(), "self" | "constant" | "identifier"))
             .and_then(|child| self.normalize_node(child))
             .unwrap_or_else(|| self.wrap("SELF", Vec::new(), node));
-        let args = self.normalize_parameters(self.named_field(node, "parameters"));
+        let args = self.normalize_parameters(self.parameters_child(node));
         let body = self.with_ruby_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
@@ -596,13 +615,18 @@ impl<'source> TreeSitterNormalizer<'source> {
         let positive_raw = self
             .named_field(node, "consequence")
             .or_else(|| self.named_field(node, "body"))
-            .or_else(|| self.named_children(node).into_iter().find(|child| child.kind() == "then"))
+            .or_else(|| {
+                self.named_children(node)
+                    .into_iter()
+                    .find(|child| child.kind() == "then")
+            })
             .or_else(|| self.branch_child(node, condition_raw, 0));
         let negative_raw = self
             .named_field(node, "alternative")
             .or_else(|| self.explicit_alternative(node));
         let positive = optional_node(positive_raw.and_then(|child| self.normalize_body(child)));
-        let negative = optional_node(negative_raw.and_then(|child| self.normalize_else_or_branch(child)));
+        let negative =
+            optional_node(negative_raw.and_then(|child| self.normalize_else_or_branch(child)));
         let node_type = if node.kind().starts_with("unless") {
             "UNLESS"
         } else {
@@ -674,7 +698,11 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        self.wrap("SUPER", vec![list_or_nil(args, args_node.unwrap_or(node), self)], node)
+        self.wrap(
+            "SUPER",
+            vec![list_or_nil(args, args_node.unwrap_or(node), self)],
+            node,
+        )
     }
 
     fn normalize_return_node(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
@@ -858,7 +886,9 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_assignment(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let left = self.assignment_left(node)?;
-        let right = self.assignment_right(node).and_then(|right| self.normalize_node(right));
+        let right = self
+            .assignment_right(node)
+            .and_then(|right| self.normalize_node(right));
         if let Some(target) = self.assignment_target(left, right.clone(), node) {
             return Some(target);
         }
@@ -867,6 +897,40 @@ impl<'source> TreeSitterNormalizer<'source> {
             vec![Child::String(self.target_name(left)), optional_node(right)],
             node,
         ))
+    }
+
+    fn normalize_declaration(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let mut assignments = Vec::new();
+        for entry in self.declaration_entries(node) {
+            let Some(name) = self.declaration_name(entry) else {
+                continue;
+            };
+            let right = self
+                .declaration_value(entry)
+                .and_then(|value| self.normalize_node(value));
+            assignments.push(self.wrap(
+                "LASGN",
+                vec![Child::String(self.target_name(name)), optional_node(right)],
+                entry,
+            ));
+        }
+
+        if assignments.is_empty() {
+            None
+        } else if assignments.len() == 1 {
+            assignments.into_iter().next()
+        } else {
+            Some(
+                self.wrap(
+                    "BLOCK",
+                    assignments
+                        .into_iter()
+                        .map(|assignment| Child::Node(Box::new(assignment)))
+                        .collect(),
+                    node,
+                ),
+            )
+        }
     }
 
     fn normalize_call(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
@@ -905,12 +969,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         let call_source = if self.dotted_call(node) {
             node
         } else {
-            self.named_children(node)
-                .into_iter()
-                .find(|child| {
-                    Some(*child) != block
-                        && (self.call_kind(child.kind()) || self.member_read_node(*child))
-                })?
+            self.named_children(node).into_iter().find(|child| {
+                Some(*child) != block
+                    && (self.call_kind(child.kind()) || self.member_read_node(*child))
+            })?
         };
         let call = self.normalize_call_without_block(call_source, block)?;
         let args = self.normalize_block_parameters(block);
@@ -976,11 +1038,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                     source,
                 ));
             }
-            return Some(self.wrap(
-                node_type,
-                vec![receiver, Child::Symbol(method), args],
-                node,
-            ));
+            return Some(self.wrap(node_type, vec![receiver, Child::Symbol(method), args], node));
         }
 
         let function = self
@@ -1007,11 +1065,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             let (receiver, method) = self.member_parts(function)?;
             let receiver = optional_node(self.normalize_node(receiver));
             let args = list_or_nil(args, node, self);
-            return Some(self.wrap(
-                "CALL",
-                vec![receiver, Child::Symbol(method), args],
-                node,
-            ));
+            return Some(self.wrap("CALL", vec![receiver, Child::Symbol(method), args], node));
         }
         let function = optional_node(self.normalize_node(function));
         let args = list_or_nil(args, node, self);
@@ -1033,7 +1087,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         if receiver.kind() == "self" {
             return Some(self.wrap(
                 "FCALL",
-                vec![Child::Symbol("[]".to_string()), list_or_nil(args, node, self)],
+                vec![
+                    Child::Symbol("[]".to_string()),
+                    list_or_nil(args, node, self),
+                ],
                 node,
             ));
         }
@@ -1049,7 +1106,9 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn normalize_rescue_modifier(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let named = self.named_children(node);
         let body = named.first().and_then(|body| self.normalize_node(*body));
-        let handler = named.get(1).and_then(|handler| self.normalize_node(*handler));
+        let handler = named
+            .get(1)
+            .and_then(|handler| self.normalize_node(*handler));
         let resbody = self.wrap(
             "RESBODY",
             vec![Child::Nil, optional_node(handler), Child::Nil],
@@ -1118,7 +1177,8 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .copied()
                 .take_while(|child| child.kind() != "ensure")
                 .collect::<Vec<_>>();
-            let body = self.normalize_body_nodes(body_nodes.clone(), *body_nodes.first().unwrap_or(&node));
+            let body =
+                self.normalize_body_nodes(body_nodes.clone(), *body_nodes.first().unwrap_or(&node));
             let ensure_body = self.normalize_body(ensure_node);
             return Some(self.wrap(
                 "ENSURE",
@@ -1132,7 +1192,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             .copied()
             .take_while(|child| child.kind() != "rescue")
             .collect::<Vec<_>>();
-        let body = self.normalize_body_nodes(body_nodes.clone(), *body_nodes.first().unwrap_or(&node));
+        let body =
+            self.normalize_body_nodes(body_nodes.clone(), *body_nodes.first().unwrap_or(&node));
         let resbodies = rescue_nodes
             .iter()
             .filter_map(|child| self.normalize_rescue_clause(*child))
@@ -1172,13 +1233,20 @@ impl<'source> TreeSitterNormalizer<'source> {
             .unwrap_or_default();
         let exception_variable = self.rescue_exception_variable(node);
         let handler = self.named_children(node).into_iter().rev().find(|child| {
-            !matches!(child.kind(), "exceptions" | "exception_variable" | "comment")
+            !matches!(
+                child.kind(),
+                "exceptions" | "exception_variable" | "comment"
+            )
         });
         let normalized_handler = handler.and_then(|handler| self.normalize_body(handler));
         let body = self.prepend_rescue_exception_assignment(normalized_handler, exception_variable);
         Some(self.wrap(
             "RESBODY",
-            vec![list_or_nil(exception_nodes, exceptions.unwrap_or(node), self), optional_node(body), Child::Nil],
+            vec![
+                list_or_nil(exception_nodes, exceptions.unwrap_or(node), self),
+                optional_node(body),
+                Child::Nil,
+            ],
             node,
         ))
     }
@@ -1244,7 +1312,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             };
             Some(Node {
                 r#type: "BLOCK".to_string(),
-                children: vec![Child::Node(Box::new(assignment)), Child::Node(Box::new(body))],
+                children: vec![
+                    Child::Node(Box::new(assignment)),
+                    Child::Node(Box::new(body)),
+                ],
                 first_lineno,
                 first_column,
                 last_lineno,
@@ -1260,11 +1331,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let condition = *named.last()?;
         let condition = optional_node(self.normalize_node(condition));
         let action = optional_node(self.normalize_node(action));
-        Some(self.wrap(
-            "IF",
-            vec![condition, action, Child::Nil],
-            node,
-        ))
+        Some(self.wrap("IF", vec![condition, action, Child::Nil], node))
     }
 
     fn normalize_modifier_action(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
@@ -1330,7 +1397,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_visibility_inline_def(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        let message = node_text(self.named_children(node).into_iter().next()?, self.source).to_string();
+        let message =
+            node_text(self.named_children(node).into_iter().next()?, self.source).to_string();
         let args = self
             .named_children(node)
             .into_iter()
@@ -1392,7 +1460,10 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_global_variable(&self, node: TreeSitterNode<'_>) -> Node {
         let text = node_text(node, self.source).to_string();
-        if let Some(number) = text.strip_prefix('$').and_then(|value| value.parse::<i64>().ok()) {
+        if let Some(number) = text
+            .strip_prefix('$')
+            .and_then(|value| value.parse::<i64>().ok())
+        {
             return self.wrap("NTH_REF", vec![Child::String(number.to_string())], node);
         }
         self.wrap("GVAR", vec![Child::String(text)], node)
@@ -1450,18 +1521,26 @@ impl<'source> TreeSitterNormalizer<'source> {
         } else {
             Some(self.list(exprs, node))
         };
-        Some(self.wrap("EVSTR", body.into_iter().map(|node| Child::Node(Box::new(node))).collect(), node))
+        Some(
+            self.wrap(
+                "EVSTR",
+                body.into_iter()
+                    .map(|node| Child::Node(Box::new(node)))
+                    .collect(),
+                node,
+            ),
+        )
     }
 
     fn normalize_heredoc_beginning(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let heredoc_body = node
-            .parent()
-            .and_then(|parent| parent.parent())
-            .and_then(|body_statement| {
-                self.named_children(body_statement)
-                    .into_iter()
-                    .find(|child| child.kind() == "heredoc_body")
-            });
+        let heredoc_body =
+            node.parent()
+                .and_then(|parent| parent.parent())
+                .and_then(|body_statement| {
+                    self.named_children(body_statement)
+                        .into_iter()
+                        .find(|child| child.kind() == "heredoc_body")
+                });
         let children = heredoc_body
             .map(|body| self.normalize_heredoc_children(body))
             .unwrap_or_default();
@@ -1507,7 +1586,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 let value = optional_node(self.normalize_node(value));
                 Some(self.wrap(
                     "LASGN",
-                    vec![Child::Symbol(node_text(name, self.source).to_string()), value],
+                    vec![
+                        Child::Symbol(node_text(name, self.source).to_string()),
+                        value,
+                    ],
                     param,
                 ))
             })
@@ -1642,16 +1724,35 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         if matches!(
             node.kind(),
-            "method_parameters" | "parameters" | "parameter_list" | "formal_parameters"
-            | "block_parameters" | "lambda_parameters"
+            "method_parameters"
+                | "parameters"
+                | "parameter_list"
+                | "formal_parameters"
+                | "function_value_parameters"
+                | "parameter"
+                | "block_parameters"
+                | "lambda_parameters"
         ) {
-            for child in self.named_children(node) {
-                self.collect_identifier_names(child, locals);
+            if node.kind() == "parameter" {
+                self.collect_parameter_names(node, locals);
+            } else {
+                for child in self.named_children(node) {
+                    if child.kind() == "parameter" {
+                        self.collect_parameter_names(child, locals);
+                    } else {
+                        self.collect_identifier_names(child, locals);
+                    }
+                }
             }
         }
         if matches!(node.kind(), "assignment" | "operator_assignment") {
             if let Some(left) = self.assignment_left(node) {
                 self.collect_assignment_target_names(left, locals);
+            }
+        }
+        for target in self.declaration_entries(node) {
+            if let Some(name) = self.declaration_name(target) {
+                self.collect_assignment_target_names(name, locals);
             }
         }
         for child in self.named_children(node) {
@@ -1667,7 +1768,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         locals: &mut BTreeSet<String>,
     ) {
         if self.identifier_kind(node.kind()) {
-            locals.insert(node_text(node, self.source).trim_start_matches('*').to_string());
+            locals.insert(
+                node_text(node, self.source)
+                    .trim_start_matches('*')
+                    .to_string(),
+            );
             return;
         }
         if matches!(
@@ -1677,6 +1782,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 | "splat"
                 | "splat_parameter"
                 | "rest_assignment"
+                | "pattern"
         ) {
             for child in self.named_children(node) {
                 self.collect_assignment_target_names(child, locals);
@@ -1686,10 +1792,32 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn collect_identifier_names(&self, node: TreeSitterNode<'_>, locals: &mut BTreeSet<String>) {
         if self.identifier_kind(node.kind()) {
-            locals.insert(node_text(node, self.source).trim_start_matches('*').to_string());
+            locals.insert(
+                node_text(node, self.source)
+                    .trim_start_matches('*')
+                    .to_string(),
+            );
         }
         for child in self.named_children(node) {
             self.collect_identifier_names(child, locals);
+        }
+    }
+
+    fn collect_parameter_names(&self, node: TreeSitterNode<'_>, locals: &mut BTreeSet<String>) {
+        if let Some(name) = self.named_field(node, "name") {
+            self.collect_identifier_names(name, locals);
+            return;
+        }
+        if let Some(name) = self
+            .named_children(node)
+            .into_iter()
+            .find(|child| self.identifier_kind(child.kind()))
+        {
+            locals.insert(
+                node_text(name, self.source)
+                    .trim_start_matches('*')
+                    .to_string(),
+            );
         }
     }
 
@@ -1698,6 +1826,15 @@ impl<'source> TreeSitterNormalizer<'source> {
             && node
                 .parent()
                 .map(|parent| function_kind(parent.kind()))
+                .unwrap_or(false)
+        {
+            return false;
+        }
+        if node.kind() == "block"
+            && node
+                .parent()
+                .and_then(|parent| parent.parent())
+                .map(|grandparent| function_kind(grandparent.kind()))
                 .unwrap_or(false)
         {
             return false;
@@ -1754,8 +1891,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 | "parameters"
                 | "parameter_list"
                 | "formal_parameters"
+                | "function_value_parameters"
                 | "block_parameters"
                 | "lambda_parameters"
+                | "parameter"
                 | "optional_parameter"
                 | "keyword_parameter"
                 | "block_parameter"
@@ -1823,12 +1962,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         let node_type = if keyword == "unless" { "UNLESS" } else { "IF" };
         let condition = optional_node(self.normalize_node(condition));
         let consequence = optional_node(consequence.and_then(|child| self.normalize_body(child)));
-        let alternative = optional_node(alternative.and_then(|child| self.normalize_else_or_branch(child)));
-        Some(self.wrap(
-            node_type,
-            vec![condition, consequence, alternative],
-            node,
-        ))
+        let alternative =
+            optional_node(alternative.and_then(|child| self.normalize_else_or_branch(child)));
+        Some(self.wrap(node_type, vec![condition, consequence, alternative], node))
     }
 
     fn command_call_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -1862,7 +1998,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.named_children(node)
             .into_iter()
             .find(|child| child.kind() == "argument_list")
-            .map(|args| node_text(args, self.source).trim_start().starts_with("def "))
+            .map(|args| {
+                node_text(args, self.source)
+                    .trim_start()
+                    .starts_with("def ")
+            })
             .unwrap_or(false)
     }
 
@@ -1945,9 +2085,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         if !text.contains("def ") || !text.split_whitespace().nth(1).unwrap_or("").contains('.') {
             return None;
         }
-        self.named_children(source)
-            .into_iter()
-            .find(|child| matches!(child.kind(), "self" | "this" | "constant" | "scope_resolution"))
+        self.named_children(source).into_iter().find(|child| {
+            matches!(
+                child.kind(),
+                "self" | "this" | "constant" | "scope_resolution"
+            )
+        })
     }
 
     fn inline_def_name_after_receiver(
@@ -1965,7 +2108,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn inline_def_body<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
-        let mut stack = self.named_children(node).into_iter().rev().collect::<Vec<_>>();
+        let mut stack = self
+            .named_children(node)
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
         while let Some(child) = stack.pop() {
             if child.kind() == "body_statement" {
                 return Some(child);
@@ -2003,8 +2150,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn boolean_expression(&self, node: TreeSitterNode<'_>) -> bool {
-        (matches!(node.kind(), "binary" | "binary_expression" | "boolean_operator")
-            || self.boolean_statement(node))
+        (matches!(
+            node.kind(),
+            "binary" | "binary_expression" | "boolean_operator"
+        ) || self.boolean_statement(node))
             && matches!(self.boolean_operator(node).as_deref(), Some("and" | "or"))
     }
 
@@ -2026,7 +2175,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         node.children(&mut node.walk()).all(|child| {
             child.is_named()
-                || matches!(node_text(child, self.source), "&&" | "||" | "and" | "or" | "(" | ")")
+                || matches!(
+                    node_text(child, self.source),
+                    "&&" | "||" | "and" | "or" | "(" | ")"
+                )
         })
     }
 
@@ -2039,11 +2191,13 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn comparison_expression(&self, node: TreeSitterNode<'_>) -> bool {
-        matches!(node.kind(), "binary" | "binary_expression" | "comparison_operator")
-            && self
-                .comparison_operator(node)
-                .map(|operator| COMPARISON_OPERATORS.contains(&operator.as_str()))
-                .unwrap_or(false)
+        matches!(
+            node.kind(),
+            "binary" | "binary_expression" | "comparison_operator"
+        ) && self
+            .comparison_operator(node)
+            .map(|operator| COMPARISON_OPERATORS.contains(&operator.as_str()))
+            .unwrap_or(false)
     }
 
     fn infix_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -2129,9 +2283,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         matches!(node.kind(), "body_statement" | "block_body" | "statement")
             && self.call_block(node).is_some()
             && (self.dotted_call(node)
-                || self.named_children(node).into_iter().any(|child| {
-                    self.call_kind(child.kind()) || self.member_read_node(child)
-                }))
+                || self
+                    .named_children(node)
+                    .into_iter()
+                    .any(|child| self.call_kind(child.kind()) || self.member_read_node(child)))
     }
 
     fn dotted_expression(&self, node: TreeSitterNode<'_>) -> bool {
@@ -2266,10 +2421,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn command_arguments(&mut self, args: TreeSitterNode<'_>) -> Vec<Node> {
         let children = self.named_children(args);
         if children.is_empty() {
-            return self
-                .scalar_argument_list_value(args)
-                .into_iter()
-                .collect();
+            return self.scalar_argument_list_value(args).into_iter().collect();
         }
         if self.dotted_expression(args) {
             return self.normalize_dotted_expression(args).into_iter().collect();
@@ -2278,7 +2430,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             && self.call_kind(children[0].kind())
             && self.call_block(children[0]).is_some()
         {
-            return self.normalize_call_with_block(children[0]).into_iter().collect();
+            return self
+                .normalize_call_with_block(children[0])
+                .into_iter()
+                .collect();
         }
         children
             .into_iter()
@@ -2326,9 +2481,106 @@ impl<'source> TreeSitterNormalizer<'source> {
             .or_else(|| self.named_children(node).into_iter().next())
     }
 
-    fn assignment_right<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
+    fn assignment_right<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
         self.named_field(node, "right")
             .or_else(|| self.named_children(node).into_iter().nth(1))
+    }
+
+    fn parameters_child<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        self.named_field(node, "parameters").or_else(|| {
+            self.named_children(node).into_iter().find(|child| {
+                matches!(
+                    child.kind(),
+                    "parameters"
+                        | "parameter_list"
+                        | "formal_parameters"
+                        | "function_value_parameters"
+                        | "method_parameters"
+                )
+            })
+        })
+    }
+
+    fn declaration_entries<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        if matches!(node.kind(), "local_variable_declaration") {
+            let entries = self
+                .named_children(node)
+                .into_iter()
+                .filter(|child| child.kind() == "variable_declarator")
+                .collect::<Vec<_>>();
+            if !entries.is_empty() {
+                return entries;
+            }
+        }
+        if matches!(
+            node.kind(),
+            "local_variable_declaration"
+                | "variable_declarator"
+                | "variable_declaration"
+                | "property_declaration"
+        ) {
+            vec![node]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn declaration_name<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if let Some(name) = self.named_field(node, "name") {
+            return Some(name);
+        }
+
+        for child in self.named_children(node) {
+            if child.kind() == "variable_declaration" {
+                if let Some(name) = self.declaration_name(child) {
+                    return Some(name);
+                }
+            }
+            if matches!(child.kind(), "identifier" | "simple_identifier" | "pattern") {
+                return Some(child);
+            }
+        }
+        None
+    }
+
+    fn declaration_value<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "property_declaration" {
+            let mut after_target = false;
+            for child in self.named_children(node) {
+                if !after_target && matches!(child.kind(), "variable_declaration" | "pattern") {
+                    after_target = true;
+                    continue;
+                }
+                if after_target && !declaration_metadata_kind(child.kind()) {
+                    return Some(child);
+                }
+            }
+        }
+
+        self.named_field(node, "value").or_else(|| {
+            self.named_children(node).into_iter().find(|child| {
+                !declaration_metadata_kind(child.kind())
+                    && !matches!(
+                        child.kind(),
+                        "identifier" | "simple_identifier" | "pattern" | "variable_declaration"
+                    )
+            })
+        })
     }
 
     fn assignment_target(
@@ -2406,13 +2658,14 @@ impl<'source> TreeSitterNormalizer<'source> {
             .next_named_sibling()
             .and_then(|sibling| self.normalize_node(sibling));
         let source = node.parent().unwrap_or(node);
-        self.assignment_target(node, right.clone(), source).or_else(|| {
-            Some(self.wrap(
-                "LASGN",
-                vec![Child::String(self.target_name(node)), optional_node(right)],
-                node,
-            ))
-        })
+        self.assignment_target(node, right.clone(), source)
+            .or_else(|| {
+                Some(self.wrap(
+                    "LASGN",
+                    vec![Child::String(self.target_name(node)), optional_node(right)],
+                    node,
+                ))
+            })
     }
 
     fn target_name(&self, node: TreeSitterNode<'_>) -> String {
@@ -2424,17 +2677,26 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn function_name(&self, node: TreeSitterNode<'_>) -> Option<String> {
         self.named_field(node, "name")
             .or_else(|| {
-                self.named_children(node).into_iter().find(|child| {
-                    self.identifier_kind(child.kind()) || child.kind() == "constant"
-                })
+                self.named_children(node)
+                    .into_iter()
+                    .find(|child| self.identifier_kind(child.kind()) || child.kind() == "constant")
             })
             .map(|name| node_text(name, self.source).to_string())
     }
 
     fn block_child<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
-        self.named_children(node)
-            .into_iter()
-            .find(|child| matches!(child.kind(), "body_statement" | "block_body" | "block"))
+        self.named_children(node).into_iter().find(|child| {
+            matches!(
+                child.kind(),
+                "body_statement"
+                    | "block_body"
+                    | "block"
+                    | "class_body"
+                    | "function_body"
+                    | "statements"
+                    | "control_structure_body"
+            )
+        })
     }
 
     fn call_block<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
@@ -2457,11 +2719,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .collect()
     }
 
-    fn source_before_child(
-        &self,
-        node: TreeSitterNode<'_>,
-        child: TreeSitterNode<'_>,
-    ) -> Node {
+    fn source_before_child(&self, node: TreeSitterNode<'_>, child: TreeSitterNode<'_>) -> Node {
         let text = self
             .source
             .get(node.start_byte()..child.start_byte())
@@ -2544,6 +2802,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 | "block_body"
                 | "control_structure_body"
                 | "function_body"
+                | "statements"
         )
     }
 
@@ -2592,7 +2851,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             "SCOPE" => {
                 if node.children.len() > 2 {
                     let child = std::mem::replace(&mut node.children[2], Child::Nil);
-                    if let Some(elided) = child_node(child).and_then(|body| self.elide_tail_returns(Some(body))) {
+                    if let Some(elided) =
+                        child_node(child).and_then(|body| self.elide_tail_returns(Some(body)))
+                    {
                         node.children[2] = Child::Node(Box::new(elided));
                     }
                 }
@@ -2601,7 +2862,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 for index in [1usize, 2usize] {
                     if node.children.len() > index {
                         let child = std::mem::replace(&mut node.children[index], Child::Nil);
-                        if let Some(elided) = child_node(child).and_then(|body| self.elide_tail_returns(Some(body))) {
+                        if let Some(elided) =
+                            child_node(child).and_then(|body| self.elide_tail_returns(Some(body)))
+                        {
                             node.children[index] = Child::Node(Box::new(elided));
                         }
                     }
@@ -2611,7 +2874,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 let index = if node.r#type == "CASE" { 1 } else { 0 };
                 if node.children.len() > index {
                     let child = std::mem::replace(&mut node.children[index], Child::Nil);
-                    if let Some(elided) = child_node(child).and_then(|body| self.elide_tail_returns(Some(body))) {
+                    if let Some(elided) =
+                        child_node(child).and_then(|body| self.elide_tail_returns(Some(body)))
+                    {
                         node.children[index] = Child::Node(Box::new(elided));
                     }
                 }
@@ -2620,7 +2885,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 for index in [1usize, 2usize] {
                     if node.children.len() > index {
                         let child = std::mem::replace(&mut node.children[index], Child::Nil);
-                        if let Some(elided) = child_node(child).and_then(|body| self.elide_tail_returns(Some(body))) {
+                        if let Some(elided) =
+                            child_node(child).and_then(|body| self.elide_tail_returns(Some(body)))
+                        {
                             node.children[index] = Child::Node(Box::new(elided));
                         }
                     }
@@ -2630,7 +2897,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 for index in [0usize, 1usize] {
                     if node.children.len() > index {
                         let child = std::mem::replace(&mut node.children[index], Child::Nil);
-                        if let Some(elided) = child_node(child).and_then(|body| self.elide_tail_returns(Some(body))) {
+                        if let Some(elided) =
+                            child_node(child).and_then(|body| self.elide_tail_returns(Some(body)))
+                        {
                             node.children[index] = Child::Node(Box::new(elided));
                         }
                     }
@@ -2722,15 +2991,27 @@ fn dynamic_scope(mut node: Node) -> Node {
 }
 
 fn assignment_operator(text: &str) -> bool {
+    matches!(text, "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&&=" | "||=")
+}
+
+fn declaration_metadata_kind(kind: &str) -> bool {
     matches!(
-        text,
-        "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&&=" | "||="
+        kind,
+        "modifiers"
+            | "type"
+            | "nullable_type"
+            | "parenthesized_type"
+            | "user_type"
+            | "type_identifier"
+            | "integral_type"
+            | "floating_point_type"
+            | "void_type"
     )
 }
 
 fn kind_type(kind: &str) -> &str {
     match kind {
-        "body_statement" | "block_body" | "block" => "BLOCK",
+        "body_statement" | "block_body" | "block" | "statements" => "BLOCK",
         other => other,
     }
 }
@@ -2738,7 +3019,12 @@ fn kind_type(kind: &str) -> &str {
 fn if_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "if" | "if_statement" | "if_modifier" | "unless" | "unless_modifier" | "if_expression" | "conditional"
+        "if" | "if_statement"
+            | "if_modifier"
+            | "unless"
+            | "unless_modifier"
+            | "if_expression"
+            | "conditional"
     )
 }
 
@@ -2863,14 +3149,17 @@ end
         nodes_of_type(&root, "DEFS", &mut defs);
 
         assert!(
-            defs.iter()
-                .any(|node| node.children.get(1) == Some(&Child::Symbol("collect_payload_binding_names".to_string()))),
+            defs.iter().any(|node| node.children.get(1)
+                == Some(&Child::Symbol("collect_payload_binding_names".to_string()))),
             "expected normalized DEFS for visibility-wrapped singleton def, got {root:#?}"
         );
 
         let def = defs
             .into_iter()
-            .find(|node| node.children.get(1) == Some(&Child::Symbol("collect_payload_binding_names".to_string())))
+            .find(|node| {
+                node.children.get(1)
+                    == Some(&Child::Symbol("collect_payload_binding_names".to_string()))
+            })
             .expect("visibility-wrapped singleton def should normalize to DEFS");
         let mut calls = Vec::new();
         nodes_of_type(def, "CALL", &mut calls);
@@ -2913,7 +3202,10 @@ end
             .iter()
             .find(|node| node.text == "<<~ZIG.chomp")
             .expect("expected heredoc chomp call");
-        assert_eq!(call.children.get(1), Some(&Child::Symbol("chomp".to_string())));
+        assert_eq!(
+            call.children.get(1),
+            Some(&Child::Symbol("chomp".to_string()))
+        );
         assert_eq!(
             call.children
                 .first()
@@ -2945,10 +3237,7 @@ end
         };
         let and_node = Node {
             r#type: "AND".to_string(),
-            children: vec![
-                Child::Node(Box::new(left)),
-                Child::Node(Box::new(right)),
-            ],
+            children: vec![Child::Node(Box::new(left)), Child::Node(Box::new(right))],
             first_lineno: 1,
             first_column: 0,
             last_lineno: 1,

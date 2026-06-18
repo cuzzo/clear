@@ -38,7 +38,12 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<FatUnionRepor
         detector.walk(&root, &Vec::new());
         out.extend(detector.findings());
     }
-    out.sort_by(|a, b| b.common.len().cmp(&a.common.len()).then_with(|| a.at.cmp(&b.at)));
+    out.sort_by(|a, b| {
+        b.common
+            .len()
+            .cmp(&a.common.len())
+            .then_with(|| a.at.cmp(&b.at))
+    });
     Ok(FatUnionReport { fat_unions: out })
 }
 
@@ -50,7 +55,11 @@ struct FatUnion {
 
 impl FatUnion {
     fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines, reports: Vec::new() }
+        Self {
+            file,
+            lines,
+            reports: Vec::new(),
+        }
     }
 
     fn walk(&mut self, node: &Node, defstack: &[String]) {
@@ -75,23 +84,36 @@ impl FatUnion {
         let (cond, first_when) = if node.r#type == "CASE2" {
             (None, node.children.get(0).and_then(ast::node))
         } else {
-            (node.children.get(0).and_then(ast::node), node.children.get(1).and_then(ast::node))
+            (
+                node.children.get(0).and_then(ast::node),
+                node.children.get(1).and_then(ast::node),
+            )
         };
 
         let mut variants = BTreeMap::new();
         let mut current_when = first_when;
         while let Some(when_node) = current_when {
-            if when_node.r#type != "WHEN" { break; }
+            if when_node.r#type != "WHEN" {
+                break;
+            }
             if let Some(pat) = when_node.children.get(0).and_then(ast::node) {
                 if let Some(variant_name) = self.variant_name(pat) {
-                    let reads = self.collect_reads(when_node.children.get(1).and_then(ast::node).unwrap_or(when_node));
+                    let reads = self.collect_reads(
+                        when_node
+                            .children
+                            .get(1)
+                            .and_then(ast::node)
+                            .unwrap_or(when_node),
+                    );
                     variants.insert(variant_name, VariantReads { reads });
                 }
             }
             current_when = when_node.children.get(2).and_then(ast::node);
         }
 
-        if variants.len() < 2 { return; }
+        if variants.len() < 2 {
+            return;
+        }
 
         let mut common = None;
         for v in variants.values() {
@@ -105,14 +127,24 @@ impl FatUnion {
         }
 
         let common = common.unwrap_or_default();
-        if common.is_empty() { return; }
+        if common.is_empty() {
+            return;
+        }
 
         let subject_name = self.subject_name(cond);
         let defn = defstack.last().map(|s| s.as_str()).unwrap_or("<top>");
         let at = format!("{}:{}:{}", self.file, defn, node.first_lineno);
-        
+
         let mut spans = BTreeMap::new();
-        spans.insert(at.clone(), [node.first_lineno, node.first_column, node.last_lineno, node.last_column]);
+        spans.insert(
+            at.clone(),
+            [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
+        );
 
         let mut variant_set: Vec<_> = variants.keys().cloned().collect();
         variant_set.sort();
@@ -129,10 +161,14 @@ impl FatUnion {
     }
 
     fn variant_name(&self, node: &Node) -> Option<String> {
-        let n = if node.r#type == "LIST" { node.children.iter().filter_map(ast::node).next()? } else { node };
+        let n = if node.r#type == "LIST" {
+            node.children.iter().filter_map(ast::node).next()?
+        } else {
+            node
+        };
         match n.r#type.as_str() {
             "CONSTANT" | "SCOPE_RESOLUTION" => Some(ast::slice(n, &self.lines)),
-            _ => None
+            _ => None,
         }
     }
 
@@ -147,14 +183,24 @@ impl FatUnion {
             if let Some(Child::Symbol(mid)) = node.children.get(1) {
                 out.push(Read {
                     name: mid.clone(),
-                    span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                    span: [
+                        node.first_lineno,
+                        node.first_column,
+                        node.last_lineno,
+                        node.last_column,
+                    ],
                 });
             }
         } else if matches!(node.r#type.as_str(), "FCALL" | "VCALL") {
             if let Some(Child::Symbol(mid)) = node.children.get(0) {
                 out.push(Read {
                     name: mid.clone(),
-                    span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                    span: [
+                        node.first_lineno,
+                        node.first_column,
+                        node.last_lineno,
+                        node.last_column,
+                    ],
                 });
             }
         }
@@ -164,7 +210,8 @@ impl FatUnion {
     }
 
     fn subject_name(&self, cond: Option<&Node>) -> String {
-        cond.map(|c| ast::slice(c, &self.lines)).unwrap_or_else(|| "implicit".to_string())
+        cond.map(|c| ast::slice(c, &self.lines))
+            .unwrap_or_else(|| "implicit".to_string())
     }
 
     fn findings(&self) -> Vec<FatUnionRow> {

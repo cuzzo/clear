@@ -96,7 +96,10 @@ impl OversizedPredicate {
             ],
         );
 
-        let atoms_text: Vec<String> = atoms.into_iter().map(|a| ast::slice(a, &self.lines)).collect();
+        let atoms_text: Vec<String> = atoms
+            .into_iter()
+            .map(|a| ast::slice(a, &self.lines))
+            .collect();
 
         self.findings.push(OversizedPredicateRow {
             at,

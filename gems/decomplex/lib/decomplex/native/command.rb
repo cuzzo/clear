@@ -38,6 +38,26 @@ module Decomplex
         ["--jobs", count.to_s]
       end
 
+      def language_for(path)
+        case File.extname(path)
+        when ".rb" then "ruby"
+        when ".py" then "python"
+        when ".js" then "javascript"
+        when ".ts", ".tsx" then "typescript"
+        when ".java" then "java"
+        when ".swift" then "swift"
+        when ".kt", ".kts" then "kotlin"
+        when ".go" then "go"
+        when ".rs" then "rust"
+        when ".zig" then "zig"
+        when ".lua" then "lua"
+        when ".c", ".h" then "c"
+        when ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx" then "cpp"
+        when ".cs" then "csharp"
+        else "ruby"
+        end
+      end
+
       private_class_method def self.native_command(args)
         if fresh_binary?(binary_path)
           [binary_path, *args]

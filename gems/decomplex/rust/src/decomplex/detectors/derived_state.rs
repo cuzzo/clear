@@ -113,7 +113,11 @@ fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
             if let Some(val) = n.children.get(1).and_then(ast::node) {
                 lvars(val, &mut deps);
             }
-            let mut deps: Vec<_> = deps.into_iter().collect::<BTreeSet<_>>().into_iter().collect();
+            let mut deps: Vec<_> = deps
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
             deps.sort();
             Asgn {
                 name: match n.children.first().unwrap() {
@@ -143,7 +147,10 @@ fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
             let Some(reasn) = reasn else { continue };
 
             // b recomputed at or after a's reassignment?
-            let recomputed = asgns.iter().skip(i + 1).any(|x| &x.name == &b.name && x.line >= reasn.line);
+            let recomputed = asgns
+                .iter()
+                .skip(i + 1)
+                .any(|x| &x.name == &b.name && x.line >= reasn.line);
             if recomputed {
                 continue;
             }

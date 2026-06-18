@@ -1,4 +1,6 @@
-use super::{ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite};
+use super::{
+    ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite,
+};
 use crate::decomplex::ast::{line, node_text, normalize_text, span, RawNode};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -51,7 +53,10 @@ fn language_grammar(language: Language) -> TreeSitterLanguage {
         Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         Language::Python => tree_sitter_python::LANGUAGE.into(),
         Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::Java => tree_sitter_java::LANGUAGE.into(),
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Swift => tree_sitter_swift::LANGUAGE.into(),
+        Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
         Language::Go => tree_sitter_go::LANGUAGE.into(),
         Language::Rust => tree_sitter_rust::LANGUAGE.into(),
         Language::Zig => tree_sitter_zig::LANGUAGE.into(),
@@ -128,10 +133,31 @@ fn collect_facts(
     seen_writes: &mut HashSet<String>,
     seen_decisions: &mut HashSet<String>,
 ) {
-    let next_context = push_function_context(node, push_owner_context(node, source, context, language), source, language);
+    let next_context = push_function_context(
+        node,
+        push_owner_context(node, source, context, language),
+        source,
+        language,
+    );
     record_function_def(node, source, file, language, &next_context, function_defs);
-    record_state_write(node, source, file, language, &next_context, state_writes, seen_writes);
-    record_decision_site(node, source, file, language, &next_context, decision_sites, seen_decisions);
+    record_state_write(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        state_writes,
+        seen_writes,
+    );
+    record_decision_site(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        decision_sites,
+        seen_decisions,
+    );
     record_predicate_alias(node, source, file, language, predicate_aliases);
     record_comparison_use(node, source, file, language, &next_context, comparison_uses);
 
@@ -173,11 +199,20 @@ fn record_function_def(
         span: span(node),
         body: RawNode::from_tree_sitter(node, source),
     };
-    let key = (function.file.clone(), function.owner.clone(), function.name.clone(), function.line);
-    if out
-        .iter()
-        .any(|existing| (existing.file.clone(), existing.owner.clone(), existing.name.clone(), existing.line) == key)
-    {
+    let key = (
+        function.file.clone(),
+        function.owner.clone(),
+        function.name.clone(),
+        function.line,
+    );
+    if out.iter().any(|existing| {
+        (
+            existing.file.clone(),
+            existing.owner.clone(),
+            existing.name.clone(),
+            existing.line,
+        ) == key
+    }) {
         return;
     }
     out.push(function);
@@ -238,7 +273,10 @@ fn record_comparison_use(
 
 fn comparison_node(node: Node<'_>, source: &str) -> bool {
     if matches!(node.kind(), "binary" | "binary_expression") {
-        return matches!(direct_operator_from_source(node, source).as_str(), "==" | "!=");
+        return matches!(
+            direct_operator_from_source(node, source).as_str(),
+            "==" | "!="
+        );
     }
     if node.kind() != "call" {
         return false;
@@ -275,15 +313,19 @@ fn record_decision_site(
         if patterns.len() < 2 {
             return;
         }
-        push_decision_site(out, seen, DecisionSite {
-            kind: "case_dispatch".to_string(),
-            members: patterns,
-            file: file.to_string_lossy().to_string(),
-            function: context.current_function(),
-            line: line(decision_node),
-            span: span(decision_node),
-            predicate: decision_predicate(decision_node, source),
-        });
+        push_decision_site(
+            out,
+            seen,
+            DecisionSite {
+                kind: "case_dispatch".to_string(),
+                members: patterns,
+                file: file.to_string_lossy().to_string(),
+                function: context.current_function(),
+                line: line(decision_node),
+                span: span(decision_node),
+                predicate: decision_predicate(decision_node, source),
+            },
+        );
     }
 }
 
@@ -325,7 +367,11 @@ fn record_conjunction_decision(
     if !from_wrapper
         && node
             .parent()
-            .map(|parent| boolean_container(parent) && boolean_and(parent, source) && span(parent) != span(node))
+            .map(|parent| {
+                boolean_container(parent)
+                    && boolean_and(parent, source)
+                    && span(parent) != span(node)
+            })
             .unwrap_or(false)
     {
         return;
@@ -341,15 +387,19 @@ fn record_conjunction_decision(
         return;
     }
 
-    push_decision_site(out, seen, DecisionSite {
-        kind: "conjunction".to_string(),
-        members,
-        file: file.to_string_lossy().to_string(),
-        function: context.current_function(),
-        line: conjunction_span(node)[0],
-        span: conjunction_span(node),
-        predicate: normalize_text(node_text(node, source)),
-    });
+    push_decision_site(
+        out,
+        seen,
+        DecisionSite {
+            kind: "conjunction".to_string(),
+            members,
+            file: file.to_string_lossy().to_string(),
+            function: context.current_function(),
+            line: conjunction_span(node)[0],
+            span: conjunction_span(node),
+            predicate: normalize_text(node_text(node, source)),
+        },
+    );
 }
 
 fn push_decision_site(out: &mut Vec<DecisionSite>, seen: &mut HashSet<String>, site: DecisionSite) {
@@ -374,9 +424,11 @@ fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
         return named.last().copied();
     }
 
-    let body = node
-        .child_by_field_name("body")
-        .or_else(|| named_children(node).into_iter().find(|child| child.kind() == "body_statement"))?;
+    let body = node.child_by_field_name("body").or_else(|| {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "body_statement")
+    })?;
     let statements: Vec<Node<'_>> = named_children(body)
         .into_iter()
         .filter(|child| !matches!(child.kind(), "comment" | "heredoc_body"))
@@ -388,8 +440,15 @@ fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-fn push_owner_context(node: Node<'_>, source: &str, context: &ContextState, language: Language) -> ContextState {
-    let Some(owner) = owner_name_from_declaration(node, source).or_else(|| receiver_convention_owner_name(node, source, language)) else {
+fn push_owner_context(
+    node: Node<'_>,
+    source: &str,
+    context: &ContextState,
+    language: Language,
+) -> ContextState {
+    let Some(owner) = owner_name_from_declaration(node, source)
+        .or_else(|| receiver_convention_owner_name(node, source, language))
+    else {
         return context.clone();
     };
     let parent_owner = context.owner.clone();
@@ -407,7 +466,12 @@ fn push_owner_context(node: Node<'_>, source: &str, context: &ContextState, lang
     next
 }
 
-fn push_function_context(node: Node<'_>, mut context: ContextState, source: &str, language: Language) -> ContextState {
+fn push_function_context(
+    node: Node<'_>,
+    mut context: ContextState,
+    source: &str,
+    language: Language,
+) -> ContextState {
     let Some(function) = function_name(node, source) else {
         return context;
     };
@@ -560,11 +624,21 @@ fn state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
 
 fn function_name(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
-        "method" | "function_definition" | "function_declaration" | "method_definition" | "function_item" => node
+        "method"
+        | "function_definition"
+        | "function_declaration"
+        | "method_definition"
+        | "function_item" => node
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
             .or_else(|| declarator_name(node.child_by_field_name("declarator"), source))
-            .or_else(|| first_named_text(node, source, &["identifier", "constant", "property_identifier"])),
+            .or_else(|| {
+                first_named_text(
+                    node,
+                    source,
+                    &["identifier", "constant", "property_identifier"],
+                )
+            }),
         "singleton_method" => {
             let name = node
                 .child_by_field_name("name")
@@ -587,7 +661,9 @@ fn function_name(node: Node<'_>, source: &str) -> Option<String> {
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
             .or_else(|| first_named_text(node, source, &["field_identifier", "identifier"])),
-        "body_statement" if first_child_kind(node) == Some("def") => hidden_ruby_method_name(node, source),
+        "body_statement" if first_child_kind(node) == Some("def") => {
+            hidden_ruby_method_name(node, source)
+        }
         "argument_list" if first_child_kind(node) == Some("def") => inline_def_name(node, source),
         _ => None,
     }
@@ -615,7 +691,8 @@ fn declarator_name(node: Option<Node<'_>>, source: &str) -> Option<String> {
 }
 
 fn owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
-    if node.kind() == "body_statement" && matches!(first_child_kind(node), Some("class" | "module")) {
+    if node.kind() == "body_statement" && matches!(first_child_kind(node), Some("class" | "module"))
+    {
         return first_named_text(node, source, &["constant", "identifier", "type_identifier"]);
     }
 
@@ -623,31 +700,35 @@ fn owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
         "class" | "module" | "class_definition" | "class_declaration" | "class_specifier" => node
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
-            .or_else(|| first_named_text(node, source, &["constant", "identifier", "type_identifier"])),
+            .or_else(|| {
+                first_named_text(node, source, &["constant", "identifier", "type_identifier"])
+            }),
         "impl_item" | "impl_block" => impl_owner_name(node, source),
-        "struct_item" | "struct_spec" | "struct_specifier" | "type_spec" | "type_declaration" => node
-            .child_by_field_name("name")
-            .map(|name| node_text(name, source).to_string())
-            .or_else(|| first_named_text(node, source, &["type_identifier", "identifier"])),
+        "struct_item" | "struct_spec" | "struct_specifier" | "type_spec" | "type_declaration" => {
+            node.child_by_field_name("name")
+                .map(|name| node_text(name, source).to_string())
+                .or_else(|| first_named_text(node, source, &["type_identifier", "identifier"]))
+        }
         _ => None,
     }
 }
 
 fn impl_owner_name(node: Node<'_>, source: &str) -> Option<String> {
-    let r#type = node
-        .child_by_field_name("type")
-        .or_else(|| {
-            named_children(node)
-                .into_iter()
-                .find(|child| child.kind().contains("type") || child.kind().contains("identifier"))
-        })?;
+    let r#type = node.child_by_field_name("type").or_else(|| {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind().contains("type") || child.kind().contains("identifier"))
+    })?;
     Some(normalize_type_owner(node_text(r#type, source)))
 }
 
 fn normalize_type_owner(text: &str) -> String {
     let value = text.trim();
     let value = value.trim_start_matches(['&', '*']);
-    let value = value.replace("const", "").replace("mut", "").replace("var", "");
+    let value = value
+        .replace("const", "")
+        .replace("mut", "")
+        .replace("var", "");
     let value = value.trim();
     let value = value.split(['(', '{', '<', ' ']).next().unwrap_or("");
     value.split('.').last().unwrap_or("").to_string()
@@ -665,7 +746,12 @@ fn hidden_ruby_method_name(node: Node<'_>, source: &str) -> Option<String> {
     };
     let name = search
         .into_iter()
-        .find(|child| matches!(child.kind(), "identifier" | "field_identifier" | "property_identifier"))
+        .find(|child| {
+            matches!(
+                child.kind(),
+                "identifier" | "field_identifier" | "property_identifier"
+            )
+        })
         .map(|child| node_text(child, source).to_string())?;
     if receiver_index.is_some() {
         Some(format!("self.{name}"))
@@ -737,7 +823,8 @@ fn previous_sibling_raw_text(node: Node<'_>) -> Option<String> {
 }
 
 fn next_sibling_raw_text(node: Node<'_>) -> Option<String> {
-    node.next_sibling().map(|sibling| sibling.kind().to_string())
+    node.next_sibling()
+        .map(|sibling| sibling.kind().to_string())
 }
 
 fn member_field_text(field: Node<'_>, source: &str) -> Option<String> {
@@ -745,17 +832,15 @@ fn member_field_text(field: Node<'_>, source: &str) -> Option<String> {
         let suffix = field
             .child_by_field_name("suffix")
             .or_else(|| {
-                named_children(field)
-                    .into_iter()
-                    .find(|child| {
-                        matches!(
-                            child.kind(),
-                            "identifier"
-                                | "simple_identifier"
-                                | "field_identifier"
-                                | "property_identifier"
-                        )
-                    })
+                named_children(field).into_iter().find(|child| {
+                    matches!(
+                        child.kind(),
+                        "identifier"
+                            | "simple_identifier"
+                            | "field_identifier"
+                            | "property_identifier"
+                    )
+                })
             })
             .or_else(|| last_named_child(field))?;
         let text = node_text(suffix, source)
@@ -779,13 +864,20 @@ fn strip_assignment_suffix(text: &str) -> String {
 fn case_node(node: Node<'_>) -> bool {
     matches!(
         node.kind(),
-        "case" | "when_expression" | "switch_statement" | "switch_expression" | "match_statement" | "match_expression"
+        "case"
+            | "when_expression"
+            | "switch_statement"
+            | "switch_expression"
+            | "match_statement"
+            | "match_expression"
     )
 }
 
 fn hidden_case(node: Node<'_>) -> bool {
-    matches!(node.kind(), "body_statement" | "block_body" | "argument_list")
-        && first_child_kind(node) == Some("case")
+    matches!(
+        node.kind(),
+        "body_statement" | "block_body" | "argument_list"
+    ) && first_child_kind(node) == Some("case")
 }
 
 fn case_source_node(node: Node<'_>) -> Node<'_> {
@@ -883,8 +975,16 @@ fn case_arm_patterns(child: Node<'_>, source: &str) -> Vec<String> {
             let value = child
                 .child_by_field_name("value")
                 .or_else(|| child.child_by_field_name("pattern"))
-                .or_else(|| named_children(child).into_iter().find(|candidate| candidate.kind() == "when_condition"))
-                .or_else(|| named_children(child).into_iter().find(|candidate| candidate.kind() == "switch_pattern"))
+                .or_else(|| {
+                    named_children(child)
+                        .into_iter()
+                        .find(|candidate| candidate.kind() == "when_condition")
+                })
+                .or_else(|| {
+                    named_children(child)
+                        .into_iter()
+                        .find(|candidate| candidate.kind() == "switch_pattern")
+                })
                 .or_else(|| first_named_child(child));
             value
                 .filter(|node| !node.kind().contains("statement") && !node.kind().contains("block"))
@@ -936,13 +1036,21 @@ fn default_case_pattern(text: &str) -> bool {
 
 fn decision_predicate(node: Node<'_>, source: &str) -> String {
     let target = decision_subject(node);
-    normalize_text(target.map(|child| node_text(child, source)).unwrap_or_else(|| node_text(node, source)))
+    normalize_text(
+        target
+            .map(|child| node_text(child, source))
+            .unwrap_or_else(|| node_text(node, source)),
+    )
 }
 
 fn decision_subject(node: Node<'_>) -> Option<Node<'_>> {
     node.child_by_field_name("value")
         .or_else(|| node.child_by_field_name("subject"))
-        .or_else(|| named_children(node).into_iter().find(|child| child.kind() == "when_subject"))
+        .or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "when_subject")
+        })
         .or_else(|| node.child_by_field_name("condition"))
         .or_else(|| {
             named_children(node).into_iter().find(|child| {
@@ -967,13 +1075,21 @@ fn decision_subject(node: Node<'_>) -> Option<Node<'_>> {
 }
 
 fn boolean_container(node: Node<'_>) -> bool {
-    if matches!(node.kind(), "binary" | "binary_expression" | "boolean_operator") {
+    if matches!(
+        node.kind(),
+        "binary" | "binary_expression" | "boolean_operator"
+    ) {
         return true;
     }
     if parenthesized_wrapper(node) {
-        return first_named_child(node).map(boolean_container).unwrap_or(false);
+        return first_named_child(node)
+            .map(boolean_container)
+            .unwrap_or(false);
     }
-    if !matches!(node.kind(), "body_statement" | "block_body" | "statement" | "pattern" | "argument_list") {
+    if !matches!(
+        node.kind(),
+        "body_statement" | "block_body" | "statement" | "pattern" | "argument_list"
+    ) {
         return false;
     }
     if !matches!(direct_operator(node).as_str(), "&&" | "and") {
@@ -995,7 +1111,10 @@ fn boolean_and(node: Node<'_>, source: &str) -> bool {
             .map(|child| boolean_and(child, source))
             .unwrap_or(false);
     }
-    matches!(direct_operator_from_source(node, source).as_str(), "&&" | "and")
+    matches!(
+        direct_operator_from_source(node, source).as_str(),
+        "&&" | "and"
+    )
 }
 
 fn flatten_boolean_and<'tree>(node: Node<'tree>, source: &str) -> Vec<Node<'tree>> {
@@ -1014,8 +1133,10 @@ fn flatten_boolean_and<'tree>(node: Node<'tree>, source: &str) -> Vec<Node<'tree
 }
 
 fn parenthesized_wrapper(node: Node<'_>) -> bool {
-    matches!(node.kind(), "parenthesized_statements" | "parenthesized_expression")
-        && named_children(node).len() == 1
+    matches!(
+        node.kind(),
+        "parenthesized_statements" | "parenthesized_expression"
+    ) && named_children(node).len() == 1
 }
 
 fn conjunction_span(node: Node<'_>) -> [usize; 4] {
@@ -1067,8 +1188,7 @@ fn direct_operator(node: Node<'_>) -> String {
         .children(&mut cursor)
         .find(|child| !child.is_named() && !matches!(child.kind(), "(" | ")"))
         .map(|child| child.kind().to_string())
-        .unwrap_or_default()
-    ;
+        .unwrap_or_default();
     result
 }
 
@@ -1078,8 +1198,7 @@ fn direct_operator_from_source(node: Node<'_>, source: &str) -> String {
         .children(&mut cursor)
         .find(|child| !child.is_named() && !matches!(node_text(*child, source), "(" | ")"))
         .map(|child| node_text(child, source).to_string())
-        .unwrap_or_default()
-    ;
+        .unwrap_or_default();
     result
 }
 
@@ -1179,7 +1298,8 @@ fn first_argument_receiver_language(language: Language) -> bool {
 }
 
 fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(String, String)> {
-    let params = node.child_by_field_name("declarator")
+    let params = node
+        .child_by_field_name("declarator")
         .and_then(|d| d.child_by_field_name("parameters"))
         .or_else(|| node.child_by_field_name("parameters"))
         .or_else(|| first_named_child_with_kind(node, "parameter_list"))
@@ -1187,18 +1307,29 @@ fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(St
             node.child_by_field_name("declarator")
                 .and_then(|d| first_named_child_with_kind(d, "parameter_list"))
         })?;
-    
+
     let first = first_named_child_with_kind(params, "parameter_declaration")?;
-    
+
     let type_node = named_children(first).into_iter().find(|child| {
-        matches!(child.kind(), "type_identifier" | "primitive_type" | "qualified_identifier" | "scoped_type_identifier")
+        matches!(
+            child.kind(),
+            "type_identifier"
+                | "primitive_type"
+                | "qualified_identifier"
+                | "scoped_type_identifier"
+        )
     })?;
-    
-    let name_node = named_children(first).into_iter().rev().find(|child| {
-        matches!(child.kind(), "identifier" | "field_identifier")
-    }).or_else(|| first_named_child(first))?;
-    
-    Some((node_text(type_node, source).to_string(), node_text(name_node, source).to_string()))
+
+    let name_node = named_children(first)
+        .into_iter()
+        .rev()
+        .find(|child| matches!(child.kind(), "identifier" | "field_identifier"))
+        .or_else(|| first_named_child(first))?;
+
+    Some((
+        node_text(type_node, source).to_string(),
+        node_text(name_node, source).to_string(),
+    ))
 }
 
 fn snake_case_type_name(type_str: &str) -> String {
@@ -1209,15 +1340,19 @@ fn snake_case_type_name(type_str: &str) -> String {
     last
 }
 
-fn receiver_convention_owner_name(node: Node<'_>, source: &str, language: Language) -> Option<String> {
+fn receiver_convention_owner_name(
+    node: Node<'_>,
+    source: &str,
+    language: Language,
+) -> Option<String> {
     if !first_argument_receiver_language(language) || node.kind() != "function_definition" {
         return None;
     }
-    
+
     let (type_name, _) = first_argument_receiver_parameter(node, source)?;
     let type_name = normalize_type_owner(&type_name);
     let name = function_name(node, source)?;
-    
+
     if name.starts_with(&snake_case_type_name(&type_name)) {
         Some(type_name)
     } else if type_name.ends_with("_t") && name.starts_with(type_name.strip_suffix("_t").unwrap()) {
@@ -1241,8 +1376,17 @@ fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Targ
     if let Some(current_receiver) = &context.receiver {
         if &target.receiver == current_receiver {
             target.receiver = "self".to_string();
-        } else if target.receiver.starts_with(&format!("{}.", current_receiver)) {
-            target.receiver = format!("self.{}", target.receiver.strip_prefix(&format!("{}.", current_receiver)).unwrap());
+        } else if target
+            .receiver
+            .starts_with(&format!("{}.", current_receiver))
+        {
+            target.receiver = format!(
+                "self.{}",
+                target
+                    .receiver
+                    .strip_prefix(&format!("{}.", current_receiver))
+                    .unwrap()
+            );
         }
     }
     target

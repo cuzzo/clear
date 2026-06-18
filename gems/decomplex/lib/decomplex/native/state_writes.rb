@@ -28,24 +28,8 @@ module Decomplex
       end
 
       private_class_method def self.run_native(paths)
-        language = language_for(paths.first)
+        language = Command.language_for(paths.first)
         Command.run("state-writes", "--language", language, *paths)
-      end
-      private_class_method def self.language_for(path)
-        case File.extname(path)
-        when ".rb" then "ruby"
-        when ".py" then "python"
-        when ".js" then "javascript"
-        when ".ts", ".tsx" then "typescript"
-        when ".go" then "go"
-        when ".rs" then "rust"
-        when ".zig" then "zig"
-        when ".lua" then "lua"
-        when ".c" then "c"
-        when ".cpp", ".cc", ".cxx" then "cpp"
-        when ".cs" then "csharp"
-        else "ruby"
-        end
       end
 
     end

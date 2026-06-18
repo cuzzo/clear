@@ -53,7 +53,10 @@ impl Miner {
     fn new(sites: Vec<DecisionSite>) -> Self {
         let mut groups = BTreeMap::new();
         for s in &sites {
-            groups.entry((s.kind.clone(), s.members.clone())).or_insert_with(Vec::new).push(s.clone());
+            groups
+                .entry((s.kind.clone(), s.members.clone()))
+                .or_insert_with(Vec::new)
+                .push(s.clone());
         }
         Self { sites, groups }
     }
@@ -66,7 +69,9 @@ impl Miner {
                 methods.insert((s.file.clone(), s.function.clone()));
             }
             let scatter = methods.len();
-            if scatter < min_scatter { continue; }
+            if scatter < min_scatter {
+                continue;
+            }
 
             let mut sites = Vec::new();
             let mut spans = BTreeMap::new();
@@ -101,16 +106,20 @@ impl Miner {
         let mut out = Vec::new();
         for s in &self.sites {
             for (kind, mem, sup) in &popular {
-                if kind != &s.kind { continue; }
-                
+                if kind != &s.kind {
+                    continue;
+                }
+
                 let mem_set: BTreeSet<_> = mem.iter().cloned().collect();
                 let s_mem_set: BTreeSet<_> = s.members.iter().cloned().collect();
-                
+
                 let diff_mem_s: BTreeSet<_> = mem_set.difference(&s_mem_set).cloned().collect();
                 let diff_s_mem: BTreeSet<_> = s_mem_set.difference(&mem_set).cloned().collect();
 
                 if diff_mem_s.len() == 1 && diff_s_mem.is_empty() {
-                    if s.members == *mem { continue; }
+                    if s.members == *mem {
+                        continue;
+                    }
 
                     let l = self.loc(s);
                     let mut spans = BTreeMap::new();

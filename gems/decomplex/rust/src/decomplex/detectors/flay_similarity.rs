@@ -133,11 +133,7 @@ pub fn scan_files(
     Ok(scan_documents(&documents, mass, fuzzy))
 }
 
-pub fn scan_documents(
-    documents: &[Document],
-    mass: usize,
-    fuzzy: usize,
-) -> Vec<SimilarityFinding> {
+pub fn scan_documents(documents: &[Document], mass: usize, fuzzy: usize) -> Vec<SimilarityFinding> {
     let mut scanner = Scanner::new(mass, fuzzy);
     scanner.scan(documents)
 }
@@ -186,13 +182,17 @@ impl Scanner {
     fn candidates_for_document(&mut self, document: &Document) -> Vec<Candidate> {
         self.source_lines
             .insert(document.file.clone(), document.lines.clone());
-        self.method_spans
-            .insert(document.file.clone(), collect_method_spans(&document.function_defs));
+        self.method_spans.insert(
+            document.file.clone(),
+            collect_method_spans(&document.function_defs),
+        );
 
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         for function in &document.function_defs {
-            if let Some(candidate) = self.candidate_for(&document.file, &function.body, Some("defn")) {
+            if let Some(candidate) =
+                self.candidate_for(&document.file, &function.body, Some("defn"))
+            {
                 self.add_candidate(&mut out, &mut seen, candidate);
             }
         }
@@ -209,13 +209,23 @@ impl Scanner {
         out
     }
 
-    fn add_candidate(&self, out: &mut Vec<Candidate>, seen: &mut HashSet<String>, candidate: Candidate) {
-        if candidate.mass < self.effective_mass_floor() || typed_struct_schema_text(&candidate.raw) {
+    fn add_candidate(
+        &self,
+        out: &mut Vec<Candidate>,
+        seen: &mut HashSet<String>,
+        candidate: Candidate,
+    ) {
+        if candidate.mass < self.effective_mass_floor() || typed_struct_schema_text(&candidate.raw)
+        {
             return;
         }
         let key = format!(
             "{}\0{}\0{:?}\0{}\0{}",
-            candidate.file, candidate.line, candidate.span, candidate.node_name, candidate.fingerprint
+            candidate.file,
+            candidate.line,
+            candidate.span,
+            candidate.node_name,
+            candidate.fingerprint
         );
         if seen.insert(key) {
             out.push(candidate);
@@ -274,11 +284,19 @@ impl Scanner {
             if cluster.len() < 2 {
                 continue;
             }
-            let raw_count = cluster.iter().map(|candidate| candidate.raw.as_str()).collect::<HashSet<_>>().len();
+            let raw_count = cluster
+                .iter()
+                .map(|candidate| candidate.raw.as_str())
+                .collect::<HashSet<_>>()
+                .len();
             if raw_count < 2 || self.typed_struct_schema_cluster(&cluster) {
                 continue;
             }
-            let mass = cluster.iter().map(|candidate| candidate.mass).min().unwrap_or(0);
+            let mass = cluster
+                .iter()
+                .map(|candidate| candidate.mass)
+                .min()
+                .unwrap_or(0);
             out.push(self.finding_for(&cluster, "type2", mass));
         }
         out
@@ -303,7 +321,11 @@ impl Scanner {
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for rows in groups.values() {
-            let cluster = uniq_sites(rows.iter().map(|(candidate, _)| candidate.clone()).collect());
+            let cluster = uniq_sites(
+                rows.iter()
+                    .map(|(candidate, _)| candidate.clone())
+                    .collect(),
+            );
             if cluster.len() < 2 {
                 continue;
             }
@@ -317,20 +339,34 @@ impl Scanner {
             }
             let mut key = cluster
                 .iter()
-                .map(|candidate| format!("{}\0{}\0{}", candidate.file, candidate.line, candidate.node_name))
+                .map(|candidate| {
+                    format!(
+                        "{}\0{}\0{}",
+                        candidate.file, candidate.line, candidate.node_name
+                    )
+                })
                 .collect::<Vec<_>>();
             key.sort();
             let key = key.join("\0");
             if !seen.insert(key) {
                 continue;
             }
-            let mass = rows.iter().map(|(_, signature_mass)| *signature_mass).max().unwrap_or(0);
+            let mass = rows
+                .iter()
+                .map(|(_, signature_mass)| *signature_mass)
+                .max()
+                .unwrap_or(0);
             out.push(self.finding_for(&cluster, "type3", mass));
         }
         out
     }
 
-    fn finding_for(&self, cluster: &[Candidate], clone_type: &str, mass: usize) -> SimilarityFinding {
+    fn finding_for(
+        &self,
+        cluster: &[Candidate],
+        clone_type: &str,
+        mass: usize,
+    ) -> SimilarityFinding {
         let mut sites = cluster.iter().map(site_for).collect::<Vec<_>>();
         sites.sort();
         SimilarityFinding {
@@ -436,7 +472,8 @@ impl Scanner {
     }
 
     fn effective_mass_floor(&self) -> usize {
-        self.mass.max(((self.mass as f64) * 23.0 / 8.0).ceil() as usize)
+        self.mass
+            .max(((self.mass as f64) * 23.0 / 8.0).ceil() as usize)
     }
 }
 
@@ -609,11 +646,16 @@ fn identifier_text(text: &str) -> bool {
         return false;
     };
     (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|char| char == '_' || char == '!' || char == '?' || char == '=' || char.is_ascii_alphanumeric())
+        && chars.all(|char| {
+            char == '_' || char == '!' || char == '?' || char == '=' || char.is_ascii_alphanumeric()
+        })
 }
 
 fn literal_text(text: &str) -> bool {
-    if symbol_literal_text(text) || quoted_literal_text(text, '"') || quoted_literal_text(text, '\'') {
+    if symbol_literal_text(text)
+        || quoted_literal_text(text, '"')
+        || quoted_literal_text(text, '\'')
+    {
         return true;
     }
     text.parse::<f64>().is_ok()
@@ -637,7 +679,11 @@ fn quoted_literal_text(text: &str, quote: char) -> bool {
 
 fn flay_node_name(node: &RawNode) -> &str {
     match node.kind.as_str() {
-        "method" | "function_definition" | "function_declaration" | "method_definition" | "function_item" => "defn",
+        "method"
+        | "function_definition"
+        | "function_declaration"
+        | "method_definition"
+        | "function_item" => "defn",
         "singleton_method" => "defs",
         other => other,
     }
@@ -647,7 +693,10 @@ fn uniq_sites(candidates: Vec<Candidate>) -> Vec<Candidate> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for candidate in candidates {
-        let key = format!("{}\0{}\0{}", candidate.file, candidate.line, candidate.node_name);
+        let key = format!(
+            "{}\0{}\0{}",
+            candidate.file, candidate.line, candidate.node_name
+        );
         if seen.insert(key) {
             out.push(candidate);
         }
@@ -677,7 +726,10 @@ fn most_common_node(cluster: &[Candidate]) -> String {
 }
 
 fn site_for(candidate: &Candidate) -> String {
-    format!("{}:{}:{}", candidate.file, candidate.method_name, candidate.line)
+    format!(
+        "{}:{}:{}",
+        candidate.file, candidate.method_name, candidate.line
+    )
 }
 
 fn nested_finding(inner: &SimilarityFinding, outer: &SimilarityFinding) -> bool {
@@ -738,7 +790,13 @@ fn node_key(node: &RawNode) -> String {
 }
 
 fn combinations(size: usize, count: usize) -> Vec<Vec<usize>> {
-    fn step(start: usize, size: usize, count: usize, current: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+    fn step(
+        start: usize,
+        size: usize,
+        count: usize,
+        current: &mut Vec<usize>,
+        out: &mut Vec<Vec<usize>>,
+    ) {
         if current.len() == count {
             out.push(current.clone());
             return;

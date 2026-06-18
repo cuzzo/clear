@@ -70,9 +70,17 @@ impl SequenceMine {
                 self.sites.push(Site {
                     calls,
                     file: self.file.clone(),
-                    defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+                    defn: next_defstack
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| "(top-level)".to_string()),
                     line: node.first_lineno,
-                    span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                    span: [
+                        node.first_lineno,
+                        node.first_column,
+                        node.last_lineno,
+                        node.last_column,
+                    ],
                 });
             }
         }
@@ -124,7 +132,9 @@ impl Report {
                 for j in i + 1..unique_calls.len() {
                     let mut pair = vec![unique_calls[i].clone(), unique_calls[j].clone()];
                     pair.sort();
-                    *co_counts.entry((pair[0].clone(), pair[1].clone())).or_insert(0) += 1;
+                    *co_counts
+                        .entry((pair[0].clone(), pair[1].clone()))
+                        .or_insert(0) += 1;
                 }
             }
         }
@@ -168,7 +178,7 @@ impl Report {
             for (has, missing, sup, conf) in &rules {
                 if unique_calls.contains(has) && !unique_calls.contains(missing) {
                     let at = format!("{}:{}:{}", s.file, s.defn, s.line);
-                    
+
                     let key = (has.clone(), missing.clone(), at.clone());
                     if seen.insert(key) {
                         let mut spans = BTreeMap::new();
@@ -187,7 +197,13 @@ impl Report {
             }
         }
 
-        out.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap().then_with(|| b.support.cmp(&a.support)).then_with(|| a.at.cmp(&b.at)));
+        out.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap()
+                .then_with(|| b.support.cmp(&a.support))
+                .then_with(|| a.at.cmp(&b.at))
+        });
         out
     }
 }

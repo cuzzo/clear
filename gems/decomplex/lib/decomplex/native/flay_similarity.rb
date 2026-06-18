@@ -10,7 +10,7 @@ module Decomplex
 
       def scan(files, mass:, fuzzy:, jobs: nil)
         paths = Array(files).map(&:to_s)
-        language = language_for(paths.first)
+        language = Command.language_for(paths.first)
         JSON.parse(
           Command.run(
             "flay-similarity",
@@ -29,22 +29,6 @@ module Decomplex
           clone_type: finding.fetch(:clone_type).to_sym,
           spans: finding.fetch(:spans).transform_values { |span| Array(span).map(&:to_i) }
         )
-      end
-      private_class_method def self.language_for(path)
-        case File.extname(path)
-        when ".rb" then "ruby"
-        when ".py" then "python"
-        when ".js" then "javascript"
-        when ".ts", ".tsx" then "typescript"
-        when ".go" then "go"
-        when ".rs" then "rust"
-        when ".zig" then "zig"
-        when ".lua" then "lua"
-        when ".c" then "c"
-        when ".cpp", ".cc", ".cxx" then "cpp"
-        when ".cs" then "csharp"
-        else "ruby"
-        end
       end
 
     end

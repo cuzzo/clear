@@ -72,8 +72,16 @@ impl PathCondition {
                 let b = node.children.get(2).and_then(ast::node);
 
                 let atoms = self.cond_atoms(cond);
-                let then_g = if node.r#type == "IF" { atoms.clone() } else { self.negate(&atoms) };
-                let else_g = if node.r#type == "IF" { self.negate(&atoms) } else { atoms.clone() };
+                let then_g = if node.r#type == "IF" {
+                    atoms.clone()
+                } else {
+                    self.negate(&atoms)
+                };
+                let else_g = if node.r#type == "IF" {
+                    self.negate(&atoms)
+                } else {
+                    atoms.clone()
+                };
 
                 if let Some(a_node) = a {
                     let mut next_guards = guards.to_vec();
@@ -106,19 +114,39 @@ impl PathCondition {
 
     fn cond_atoms(&self, cond: Option<&Node>) -> Vec<Vec<String>> {
         let Some(cond) = cond else { return Vec::new() };
-        ast::flatten_and(cond).into_iter().map(|a| {
-            let t = ast::slice(a, &self.lines);
-            let (text, neg) = ast::canon_polarity(&t);
-            vec![text, if neg { "true".to_string() } else { "false".to_string() }]
-        }).collect()
+        ast::flatten_and(cond)
+            .into_iter()
+            .map(|a| {
+                let t = ast::slice(a, &self.lines);
+                let (text, neg) = ast::canon_polarity(&t);
+                vec![
+                    text,
+                    if neg {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    },
+                ]
+            })
+            .collect()
     }
 
     fn negate(&self, atoms: &[Vec<String>]) -> Vec<Vec<String>> {
-        atoms.iter().map(|a| {
-            let t = &a[0];
-            let n = a[1] == "true";
-            vec![t.clone(), if !n { "true".to_string() } else { "false".to_string() }]
-        }).collect()
+        atoms
+            .iter()
+            .map(|a| {
+                let t = &a[0];
+                let n = a[1] == "true";
+                vec![
+                    t.clone(),
+                    if !n {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    },
+                ]
+            })
+            .collect()
     }
 
     fn record(&mut self, node: &Node, defstack: &[String], guards: &[Vec<String>]) {
@@ -134,15 +162,27 @@ impl PathCondition {
         }
 
         let slice = ast::slice(node, &self.lines);
-        let action = if slice.len() > 80 { slice[..80].to_string() } else { slice };
+        let action = if slice.len() > 80 {
+            slice[..80].to_string()
+        } else {
+            slice
+        };
 
         self.sites.push(Site {
             guards: members,
             action,
             file: self.file.clone(),
-            defn: defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+            defn: defstack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "(top-level)".to_string()),
             line: node.first_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
         });
     }
 }
@@ -162,11 +202,14 @@ impl Report {
             }
             groups.entry(s.guards.clone()).or_default().push(s.clone());
         }
-        
-        let ordered_groups = keys.into_iter().map(|k| {
-            let v = groups.remove(&k).unwrap();
-            (k, v)
-        }).collect();
+
+        let ordered_groups = keys
+            .into_iter()
+            .map(|k| {
+                let v = groups.remove(&k).unwrap();
+                (k, v)
+            })
+            .collect();
 
         Self {
             sites,
@@ -181,7 +224,9 @@ impl Report {
     }
 
     fn neglected(&self, min_support: usize) -> Vec<NeglectedPathCondition> {
-        let popular: Vec<_> = self.groups.iter()
+        let popular: Vec<_> = self
+            .groups
+            .iter()
             .filter(|(_, s)| s.len() >= min_support)
             .map(|(g, s)| (g.clone(), s.len()))
             .collect();

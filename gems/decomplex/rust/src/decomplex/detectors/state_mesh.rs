@@ -200,7 +200,14 @@ impl StateMesh {
         }
     }
 
-    fn walk_writes(&self, node: &Node, lines: &[String], defstack: &[String], file: &str, out: &mut Vec<Write>) {
+    fn walk_writes(
+        &self,
+        node: &Node,
+        lines: &[String],
+        defstack: &[String],
+        file: &str,
+        out: &mut Vec<Write>,
+    ) {
         let mut next_defstack = defstack.to_vec();
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "DEFN" => {
@@ -214,7 +221,10 @@ impl StateMesh {
                 }
             }
             "ATTRASGN" => {
-                if let (Some(recv), Some(Child::Symbol(msg))) = (node.children.get(0).and_then(ast::node), node.children.get(1)) {
+                if let (Some(recv), Some(Child::Symbol(msg))) = (
+                    node.children.get(0).and_then(ast::node),
+                    node.children.get(1),
+                ) {
                     if msg != "[]=" {
                         let attr = msg.trim_end_matches('=').to_string();
                         let norm = self.normalize(&attr);
@@ -223,9 +233,17 @@ impl StateMesh {
                             norm,
                             recv: self.recv_slice(Some(recv), lines),
                             file: file.to_string(),
-                            defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+                            defn: next_defstack
+                                .last()
+                                .cloned()
+                                .unwrap_or_else(|| "(top-level)".to_string()),
                             line: node.first_lineno,
-                            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                            span: [
+                                node.first_lineno,
+                                node.first_column,
+                                node.last_lineno,
+                                node.last_column,
+                            ],
                         });
                     }
                 }
@@ -238,9 +256,17 @@ impl StateMesh {
                         norm,
                         recv: "self".to_string(),
                         file: file.to_string(),
-                        defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+                        defn: next_defstack
+                            .last()
+                            .cloned()
+                            .unwrap_or_else(|| "(top-level)".to_string()),
                         line: node.first_lineno,
-                        span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                        span: [
+                            node.first_lineno,
+                            node.first_column,
+                            node.last_lineno,
+                            node.last_column,
+                        ],
                     });
                 }
             }
@@ -263,7 +289,15 @@ impl StateMesh {
         }
     }
 
-    fn walk_reads(&self, node: &Node, lines: &[String], defstack: &[String], file: &str, field_norms: &BTreeSet<String>, out: &mut Vec<Read>) {
+    fn walk_reads(
+        &self,
+        node: &Node,
+        lines: &[String],
+        defstack: &[String],
+        file: &str,
+        field_norms: &BTreeSet<String>,
+        out: &mut Vec<Read>,
+    ) {
         let mut next_defstack = defstack.to_vec();
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "DEFN" => {
@@ -277,21 +311,44 @@ impl StateMesh {
                 }
             }
             "CALL" | "OPCALL" | "FCALL" | "VCALL" => {
-                let recv = if node.r#type == "CALL" || node.r#type == "OPCALL" { node.children.get(0).and_then(ast::node) } else { None };
-                let mid = if node.r#type == "CALL" || node.r#type == "OPCALL" { node.children.get(1) } else { node.children.get(0) };
-                let args = if node.r#type == "CALL" || node.r#type == "OPCALL" { node.children.get(2) } else { node.children.get(1) };
+                let recv = if node.r#type == "CALL" || node.r#type == "OPCALL" {
+                    node.children.get(0).and_then(ast::node)
+                } else {
+                    None
+                };
+                let mid = if node.r#type == "CALL" || node.r#type == "OPCALL" {
+                    node.children.get(1)
+                } else {
+                    node.children.get(0)
+                };
+                let args = if node.r#type == "CALL" || node.r#type == "OPCALL" {
+                    node.children.get(2)
+                } else {
+                    node.children.get(1)
+                };
 
                 if let Some(Child::Symbol(name)) = mid {
-                    if args.is_none() || matches!(args, Some(Child::Nil)) || self.is_empty_list(args) {
+                    if args.is_none()
+                        || matches!(args, Some(Child::Nil))
+                        || self.is_empty_list(args)
+                    {
                         if field_norms.contains(name) {
                             out.push(Read {
                                 attr: name.clone(),
                                 norm: name.clone(),
                                 recv: self.recv_slice(recv, lines),
                                 file: file.to_string(),
-                                defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+                                defn: next_defstack
+                                    .last()
+                                    .cloned()
+                                    .unwrap_or_else(|| "(top-level)".to_string()),
                                 line: node.first_lineno,
-                                span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                                span: [
+                                    node.first_lineno,
+                                    node.first_column,
+                                    node.last_lineno,
+                                    node.last_column,
+                                ],
                             });
                         }
                     }
@@ -306,9 +363,17 @@ impl StateMesh {
                             norm,
                             recv: "self".to_string(),
                             file: file.to_string(),
-                            defn: next_defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+                            defn: next_defstack
+                                .last()
+                                .cloned()
+                                .unwrap_or_else(|| "(top-level)".to_string()),
                             line: node.first_lineno,
-                            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                            span: [
+                                node.first_lineno,
+                                node.first_column,
+                                node.last_lineno,
+                                node.last_column,
+                            ],
                         });
                     }
                 }
@@ -329,16 +394,21 @@ impl StateMesh {
 
         let files: Vec<_> = self.src_map.keys().map(PathBuf::from).collect();
         let sa = semantic_alias::scan_files(&files, language)?;
-        
+
         for m in sa.reification_misses {
             let loc = m.at.clone();
             let parts: Vec<&str> = loc.split(':').collect();
-            if parts.len() < 3 { continue; }
+            if parts.len() < 3 {
+                continue;
+            }
             let line = parts.last().unwrap().parse::<usize>().unwrap_or(0);
             let defn = parts[parts.len() - 2].to_string();
             let file = parts[..parts.len() - 2].join(":");
 
-            if let Some(matched) = field_norms.iter().find(|fnorm| m.raw.contains(*fnorm) || m.canon.contains(*fnorm)) {
+            if let Some(matched) = field_norms
+                .iter()
+                .find(|fnorm| m.raw.contains(*fnorm) || m.canon.contains(*fnorm))
+            {
                 self.re_derivations.push(ReDerivation {
                     field: matched.clone(),
                     file,
@@ -360,25 +430,43 @@ impl StateMesh {
         for fnorm in &field_norms {
             let ws: Vec<_> = self.writes.iter().filter(|w| &w.norm == fnorm).collect();
             let rs: Vec<_> = self.reads.iter().filter(|r| &r.norm == fnorm).collect();
-            let ds: Vec<_> = self.re_derivations.iter().filter(|d| &d.field == fnorm).collect();
+            let ds: Vec<_> = self
+                .re_derivations
+                .iter()
+                .filter(|d| &d.field == fnorm)
+                .collect();
 
             let mut all_sites = BTreeSet::new();
-            for w in &ws { all_sites.insert((w.file.clone(), w.defn.clone())); }
-            for r in &rs { all_sites.insert((r.file.clone(), r.defn.clone())); }
-            for d in &ds { all_sites.insert((d.file.clone(), d.defn.clone())); }
+            for w in &ws {
+                all_sites.insert((w.file.clone(), w.defn.clone()));
+            }
+            for r in &rs {
+                all_sites.insert((r.file.clone(), r.defn.clone()));
+            }
+            for d in &ds {
+                all_sites.insert((d.file.clone(), d.defn.clone()));
+            }
             let scatter = all_sites.len();
 
             let mut write_sites = BTreeSet::new();
-            for w in &ws { write_sites.insert((w.file.clone(), w.defn.clone())); }
+            for w in &ws {
+                write_sites.insert((w.file.clone(), w.defn.clone()));
+            }
             let write_scatter = write_sites.len();
 
             let mut read_sites = BTreeSet::new();
-            for r in &rs { read_sites.insert((r.file.clone(), r.defn.clone())); }
+            for r in &rs {
+                read_sites.insert((r.file.clone(), r.defn.clone()));
+            }
             let read_scatter = read_sites.len();
 
             let mut receivers = BTreeSet::new();
-            for w in &ws { receivers.insert(w.recv.clone()); }
-            for r in &rs { receivers.insert(r.recv.clone()); }
+            for w in &ws {
+                receivers.insert(w.recv.clone());
+            }
+            for r in &rs {
+                receivers.insert(r.recv.clone());
+            }
             let receiver_types = receivers.len();
 
             let n_writes = ws.len();
@@ -404,24 +492,39 @@ impl StateMesh {
             });
         }
 
-        metrics_vec.sort_by(|a, b| b.messiness.partial_cmp(&a.messiness).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.name.cmp(&b.name)));
+        metrics_vec.sort_by(|a, b| {
+            b.messiness
+                .partial_cmp(&a.messiness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         for (i, m) in metrics_vec.iter_mut().enumerate() {
             m.rank = i + 1;
         }
 
         let total = metrics_vec.len();
         if total > 1 {
-            let attrs = ["writes", "reads", "re_derivations", "scatter", "messiness", "pressure"];
+            let attrs = [
+                "writes",
+                "reads",
+                "re_derivations",
+                "scatter",
+                "messiness",
+                "pressure",
+            ];
             for attr in &attrs {
-                let mut vals: Vec<f64> = metrics_vec.iter().map(|m| match *attr {
-                    "writes" => m.writes as f64,
-                    "reads" => m.reads as f64,
-                    "re_derivations" => m.re_derivations as f64,
-                    "scatter" => m.scatter as f64,
-                    "messiness" => m.messiness,
-                    "pressure" => m.pressure as f64,
-                    _ => 0.0,
-                }).collect();
+                let mut vals: Vec<f64> = metrics_vec
+                    .iter()
+                    .map(|m| match *attr {
+                        "writes" => m.writes as f64,
+                        "reads" => m.reads as f64,
+                        "re_derivations" => m.re_derivations as f64,
+                        "scatter" => m.scatter as f64,
+                        "messiness" => m.messiness,
+                        "pressure" => m.pressure as f64,
+                        _ => 0.0,
+                    })
+                    .collect();
                 vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                 for m in metrics_vec.iter_mut() {
@@ -445,71 +548,120 @@ impl StateMesh {
 
     fn to_json_graph(&self) -> StateMeshReport {
         let fm = self.metrics();
-        let fm_index: BTreeMap<String, &FieldMetrics> = fm.iter().map(|m| (m.name.clone(), m)).collect();
+        let fm_index: BTreeMap<String, &FieldMetrics> =
+            fm.iter().map(|m| (m.name.clone(), m)).collect();
         let field_norms = self.known_field_norms();
 
         let mut fields_obj = BTreeMap::new();
         for fnorm in &field_norms {
             let m = fm_index.get(fnorm).unwrap();
-            let ws: Vec<_> = self.writes.iter().filter(|w| &w.norm == fnorm).map(|w| SiteInfo {
-                file: w.file.clone(), defn: w.defn.clone(), line: w.line, recv: w.recv.clone(), span: w.span,
-            }).collect();
-            let rs: Vec<_> = self.reads.iter().filter(|r| &r.norm == fnorm).map(|r| SiteInfo {
-                file: r.file.clone(), defn: r.defn.clone(), line: r.line, recv: r.recv.clone(), span: r.span,
-            }).collect();
-            let ds: Vec<_> = self.re_derivations.iter().filter(|d| &d.field == fnorm).map(|d| ReDerivationInfo {
-                file: d.file.clone(), defn: d.defn.clone(), line: d.line, raw: d.raw.clone(), predicate: d.predicate.clone(), canon: d.canon.clone(),
-            }).collect();
+            let ws: Vec<_> = self
+                .writes
+                .iter()
+                .filter(|w| &w.norm == fnorm)
+                .map(|w| SiteInfo {
+                    file: w.file.clone(),
+                    defn: w.defn.clone(),
+                    line: w.line,
+                    recv: w.recv.clone(),
+                    span: w.span,
+                })
+                .collect();
+            let rs: Vec<_> = self
+                .reads
+                .iter()
+                .filter(|r| &r.norm == fnorm)
+                .map(|r| SiteInfo {
+                    file: r.file.clone(),
+                    defn: r.defn.clone(),
+                    line: r.line,
+                    recv: r.recv.clone(),
+                    span: r.span,
+                })
+                .collect();
+            let ds: Vec<_> = self
+                .re_derivations
+                .iter()
+                .filter(|d| &d.field == fnorm)
+                .map(|d| ReDerivationInfo {
+                    file: d.file.clone(),
+                    defn: d.defn.clone(),
+                    line: d.line,
+                    raw: d.raw.clone(),
+                    predicate: d.predicate.clone(),
+                    canon: d.canon.clone(),
+                })
+                .collect();
 
-            fields_obj.insert(fnorm.clone(), StateFieldRow {
-                messiness: m.messiness,
-                rank: m.rank,
-                metrics: FieldMetricsRow {
-                    writes: m.writes,
-                    reads: m.reads,
-                    re_derivations: m.re_derivations,
-                    scatter: m.scatter,
-                    write_scatter: m.write_scatter,
-                    read_scatter: m.read_scatter,
-                    receiver_types: m.receiver_types,
-                    fix_churn: 1.0,
-                    pressure: m.pressure,
-                    percentiles: m.percentiles.clone(),
+            fields_obj.insert(
+                fnorm.clone(),
+                StateFieldRow {
+                    messiness: m.messiness,
+                    rank: m.rank,
+                    metrics: FieldMetricsRow {
+                        writes: m.writes,
+                        reads: m.reads,
+                        re_derivations: m.re_derivations,
+                        scatter: m.scatter,
+                        write_scatter: m.write_scatter,
+                        read_scatter: m.read_scatter,
+                        receiver_types: m.receiver_types,
+                        fix_churn: 1.0,
+                        pressure: m.pressure,
+                        percentiles: m.percentiles.clone(),
+                    },
+                    writers: ws,
+                    readers: rs,
+                    re_derivations: ds,
                 },
-                writers: ws,
-                readers: rs,
-                re_derivations: ds,
-            });
+            );
         }
 
-        let mut all_unit_sites: BTreeMap<(String, String), (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
+        let mut all_unit_sites: BTreeMap<(String, String), (BTreeSet<String>, BTreeSet<String>)> =
+            BTreeMap::new();
         for w in &self.writes {
-            let entry = all_unit_sites.entry((w.file.clone(), w.defn.clone())).or_default();
+            let entry = all_unit_sites
+                .entry((w.file.clone(), w.defn.clone()))
+                .or_default();
             entry.0.insert(w.norm.clone());
         }
         for r in &self.reads {
-            let entry = all_unit_sites.entry((r.file.clone(), r.defn.clone())).or_default();
+            let entry = all_unit_sites
+                .entry((r.file.clone(), r.defn.clone()))
+                .or_default();
             entry.1.insert(r.norm.clone());
         }
 
-        let mut dirs: BTreeMap<String, BTreeMap<String, BTreeMap<String, DefnObj>>> = BTreeMap::new();
+        let mut dirs: BTreeMap<String, BTreeMap<String, BTreeMap<String, DefnObj>>> =
+            BTreeMap::new();
         for ((file, defn), (ws, rs)) in all_unit_sites {
             let path = Path::new(&file);
-            let dir = path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string());
+            let dir = path
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string());
             let dir = if dir.is_empty() { ".".to_string() } else { dir };
-            let base = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.clone());
+            let base = path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.clone());
 
-            dirs.entry(dir).or_default()
-                .entry(base).or_default()
-                .insert(defn.clone(), DefnObj {
-                    name: defn,
-                    writers: ws.len(),
-                    readers: rs.len(),
-                    fields: DefnFields {
-                        written: ws.into_iter().collect(),
-                        read: rs.into_iter().collect(),
+            dirs.entry(dir)
+                .or_default()
+                .entry(base)
+                .or_default()
+                .insert(
+                    defn.clone(),
+                    DefnObj {
+                        name: defn,
+                        writers: ws.len(),
+                        readers: rs.len(),
+                        fields: DefnFields {
+                            written: ws.into_iter().collect(),
+                            read: rs.into_iter().collect(),
+                        },
                     },
-                });
+                );
         }
 
         let mut hierarchy = Vec::new();
@@ -568,7 +720,8 @@ impl StateMesh {
         for w in &self.writes {
             *discovered.entry(w.norm.clone()).or_insert(0) += 1;
         }
-        let mut norms: BTreeSet<String> = discovered.into_iter()
+        let mut norms: BTreeSet<String> = discovered
+            .into_iter()
             .filter(|(_, count)| *count >= self.min_writes)
             .map(|(name, _)| name)
             .collect();
@@ -579,7 +732,9 @@ impl StateMesh {
     }
 
     fn recv_slice(&self, node: Option<&Node>, lines: &[String]) -> String {
-        let Some(node) = node else { return "?".to_string() };
+        let Some(node) = node else {
+            return "?".to_string();
+        };
         ast::slice(node, lines)
     }
 

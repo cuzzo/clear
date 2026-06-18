@@ -40,7 +40,10 @@ struct Block {
 const HOLE_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "LASGN", "DASGN", "IASGN"];
 const MIN_TOKENS: usize = 8;
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<InconsistentRenameCloneRow>> {
+pub fn scan_files(
+    files: &[PathBuf],
+    language: Language,
+) -> Result<Vec<InconsistentRenameCloneRow>> {
     let mut blocks = Vec::new();
     for file in files {
         let (root, _lines) = ast::parse_with_language(file, language)?;
@@ -94,7 +97,10 @@ impl InconsistentRenameClone {
             skeleton,
             names,
             file: self.file.clone(),
-            defn: defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+            defn: defstack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "(top-level)".to_string()),
             line: stmts[0].first_lineno,
             span: [
                 stmts[0].first_lineno,
@@ -120,7 +126,11 @@ impl InconsistentRenameClone {
                 }
             }
             "CALL" | "FCALL" => {
-                skeleton.push(if node.r#type == "CALL" { Skeleton::CALL } else { Skeleton::FCALL });
+                skeleton.push(if node.r#type == "CALL" {
+                    Skeleton::CALL
+                } else {
+                    Skeleton::FCALL
+                });
                 let mid_index = if node.r#type == "CALL" { 1 } else { 0 };
                 skeleton.push(Skeleton::MID);
                 if let Some(Child::Symbol(mid)) = node.children.get(mid_index) {
@@ -159,7 +169,11 @@ impl Report {
         for members in self.groups.values() {
             out.extend(self.findings_for(members));
         }
-        out.sort_by(|a, b| b.clone_size.cmp(&a.clone_size).then_with(|| a.at.cmp(&b.at)));
+        out.sort_by(|a, b| {
+            b.clone_size
+                .cmp(&a.clone_size)
+                .then_with(|| a.at.cmp(&b.at))
+        });
         out.dedup_by(|a, b| a.at == b.at && a.ref_at == b.ref_at && a.ref_name == b.ref_name);
         out
     }
@@ -188,7 +202,11 @@ impl Report {
         out
     }
 
-    fn inconsistent_pairs(&self, ref_block: &Block, candidate: &Block) -> Vec<InconsistentRenameCloneRow> {
+    fn inconsistent_pairs(
+        &self,
+        ref_block: &Block,
+        candidate: &Block,
+    ) -> Vec<InconsistentRenameCloneRow> {
         let mut out = Vec::new();
         for (ref_name, positions) in self.ref_classes(ref_block) {
             let mut spellings = BTreeSet::new();
@@ -200,7 +218,12 @@ impl Report {
             if spellings.len() < 2 {
                 continue;
             }
-            out.push(self.finding(ref_block, candidate, &ref_name, spellings.into_iter().collect()));
+            out.push(self.finding(
+                ref_block,
+                candidate,
+                &ref_name,
+                spellings.into_iter().collect(),
+            ));
         }
         out
     }
@@ -218,7 +241,13 @@ impl Report {
         left.file == right.file && left.defn == right.defn
     }
 
-    fn finding(&self, ref_block: &Block, candidate: &Block, ref_name: &str, divergent: Vec<String>) -> InconsistentRenameCloneRow {
+    fn finding(
+        &self,
+        ref_block: &Block,
+        candidate: &Block,
+        ref_name: &str,
+        divergent: Vec<String>,
+    ) -> InconsistentRenameCloneRow {
         let at = format!("{}:{}:{}", candidate.file, candidate.defn, candidate.line);
         let ref_at = format!("{}:{}:{}", ref_block.file, ref_block.defn, ref_block.line);
         let mut spans = BTreeMap::new();

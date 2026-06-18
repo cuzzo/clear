@@ -25,6 +25,13 @@ class DetectorRunnerTest < Minitest::Test
     assert_equal ruby_json, rust_json
   end
 
+  def test_native_command_language_for_recognizes_jvm_and_swift_extensions
+    assert_equal "java", Decomplex::Native::Command.language_for("Example.java")
+    assert_equal "kotlin", Decomplex::Native::Command.language_for("Example.kt")
+    assert_equal "kotlin", Decomplex::Native::Command.language_for("Example.kts")
+    assert_equal "swift", Decomplex::Native::Command.language_for("Example.swift")
+  end
+
   def test_miner_rust_engine_matches_ruby_engine_byte_for_byte
     skip "cargo is not available" unless cargo_available?
 
@@ -49,6 +56,32 @@ class DetectorRunnerTest < Minitest::Test
       file.flush
 
       ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("miner", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_flay_similarity_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-flay", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        def one(a, b)
+          total = a + b
+          puts total
+          total * 2
+        end
+
+        def two(x, y)
+          total = x + y
+          puts total
+          total * 2
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("flay-similarity", [file.path], mass: 4, fuzzy: 1)
 
       assert ok, diff_message(ruby_json, rust_json)
       assert_equal ruby_json, rust_json

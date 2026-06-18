@@ -105,9 +105,15 @@ impl DecisionPressure {
             "IVAR" => true,
             "CALL" | "QCALL" => {
                 let recv = n.children.get(0).and_then(ast::node);
-                let mid = n.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None });
+                let mid = n.children.get(1).and_then(|c| match c {
+                    Child::Symbol(s) => Some(s),
+                    _ => None,
+                });
                 let args = n.children.get(2);
-                recv.is_some() && (args.is_none() || matches!(args, Some(Child::Nil)) || mid.map(|s| s.as_str()) == Some("[]"))
+                recv.is_some()
+                    && (args.is_none()
+                        || matches!(args, Some(Child::Nil))
+                        || mid.map(|s| s.as_str()) == Some("[]"))
             }
             _ => false,
         }
@@ -117,25 +123,42 @@ impl DecisionPressure {
         Hit {
             contract,
             file: self.file.clone(),
-            defn: defstack.last().cloned().unwrap_or_else(|| "(top-level)".to_string()),
+            defn: defstack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "(top-level)".to_string()),
             line: node.first_lineno,
-            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+            span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
         }
     }
 
-    fn record_decision(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
+    fn record_decision(
+        &mut self,
+        node: &Node,
+        defstack: &[String],
+        asgmap: &BTreeMap<String, Node>,
+    ) {
         if !matches!(node.r#type.as_str(), "CALL" | "QCALL") {
             return;
         }
 
         let recv = node.children.get(0).and_then(ast::node);
-        let mid = node.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None });
+        let mid = node.children.get(1).and_then(|c| match c {
+            Child::Symbol(s) => Some(s),
+            _ => None,
+        });
         let _args = node.children.get(2);
 
         let Some(recv) = recv else { return };
         let Some(mid) = mid else { return };
 
-        let guard = (node.r#type == "CALL" && GUARD_MIDS.contains(&mid.as_str())) || node.r#type == "QCALL";
+        let guard =
+            (node.r#type == "CALL" && GUARD_MIDS.contains(&mid.as_str())) || node.r#type == "QCALL";
         if guard {
             if let Some(c) = self.contract_of(recv, asgmap, 0) {
                 self.guard_hits.push(self.hit(c, defstack, node));
@@ -150,7 +173,12 @@ impl DecisionPressure {
         }
     }
 
-    fn record_rescue_nil(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
+    fn record_rescue_nil(
+        &mut self,
+        node: &Node,
+        defstack: &[String],
+        asgmap: &BTreeMap<String, Node>,
+    ) {
         if node.r#type != "RESCUE" {
             return;
         }
@@ -159,23 +187,42 @@ impl DecisionPressure {
         let resb = node.children.get(1).and_then(ast::node);
 
         let Some(resb) = resb else { return };
-        if resb.r#type != "RESBODY" { return };
-        if !matches!(resb.children.get(0), None | Some(Child::Nil)) { return };
+        if resb.r#type != "RESBODY" {
+            return;
+        };
+        if !matches!(resb.children.get(0), None | Some(Child::Nil)) {
+            return;
+        };
 
         let handler = resb.children.get(1);
-        let nil_handler = matches!(handler, None | Some(Child::Nil)) || handler.and_then(ast::node).map(|n| n.r#type == "NIL").unwrap_or(false);
-        if !nil_handler { return };
+        let nil_handler = matches!(handler, None | Some(Child::Nil))
+            || handler
+                .and_then(ast::node)
+                .map(|n| n.r#type == "NIL")
+                .unwrap_or(false);
+        if !nil_handler {
+            return;
+        };
 
         let Some(body) = body else { return };
-        if !matches!(body.r#type.as_str(), "CALL" | "QCALL") { return };
+        if !matches!(body.r#type.as_str(), "CALL" | "QCALL") {
+            return;
+        };
 
         if let Some(c) = self.contract_of(body, asgmap, 0) {
             self.guard_hits.push(self.hit(c, defstack, node));
         }
     }
 
-    fn contract_of(&self, n: &Node, asgmap: &BTreeMap<String, Node>, depth: usize) -> Option<String> {
-        if depth >= 8 { return None; }
+    fn contract_of(
+        &self,
+        n: &Node,
+        asgmap: &BTreeMap<String, Node>,
+        depth: usize,
+    ) -> Option<String> {
+        if depth >= 8 {
+            return None;
+        }
 
         match n.r#type.as_str() {
             "LVAR" | "DVAR" => {
@@ -196,12 +243,18 @@ impl DecisionPressure {
             }
             "CALL" | "QCALL" => {
                 let recv = n.children.get(0).and_then(ast::node);
-                let mid = n.children.get(1).and_then(|c| match c { Child::Symbol(s) => Some(s), _ => None })?;
+                let mid = n.children.get(1).and_then(|c| match c {
+                    Child::Symbol(s) => Some(s),
+                    _ => None,
+                })?;
                 let args = n.children.get(2);
 
                 if mid == "[]" {
                     let key = if let Some(Child::Node(node)) = args {
-                        node.children.iter().filter(|c| !matches!(c, Child::Nil)).next()
+                        node.children
+                            .iter()
+                            .filter(|c| !matches!(c, Child::Nil))
+                            .next()
                     } else {
                         None
                     };
@@ -210,7 +263,10 @@ impl DecisionPressure {
                         _ => "nil".to_string(), // Simplified key.inspect
                     };
                     Some(format!("[{}]", kt))
-                } else if (args.is_none() || matches!(args, Some(Child::Nil))) && recv.is_some() && !TRANSIENT_NOARG_MIDS.contains(&mid.as_str()) {
+                } else if (args.is_none() || matches!(args, Some(Child::Nil)))
+                    && recv.is_some()
+                    && !TRANSIENT_NOARG_MIDS.contains(&mid.as_str())
+                {
                     Some(format!(".{}", mid))
                 } else {
                     None
@@ -222,7 +278,7 @@ impl DecisionPressure {
                 }
                 None
             }
-            _ => None
+            _ => None,
         }
     }
 }
@@ -248,28 +304,42 @@ impl Report {
             rows_map.entry(h.contract.clone()).or_default().push(h);
         }
 
-        let rows: Vec<_> = rows_map.into_iter().map(|(contract, hs)| {
-            let mut methods_set = BTreeSet::new();
-            for h in &hs {
-                methods_set.insert((&h.file, &h.defn));
-            }
-            let sites = hs.iter().map(|h| loc(h)).collect();
-            let spans = hs.iter().map(|h| (loc(h), h.span)).collect();
-            let essential = ess.get(&contract).cloned().unwrap_or(0);
-            DecisionPressureRow {
-                contract,
-                decisions: hs.len(),
-                essential,
-                methods: methods_set.len(),
-                sites,
-                spans,
-            }
-        }).collect();
+        let rows: Vec<_> = rows_map
+            .into_iter()
+            .map(|(contract, hs)| {
+                let mut methods_set = BTreeSet::new();
+                for h in &hs {
+                    methods_set.insert((&h.file, &h.defn));
+                }
+                let sites = hs.iter().map(|h| loc(h)).collect();
+                let spans = hs.iter().map(|h| (loc(h), h.span)).collect();
+                let essential = ess.get(&contract).cloned().unwrap_or(0);
+                DecisionPressureRow {
+                    contract,
+                    decisions: hs.len(),
+                    essential,
+                    methods: methods_set.len(),
+                    sites,
+                    spans,
+                }
+            })
+            .collect();
 
-        let mut named: Vec<_> = rows.iter().filter(|r| r.contract != "~local").cloned().collect();
-        named.sort_by(|a, b| b.decisions.cmp(&a.decisions).then_with(|| b.methods.cmp(&a.methods)));
-        
-        let local: Vec<_> = rows.into_iter().filter(|r| r.contract == "~local").collect();
+        let mut named: Vec<_> = rows
+            .iter()
+            .filter(|r| r.contract != "~local")
+            .cloned()
+            .collect();
+        named.sort_by(|a, b| {
+            b.decisions
+                .cmp(&a.decisions)
+                .then_with(|| b.methods.cmp(&a.methods))
+        });
+
+        let local: Vec<_> = rows
+            .into_iter()
+            .filter(|r| r.contract == "~local")
+            .collect();
         named.into_iter().chain(local).collect()
     }
 }

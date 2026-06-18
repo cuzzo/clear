@@ -111,7 +111,12 @@ impl RedundantNilGuard {
         }
     }
 
-    fn process_block(&mut self, stmts: &[&Node], defstack: &[String], known: &BTreeSet<String>) -> Flow {
+    fn process_block(
+        &mut self,
+        stmts: &[&Node],
+        defstack: &[String],
+        known: &BTreeSet<String>,
+    ) -> Flow {
         let mut current = known.clone();
         for stmt in stmts {
             let flow = self.process_stmt(stmt, defstack, &current);
@@ -155,7 +160,12 @@ impl RedundantNilGuard {
         }
     }
 
-    fn process_branch(&mut self, node: &Node, defstack: &[String], known: &BTreeSet<String>) -> Flow {
+    fn process_branch(
+        &mut self,
+        node: &Node,
+        defstack: &[String],
+        known: &BTreeSet<String>,
+    ) -> Flow {
         let cond = node.children.get(0).and_then(ast::node);
         let then_body = node.children.get(1).and_then(ast::node);
         let else_body = node.children.get(2).and_then(ast::node);
@@ -186,7 +196,11 @@ impl RedundantNilGuard {
                 terminated: false,
             }
         } else {
-            let intersection: BTreeSet<_> = then_flow.known.intersection(&else_flow.known).cloned().collect();
+            let intersection: BTreeSet<_> = then_flow
+                .known
+                .intersection(&else_flow.known)
+                .cloned()
+                .collect();
             Flow {
                 known: intersection,
                 terminated: false,
@@ -228,7 +242,12 @@ impl RedundantNilGuard {
         }
     }
 
-    fn record_redundant(&mut self, node: &Node, defstack: &[String], known: &BTreeSet<String>) -> bool {
+    fn record_redundant(
+        &mut self,
+        node: &Node,
+        defstack: &[String],
+        known: &BTreeSet<String>,
+    ) -> bool {
         let local = self.redundant_nil_subject(node, known);
         let Some(local) = local else { return false };
 
@@ -385,12 +404,10 @@ impl RedundantNilGuard {
 
     fn subject_key(&self, node: &Node) -> Option<String> {
         match node.r#type.as_str() {
-            "LVAR" | "DVAR" | "VCALL" => {
-                match node.children.first()? {
-                    Child::String(s) | Child::Symbol(s) => Some(s.clone()),
-                    _ => None,
-                }
-            }
+            "LVAR" | "DVAR" | "VCALL" => match node.children.first()? {
+                Child::String(s) | Child::Symbol(s) => Some(s.clone()),
+                _ => None,
+            },
             "CALL" => {
                 let recv = node.children.get(0).and_then(ast::node);
                 let mid = match node.children.get(1)? {
@@ -398,7 +415,9 @@ impl RedundantNilGuard {
                     _ => return None,
                 };
                 let args = node.children.get(2);
-                if (args.is_none() || matches!(args, Some(Child::Nil))) && self.stable_reader_name(mid) {
+                if (args.is_none() || matches!(args, Some(Child::Nil)))
+                    && self.stable_reader_name(mid)
+                {
                     if let Some(recv) = recv {
                         if recv.r#type == "SELF" {
                             return Some(format!("self.{}", mid));
@@ -429,7 +448,9 @@ impl RedundantNilGuard {
     }
 
     fn nil_arg(&self, args: Option<&Child>) -> bool {
-        let Some(Child::Node(node)) = args else { return false };
+        let Some(Child::Node(node)) = args else {
+            return false;
+        };
         if node.r#type != "LIST" {
             return false;
         }
