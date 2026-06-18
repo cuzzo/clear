@@ -377,7 +377,8 @@ module Decomplex
         @language = language
         @source = source
         @lines = lines
-        @root = root
+        @tree_sitter_facade = TreeSitterFacadeContext.new(root)
+        @root = @tree_sitter_facade.root
         @adapter = adapter
       end
 
@@ -486,6 +487,206 @@ module Decomplex
           end
         end
         aliases
+      end
+    end
+
+    class TreeSitterFacadeContext
+      attr_reader :root
+
+      def initialize(raw_root)
+        @wrappers = {}
+        @children_cache = {}
+        @named_children_cache = {}
+        @named_field_cache = {}
+        @parent_cache = {}
+        @prev_sibling_cache = {}
+        @next_sibling_cache = {}
+        @prev_named_sibling_cache = {}
+        @next_named_sibling_cache = {}
+        @root = wrap(raw_root)
+        index_tree(raw_root)
+      end
+
+      def wrap(raw)
+        return nil unless raw
+        return raw if raw.is_a?(TreeSitterNodeFacade)
+
+        key = node_key(raw)
+        @wrappers[key] ||= TreeSitterNodeFacade.new(self, raw, key)
+      end
+
+      def children(raw)
+        node = unwrap(raw)
+        @children_cache.fetch(node_key(node)) { [] }
+      end
+
+      def named_children(raw)
+        node = unwrap(raw)
+        @named_children_cache.fetch(node_key(node)) { [] }
+      end
+
+      def child_by_field_name(raw, name)
+        node = unwrap(raw)
+        key = [node_key(node), name.to_s]
+        return @named_field_cache[key] if @named_field_cache.key?(key)
+
+        @named_field_cache[key] = wrap(node.child_by_field_name(name))
+      rescue StandardError
+        nil
+      end
+
+      def parent(raw)
+        @parent_cache[node_key(unwrap(raw))]
+      end
+
+      def prev_sibling(raw)
+        @prev_sibling_cache[node_key(unwrap(raw))]
+      end
+
+      def next_sibling(raw)
+        @next_sibling_cache[node_key(unwrap(raw))]
+      end
+
+      def prev_named_sibling(raw)
+        @prev_named_sibling_cache[node_key(unwrap(raw))]
+      end
+
+      def next_named_sibling(raw)
+        @next_named_sibling_cache[node_key(unwrap(raw))]
+      end
+
+      def node_key(raw)
+        node = unwrap(raw)
+        [node.kind, node.start_byte, node.end_byte, node.named?]
+      end
+
+      private
+
+      def unwrap(raw)
+        raw.is_a?(TreeSitterNodeFacade) ? raw.raw : raw
+      end
+
+      def index_tree(raw_root)
+        pending = [raw_root]
+        until pending.empty?
+          raw = pending.pop
+          key = node_key(raw)
+          raw_children = Array(raw.children)
+          wrapped_children = raw_children.map { |child| wrap(child) }
+          @children_cache[key] = wrapped_children
+          @named_children_cache[key] = wrapped_children.select(&:named?)
+
+          raw_children.each do |child|
+            child_key = node_key(child)
+            @parent_cache[child_key] = wrap(raw)
+          end
+
+          index_siblings(raw_children, @prev_sibling_cache, @next_sibling_cache)
+          index_siblings(raw_children.select(&:named?), @prev_named_sibling_cache, @next_named_sibling_cache)
+
+          pending.concat(raw_children.reverse)
+        end
+      end
+
+      def index_siblings(raw_children, prev_cache, next_cache)
+        raw_children.each_with_index do |child, index|
+          key = node_key(child)
+          prev_cache[key] = wrap(raw_children[index - 1]) if index.positive?
+          next_cache[key] = wrap(raw_children[index + 1]) if index + 1 < raw_children.length
+        end
+      end
+    end
+
+    class TreeSitterNodeFacade
+      attr_reader :context, :raw
+
+      def initialize(context, raw, key)
+        @context = context
+        @raw = raw
+        @key = key
+      end
+
+      def kind
+        @kind ||= raw.kind
+      end
+
+      def text
+        @text ||= raw.text.to_s
+      end
+
+      def start_byte
+        raw.start_byte
+      end
+
+      def end_byte
+        raw.end_byte
+      end
+
+      def start_point
+        raw.start_point
+      end
+
+      def end_point
+        raw.end_point
+      end
+
+      def named?
+        raw.named?
+      end
+
+      def has_error?
+        raw.respond_to?(:has_error?) && raw.has_error?
+      end
+
+      def children
+        context.children(self)
+      end
+
+      def named_children
+        context.named_children(self)
+      end
+
+      def child_by_field_name(name)
+        context.child_by_field_name(self, name)
+      end
+
+      def parent
+        context.parent(self)
+      end
+
+      def prev_sibling
+        context.prev_sibling(self)
+      end
+
+      def next_sibling
+        context.next_sibling(self)
+      end
+
+      def prev_named_sibling
+        context.prev_named_sibling(self)
+      end
+
+      def next_named_sibling
+        context.next_named_sibling(self)
+      end
+
+      def ==(other)
+        other = other.raw if other.is_a?(TreeSitterNodeFacade)
+        other.respond_to?(:kind) &&
+          kind == other.kind &&
+          start_byte == other.start_byte &&
+          end_byte == other.end_byte &&
+          named? == other.named?
+      end
+
+      alias eql? ==
+
+      def hash
+        @key.hash
+      end
+
+      def inspect
+        "#<#{self.class} kind=#{kind.inspect} start_byte=#{start_byte} end_byte=#{end_byte}>"
       end
     end
 
