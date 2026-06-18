@@ -22,10 +22,10 @@ pub struct ResultReport {
 const LIMIT: usize = 3;
 const PREDICATE_NODES: &[&str] = &["IF", "WHILE", "UNTIL"];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<ResultReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ResultReport> {
     let mut findings = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut scanner = OversizedPredicate::new(file.to_string_lossy().to_string(), lines, LIMIT);
         scanner.walk(&root, &Vec::new());
         findings.extend(scanner.findings);

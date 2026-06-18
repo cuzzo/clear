@@ -26,10 +26,10 @@ struct Asgn {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<DerivedStateRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DerivedStateRow>> {
     let mut out = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let detector = DerivedState::new(file.to_string_lossy().to_string(), lines);
         detector.each_method(&root, &mut |file, defn, stmts| {
             out.extend(analyze(file, defn, stmts));

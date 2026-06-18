@@ -6,8 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Language as TreeSitterLanguage, Node, Parser};
 
-pub fn parse_file(file: PathBuf) -> Result<Document> {
-    let parsed = ParsedRuby::parse(file)?;
+pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
+    let parsed = ParsedDocument::parse(file, language)?;
     let mut function_defs = Vec::new();
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
@@ -21,6 +21,7 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
         parsed.tree.root_node(),
         &parsed.source,
         &parsed.file,
+        language,
         &context,
         &mut function_defs,
         &mut state_writes,
@@ -33,7 +34,7 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
 
     Ok(Document {
         file: parsed.file.to_string_lossy().to_string(),
-        language: Language::Ruby,
+        language,
         source: parsed.source.clone(),
         lines: parsed.source.lines().map(ToString::to_string).collect(),
         root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
@@ -45,24 +46,36 @@ pub fn parse_file(file: PathBuf) -> Result<Document> {
     })
 }
 
-fn ruby_language() -> TreeSitterLanguage {
-    tree_sitter_ruby::LANGUAGE.into()
+fn language_grammar(language: Language) -> TreeSitterLanguage {
+    match language {
+        Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        Language::Python => tree_sitter_python::LANGUAGE.into(),
+        Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Go => tree_sitter_go::LANGUAGE.into(),
+        Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+        Language::Zig => tree_sitter_zig::LANGUAGE.into(),
+        Language::Lua => tree_sitter_lua::LANGUAGE.into(),
+        Language::C => tree_sitter_c::LANGUAGE.into(),
+        Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        Language::CSharp => tree_sitter_c_sharp::language().into(),
+    }
 }
 
-struct ParsedRuby {
+struct ParsedDocument {
     file: PathBuf,
     source: String,
     tree: tree_sitter::Tree,
 }
 
-impl ParsedRuby {
-    fn parse(file: PathBuf) -> Result<Self> {
+impl ParsedDocument {
+    fn parse(file: PathBuf, language: Language) -> Result<Self> {
         let source = fs::read_to_string(&file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let mut parser = Parser::new();
         parser
-            .set_language(&ruby_language())
-            .with_context(|| "failed to initialize tree-sitter ruby parser")?;
+            .set_language(&language_grammar(language))
+            .with_context(|| "failed to initialize tree-sitter parser")?;
         let tree = parser
             .parse(&source, None)
             .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
@@ -75,6 +88,7 @@ struct ContextState {
     file_owner: String,
     owner: Option<String>,
     function: Option<String>,
+    pub receiver: Option<String>,
 }
 
 impl ContextState {
@@ -83,6 +97,7 @@ impl ContextState {
             file_owner,
             owner: None,
             function: None,
+            receiver: None,
         }
     }
 
@@ -103,6 +118,7 @@ fn collect_facts(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    language: Language,
     context: &ContextState,
     function_defs: &mut Vec<FunctionDef>,
     state_writes: &mut Vec<StateWrite>,
@@ -112,12 +128,12 @@ fn collect_facts(
     seen_writes: &mut HashSet<String>,
     seen_decisions: &mut HashSet<String>,
 ) {
-    let next_context = push_function_context(node, push_owner_context(node, source, context), source);
-    record_function_def(node, source, file, &next_context, function_defs);
-    record_state_write(node, source, file, &next_context, state_writes, seen_writes);
-    record_decision_site(node, source, file, &next_context, decision_sites, seen_decisions);
-    record_predicate_alias(node, source, file, predicate_aliases);
-    record_comparison_use(node, source, file, &next_context, comparison_uses);
+    let next_context = push_function_context(node, push_owner_context(node, source, context, language), source, language);
+    record_function_def(node, source, file, language, &next_context, function_defs);
+    record_state_write(node, source, file, language, &next_context, state_writes, seen_writes);
+    record_decision_site(node, source, file, language, &next_context, decision_sites, seen_decisions);
+    record_predicate_alias(node, source, file, language, predicate_aliases);
+    record_comparison_use(node, source, file, language, &next_context, comparison_uses);
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -125,6 +141,7 @@ fn collect_facts(
             child,
             source,
             file,
+            language,
             &next_context,
             function_defs,
             state_writes,
@@ -141,6 +158,7 @@ fn record_function_def(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    _language: Language,
     context: &ContextState,
     out: &mut Vec<FunctionDef>,
 ) {
@@ -169,9 +187,10 @@ fn record_predicate_alias(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    _language: Language,
     out: &mut Vec<PredicateAlias>,
 ) {
-    if node.kind() != "method" {
+    if !matches!(node.kind(), "method" | "function_definition") {
         return;
     }
     let Some(name) = function_name(node, source) else {
@@ -199,6 +218,7 @@ fn record_comparison_use(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    _language: Language,
     context: &ContextState,
     out: &mut Vec<ComparisonUse>,
 ) {
@@ -232,10 +252,15 @@ fn record_decision_site(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    language: Language,
     context: &ContextState,
     out: &mut Vec<DecisionSite>,
     seen: &mut HashSet<String>,
 ) {
+    if generated_lua_compat_prelude(node, source, language) {
+        return;
+    }
+
     if boolean_container(node) && boolean_and(node, source) {
         record_conjunction_decision(node, source, file, context, out, seen);
         return;
@@ -260,6 +285,17 @@ fn record_decision_site(
             predicate: decision_predicate(decision_node, source),
         });
     }
+}
+
+fn generated_lua_compat_prelude(node: Node<'_>, source: &str, language: Language) -> bool {
+    if language != Language::Lua {
+        return false;
+    }
+    if line(node) != 1 {
+        return false;
+    }
+    let first_line = source.lines().next().unwrap_or("");
+    first_line.contains("_tl_compat") && first_line.contains("compat53.module")
 }
 
 fn record_conjunction_decision(
@@ -352,8 +388,8 @@ fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-fn push_owner_context(node: Node<'_>, source: &str, context: &ContextState) -> ContextState {
-    let Some(owner) = owner_name_from_declaration(node, source) else {
+fn push_owner_context(node: Node<'_>, source: &str, context: &ContextState, language: Language) -> ContextState {
+    let Some(owner) = owner_name_from_declaration(node, source).or_else(|| receiver_convention_owner_name(node, source, language)) else {
         return context.clone();
     };
     let parent_owner = context.owner.clone();
@@ -371,13 +407,14 @@ fn push_owner_context(node: Node<'_>, source: &str, context: &ContextState) -> C
     next
 }
 
-fn push_function_context(node: Node<'_>, mut context: ContextState, source: &str) -> ContextState {
+fn push_function_context(node: Node<'_>, mut context: ContextState, source: &str, language: Language) -> ContextState {
     let Some(function) = function_name(node, source) else {
         return context;
     };
     let owner = context.current_owner();
     context.function = Some(function);
     context.owner = Some(owner);
+    context.receiver = function_receiver_name(node, source, language);
     context
 }
 
@@ -385,11 +422,12 @@ fn record_state_write(
     node: Node<'_>,
     source: &str,
     file: &Path,
+    _language: Language,
     context: &ContextState,
     out: &mut Vec<StateWrite>,
     seen: &mut HashSet<String>,
 ) {
-    if node.kind() == "operator_assignment" {
+    if node.kind() == "operator_assignment" || node.kind() == "augmented_assignment" {
         return;
     }
 
@@ -399,6 +437,7 @@ fn record_state_write(
     let Some(target) = state_target(assignment.lhs, source) else {
         return;
     };
+    let target = normalize_target_receiver(target, context);
     if target.field == "[]" || target.field.starts_with('$') {
         return;
     }
@@ -521,9 +560,10 @@ fn state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
 
 fn function_name(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
-        "method" => node
+        "method" | "function_definition" | "function_declaration" | "method_definition" | "function_item" => node
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
+            .or_else(|| declarator_name(node.child_by_field_name("declarator"), source))
             .or_else(|| first_named_text(node, source, &["identifier", "constant", "property_identifier"])),
         "singleton_method" => {
             let name = node
@@ -543,10 +583,35 @@ fn function_name(node: Node<'_>, source: &str) -> Option<String> {
                 })?;
             Some(format!("self.{name}"))
         }
+        "method_declaration" => node
+            .child_by_field_name("name")
+            .map(|name| node_text(name, source).to_string())
+            .or_else(|| first_named_text(node, source, &["field_identifier", "identifier"])),
         "body_statement" if first_child_kind(node) == Some("def") => hidden_ruby_method_name(node, source),
         "argument_list" if first_child_kind(node) == Some("def") => inline_def_name(node, source),
         _ => None,
     }
+}
+
+fn declarator_name(node: Option<Node<'_>>, source: &str) -> Option<String> {
+    let mut pending = vec![node?];
+    let mut seen = HashSet::new();
+    while let Some(current) = pending.pop() {
+        let key = format!("{:?}\0{}", span(current), current.kind());
+        if !seen.insert(key) {
+            continue;
+        }
+        if matches!(
+            current.kind(),
+            "identifier" | "simple_identifier" | "field_identifier" | "property_identifier"
+        ) {
+            return Some(node_text(current, source).to_string());
+        }
+        let mut children = named_children(current);
+        children.reverse();
+        pending.extend(children);
+    }
+    None
 }
 
 fn owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
@@ -555,12 +620,37 @@ fn owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
     }
 
     match node.kind() {
-        "class" | "module" => node
+        "class" | "module" | "class_definition" | "class_declaration" | "class_specifier" => node
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
             .or_else(|| first_named_text(node, source, &["constant", "identifier", "type_identifier"])),
+        "impl_item" | "impl_block" => impl_owner_name(node, source),
+        "struct_item" | "struct_spec" | "struct_specifier" | "type_spec" | "type_declaration" => node
+            .child_by_field_name("name")
+            .map(|name| node_text(name, source).to_string())
+            .or_else(|| first_named_text(node, source, &["type_identifier", "identifier"])),
         _ => None,
     }
+}
+
+fn impl_owner_name(node: Node<'_>, source: &str) -> Option<String> {
+    let r#type = node
+        .child_by_field_name("type")
+        .or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind().contains("type") || child.kind().contains("identifier"))
+        })?;
+    Some(normalize_type_owner(node_text(r#type, source)))
+}
+
+fn normalize_type_owner(text: &str) -> String {
+    let value = text.trim();
+    let value = value.trim_start_matches(['&', '*']);
+    let value = value.replace("const", "").replace("mut", "").replace("var", "");
+    let value = value.trim();
+    let value = value.split(['(', '{', '<', ' ']).next().unwrap_or("");
+    value.split('.').last().unwrap_or("").to_string()
 }
 
 fn hidden_ruby_method_name(node: Node<'_>, source: &str) -> Option<String> {
@@ -657,14 +747,29 @@ fn member_field_text(field: Node<'_>, source: &str) -> Option<String> {
             .or_else(|| {
                 named_children(field)
                     .into_iter()
-                    .find(|child| matches!(child.kind(), "identifier" | "simple_identifier" | "field_identifier" | "property_identifier"))
+                    .find(|child| {
+                        matches!(
+                            child.kind(),
+                            "identifier"
+                                | "simple_identifier"
+                                | "field_identifier"
+                                | "property_identifier"
+                        )
+                    })
             })
             .or_else(|| last_named_child(field))?;
-        let text = node_text(suffix, source).trim_start_matches(['.', '?']);
+        let text = node_text(suffix, source)
+            .trim_start_matches(['.', '?'])
+            .trim_start_matches("->");
         return (!text.is_empty()).then(|| text.to_string());
     }
 
-    Some(node_text(field, source).trim_start_matches(['.', '?']).to_string())
+    Some(
+        node_text(field, source)
+            .trim_start_matches(['.', '?'])
+            .trim_start_matches("->")
+            .to_string(),
+    )
 }
 
 fn strip_assignment_suffix(text: &str) -> String {
@@ -987,7 +1092,7 @@ mod tests {
     fn document(source: &str) -> Document {
         let mut file = NamedTempFile::new().expect("tempfile");
         file.write_all(source.as_bytes()).expect("write source");
-        parse_file(file.path().to_path_buf()).expect("document")
+        parse_file(file.path().to_path_buf(), Language::Ruby).expect("document")
     }
 
     #[test]
@@ -1052,4 +1157,93 @@ end
         assert_eq!(doc.state_writes[0].function, "set");
         assert_eq!(doc.state_writes[0].field, "state");
     }
+}
+
+#[cfg(test)]
+mod c_tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_c_assignment() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"void foo() { handle->loop = 1; }").unwrap();
+        let doc = parse_file(file.path().to_path_buf(), Language::C).unwrap();
+        assert!(!doc.state_writes.is_empty());
+    }
+}
+
+fn first_argument_receiver_language(language: Language) -> bool {
+    matches!(language, Language::C)
+}
+
+fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(String, String)> {
+    let params = node.child_by_field_name("declarator")
+        .and_then(|d| d.child_by_field_name("parameters"))
+        .or_else(|| node.child_by_field_name("parameters"))
+        .or_else(|| first_named_child_with_kind(node, "parameter_list"))
+        .or_else(|| {
+            node.child_by_field_name("declarator")
+                .and_then(|d| first_named_child_with_kind(d, "parameter_list"))
+        })?;
+    
+    let first = first_named_child_with_kind(params, "parameter_declaration")?;
+    
+    let type_node = named_children(first).into_iter().find(|child| {
+        matches!(child.kind(), "type_identifier" | "primitive_type" | "qualified_identifier" | "scoped_type_identifier")
+    })?;
+    
+    let name_node = named_children(first).into_iter().rev().find(|child| {
+        matches!(child.kind(), "identifier" | "field_identifier")
+    }).or_else(|| first_named_child(first))?;
+    
+    Some((node_text(type_node, source).to_string(), node_text(name_node, source).to_string()))
+}
+
+fn snake_case_type_name(type_str: &str) -> String {
+    let mut parts = type_str.split("::");
+    let mut last = parts.last().unwrap_or(type_str).to_string();
+    // Simplified snake casing logic
+    last.make_ascii_lowercase();
+    last
+}
+
+fn receiver_convention_owner_name(node: Node<'_>, source: &str, language: Language) -> Option<String> {
+    if !first_argument_receiver_language(language) || node.kind() != "function_definition" {
+        return None;
+    }
+    
+    let (type_name, _) = first_argument_receiver_parameter(node, source)?;
+    let type_name = normalize_type_owner(&type_name);
+    let name = function_name(node, source)?;
+    
+    if name.starts_with(&snake_case_type_name(&type_name)) {
+        Some(type_name)
+    } else if type_name.ends_with("_t") && name.starts_with(type_name.strip_suffix("_t").unwrap()) {
+        Some(type_name)
+    } else {
+        None
+    }
+}
+
+fn function_receiver_name(node: Node<'_>, source: &str, language: Language) -> Option<String> {
+    // Only handling C convention for now
+    if first_argument_receiver_language(language) && node.kind() == "function_definition" {
+        if let Some((_, name)) = first_argument_receiver_parameter(node, source) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Target {
+    if let Some(current_receiver) = &context.receiver {
+        if &target.receiver == current_receiver {
+            target.receiver = "self".to_string();
+        } else if target.receiver.starts_with(&format!("{}.", current_receiver)) {
+            target.receiver = format!("self.{}", target.receiver.strip_prefix(&format!("{}.", current_receiver)).unwrap());
+        }
+    }
+    target
 }

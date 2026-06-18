@@ -47,11 +47,11 @@ struct Use {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<SemanticAliasReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<SemanticAliasReport> {
     let mut preds = Vec::new();
     let mut uses = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut scanner = SemanticAlias::new(file.to_string_lossy().to_string(), lines);
         scanner.walk(&root, &Vec::new());
         preds.extend(scanner.preds);

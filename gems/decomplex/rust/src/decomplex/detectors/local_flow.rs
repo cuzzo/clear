@@ -52,10 +52,10 @@ const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"
 const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN"];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<MethodSummary>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSummary>> {
     let mut out = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut detector = LocalFlow::new(file.to_string_lossy().to_string(), lines);
         out.extend(detector.scan(&root));
     }
@@ -330,4 +330,41 @@ struct RawBoundary {
     line: usize,
     kind: String,
     text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn extracts_python_function_local_flow() {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        file.write_all(
+            b"def mixed(price, tax):\n    subtotal = price + tax\n    total = subtotal\n    return total\n",
+        )
+        .expect("write");
+
+        let summaries = scan_files(&[file.path().to_path_buf()], Language::Python).expect("scan");
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "mixed")
+            .expect("mixed summary");
+
+        assert_eq!(summary.owner, "(top-level)");
+        assert_eq!(summary.statements.len(), 3);
+        assert_eq!(
+            summary.statements[0].reads,
+            ["price".to_string(), "tax".to_string()].into_iter().collect()
+        );
+        assert_eq!(
+            summary.statements[1].dependencies,
+            vec![("total".to_string(), "subtotal".to_string())]
+        );
+        assert_eq!(
+            summary.statements[2].reads,
+            ["total".to_string()].into_iter().collect()
+        );
+    }
 }

@@ -149,7 +149,7 @@ struct FieldMetrics {
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StateMeshReport> {
     let mut src_map = BTreeMap::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         src_map.insert(file.to_string_lossy().to_string(), (root, lines));
     }
 

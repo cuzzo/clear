@@ -3,12 +3,16 @@
 require "json"
 require_relative "co_update"
 require_relative "flay_similarity"
+require_relative "local_flow"
+require_relative "structural_topology"
 require_relative "native/co_update"
 require_relative "native/decision_pressure"
 require_relative "native/predicate_aliases"
 require_relative "native/flay_similarity"
 require_relative "native/miner"
 require_relative "native/semantic_aliases"
+require_relative "native/local_flow"
+require_relative "native/structural_topology"
 require_relative "miner"
 require_relative "decision_pressure"
 require_relative "predicate_alias"
@@ -69,7 +73,9 @@ module Decomplex
       "sequence-mine" => :sequence_mine,
       "function-lcom" => :function_lcom,
       "false-simplicity" => :false_simplicity,
-      "fat-union" => :fat_union
+      "fat-union" => :fat_union,
+      "local-flow" => :local_flow,
+      "structural-topology" => :structural_topology
     }.freeze
     ENGINES = %w[ruby rust].freeze
 
@@ -124,6 +130,10 @@ module Decomplex
         false_simplicity(files, engine: engine, jobs: jobs)
       when :fat_union
         fat_union(files, engine: engine, jobs: jobs)
+      when :local_flow
+        local_flow(files, engine: engine, jobs: jobs)
+      when :structural_topology
+        structural_topology(files, engine: engine, jobs: jobs)
       else
         raise ArgumentError, "unsupported decomplex detector: #{detector}"
       end
@@ -361,6 +371,86 @@ module Decomplex
       end
 
       { "fat_unions" => FatUnion.scan(files).fat_unions }
+    end
+
+    private_class_method def self.local_flow(files, engine:, jobs:)
+      return Native::LocalFlow.scan(files, jobs: jobs) if engine.to_s == "rust"
+
+      LocalFlow.scan(files).map { |summary| local_flow_summary(summary) }
+    end
+
+    private_class_method def self.structural_topology(files, engine:, jobs:)
+      return Native::StructuralTopology.scan(files, jobs: jobs) if engine.to_s == "rust"
+
+      graph = StructuralTopology.scan(files)
+      {
+        "methods" => graph.methods.map { |method| structural_method(method) },
+        "edges" => graph.edges.map { |edge| structural_edge(edge) }
+      }
+    end
+
+    private_class_method def self.local_flow_summary(summary)
+      {
+        "id" => summary.id,
+        "owner" => summary.owner,
+        "name" => summary.name,
+        "file" => summary.file,
+        "line" => summary.line,
+        "span" => summary.span,
+        "statements" => summary.statements.map { |statement| local_flow_statement(statement) },
+        "boundaries" => summary.boundaries.map { |boundary| local_flow_boundary(boundary) }
+      }
+    end
+
+    private_class_method def self.local_flow_statement(statement)
+      {
+        "index" => statement.index,
+        "line" => statement.line,
+        "end_line" => statement.end_line,
+        "span" => statement.span,
+        "source" => statement.source,
+        "reads" => statement.reads.to_a.sort,
+        "writes" => statement.writes.to_a.sort,
+        "dependencies" => statement.dependencies.map { |edge| Array(edge).map(&:to_s) }.sort,
+        "co_uses" => statement.co_uses.map { |edge| Array(edge).map(&:to_s).sort }.sort
+      }
+    end
+
+    private_class_method def self.local_flow_boundary(boundary)
+      {
+        "before_index" => boundary.before_index,
+        "after_index" => boundary.after_index,
+        "line" => boundary.line,
+        "kind" => boundary.kind.to_s,
+        "text" => boundary.text
+      }
+    end
+
+    private_class_method def self.structural_method(method)
+      {
+        "id" => method.id,
+        "owner" => method.owner,
+        "name" => method.name,
+        "file" => method.file,
+        "line" => method.line,
+        "span" => method.span,
+        "visibility" => method.visibility.to_s
+      }
+    end
+
+    private_class_method def self.structural_edge(edge)
+      {
+        "caller" => edge.caller,
+        "callee" => edge.callee,
+        "caller_name" => edge.caller_name,
+        "callee_name" => edge.callee_name,
+        "file" => edge.file,
+        "line" => edge.line,
+        "span" => edge.span,
+        "type" => edge.type.to_s,
+        "kind" => edge.kind.to_s,
+        "confidence" => edge.confidence.to_s
+      }
     end
 
     private_class_method def self.canonicalize(value)

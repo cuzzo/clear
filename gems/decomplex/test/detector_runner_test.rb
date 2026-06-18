@@ -554,6 +554,66 @@ class DetectorRunnerTest < Minitest::Test
     end
   end
 
+  def test_local_flow_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-local-flow", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Billing
+          def mixed(price, tax)
+            subtotal = price + tax
+            total = subtotal.round
+
+            timestamp = Time.now
+            buffer = []
+            buffer << timestamp
+            [total, buffer]
+          end
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("local-flow", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
+  def test_structural_topology_rust_engine_matches_ruby_engine_byte_for_byte
+    skip "cargo is not available" unless cargo_available?
+
+    Tempfile.create(["decomplex-structural-topology", ".rb"]) do |file|
+      file.write(<<~RUBY)
+        class Worker
+          def run(items)
+            prepare
+            if ready?
+              validate
+            end
+            items.each do |item|
+              helper(item)
+            end
+          end
+
+          private
+          def prepare; end
+          def ready?; true; end
+          def validate; end
+          def helper(item); item; end
+
+          public :validate
+        end
+      RUBY
+      file.flush
+
+      ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare("structural-topology", [file.path])
+
+      assert ok, diff_message(ruby_json, rust_json)
+      assert_equal ruby_json, rust_json
+    end
+  end
+
   def test_detector_cli_compare_engines_outputs_canonical_json
     skip "cargo is not available" unless cargo_available?
 

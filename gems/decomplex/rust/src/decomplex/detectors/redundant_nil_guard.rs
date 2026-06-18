@@ -61,10 +61,10 @@ impl Finding {
 
 const TERMINATING_CALLS: &[&str] = &["raise", "fail", "abort", "exit", "exit!"];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<RedundantNilGuardRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<RedundantNilGuardRow>> {
     let mut findings = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut scanner = RedundantNilGuard::new(file.to_string_lossy().to_string(), lines);
         scanner.walk(&root, &Vec::new());
         findings.extend(scanner.findings);

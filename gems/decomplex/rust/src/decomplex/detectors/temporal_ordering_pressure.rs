@@ -32,10 +32,10 @@ struct MethodState {
     writes: Vec<String>,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<TemporalOrderingPressureRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<TemporalOrderingPressureRow>> {
     let mut rows = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut detector = TemporalOrderingPressure::new(file.to_string_lossy().to_string(), lines);
         rows.extend(detector.scan(&root));
     }

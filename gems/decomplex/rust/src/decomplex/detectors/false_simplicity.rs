@@ -26,10 +26,10 @@ struct Site {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<FalseSimplicityRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FalseSimplicityRow>> {
     let mut sites = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut detector = FalseSimplicity::new(file.to_string_lossy().to_string(), lines);
         detector.walk(&root, &Vec::new());
         sites.extend(detector.sites);

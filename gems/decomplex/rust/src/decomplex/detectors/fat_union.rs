@@ -30,10 +30,10 @@ struct VariantReads {
     reads: Vec<Read>,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<FatUnionReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<FatUnionReport> {
     let mut out = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut detector = FatUnion::new(file.to_string_lossy().to_string(), lines);
         detector.walk(&root, &Vec::new());
         out.extend(detector.findings());

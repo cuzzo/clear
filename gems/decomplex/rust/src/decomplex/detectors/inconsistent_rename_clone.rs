@@ -40,10 +40,10 @@ struct Block {
 const HOLE_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "LASGN", "DASGN", "IASGN"];
 const MIN_TOKENS: usize = 8;
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<InconsistentRenameCloneRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<InconsistentRenameCloneRow>> {
     let mut blocks = Vec::new();
     for file in files {
-        let (root, _lines) = ast::parse(file)?;
+        let (root, _lines) = ast::parse_with_language(file, language)?;
         let detector = InconsistentRenameClone::new(file.to_string_lossy().to_string());
         detector.collect(&root, &Vec::new(), &mut blocks);
     }

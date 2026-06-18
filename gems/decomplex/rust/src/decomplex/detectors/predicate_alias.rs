@@ -28,10 +28,10 @@ struct Pred {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<PredicateAliasReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PredicateAliasReport> {
     let mut preds = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut p = PredicateAlias::new(file.to_string_lossy().to_string(), lines);
         p.walk(&root);
         preds.extend(p.preds);

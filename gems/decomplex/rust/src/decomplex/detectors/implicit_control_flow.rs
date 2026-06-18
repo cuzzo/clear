@@ -84,10 +84,10 @@ const MUTATING_MIDS: &[&str] = &[
 const NON_MUTATING_OPERATOR_MIDS: &[&str] = &["!", "!=", "!~"];
 const MUTATING_SUFFIXES: &[&str] = &["!"];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<ImplicitControlFlowReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ImplicitControlFlowReport> {
     let mut parsed = BTreeMap::new();
     for file in files {
-        parsed.insert(file.to_string_lossy().to_string(), ast::parse(file)?);
+        parsed.insert(file.to_string_lossy().to_string(), ast::parse_with_language(file, language)?);
     }
 
     let effect_index = EffectIndex::build(&parsed);

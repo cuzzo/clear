@@ -41,8 +41,8 @@ struct RangeInfo {
     last: usize,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<OperationalDiscontinuityRow>> {
-    let summaries = local_flow::scan_files(files, _language)?;
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<OperationalDiscontinuityRow>> {
+    let summaries = local_flow::scan_files(files, language)?;
     let detector = OperationalDiscontinuity::new(summaries);
     Ok(detector.findings())
 }

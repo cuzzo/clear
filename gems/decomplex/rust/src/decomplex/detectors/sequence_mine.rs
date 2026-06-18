@@ -29,10 +29,10 @@ struct Site {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<BrokenProtocolReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<BrokenProtocolReport> {
     let mut sites = Vec::new();
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut sm = SequenceMine::new(file.to_string_lossy().to_string(), lines);
         sm.walk(&root, &Vec::new());
         sites.extend(sm.sites);

@@ -113,10 +113,9 @@ module Decomplex
         defstack = defstack + [node.children[0].to_s]
       when :DEFN then defstack = defstack + [node.children[0].to_s]
       when :DEFS then defstack = defstack + [node.children[1].to_s]
-      when :CALL, :OPCALL, :FCALL, :VCALL
+      when :CALL, :OPCALL, :FCALL
         # CALL(recv, :method, args) - attribute reads have no args
         # FCALL(:method, args) - attribute reads have no args
-        # VCALL(:method) - attribute reads have no args
         recv = node.type == :CALL || node.type == :OPCALL ? node.children[0] : nil
         mid  = node.type == :CALL || node.type == :OPCALL ? node.children[1] : node.children[0]
         args = node.type == :CALL || node.type == :OPCALL ? node.children[2] : node.children[1]

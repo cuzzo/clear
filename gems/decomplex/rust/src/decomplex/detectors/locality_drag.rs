@@ -45,8 +45,8 @@ pub struct BoundaryInfo {
     pub marker: String,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<LocalityDragRow>> {
-    let summaries = local_flow::scan_files(files, _language)?;
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<LocalityDragRow>> {
+    let summaries = local_flow::scan_files(files, language)?;
     let mut detector = LocalityDrag::new(summaries);
     Ok(detector.findings())
 }

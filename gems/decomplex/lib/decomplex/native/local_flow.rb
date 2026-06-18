@@ -5,31 +5,15 @@ require_relative "command"
 
 module Decomplex
   module Native
-    module FlaySimilarity
+    module LocalFlow
       module_function
 
-      def scan(files, mass:, fuzzy:, jobs: nil)
+      def scan(files, jobs: nil)
         paths = Array(files).map(&:to_s)
         language = language_for(paths.first)
-        JSON.parse(
-          Command.run(
-            "flay-similarity",
-            "--language", language,
-            *Command.jobs_args(jobs),
-            "--mass", mass.to_i.to_s,
-            "--fuzzy", fuzzy.to_i.to_s,
-            *paths
-          ),
-          symbolize_names: true
-        ).map { |finding| normalize_finding(finding) }
+        JSON.parse(Command.run("local-flow", "--language", language, *Command.jobs_args(jobs), *paths))
       end
 
-      private_class_method def self.normalize_finding(finding)
-        finding.merge(
-          clone_type: finding.fetch(:clone_type).to_sym,
-          spans: finding.fetch(:spans).transform_values { |span| Array(span).map(&:to_i) }
-        )
-      end
       private_class_method def self.language_for(path)
         case File.extname(path)
         when ".rb" then "ruby"
@@ -46,7 +30,6 @@ module Decomplex
         else "ruby"
         end
       end
-
     end
   end
 end

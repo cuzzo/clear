@@ -34,14 +34,14 @@ const NOISE_MIDS: &[&str] = &[
     "!", "!=", "==", "===", "<", "<=", ">", ">=", "[]", "[]=", "to_s", "inspect", "class",
 ];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<StateBranchDensityRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBranchDensityRow>> {
     let mut parsed = Vec::new();
     let mut global_immutable_readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut global_type_aliases: BTreeMap<String, String> = BTreeMap::new();
 
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let scanner = StateBranchDensity::new(None, lines.clone(), None, None, None);
         
         for (name, readers) in scanner.immutable_struct_readers(&lines) {

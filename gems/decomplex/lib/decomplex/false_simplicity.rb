@@ -134,7 +134,7 @@ module Decomplex
     ).freeze
     ZIG_LEXICON = Lexicon.new(
       dispatch_mids: %w[field fieldParentPtr ptrCast alignCast call].freeze,
-      meta_mids: %w[typeInfo TypeOf ptrCast intFromPtr ptrFromInt].freeze,
+      meta_mids: %w[typeInfo TypeOf ptrCast intFromPtr ptrFromInt eval].freeze,
       method_obj_mids: %i[method].freeze,
       io_consts: %w[std os fs process net Thread Mutex Atomic].freeze,
       io_bare: %w[panic unreachable].freeze,

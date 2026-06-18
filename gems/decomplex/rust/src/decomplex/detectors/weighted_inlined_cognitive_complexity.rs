@@ -22,13 +22,13 @@ pub struct WeightedInlinedCognitiveComplexityRow {
     pub spans: BTreeMap<String, Span>,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<WeightedInlinedCognitiveComplexityRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<WeightedInlinedCognitiveComplexityRow>> {
     let mut parsed = BTreeMap::new();
     for file in files {
-        parsed.insert(file.to_string_lossy().to_string(), ast::parse(file)?);
+        parsed.insert(file.to_string_lossy().to_string(), ast::parse_with_language(file, language)?);
     }
     
-    let topology_report = structural_topology::scan_files(files, _language)?;
+    let topology_report = structural_topology::scan_files(files, language)?;
     let topology = structural_topology::Graph::new(topology_report.methods, topology_report.edges);
 
     let mut bodies = Vec::new();

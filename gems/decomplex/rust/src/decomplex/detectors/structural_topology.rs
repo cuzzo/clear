@@ -43,12 +43,12 @@ const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"
 const CONDITIONAL_TYPES: &[&str] = &["IF", "UNLESS", "CASE", "CASE2"];
 const ITERATION_TYPES: &[&str] = &["ITER", "FOR", "WHILE", "UNTIL"];
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<StructuralTopologyReport> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StructuralTopologyReport> {
     let mut methods = Vec::new();
     let mut parsed = Vec::new();
 
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut mc = MethodCollector::new(file.to_string_lossy().to_string(), lines.clone());
         methods.extend(mc.scan(&root));
         parsed.push((file.to_string_lossy().to_string(), root, lines));

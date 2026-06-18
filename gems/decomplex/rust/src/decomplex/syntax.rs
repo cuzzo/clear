@@ -1,4 +1,4 @@
-pub mod ruby;
+pub mod tree_sitter_adapter;
 
 use crate::decomplex::ast::{RawNode, Span};
 use crate::decomplex::parallel;
@@ -10,12 +10,32 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Language {
     Ruby,
+    Python,
+    JavaScript,
+    TypeScript,
+    Go,
+    Rust,
+    Zig,
+    Lua,
+    C,
+    Cpp,
+    CSharp,
 }
 
 impl Language {
     pub fn parse(value: &str) -> Result<Self> {
         match value {
             "ruby" => Ok(Self::Ruby),
+            "python" => Ok(Self::Python),
+            "javascript" => Ok(Self::JavaScript),
+            "typescript" => Ok(Self::TypeScript),
+            "go" => Ok(Self::Go),
+            "rust" => Ok(Self::Rust),
+            "zig" => Ok(Self::Zig),
+            "lua" => Ok(Self::Lua),
+            "c" => Ok(Self::C),
+            "cpp" => Ok(Self::Cpp),
+            "csharp" => Ok(Self::CSharp),
             _ => bail!("unsupported Decomplex native language: {value}"),
         }
     }
@@ -99,9 +119,7 @@ pub struct SimilarityFinding {
 }
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
-    match language {
-        Language::Ruby => ruby::parse_file(file),
-    }
+    tree_sitter_adapter::parse_file(file, language)
 }
 
 pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document>> {

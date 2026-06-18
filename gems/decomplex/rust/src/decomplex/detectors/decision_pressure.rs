@@ -27,12 +27,12 @@ struct Hit {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], _language: Language) -> Result<Vec<DecisionPressureRow>> {
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DecisionPressureRow>> {
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
 
     for file in files {
-        let (root, lines) = ast::parse(file)?;
+        let (root, lines) = ast::parse_with_language(file, language)?;
         let mut detector = DecisionPressure::new(file.to_string_lossy().to_string(), lines);
         detector.walk(&root, &Vec::new(), &BTreeMap::new());
         guard.extend(detector.guard_hits);

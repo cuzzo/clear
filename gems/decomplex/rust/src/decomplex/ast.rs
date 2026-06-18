@@ -1,9 +1,10 @@
-use serde::Serialize;
+use crate::decomplex::syntax::Language;
 use anyhow::{Context, Result};
+use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
-use tree_sitter::{Node as TreeSitterNode, Parser};
+use tree_sitter::{Language as TreeSitterLanguage, Node as TreeSitterNode, Parser};
 
 pub type Span = [usize; 4];
 const COMPARISON_OPERATORS: &[&str] = &["==", "!=", "===", "!==", "<", "<=", ">", ">="];
@@ -190,18 +191,38 @@ pub struct Node {
 }
 
 pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
+    parse_with_language(file, Language::Ruby)
+}
+
+pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec<String>)> {
     let source = fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut parser = Parser::new();
     parser
-        .set_language(&tree_sitter_ruby::LANGUAGE.into())
-        .with_context(|| "failed to initialize tree-sitter ruby parser")?;
+        .set_language(&language_grammar(language))
+        .with_context(|| "failed to initialize tree-sitter parser")?;
     let tree = parser
         .parse(&source, None)
         .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
     let root = TreeSitterNormalizer::new(&source).normalize(tree.root_node());
     let lines = source.lines().map(ToString::to_string).collect();
     Ok((root, lines))
+}
+
+fn language_grammar(language: Language) -> TreeSitterLanguage {
+    match language {
+        Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        Language::Python => tree_sitter_python::LANGUAGE.into(),
+        Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Go => tree_sitter_go::LANGUAGE.into(),
+        Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+        Language::Zig => tree_sitter_zig::LANGUAGE.into(),
+        Language::Lua => tree_sitter_lua::LANGUAGE.into(),
+        Language::C => tree_sitter_c::LANGUAGE.into(),
+        Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        Language::CSharp => tree_sitter_c_sharp::language().into(),
+    }
 }
 
 pub fn node(child: &Child) -> Option<&Node> {
@@ -325,7 +346,8 @@ impl<'source> TreeSitterNormalizer<'source> {
                 let children = self.normalize_children(node);
                 Some(self.wrap("ROOT", children, node))
             }
-            "method" => self.normalize_function(node),
+            "method" | "function_definition" | "function_declaration" | "method_definition"
+            | "method_declaration" | "function_item" => self.normalize_function(node),
             "singleton_method" => self.normalize_singleton_function(node),
             "class" | "class_definition" | "class_declaration" | "class_specifier" => {
                 self.normalize_class(node)
@@ -1620,7 +1642,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         if matches!(
             node.kind(),
-            "method_parameters" | "block_parameters" | "lambda_parameters"
+            "method_parameters" | "parameters" | "parameter_list" | "formal_parameters"
+            | "block_parameters" | "lambda_parameters"
         ) {
             for child in self.named_children(node) {
                 self.collect_identifier_names(child, locals);
@@ -1671,6 +1694,14 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn ruby_scope_boundary(&self, node: TreeSitterNode<'_>) -> bool {
+        if node.kind() == "block"
+            && node
+                .parent()
+                .map(|parent| function_kind(parent.kind()))
+                .unwrap_or(false)
+        {
+            return false;
+        }
         if matches!(node.kind(), "block" | "do_block")
             && node
                 .parent()
@@ -1720,6 +1751,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         matches!(
             parent.kind(),
             "method_parameters"
+                | "parameters"
+                | "parameter_list"
+                | "formal_parameters"
                 | "block_parameters"
                 | "lambda_parameters"
                 | "optional_parameter"
@@ -2705,6 +2739,19 @@ fn if_kind(kind: &str) -> bool {
     matches!(
         kind,
         "if" | "if_statement" | "if_modifier" | "unless" | "unless_modifier" | "if_expression" | "conditional"
+    )
+}
+
+fn function_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "method"
+            | "function_definition"
+            | "function_declaration"
+            | "method_definition"
+            | "method_declaration"
+            | "function_item"
+            | "singleton_method"
     )
 }
 
