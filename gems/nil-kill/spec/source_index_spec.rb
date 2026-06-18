@@ -43,6 +43,102 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "indexes Ruby struct block owners and Sorbet struct fields" do
+    Dir.mktmpdir("nil-kill-source-index-struct-owners") do |dir|
+      path = File.join(dir, "sample.rb")
+      File.write(path, <<~RUBY)
+        module Sample
+          module DropField
+            extend T::Sig
+
+            sig { returns(String) }
+            def token
+              "fallback"
+            end
+          end
+
+          Item = Struct.new(:token) do
+            include DropField
+
+            sig { returns(String) }
+            def token
+              self[:token].to_s
+            end
+          end
+
+          class Record < T::Struct
+            const :value, String
+
+            def helper
+              const :not_a_field, String
+            end
+
+            prop :after_method, Integer
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+
+      expect(idx.methods).to include(a_hash_including("class" => "Sample::Item", "method" => "token", "has_sig" => true))
+      expect(idx.struct_declarations).to include(a_hash_including("class" => "Sample::Item", "fields" => %w[token]))
+      expect(idx.included_modules).to include(a_hash_including("class" => "Sample::Item", "module" => "Sample::DropField"))
+      expect(idx.sorbet_state_fields).to include(a_hash_including("class" => "Sample::Record", "field" => "value", "type" => "String"))
+      expect(idx.sorbet_state_fields).to include(a_hash_including("class" => "Sample::Record", "field" => "after_method", "type" => "Integer"))
+      expect(idx.sorbet_state_fields).not_to include(a_hash_including("field" => "not_a_field"))
+    end
+  end
+
+  it "indexes reusable return-usage and hash-record escape facts" do
+    Dir.mktmpdir("nil-kill-source-index-facts") do |dir|
+      path = File.join(dir, "sample.rb")
+      File.write(path, <<~RUBY)
+        class Example
+          def produce
+            items << {name: name, id: id}
+            fallback
+          end
+
+          def consume
+            produce
+          end
+
+          def route(mode)
+            mode == :fast || mode == :safe
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+
+      expect(idx.return_usage_sites).to include(a_hash_including(
+        "name" => "produce",
+        "context" => "return",
+        "current_method" => "consume"
+      ))
+      expect(idx.return_direct_usage_sites).to include(a_hash_including(
+        "name" => "produce",
+        "context" => "return",
+        "current_method" => "consume"
+      ))
+      expect(idx.hash_record_escape_sites).to include(a_hash_including(
+        "line" => 3,
+        "code" => "{name: name, id: id}",
+        "escapes_collection" => true
+      ))
+      expect(idx.hidden_enum_observations).to include(a_hash_including(
+        "kind" => "param",
+        "slot" => "mode",
+        "values" => include(a_hash_including("value" => ":fast"))
+      ))
+
+      usage_only = described_class.new(path, usage_only: true)
+      expect(usage_only.methods).to be_empty
+      expect(usage_only.hash_record_escape_sites).to be_empty
+      expect(usage_only.return_usage_sites).not_to be_empty
+    end
+  end
+
   it "records splat / double-splat / block params as untraceable (def-side, not sig-side)" do
     Dir.mktmpdir("nil-kill-untraceable") do |dir|
       path = File.join(dir, "sample.rb")

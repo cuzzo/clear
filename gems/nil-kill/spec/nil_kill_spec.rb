@@ -1667,6 +1667,26 @@ RSpec.describe NilKill do
       end
     end
 
+    it "uses indexed return-usage facts before falling back to AST scans" do
+      infer = infer_with_store
+      evidence = {
+        "facts" => {
+          "existing_sigs" => [
+            { "path" => "app/example.rb", "line" => 1, "class" => "Example", "method" => "answer", "kind" => "instance",
+              "sig" => "sig { returns(T.untyped) }" }
+          ],
+          "return_usage_sites" => [
+            { "path" => "spec/example_spec.rb", "line" => 3, "name" => "answer", "context" => "value", "current_method" => nil }
+          ],
+        },
+      }
+
+      expect(infer.send(:unused_return_methods, evidence)).to be_empty
+
+      evidence["facts"]["return_usage_sites"] = []
+      expect(infer.send(:unused_return_methods, evidence)).to include(a_hash_including("method" => "answer"))
+    end
+
     it "uses nested runtime shape evidence for generic narrowing" do
       infer = infer_with_store
       rec = {
@@ -2589,6 +2609,31 @@ RSpec.describe NilKill do
 
           escaping = infer.send(:hash_record_producers_escaping_into_collection,
             [{ "path" => path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
+
+          expect(escaping).not_to be_empty
+        end
+      end
+
+      it "uses indexed hash-record escape facts when available" do
+        Dir.mktmpdir("nil-kill-indexed-append") do |dir|
+          path = File.join(dir, "parser.rb")
+          File.write(path, <<~RUBY)
+            class P
+              def parse
+                fields << { name: name, value: :wildcard, name_token: tok }
+              end
+            end
+          RUBY
+          idx = NilKill::SourceIndex.new(path)
+          infer = described_class.allocate
+          store = NilKill::Store.new
+          store.facts["hash_record_escape_sites"] = idx.hash_record_escape_sites
+          infer.instance_variable_set(:@store, store)
+          infer.define_singleton_method(:parsed_hash_record_source) { |_| raise "should use indexed facts" }
+          site_path = idx.hash_record_escape_sites.first.fetch("path")
+
+          escaping = infer.send(:hash_record_producers_escaping_into_collection,
+            [{ "path" => site_path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
 
           expect(escaping).not_to be_empty
         end

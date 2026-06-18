@@ -7,6 +7,8 @@ module NilKill
   module Languages
     module Providers
       class Ruby < Provider
+        SourceIndexFunctionDef = Struct.new(:owner, :name, :line, :signature, keyword_init: true) unless const_defined?(:SourceIndexFunctionDef, false)
+
         def language
           "ruby"
         end
@@ -59,6 +61,20 @@ module NilKill
           ["runtime collection uses the existing nil-kill collect command and Ruby source instrumentation"]
         end
 
+        def static_evidence(document:, facts:, rel_path:)
+          source_index = source_index_for(document)
+          old_source_index = @current_source_index
+          @current_source_index = source_index
+          evidence = super
+          if source_index
+            evidence["methods"] = source_index_method_records(document, rel_path, source_index)
+            evidence["signatures"] = source_index_signatures(source_index)
+          end
+          evidence
+        ensure
+          @current_source_index = old_source_index
+        end
+
         def method_source(function_def)
           sorbet.method_source(function_def)
         end
@@ -68,13 +84,18 @@ module NilKill
         end
 
         def type_definitions(document:, facts:, rel_path:, methods:, state_declarations:)
+          source_index = @current_source_index || source_index_for(document)
           definitions = sorbet.type_definitions(
             rel_path: rel_path,
-            function_defs: Array(facts[:function_defs]),
+            function_defs: source_index ? source_index_function_defs(source_index) : Array(facts[:function_defs]),
             state_declarations: state_declarations,
             provider: self
           )
-          definitions.concat(ruby_struct_type_definitions(document, rel_path))
+          if source_index
+            definitions.concat(source_index_type_definitions(source_index, rel_path))
+          else
+            definitions.concat(ruby_struct_type_definitions(document, rel_path))
+          end
           definitions.concat(ruby_type_alias_definitions(document, rel_path))
           definitions
         end
@@ -105,6 +126,97 @@ module NilKill
         end
 
         private
+
+        def source_index_for(document)
+          return nil unless document.respond_to?(:file)
+
+          file = document.file.to_s
+          return nil if file.empty? || !File.file?(file)
+
+          NilKill::SourceIndex.new(file)
+        end
+
+        def source_index_function_defs(source_index)
+          source_index.methods.map do |method|
+            SourceIndexFunctionDef.new(
+              owner: method["class"].to_s,
+              name: method["method"].to_s,
+              line: method["line"].to_i,
+              signature: method["sig"].to_s
+            )
+          end
+        end
+
+        def source_index_method_records(document, rel_path, source_index)
+          source_index.methods.map do |method|
+            owner = method["class"].to_s
+            name = method["method"].to_s
+            kind = method["kind"].to_s
+            signature = method["sig"].to_s
+            source = if signature.empty?
+                       {}
+                     else
+                       { "sig" => signature, "signature" => signature, "type_system" => "sorbet" }
+                     end
+            {
+              "key" => [owner, name, kind],
+              "owner" => owner,
+              "name" => name,
+              "kind" => kind,
+              "path" => rel_path,
+              "line" => method["line"],
+              "span" => nil,
+              "language" => document.language.to_s,
+              "signature" => signature,
+              "params" => Array(method["params"]).map { |param| param["name"].to_s },
+              "source" => source,
+            }
+          end
+        end
+
+        def source_index_signatures(source_index)
+          source_index.methods.each_with_object({}) do |method, signatures|
+            signature = method["sig"].to_s
+            next if signature.empty?
+
+            signatures[[method["class"].to_s, method["method"].to_s].join("\u0000")] = signature
+          end
+        end
+
+        def source_index_type_definitions(source_index, rel_path)
+          definitions = []
+          source_index.struct_declarations.each do |declaration|
+            Array(declaration["fields"]).each do |field|
+              definitions << ruby_state_field_definition(
+                rel_path: rel_path,
+                owner: declaration["class"],
+                name: field,
+                type: nil,
+                line: declaration["line"],
+                source: "ruby-struct"
+              )
+            end
+          end
+          source_index.sorbet_state_fields.each do |field|
+            definitions << ruby_state_field_definition(
+              rel_path: rel_path,
+              owner: field["class"],
+              name: field["field"],
+              type: field["type"],
+              line: field["line"],
+              source: "sorbet"
+            )
+          end
+          source_index.included_modules.each do |mod|
+            definitions << ruby_included_module_definition(
+              rel_path: rel_path,
+              owner: mod["class"],
+              name: mod["module"],
+              line: mod["line"]
+            )
+          end
+          definitions
+        end
 
         def ruby_struct_type_definitions(document, rel_path)
           definitions = []

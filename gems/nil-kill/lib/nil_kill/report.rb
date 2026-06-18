@@ -1206,6 +1206,17 @@ module NilKill
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
       return usage if names.empty?
 
+      if evidence.dig("facts")&.key?("return_direct_usage_sites")
+        Array(evidence.dig("facts", "return_direct_usage_sites")).each do |site|
+          name = site["name"].to_s
+          next unless names.include?(name)
+          context = site["context"].to_s
+          next unless usage[name].key?(context)
+          usage[name][context] += 1
+        end
+        return usage
+      end
+
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
@@ -1395,6 +1406,12 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges } if candidate_names.empty?
+
+      if evidence.dig("facts")&.key?("return_usage_sites")
+        apply_return_usage_sites(Array(evidence.dig("facts", "return_usage_sites")), candidate_names, method_return_types, used, return_edges)
+        propagate_return_usage!(used, return_edges)
+        return { "candidate_names" => candidate_names, "used" => used, "return_edges" => return_edges }
+      end
 
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
@@ -3521,6 +3538,12 @@ module NilKill
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
+      if evidence.dig("facts")&.key?("return_usage_sites")
+        apply_return_usage_sites(Array(evidence.dig("facts", "return_usage_sites")), candidate_names, method_return_types, used, return_edges)
+        propagate_return_usage!(used, return_edges)
+        return (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
+      end
+
       evidence_target_files(evidence).each do |path|
         parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
@@ -3528,6 +3551,27 @@ module NilKill
       end
       propagate_return_usage!(used, return_edges)
       (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
+    end
+
+    def apply_return_usage_sites(sites, candidate_names, method_return_types, used, return_edges)
+      sites.each do |site|
+        name = site["name"].to_s.to_sym
+        next unless candidate_names.include?(name)
+        context = site["context"].to_s
+        current_method_name = site["current_method"].to_s
+        current_method = current_method_name.empty? ? nil : current_method_name.to_sym
+        if context == "return" && current_method && candidate_names.include?(current_method)
+          if typed_value_return?(method_return_types[current_method])
+            used << name
+          else
+            return_edges[current_method] << name
+          end
+        elsif context == "return" && method_return_types[current_method] != "void"
+          used << name
+        elsif context == "value"
+          used << name
+        end
+      end
     end
 
     def unambiguous_method_return_types(evidence)
