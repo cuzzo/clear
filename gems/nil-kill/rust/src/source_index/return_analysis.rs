@@ -435,6 +435,13 @@ impl<'a> FileIndexer<'a> {
         if types.len() == 1 && useful_type(&types[0]) {
             return Some(types[0].clone());
         }
+        if let Some(node) = node {
+            if let Some(ret) = self.rbi_return_source(node, frame) {
+                if useful_type(&ret) {
+                    return Some(ret);
+                }
+            }
+        }
         None
     }
 
@@ -452,18 +459,24 @@ impl<'a> FileIndexer<'a> {
             )
     }
 
-    fn rbi_return_source(&mut self, node: Node<'_>, frame: &mut Frame) -> bool {
-        let _receiver_type = self.receiver_type_for_call(node, frame);
-        let _candidate = self.rbi_return_candidate(node);
-        false
+    fn rbi_return_source(&mut self, node: Node<'_>, frame: &mut Frame) -> Option<String> {
+        if !self.rbi_return_candidate(node) {
+            return None;
+        }
+        let method = call_name(node, self.file)?;
+        let receiver_type = self.receiver_type_for_call(node, frame);
+        core_rbi_return_type(&method, receiver_type.as_deref())
     }
 
-    fn statically_provable_call(&mut self, node: Node<'_>, frame: &mut Frame) -> bool {
-        self.rbi_return_source(node, frame)
-            || self
-                .propagated_core_return_type(node, frame)
+    fn statically_provable_call(&mut self, node: Node<'_>, frame: &mut Frame) -> Value {
+        if let Some(ret) = self.rbi_return_source(node, frame) {
+            return json!(ret);
+        }
+        json!(
+            self.propagated_core_return_type(node, frame)
                 .as_deref()
                 .is_some_and(useful_type)
+        )
     }
 
     fn receiver_type_for_call(&mut self, node: Node<'_>, frame: &mut Frame) -> Option<String> {
@@ -1106,6 +1119,24 @@ fn collection_builder_kind(kind: &str) -> CollectionBuilderKind {
         "hash" => CollectionBuilderKind::Hash,
         "set" => CollectionBuilderKind::Set,
         _ => CollectionBuilderKind::Unknown,
+    }
+}
+
+fn core_rbi_return_type(method: &str, receiver_type: Option<&str>) -> Option<String> {
+    match (method, receiver_type.unwrap_or("")) {
+        ("to_s", _) => Some("String".to_string()),
+        ("to_i", _) => Some("Integer".to_string()),
+        ("to_sym", _) => Some("Symbol".to_string()),
+        ("upcase" | "downcase" | "capitalize" | "swapcase" | "strip" | "lstrip" | "rstrip", "String") => {
+            Some("String".to_string())
+        }
+        ("bytes", "String") => Some("T::Array[Integer]".to_string()),
+        ("*", "String") => Some("String".to_string()),
+        ("expand_path", _) => Some("String".to_string()),
+        ("ruby", _) => Some("String".to_string()),
+        ("spawn", _) => Some("Integer".to_string()),
+        ("sum", ty) if array_receiver_type(ty) => Some("T.all(T.untyped, Numeric)".to_string()),
+        _ => None,
     }
 }
 

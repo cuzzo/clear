@@ -4,6 +4,11 @@ fn call_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
         "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| lhs.kind() == "element_reference") => {
             Some("[]=".to_string())
         }
+        "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| normalized_kind(lhs, file) == NormKind::Call) => {
+            assignment_lhs(node)
+                .and_then(|lhs| call_name(lhs, file))
+                .map(|name| format!("{name}="))
+        }
         "binary" => all_children(node)
             .into_iter()
             .find(|child| !child.is_named() && !matches!(node_text_raw(*child).as_str(), "(" | ")"))
@@ -51,6 +56,9 @@ fn call_arguments<'tree>(node: Node<'tree>, file: &SourceFile) -> Vec<Node<'tree
                 out.push(value);
             }
             out
+        }
+        "assignment" | "operator_assignment" if assignment_lhs(node).is_some_and(|lhs| normalized_kind(lhs, file) == NormKind::Call) => {
+            write_value(node).into_iter().collect()
         }
         "binary" => named_children(node).into_iter().skip(1).take(1).collect(),
         "return" => raw_return_args(node),
@@ -425,7 +433,24 @@ fn collect_scope_assignments(scope: Node<'_>, file: &SourceFile, names: &mut BTr
                 names.insert(node_text(lhs, file));
             }
         }
+        if node.kind() == "rescue" {
+            for child in named_children(node) {
+                if matches!(child.kind(), "body_statement" | "block_body" | "then") {
+                    continue;
+                }
+                collect_identifier_names(child, file, names);
+            }
+        }
     });
+}
+
+fn collect_identifier_names(node: Node<'_>, file: &SourceFile, names: &mut BTreeSet<String>) {
+    if node.kind() == "identifier" {
+        names.insert(node_text(node, file));
+    }
+    for child in named_children(node) {
+        collect_identifier_names(child, file, names);
+    }
 }
 
 fn scope_key(node: Node<'_>) -> ScopeKey {
@@ -535,11 +560,38 @@ fn first_line(text: &str) -> String {
 }
 
 fn rel_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .trim_start_matches("./")
-        .to_string()
+    if let Ok(stripped) = path.strip_prefix(root) {
+        return stripped.to_string_lossy().trim_start_matches("./").to_string();
+    }
+
+    let root_components = root.components().collect::<Vec<_>>();
+    let path_components = path.components().collect::<Vec<_>>();
+    let mut common = 0usize;
+    while common < root_components.len()
+        && common < path_components.len()
+        && root_components[common] == path_components[common]
+    {
+        common += 1;
+    }
+    if common == 0 {
+        return path.to_string_lossy().to_string();
+    }
+
+    let mut rel = PathBuf::new();
+    for component in &root_components[common..] {
+        if matches!(component, std::path::Component::Normal(_)) {
+            rel.push("..");
+        }
+    }
+    for component in &path_components[common..] {
+        match component {
+            std::path::Component::Normal(part) => rel.push(part),
+            std::path::Component::ParentDir => rel.push(".."),
+            std::path::Component::CurDir => {}
+            _ => return path.to_string_lossy().to_string(),
+        }
+    }
+    rel.to_string_lossy().trim_start_matches("./").to_string()
 }
 
 fn debug_node_name(kind: NormKind) -> &'static str {

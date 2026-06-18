@@ -1112,7 +1112,11 @@ fn scope_method_frame(record: &Value, frame: &mut Frame) {
     frame.local_container_origins = record.get("params").and_then(Value::as_array).map(|a| {
         a.iter().filter_map(|p| {
             let nm = p.get("name")?.as_str()?;
-            Some((nm.to_string(), json!({"kind":"method parameter","name":nm,"type":p.get("type"),"path":record.get("path"),"line":record.get("line")})))
+            let mut origin = json!({"kind":"method parameter","name":nm,"path":record.get("path"),"line":record.get("line")});
+            if let Some(ty) = p.get("type").and_then(Value::as_str) {
+                object_insert(&mut origin, "type", json!(ty));
+            }
+            Some((nm.to_string(), origin))
         }).collect()
     }).unwrap_or_default();
 }

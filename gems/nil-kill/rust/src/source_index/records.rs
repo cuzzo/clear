@@ -519,11 +519,7 @@ fn hash_key_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
 fn tuple_confidence(types: &[String]) -> &'static str {
     let constants = types
         .iter()
-        .filter(|ty| {
-            let mut chars = ty.chars();
-            chars.next().is_some_and(|ch| ch.is_ascii_uppercase())
-                && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':')
-        })
+        .filter(|ty| leading_constant_path(ty).is_some())
         .collect::<Vec<_>>();
     let namespaces = constants
         .iter()
@@ -534,6 +530,23 @@ fn tuple_confidence(types: &[String]) -> &'static str {
     }
     let unique = types.iter().collect::<BTreeSet<_>>();
     if unique.len() == types.len() { "high" } else { "review" }
+}
+
+fn leading_constant_path(type_text: &str) -> Option<&str> {
+    let end = type_text
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == ':')
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let prefix = &type_text[..end];
+    if prefix.is_empty() {
+        return None;
+    }
+    let valid = prefix
+        .split("::")
+        .all(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()));
+    valid.then_some(prefix)
 }
 
 fn non_nil_return_sig(sig: &str) -> bool {

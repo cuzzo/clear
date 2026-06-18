@@ -259,22 +259,6 @@ fn collect_return_usage_site_context(
         return;
     }
 
-    // Collect rescue handlers without changing traversal
-    if node.kind() == "body_statement" {
-        let rescue_line = node.children(&mut node.walk()).find(|c| c.kind() == "rescue").map(|r| line(r));
-        if let Some(hl) = rescue_line {
-            handlers.push(json!({"path": file.rel, "line": hl, "kind": "rescue", "method": current_method}));
-        }
-    }
-    if node.kind() == "begin" {
-        if let Some(hl) = node.child_by_field_name("rescue").map(|r| line(r)) {
-            handlers.push(json!({"path": file.rel, "line": hl, "kind": "rescue", "method": current_method}));
-        }
-    }
-    if node.kind() == "rescue_modifier" {
-        handlers.push(json!({"path": file.rel, "line": line(node), "kind": "rescue_modifier", "method": current_method}));
-    }
-
     match normalized_kind(node, file) {
         NormKind::Def => {
             let name = method_name(node, file);
@@ -282,12 +266,43 @@ fn collect_return_usage_site_context(
                 collect_return_usage_site_context(body, file, "return", Some(name.as_str()), None, sites, handlers, direct_usage);
             }
         }
-        NormKind::Program | NormKind::Statements => {
+        NormKind::Program => {
             let body = statement_expressions(node);
             let last = body.len().saturating_sub(1);
             for (idx, child) in body.into_iter().enumerate() {
-                let child_context = if idx == last { context } else { "statement" };
+                let child_context = if idx == last { "value" } else { "statement" };
                 collect_return_usage_site_context(child, file, child_context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+        }
+        NormKind::Block => {
+            if let Some(body) = node
+                .child_by_field_name("body")
+                .or_else(|| named_children(node).into_iter().find(|child| matches!(child.kind(), "body_statement" | "block_body")))
+                .or_else(|| named_children(node).last().copied())
+            {
+                collect_return_usage_site_context(body, file, context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+        }
+        NormKind::Statements => {
+            let body = statement_expressions(node);
+            let has_rescue = named_children(node)
+                .into_iter()
+                .any(|child| child.kind() == "rescue");
+            let last = body.len().saturating_sub(1);
+            for (idx, child) in body.into_iter().enumerate() {
+                let child_context = if has_rescue || idx != last { "statement" } else { context };
+                collect_return_usage_site_context(child, file, child_context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+            for child in named_children(node) {
+                match child.kind() {
+                    "rescue" => {
+                        collect_return_usage_site_context(child, file, "statement", current_method, None, sites, handlers, direct_usage);
+                    }
+                    "ensure" => {
+                        collect_return_usage_site_context(child, file, context, current_method, current_handler, sites, handlers, direct_usage);
+                    }
+                    _ => {}
+                }
             }
         }
         NormKind::Return => {
@@ -312,6 +327,13 @@ fn collect_return_usage_site_context(
             for (idx, child) in body.into_iter().enumerate() {
                 let child_context = if idx == last { context } else { "statement" };
                 collect_return_usage_site_context(child, file, child_context, current_method, current_handler, sites, handlers, direct_usage);
+            }
+        }
+        NormKind::Rescue => {
+            for child in named_children(node) {
+                if matches!(child.kind(), "body_statement" | "block_body" | "then") {
+                    collect_return_usage_site_context(child, file, "statement", current_method, current_handler, sites, handlers, direct_usage);
+                }
             }
         }
         NormKind::Call => {
