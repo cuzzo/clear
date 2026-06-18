@@ -2,6 +2,8 @@
 
 require "yaml"
 require "json"
+require_relative "dependency_graph"
+require_relative "graphviz_formatter"
 sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
 if File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
@@ -81,6 +83,10 @@ module Espalier
 
     def to_yaml(manifest)
       YAML.dump(manifest)
+    end
+
+    def to_dot(manifest)
+      GraphvizFormatter.new(DependencyGraph.from_manifest(manifest)).to_dot
     end
 
     def to_sarif(manifest)

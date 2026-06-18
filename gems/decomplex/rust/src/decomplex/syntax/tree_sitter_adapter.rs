@@ -63,7 +63,7 @@ fn language_grammar(language: Language) -> TreeSitterLanguage {
         Language::Lua => tree_sitter_lua::LANGUAGE.into(),
         Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-        Language::CSharp => tree_sitter_c_sharp::language().into(),
+        Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
     }
 }
 

@@ -230,7 +230,7 @@ fn language_grammar(language: Language) -> TreeSitterLanguage {
         Language::Lua => tree_sitter_lua::LANGUAGE.into(),
         Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-        Language::CSharp => tree_sitter_c_sharp::language().into(),
+        Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
     }
 }
 
@@ -293,6 +293,7 @@ struct TreeSitterNormalizer<'source> {
     source: &'source str,
     language: Language,
     local_stack: Vec<BTreeSet<String>>,
+    root_span: Option<Span>,
 }
 
 impl<'source> TreeSitterNormalizer<'source> {
@@ -301,10 +302,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             source,
             language,
             local_stack: Vec::new(),
+            root_span: None,
         }
     }
 
     fn normalize(mut self, root: TreeSitterNode<'_>) -> Node {
+        self.root_span = Some(span(root));
         let children = if self.language == Language::Ruby {
             self.with_ruby_scope(root, true, |normalizer| normalizer.normalize_children(root))
         } else {
@@ -326,6 +329,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.ternary_statement(node) {
             return self.normalize_ternary_statement(node);
         }
+        if self.leading_if_statement(node) {
+            return self.normalize_leading_if_statement(node);
+        }
         if if_kind(node.kind()) {
             return self.normalize_if(node);
         }
@@ -341,8 +347,17 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.statement_call_with_block(node) {
             return self.normalize_statement_call_with_block(node);
         }
+        if self.super_statement(node) {
+            return Some(self.normalize_super_statement(node));
+        }
         if self.command_call_statement(node) {
             return self.normalize_command_call_statement(node);
+        }
+        if self.yield_statement(node) {
+            return Some(self.normalize_yield_statement(node));
+        }
+        if self.super_statement(node) {
+            return Some(self.normalize_super_statement(node));
         }
         if self.unary_not_statement(node) {
             return self.normalize_unary_not(node);
@@ -365,6 +380,19 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.comparison_expression(node) {
             return self.normalize_comparison(node);
         }
+        if self.self_node(node) {
+            return Some(self.wrap("SELF", Vec::new(), node));
+        }
+        if instance_variable_node(node, self.source) {
+            return Some(self.wrap(
+                "IVAR",
+                vec![Child::String(node_text(node, self.source).to_string())],
+                node,
+            ));
+        }
+        if global_variable_node(node, self.source) {
+            return Some(self.normalize_global_variable(node));
+        }
 
         match node.kind() {
             "program" => {
@@ -383,7 +411,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
             "module" => self.normalize_module(node),
             "lambda" => self.normalize_lambda(node),
-            "body_statement" | "block_body" | "block" => self.normalize_body(node),
+            _ if self.block_kind(node.kind()) => {
+                let children = self.normalize_children(node);
+                Some(self.wrap("BLOCK", children, node))
+            }
             "ensure" => self.normalize_ensure_clause(node),
             "begin" => self.normalize_begin(node),
             "subshell" => Some(self.normalize_subshell(node)),
@@ -395,10 +426,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 self.normalize_assignment(node)
             }
             "variable_declarator" if !self.has_assignment_operator_child(node) => {
-                Some(self.wrap(kind_type(node.kind()), Vec::new(), node))
+                Some(self.wrap(&kind_type(node.kind()), Vec::new(), node))
             }
             "expression_list" if self.single_short_var_lhs(node) => {
-                Some(self.wrap(kind_type(node.kind()), Vec::new(), node))
+                Some(self.wrap(&kind_type(node.kind()), Vec::new(), node))
             }
             "call" | "call_expression" | "method_call" | "method_call_expression" => {
                 self.normalize_call(node)
@@ -414,7 +445,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             "super" => Some(self.normalize_super(node)),
             "return" | "return_statement" | "return_expression" | "break" | "break_statement"
             | "break_expression" | "next" | "continue_statement" => self.normalize_return(node),
-            "nil" => Some(self.wrap("NIL", Vec::new(), node)),
+            "nil" | "none" | "null" => Some(self.wrap("NIL", Vec::new(), node)),
             "true" => Some(self.wrap("TRUE", Vec::new(), node)),
             "false" => Some(self.wrap("FALSE", Vec::new(), node)),
             "instance_variable" => Some(self.wrap(
@@ -443,6 +474,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             | "raw_string_literal" => {
                 if self.interpolated_string(node) {
                     Some(self.normalize_interpolated_string(node))
+                } else if let Some(content) = self.lua_no_paren_string_argument_content(node) {
+                    Some(self.wrap(
+                        "STR",
+                        vec![Child::String(node_text(content, self.source).to_string())],
+                        content,
+                    ))
                 } else {
                     Some(self.wrap(
                         "STR",
@@ -451,17 +488,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                     ))
                 }
             }
-            "integer" => Some(self.wrap(
-                "INTEGER",
-                vec![Child::String(node_text(node, self.source).to_string())],
-                node,
-            )),
-            "float" | "float_literal" => Some(self.wrap(
-                "FLOAT",
-                vec![Child::String(node_text(node, self.source).to_string())],
-                node,
-            )),
-            "pair" | "keyword_argument" => self.normalize_pair(node),
+            "integer" => Some(self.wrap("INTEGER", Vec::new(), node)),
+            "float" | "float_literal" => Some(self.wrap("FLOAT", Vec::new(), node)),
+            "pair" => self.normalize_pair(node),
             "simple_symbol" | "symbol" => Some(self.wrap(
                 "LIT",
                 vec![Child::Symbol(
@@ -471,7 +500,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             )),
             _ => {
                 let children = self.normalize_children(node);
-                Some(self.wrap(kind_type(node.kind()), children, node))
+                Some(self.wrap(&kind_type(node.kind()), children, node))
             }
         }
     }
@@ -541,6 +570,33 @@ impl<'source> TreeSitterNormalizer<'source> {
                 Child::Nil,
                 Child::Node(Box::new(self.scope(body, None, node))),
             ],
+            node,
+        ))
+    }
+
+    fn normalize_python_nested_class_as_iter(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let name_node = self
+            .named_field(node, "name")
+            .or_else(|| self.first_named(node))?;
+        let name = node_text(name_node, self.source).to_string();
+        let header_end = node
+            .children(&mut node.walk())
+            .find(|child| !child.is_named() && node_text(*child, self.source) == ":")
+            .unwrap_or(name_node);
+        let call = self.wrap_from_nodes(
+            "VCALL",
+            vec![Child::Symbol(name), Child::Nil],
+            node,
+            header_end,
+        );
+        let body = self
+            .named_field(node, "body")
+            .or_else(|| self.block_child(node))
+            .and_then(|body| self.normalize_body(body));
+        let scope = self.scope(body, None, node);
+        Some(self.wrap(
+            "ITER",
+            vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
             node,
         ))
     }
@@ -619,7 +675,60 @@ impl<'source> TreeSitterNormalizer<'source> {
         )
     }
 
+    fn normalize_yield_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
+        let args_node = self
+            .named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "argument_list");
+        let args = args_node
+            .map(|args| self.yield_argument_nodes(args))
+            .unwrap_or_else(|| {
+                self.named_children(node)
+                    .into_iter()
+                    .filter(|child| child.kind() != "yield")
+                    .filter_map(|child| self.normalize_node(child))
+                    .collect()
+            });
+        self.wrap(
+            "YIELD",
+            vec![list_or_nil(args, args_node.unwrap_or(node), self)],
+            node,
+        )
+    }
+
+    fn normalize_super_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
+        let raw = self.raw_named_children(node);
+        let children = if raw.len() == 1 && raw[0].kind() == "call" {
+            self.raw_named_children(raw[0])
+        } else {
+            raw
+        };
+        let args_node = children
+            .into_iter()
+            .find(|child| child.kind() == "argument_list");
+        let args = args_node
+            .map(|args| self.yield_argument_nodes(args))
+            .unwrap_or_default();
+        self.wrap(
+            "SUPER",
+            vec![list_or_nil(args, args_node.unwrap_or(node), self)],
+            node,
+        )
+    }
+
     fn normalize_body(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if self.language == Language::Python && node.kind() == "block" {
+            let raw_children = self.raw_named_children(node);
+            if raw_children.len() == 1
+                && raw_children[0].kind() == "class_definition"
+                && node
+                    .parent()
+                    .map(|parent| parent.kind() == "class_definition")
+                    .unwrap_or(false)
+            {
+                return self.normalize_python_nested_class_as_iter(raw_children[0]);
+            }
+        }
         if self.leading_if_statement(node) {
             return self.normalize_leading_if_statement(node);
         }
@@ -638,6 +747,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.command_call_statement(node) {
             return self.normalize_command_call_statement(node);
         }
+        if self.yield_statement(node) {
+            return Some(self.normalize_yield_statement(node));
+        }
         if self.unary_not_statement(node) {
             return self.normalize_unary_not(node);
         }
@@ -654,6 +766,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.block_kind(node.kind()) {
             let children = self.normalize_children(node);
             if children.is_empty() {
+                let text = node_text(node, self.source).trim();
+                if bare_identifier_text(text) {
+                    return Some(self.wrap("VCALL", vec![Child::Symbol(text.to_string())], node));
+                }
                 return None;
             }
             if children.len() == 1 {
@@ -737,6 +853,21 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_else_or_branch(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if self.language == Language::Python && node.kind() == "else_clause" {
+            if let Some(block) = self
+                .raw_named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "block")
+            {
+                if let Some(normalized) = self.normalize_python_else_if_block(block) {
+                    return Some(self.wrap(
+                        "ELSE_CLAUSE",
+                        vec![Child::Node(Box::new(normalized))],
+                        node,
+                    ));
+                }
+            }
+        }
         if node.kind() != "else" {
             return self.normalize_body(node);
         }
@@ -751,6 +882,75 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
         }
         self.normalize_body_nodes(self.named_children(node), node)
+    }
+
+    fn normalize_python_else_if_block(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let statements = self
+            .raw_named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() != "comment")
+            .collect::<Vec<_>>();
+        if statements.len() != 1 || statements[0].kind() != "if_statement" {
+            return None;
+        }
+        let if_node = statements[0];
+        let condition = self
+            .named_field(if_node, "condition")
+            .or_else(|| self.named_field(if_node, "predicate"))
+            .or_else(|| self.first_named(if_node))?;
+        if self.identifier_kind(condition.kind()) {
+            return self.normalize_python_if_statement_as_iter(if_node);
+        }
+        let consequence = self
+            .named_field(if_node, "consequence")
+            .or_else(|| self.named_field(if_node, "body"))
+            .or_else(|| self.branch_child(if_node, condition, 0));
+        let alternative = self.explicit_alternative(if_node);
+        let mut children = Vec::new();
+        if let Some(condition) = self.normalize_node(condition) {
+            children.push(Child::Node(Box::new(condition)));
+        }
+        if let Some(consequence) = consequence.and_then(|child| {
+            self.normalize_python_else_if_block(child)
+                .or_else(|| self.normalize_body(child))
+        }) {
+            children.push(Child::Node(Box::new(consequence)));
+        }
+        if let Some(alternative) =
+            alternative.and_then(|child| self.normalize_else_or_branch(child))
+        {
+            children.push(Child::Node(Box::new(alternative)));
+        }
+        Some(self.wrap("BLOCK", children, node))
+    }
+
+    fn normalize_python_if_statement_as_iter(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let condition = self
+            .named_field(node, "condition")
+            .or_else(|| self.named_field(node, "predicate"))
+            .or_else(|| self.first_named(node))?;
+        let body = self
+            .named_field(node, "consequence")
+            .or_else(|| self.named_field(node, "body"))
+            .or_else(|| self.branch_child(node, condition, 0))?;
+        let call_source = self.source_before_child(node, body);
+        let call = self.wrap_from_source_node(
+            "VCALL",
+            vec![
+                Child::Symbol(node_text(condition, self.source).to_string()),
+                Child::Nil,
+            ],
+            &call_source,
+        );
+        let body = self.with_ruby_scope(body, false, |normalizer| {
+            normalizer.normalize_body(body).map(dynamic_scope)
+        });
+        let scope = self.scope(body, None, node);
+        Some(self.wrap(
+            "ITER",
+            vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
+            node,
+        ))
     }
 
     fn normalize_case(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
@@ -813,9 +1013,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             .into_iter()
             .rev()
             .fold(fallback, |next_when, mut current| {
-                if current.children.len() > 2 {
-                    current.children[2] = optional_node(next_when);
+                while current.children.len() <= 2 {
+                    current.children.push(Child::Nil);
                 }
+                current.children[2] = optional_node(next_when);
                 Some(current)
             })
     }
@@ -1321,7 +1522,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn normalize_member_read(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let Some((receiver, method)) = self.member_parts(node) else {
             let children = self.normalize_children(node);
-            return Some(self.wrap(kind_type(node.kind()), children, node));
+            return Some(self.wrap(&kind_type(node.kind()), children, node));
         };
         let receiver = optional_node(self.normalize_node(receiver));
         Some(self.wrap(
@@ -1652,9 +1853,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn link_rescue_chain(&self, mut resbodies: Vec<Node>) -> Option<Node> {
         let mut next = None;
         while let Some(mut current) = resbodies.pop() {
-            if current.children.len() > 2 {
-                current.children[2] = optional_node(next);
+            while current.children.len() <= 2 {
+                current.children.push(Child::Nil);
             }
+            current.children[2] = optional_node(next);
             next = Some(current);
         }
         next
@@ -1757,22 +1959,24 @@ impl<'source> TreeSitterNormalizer<'source> {
             .map(|args| self.command_arguments(args))
             .unwrap_or_default();
         let block = self.call_block(node);
+        let call_source = block.map(|block| self.source_before_child(node, block));
         if node_text(function, self.source) == "yield" {
-            return Some(self.wrap(
-                "YIELD",
-                vec![list_or_nil(args, args_node.unwrap_or(node), self)],
-                node,
-            ));
+            let children = vec![list_or_nil(args, args_node.unwrap_or(node), self)];
+            if let Some(source) = call_source.as_ref() {
+                return Some(self.wrap_from_source_node("YIELD", children, source));
+            }
+            return Some(self.wrap("YIELD", children, node));
         }
         let call_type = if args.is_empty() { "VCALL" } else { "FCALL" };
-        let call = self.wrap(
-            call_type,
-            vec![
-                Child::Symbol(node_text(function, self.source).to_string()),
-                list_or_nil(args, args_node.unwrap_or(node), self),
-            ],
-            node,
-        );
+        let call_children = vec![
+            Child::Symbol(node_text(function, self.source).to_string()),
+            list_or_nil(args, args_node.unwrap_or(node), self),
+        ];
+        let call = if let Some(source) = call_source.as_ref() {
+            self.wrap_from_source_node(call_type, call_children, source)
+        } else {
+            self.wrap(call_type, call_children, node)
+        };
         let Some(block) = block else {
             return Some(call);
         };
@@ -2153,11 +2357,15 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn scope(&self, body: Option<Node>, args: Option<Node>, source: TreeSitterNode<'_>) -> Node {
-        self.wrap(
-            "SCOPE",
-            vec![Child::Nil, optional_node(args), optional_node(body)],
-            source,
-        )
+        let source_node = body.as_ref().or(args.as_ref()).cloned();
+        let children = vec![Child::Nil, optional_node(args), optional_node(body)];
+        if let Some(source_node) = source_node {
+            self.wrap_from_source_node("SCOPE", children, &source_node)
+        } else if let Some(root_span) = self.root_span {
+            self.wrap_from_span_text("SCOPE", children, root_span, self.source)
+        } else {
+            self.wrap("SCOPE", children, source)
+        }
     }
 
     fn list(&self, children: Vec<Node>, source: TreeSitterNode<'_>) -> Node {
@@ -2218,6 +2426,24 @@ impl<'source> TreeSitterNormalizer<'source> {
             last_lineno: source.last_lineno,
             last_column: source.last_column,
             text: source.text.clone(),
+        }
+    }
+
+    fn wrap_from_span_text(
+        &self,
+        node_type: &str,
+        children: Vec<Child>,
+        node_span: Span,
+        text: &str,
+    ) -> Node {
+        Node {
+            r#type: node_type.to_string(),
+            children,
+            first_lineno: node_span[0],
+            first_column: node_span[1],
+            last_lineno: node_span[2],
+            last_column: node_span[3],
+            text: text.to_string(),
         }
     }
 
@@ -2483,7 +2709,15 @@ impl<'source> TreeSitterNormalizer<'source> {
         )
     }
 
+    fn self_node(&self, node: TreeSitterNode<'_>) -> bool {
+        matches!(node.kind(), "self" | "this")
+            || matches!(node_text(node, self.source), "self" | "this")
+    }
+
     fn assignment_lhs(&self, node: TreeSitterNode<'_>) -> bool {
+        if self.lua_single_assignment_block_child(node) {
+            return false;
+        }
         if node
             .prev_sibling()
             .map(|sibling| node_text(sibling, self.source) == ":")
@@ -2491,15 +2725,67 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return false;
         }
+        if self.literal_fragment_assignment_context(node) {
+            return false;
+        }
         node.next_sibling()
             .map(|sibling| assignment_operator(node_text(sibling, self.source)))
             .unwrap_or(false)
     }
 
+    fn literal_fragment_assignment_context(&self, node: TreeSitterNode<'_>) -> bool {
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        if matches!(
+            parent.kind(),
+            "string" | "delimited_symbol" | "regex" | "regex_literal"
+        ) {
+            return true;
+        }
+
+        matches!(
+            node.kind(),
+            "string_content" | "escape_sequence" | "interpolation"
+        ) && parent
+            .parent()
+            .map(|grandparent| {
+                matches!(
+                    grandparent.kind(),
+                    "string" | "delimited_symbol" | "regex" | "regex_literal"
+                )
+            })
+            .unwrap_or(false)
+    }
+
     fn assignment_rhs(&self, node: TreeSitterNode<'_>) -> bool {
+        if self.lua_single_assignment_block_child(node) {
+            return false;
+        }
+        if self.literal_fragment_assignment_context(node) {
+            return false;
+        }
         node.prev_sibling()
             .map(|sibling| assignment_operator(node_text(sibling, self.source)))
             .unwrap_or(false)
+    }
+
+    fn lua_single_assignment_block_child(&self, node: TreeSitterNode<'_>) -> bool {
+        if self.language != Language::Lua {
+            return false;
+        }
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        if parent.kind() != "assignment_statement" {
+            return false;
+        }
+        let Some(grandparent) = parent.parent() else {
+            return false;
+        };
+        grandparent.kind() == "block"
+            && node_text(grandparent, self.source) == node_text(parent, self.source)
+            && self.raw_named_children(grandparent).len() == 1
     }
 
     fn has_assignment_operator_child(&self, node: TreeSitterNode<'_>) -> bool {
@@ -2532,14 +2818,22 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn leading_if_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        let first_child = node.children(&mut node.walk()).next();
+        let single_named_if_block = matches!(self.language, Language::Python | Language::Lua)
+            && node.kind() == "block"
+            && self.raw_named_children(node).len() == 1
+            && first_child
+                .map(|child| child.kind() == "if_statement")
+                .unwrap_or(false);
+        if single_named_if_block {
+            return true;
+        }
         matches!(
             node.kind(),
             "body_statement" | "block" | "block_body" | "statement"
-        ) && node
-            .children(&mut node.walk())
-            .next()
+        ) && (first_child
             .map(|child| matches!(child.kind(), "if" | "unless"))
-            .unwrap_or(false)
+            .unwrap_or(false))
             && self.named_children(node).len() >= 2
             && self
                 .named_children(node)
@@ -2549,6 +2843,35 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_leading_if_statement(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if self.language == Language::Python && node.kind() == "block" {
+            if let Some(if_node) = self
+                .raw_named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "if_statement")
+            {
+                let condition = self
+                    .named_field(if_node, "condition")
+                    .or_else(|| self.named_field(if_node, "predicate"))
+                    .or_else(|| self.first_named(if_node))?;
+                let consequence = self
+                    .named_field(if_node, "consequence")
+                    .or_else(|| self.named_field(if_node, "body"))
+                    .or_else(|| self.branch_child(if_node, condition, 0));
+                let condition = optional_node(self.normalize_node(condition));
+                let consequence =
+                    optional_node(consequence.and_then(|child| self.normalize_body(child)));
+                return Some(self.wrap("IF", vec![condition, consequence, Child::Nil], if_node));
+            }
+        }
+        if self.language == Language::Lua && node.kind() == "block" {
+            if let Some(if_node) = self
+                .raw_named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "if_statement")
+            {
+                return self.normalize_if(if_node);
+            }
+        }
         let keyword = node
             .children(&mut node.walk())
             .next()
@@ -2810,21 +3133,86 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.infix_statement_parts(node).is_some()
     }
 
-    fn unary_not_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
-        ) && node
+    fn argument_list_unary_not(&self, node: TreeSitterNode<'_>) -> bool {
+        if node.kind() != "argument_list" {
+            return false;
+        }
+        let named = self.named_children(node);
+        if node
             .children(&mut node.walk())
             .next()
             .map(|child| node_text(child, self.source) == "!")
             .unwrap_or(false)
-            && self.named_children(node).len() == 1
+            && named.len() == 1
+        {
+            return true;
+        }
+
+        let raw_named = self.raw_named_children(node);
+        if raw_named.len() != 1 || raw_named[0].kind() != "unary" {
+            return false;
+        }
+        node_text(node, self.source) == node_text(raw_named[0], self.source)
+            && self.unary_not_expression(raw_named[0])
+            && self.raw_named_children(raw_named[0]).len() == 1
+    }
+
+    fn unary_not_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        if !matches!(
+            node.kind(),
+            "body_statement" | "block_body" | "statement" | "argument_list"
+        ) {
+            return false;
+        }
+        let named = self.named_children(node);
+        if node
+            .children(&mut node.walk())
+            .next()
+            .map(|child| node_text(child, self.source) == "!")
+            .unwrap_or(false)
+            && named.len() == 1
+        {
+            return true;
+        }
+
+        let raw_named = self.raw_named_children(node);
+        raw_named.len() == 1
+            && raw_named[0].kind() == "unary"
+            && node_text(node, self.source) == node_text(raw_named[0], self.source)
+            && self.unary_not_expression(raw_named[0])
+            && self.raw_named_children(raw_named[0]).len() == 1
     }
 
     fn unary_not_expression(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(node.kind(), "unary" | "unary_expression")
             && node_text(node, self.source).trim_start().starts_with('!')
+    }
+
+    fn unary_minus_expression(&self, node: TreeSitterNode<'_>) -> bool {
+        if matches!(node.kind(), "unary" | "unary_expression" | "unary_operator")
+            && node_text(node, self.source).trim_start().starts_with('-')
+        {
+            return true;
+        }
+
+        if node.kind() != "expression_list" {
+            return false;
+        }
+        let named = self.named_children(node);
+        if node
+            .children(&mut node.walk())
+            .next()
+            .map(|child| node_text(child, self.source) == "-")
+            .unwrap_or(false)
+            && named.len() == 1
+        {
+            return true;
+        }
+
+        let raw_named = self.raw_named_children(node);
+        raw_named.len() == 1
+            && node_text(node, self.source) == node_text(raw_named[0], self.source)
+            && self.unary_minus_expression(raw_named[0])
     }
 
     fn infix_statement_parts<'tree>(
@@ -2837,11 +3225,23 @@ impl<'source> TreeSitterNormalizer<'source> {
         ) {
             return None;
         }
+        let raw_named = self.raw_named_children(node);
+        let target = if raw_named.len() == 1
+            && matches!(
+                raw_named[0].kind(),
+                "binary" | "binary_expression" | "comparison_operator"
+            )
+            && node_text(node, self.source) == node_text(raw_named[0], self.source)
+        {
+            raw_named[0]
+        } else {
+            node
+        };
         let mut named_index = 0usize;
         let mut left = None;
         let mut right = None;
         let mut operator = None;
-        for child in node.children(&mut node.walk()) {
+        for child in target.children(&mut target.walk()) {
             if child.is_named() {
                 left.get_or_insert(child);
                 if operator.is_some() {
@@ -2879,9 +3279,30 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn binary_operator(&self, node: TreeSitterNode<'_>) -> Option<String> {
-        node.children(&mut node.walk())
+        if let Some(operator) = node
+            .children(&mut node.walk())
             .find(|child| !child.is_named() && !matches!(node_text(*child, self.source), "(" | ")"))
             .map(|child| node_text(child, self.source).to_string())
+        {
+            return Some(operator);
+        }
+
+        let raw_named = self.raw_named_children(node);
+        if raw_named.len() == 1
+            && matches!(
+                raw_named[0].kind(),
+                "binary"
+                    | "binary_expression"
+                    | "binary_operator"
+                    | "boolean_operator"
+                    | "comparison_operator"
+            )
+            && node_text(node, self.source) == node_text(raw_named[0], self.source)
+        {
+            return self.binary_operator(raw_named[0]);
+        }
+
+        None
     }
 
     fn interpolated_statement(&self, node: TreeSitterNode<'_>) -> bool {
@@ -2910,6 +3331,115 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .named_children(node)
                     .into_iter()
                     .any(|child| self.call_kind(child.kind()) || self.member_read_node(child)))
+    }
+
+    fn yield_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        if !matches!(
+            node.kind(),
+            "body_statement" | "block" | "block_body" | "expression_statement" | "statement"
+        ) {
+            return false;
+        }
+        let Some(first) = node.children(&mut node.walk()).next() else {
+            return false;
+        };
+        if node_text(first, self.source) == "yield" {
+            return true;
+        }
+
+        if matches!(
+            node.kind(),
+            "body_statement" | "block_body" | "expression_statement" | "statement"
+        ) && first.kind() == "yield"
+        {
+            let Some(keyword) = first.children(&mut first.walk()).next() else {
+                return false;
+            };
+            return node_text(keyword, self.source) == "yield";
+        }
+
+        false
+    }
+
+    fn super_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        if !matches!(
+            node.kind(),
+            "body_statement" | "block" | "block_body" | "call" | "statement"
+        ) {
+            return false;
+        }
+        if node_text(node, self.source).trim() == "super" {
+            return true;
+        }
+        let raw = self.raw_named_children(node);
+        let named = if raw.len() == 1 && raw[0].kind() == "call" {
+            self.raw_named_children(raw[0])
+        } else {
+            raw
+        };
+        named
+            .first()
+            .map(|child| child.kind() == "super")
+            .unwrap_or(false)
+            && named
+                .iter()
+                .skip(1)
+                .all(|child| child.kind() == "argument_list")
+    }
+
+    fn argument_list_element_reference(&self, node: TreeSitterNode<'_>) -> bool {
+        if node.kind() != "argument_list" {
+            return false;
+        }
+        let named = self.named_children(node);
+        if named
+            .iter()
+            .any(|child| matches!(child.kind(), "block" | "do_block"))
+        {
+            return false;
+        }
+
+        let children = node.children(&mut node.walk()).collect::<Vec<_>>();
+        let direct_bracket_shape = children
+            .first()
+            .map(|child| node_text(*child, self.source) != "[")
+            .unwrap_or(false)
+            && children
+                .iter()
+                .any(|child| !child.is_named() && node_text(*child, self.source) == "[")
+            && children
+                .iter()
+                .any(|child| !child.is_named() && node_text(*child, self.source) == "]")
+            && named.len() >= 2;
+        if direct_bracket_shape {
+            return true;
+        }
+
+        if named.len() != 1 || named[0].kind() != "element_reference" {
+            return false;
+        }
+        let reference = named[0];
+        let reference_named = self.raw_named_children(reference);
+        if reference_named.len() < 2
+            || reference_named
+                .iter()
+                .any(|child| matches!(child.kind(), "block" | "do_block"))
+        {
+            return false;
+        }
+        let reference_children = reference
+            .children(&mut reference.walk())
+            .collect::<Vec<_>>();
+        reference_children
+            .first()
+            .map(|child| node_text(*child, self.source) != "[")
+            .unwrap_or(false)
+            && reference_children
+                .iter()
+                .any(|child| !child.is_named() && node_text(*child, self.source) == "[")
+            && reference_children
+                .iter()
+                .any(|child| !child.is_named() && node_text(*child, self.source) == "]")
     }
 
     fn dotted_expression(&self, node: TreeSitterNode<'_>) -> bool {
@@ -2968,6 +3498,9 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn member_read_node(&self, node: TreeSitterNode<'_>) -> bool {
+        if self.language == Language::Lua && node.kind() == "field" {
+            return false;
+        }
         matches!(
             node.kind(),
             "attribute"
@@ -2987,6 +3520,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() == "expression_list"
+            && !(self.named_field(node, "operand").is_some()
+                && self.named_field(node, "field").is_some())
+        {
+            return None;
+        }
         if self.dotted_call(node) {
             return self.dotted_call_parts(node, None);
         }
@@ -3057,6 +3596,17 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .normalize_call_with_block(children[0])
                 .into_iter()
                 .collect();
+        }
+        children
+            .into_iter()
+            .filter_map(|child| self.normalize_node(child))
+            .collect()
+    }
+
+    fn yield_argument_nodes(&mut self, node: TreeSitterNode<'_>) -> Vec<Node> {
+        let children = self.named_children(node);
+        if children.is_empty() {
+            return self.scalar_argument_list_value(node).into_iter().collect();
         }
         children
             .into_iter()
@@ -3355,13 +3905,380 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'tree>,
         name: &str,
     ) -> Option<TreeSitterNode<'tree>> {
+        if self.language == Language::Python
+            && matches!(name, "body" | "consequence")
+            && matches!(
+                node.kind(),
+                "elif_clause"
+                    | "else_clause"
+                    | "for_statement"
+                    | "function_definition"
+                    | "if_statement"
+                    | "try_statement"
+                    | "while_statement"
+                    | "with_statement"
+            )
+        {
+            if let Some(block) = self
+                .raw_named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "block")
+            {
+                return Some(block);
+            }
+        }
         node.child_by_field_name(name)
     }
 
     fn named_children<'tree>(&self, node: TreeSitterNode<'tree>) -> Vec<TreeSitterNode<'tree>> {
+        if node.kind() == "dotted_name" && !node_text(node, self.source).contains('.') {
+            return Vec::new();
+        }
+        if self.language == Language::Python
+            && node.kind() == "with_clause"
+            && bare_identifier_text(node_text(node, self.source))
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "variable_list"
+            && self.raw_named_children(node).len() == 1
+            && self
+                .raw_named_children(node)
+                .first()
+                .map(|child| self.identifier_kind(child.kind()))
+                .unwrap_or(false)
+            && self.lua_single_assignment_block_child(node)
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "variable_list"
+            && self.raw_named_children(node).len() == 1
+            && node
+                .parent()
+                .map(|parent| parent.kind() == "for_generic_clause")
+                .unwrap_or(false)
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "variable_list"
+            && self.raw_named_children(node).len() == 1
+            && node
+                .parent()
+                .map(|parent| {
+                    parent.kind() == "variable_declaration"
+                        && self.raw_named_children(parent).len() == 1
+                })
+                .unwrap_or(false)
+        {
+            return Vec::new();
+        }
+
+        let children = self.raw_named_children(node);
+        if self.language == Language::Lua
+            && node.kind() == "expression_list"
+            && children.len() == 1
+            && self.identifier_kind(children[0].kind())
+            && node
+                .parent()
+                .map(|parent| matches!(parent.kind(), "assignment_statement" | "return_statement"))
+                .unwrap_or(false)
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "expression_list"
+            && children.len() == 1
+            && matches!(
+                children[0].kind(),
+                "true" | "false" | "nil" | "number" | "integer" | "float"
+            )
+            && node
+                .parent()
+                .map(|parent| matches!(parent.kind(), "assignment_statement" | "return_statement"))
+                .unwrap_or(false)
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "expression_list"
+            && children.len() == 1
+            && matches!(
+                children[0].kind(),
+                "binary_expression"
+                    | "function_call"
+                    | "dot_index_expression"
+                    | "function_definition"
+                    | "string"
+            )
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Lua
+            && node.kind() == "expression_list"
+            && children.len() == 1
+            && children[0].kind() == "table_constructor"
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Lua
+            && node.kind() == "field"
+            && children.len() == 1
+            && self.identifier_kind(children[0].kind())
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Lua
+            && node.kind() == "field"
+            && children.len() == 1
+            && children[0].kind() == "string"
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Lua
+            && node.kind() == "field"
+            && children.len() == 1
+            && children[0].kind() == "function_call"
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Lua
+            && node.kind() == "block"
+            && children.len() == 1
+            && matches!(
+                children[0].kind(),
+                "assignment_statement"
+                    | "function_call"
+                    | "return_statement"
+                    | "variable_declaration"
+            )
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "relative_import"
+            && children.len() == 1
+            && children[0].kind() == "import_prefix"
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Python && node.kind() == "block" && children.len() == 1 {
+            if children[0].kind() == "function_definition" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "decorated_definition" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "pass_statement"
+                && node_text(node, self.source).trim() == "pass"
+            {
+                return Vec::new();
+            }
+            if matches!(children[0].kind(), "break_statement" | "continue_statement")
+                && bare_identifier_text(node_text(node, self.source).trim())
+            {
+                return Vec::new();
+            }
+            if children[0].kind() == "return_statement"
+                && node_text(node, self.source) == node_text(children[0], self.source)
+            {
+                if self.raw_named_children(children[0]).is_empty() {
+                    return Vec::new();
+                }
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "delete_statement" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "if_statement" {
+                return self.named_children(children[0]);
+            }
+            if matches!(
+                children[0].kind(),
+                "assert_statement"
+                    | "for_statement"
+                    | "import_from_statement"
+                    | "import_statement"
+                    | "raise_statement"
+                    | "try_statement"
+                    | "while_statement"
+                    | "with_statement"
+            ) {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() != "expression_statement" {
+                return children;
+            }
+            let statement_children = self.raw_named_children(children[0]);
+            if statement_children.len() == 1
+                && statement_children[0].kind() == "identifier"
+                && node_text(node, self.source) == node_text(children[0], self.source)
+            {
+                return Vec::new();
+            }
+            if statement_children.len() == 1 && statement_children[0].kind() == "ellipsis" {
+                return Vec::new();
+            }
+            if statement_children.len() == 1
+                && matches!(
+                    statement_children[0].kind(),
+                    "assignment"
+                        | "augmented_assignment"
+                        | "binary_operator"
+                        | "call"
+                        | "string"
+                        | "subscript"
+                )
+            {
+                return self.named_children(statement_children[0]);
+            }
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "yield"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "identifier"
+        {
+            return Vec::new();
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "binary_operator"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "comparison_operator"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "call"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "attribute"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "expression_statement"
+            && children.len() == 1
+            && children[0].kind() == "string"
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python && node.kind() == "as_pattern_target" {
+            return Vec::new();
+        }
+        if self.language == Language::Python
+            && matches!(node.kind(), "with_clause" | "with_item")
+            && children.len() == 1
+            && matches!(children[0].kind(), "with_item" | "as_pattern")
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "with_item"
+            && children.len() == 1
+            && children[0].kind() == "call"
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if self.language == Language::Python
+            && node.kind() == "with_item"
+            && children.len() == 1
+            && children[0].kind() == "attribute"
+            && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.named_children(children[0]);
+        }
+        if node.kind() == "type" && children.len() == 1 {
+            if children[0].kind() == "union_type" {
+                return self.named_children(children[0]);
+            }
+            if self.language == Language::Python && children[0].kind() == "binary_operator" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "generic_type" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "attribute" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "string" {
+                return self.named_children(children[0]);
+            }
+            if children[0].kind() == "list" {
+                if self.raw_named_children(children[0]).is_empty() {
+                    return Vec::new();
+                }
+                return self.named_children(children[0]);
+            }
+            if matches!(
+                children[0].kind(),
+                "ellipsis" | "identifier" | "nil" | "none" | "null"
+            ) {
+                return Vec::new();
+            }
+        }
+        if node.kind() == "expression_statement"
+            && children.len() == 1
+            && matches!(children[0].kind(), "assignment" | "augmented_assignment")
+        {
+            return self.named_children(children[0]);
+        }
+
+        children
+    }
+
+    fn raw_named_children<'tree>(&self, node: TreeSitterNode<'tree>) -> Vec<TreeSitterNode<'tree>> {
         node.children(&mut node.walk())
             .filter(|child| child.is_named())
             .collect()
+    }
+
+    fn lua_no_paren_string_argument_content<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if self.language != Language::Lua || node.kind() != "string" {
+            return None;
+        }
+        let parent = node.parent()?;
+        if parent.kind() != "arguments"
+            || node_text(parent, self.source) != node_text(node, self.source)
+        {
+            return None;
+        }
+        self.raw_named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "string_content")
     }
 
     fn source_before_child(&self, node: TreeSitterNode<'_>, child: TreeSitterNode<'_>) -> Node {
@@ -3414,9 +4331,17 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        self.named_children(node)
-            .into_iter()
-            .find(|child| matches!(child.kind(), "else" | "elsif"))
+        self.named_children(node).into_iter().find(|child| {
+            matches!(
+                child.kind(),
+                "elif_clause"
+                    | "else"
+                    | "else_clause"
+                    | "else_statement"
+                    | "elsif"
+                    | "elseif_statement"
+            )
+        })
     }
 
     fn case_value<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
@@ -3657,6 +4582,9 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn elide_implicit_nil_body(&self, node: Option<Node>) -> Option<Node> {
+        if self.language != Language::Ruby {
+            return node;
+        }
         let node = self.drop_trailing_nil_statement(node);
         match node {
             Some(node) if node.r#type == "NIL" => None,
@@ -3754,10 +4682,19 @@ fn declaration_metadata_kind(kind: &str) -> bool {
     )
 }
 
-fn kind_type(kind: &str) -> &str {
+fn kind_type(kind: &str) -> String {
     match kind {
-        "body_statement" | "block_body" | "block" | "statements" => "BLOCK",
-        other => other,
+        "body_statement" | "block_body" | "block" | "statements" => "BLOCK".to_string(),
+        other => other
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() {
+                    ch.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect(),
     }
 }
 
@@ -3822,6 +4759,21 @@ fn bare_identifier_text(text: &str) -> bool {
     chars.all(|ch| ch == '_' || ch == '!' || ch == '?' || ch == '=' || ch.is_ascii_alphanumeric())
 }
 
+fn instance_variable_node(node: TreeSitterNode<'_>, source: &str) -> bool {
+    let text = node_text(node, source);
+    node.kind() == "instance_variable"
+        || text
+            .strip_prefix('@')
+            .map(bare_identifier_text)
+            .unwrap_or(false)
+}
+
+fn global_variable_node(node: TreeSitterNode<'_>, source: &str) -> bool {
+    node.kind() == "global_variable"
+        || (!matches!(node.kind(), "string_content" | "escape_sequence")
+            && node_text(node, source).starts_with('$'))
+}
+
 fn comparison_operator_from_text(text: &str) -> Option<String> {
     for operator in ["===", "!==", "==", "!=", "<=", ">=", "<", ">"] {
         if text.contains(operator) {
@@ -3840,8 +4792,13 @@ pub fn child_to_string(child: Option<&Child>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Child, Node};
+    use super::{parse, parse_with_language, Child, Node};
+    use crate::decomplex::syntax::Language;
+    use serde_json::{json, Value};
     use std::io::Write;
+    use std::path::Path;
+    use std::process::Command;
+    use tree_sitter::{Node as TreeSitterNode, Parser as TreeSitterParser};
 
     fn parse_source(source: &str) -> Node {
         let mut file = tempfile::Builder::new()
@@ -3853,6 +4810,18 @@ mod tests {
         parse(file.path()).expect("parse temp ruby file").0
     }
 
+    fn parse_language_source(source: &str, language: Language, suffix: &str) -> Node {
+        let mut file = tempfile::Builder::new()
+            .suffix(suffix)
+            .tempfile()
+            .expect("create temp source file");
+        file.write_all(source.as_bytes())
+            .expect("write temp source file");
+        parse_with_language(file.path(), language)
+            .expect("parse temp source file")
+            .0
+    }
+
     fn nodes_of_type<'a>(node: &'a Node, node_type: &str, out: &mut Vec<&'a Node>) {
         if node.r#type == node_type {
             out.push(node);
@@ -3860,6 +4829,1762 @@ mod tests {
         for child in node.children.iter().filter_map(super::node) {
             nodes_of_type(child, node_type, out);
         }
+    }
+
+    fn first_node<'a>(root: &'a Node, node_type: &str, text: &str) -> &'a Node {
+        let mut nodes = Vec::new();
+        nodes_of_type(root, node_type, &mut nodes);
+        nodes
+            .into_iter()
+            .find(|node| node.text == text)
+            .unwrap_or_else(|| panic!("expected {node_type} with text {text:?} in {root:#?}"))
+    }
+
+    fn child_node(node: &Node, index: usize) -> &Node {
+        node.children
+            .get(index)
+            .and_then(super::node)
+            .unwrap_or_else(|| panic!("expected child node {index} in {node:#?}"))
+    }
+
+    fn child_types(node: &Node) -> Vec<&str> {
+        node.children
+            .iter()
+            .filter_map(super::node)
+            .map(|child| child.r#type.as_str())
+            .collect()
+    }
+
+    fn test_node(node_type: &str, children: Vec<Child>) -> Node {
+        Node {
+            r#type: node_type.to_string(),
+            children,
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: node_type.to_string(),
+        }
+    }
+
+    fn infix_parts_text(
+        normalizer: &super::TreeSitterNormalizer<'_>,
+        node: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Option<(String, String, String)> {
+        let (left, operator, right) = normalizer.infix_statement_parts(node)?;
+        Some((
+            super::node_text(left, source).to_string(),
+            operator,
+            super::node_text(right, source).to_string(),
+        ))
+    }
+
+    fn node_value(node: &Node) -> Value {
+        json!({
+            "type": node.r#type,
+            "children": node.children.iter().map(child_value).collect::<Vec<_>>(),
+            "first_lineno": node.first_lineno,
+            "first_column": node.first_column,
+            "last_lineno": node.last_lineno,
+            "last_column": node.last_column,
+            "text": node.text,
+        })
+    }
+
+    fn child_value(child: &Child) -> Value {
+        match child {
+            Child::Node(node) => node_value(node),
+            Child::Symbol(value) | Child::String(value) => Value::String(value.clone()),
+            Child::Nil => Value::Null,
+        }
+    }
+
+    fn ruby_language_name(language: Language) -> &'static str {
+        match language {
+            Language::Ruby => "ruby",
+            Language::Python => "python",
+            Language::JavaScript => "javascript",
+            Language::Java => "java",
+            Language::TypeScript => "typescript",
+            Language::Swift => "swift",
+            Language::Kotlin => "kotlin",
+            Language::Go => "go",
+            Language::Rust => "rust",
+            Language::Zig => "zig",
+            Language::Lua => "lua",
+            Language::C => "c",
+            Language::Cpp => "cpp",
+            Language::CSharp => "csharp",
+        }
+    }
+
+    fn ruby_normalized_value(path: &Path, language: Language) -> Value {
+        let decomplex_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("decomplex rust dir should have gem parent");
+        let script = r#"
+          root, = Decomplex::Ast.parse(ARGV.fetch(0))
+
+          def value(node)
+            if node.is_a?(Decomplex::Ast::Node)
+              {
+                "type" => node.type.to_s,
+                "children" => node.children.map { |child| value(child) },
+                "first_lineno" => node.first_lineno,
+                "first_column" => node.first_column,
+                "last_lineno" => node.last_lineno,
+                "last_column" => node.last_column,
+                "text" => node.text.to_s,
+              }
+            elsif node.is_a?(Symbol)
+              node.to_s
+            else
+              node
+            end
+          end
+
+          puts JSON.generate(value(root))
+        "#;
+        let output = Command::new("ruby")
+            .current_dir(decomplex_dir)
+            .env("DECOMPLEX_FORCE_LANGUAGE", ruby_language_name(language))
+            .args([
+                "-I",
+                "lib",
+                "-r",
+                "decomplex/ast",
+                "-r",
+                "json",
+                "-e",
+                script,
+            ])
+            .arg(path)
+            .output()
+            .expect("run ruby normalizer");
+        assert!(
+            output.status.success(),
+            "ruby normalizer failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("ruby normalizer should emit JSON")
+    }
+
+    fn assert_ruby_parity(source: &str, language: Language, suffix: &str) {
+        let mut file = tempfile::Builder::new()
+            .suffix(suffix)
+            .tempfile()
+            .expect("create parity temp source file");
+        file.write_all(source.as_bytes())
+            .expect("write parity temp source file");
+
+        let rust = node_value(
+            &parse_with_language(file.path(), language)
+                .expect("parse parity temp source file")
+                .0,
+        );
+        let ruby = ruby_normalized_value(file.path(), language);
+        assert_eq!(rust, ruby);
+    }
+
+    fn raw_tree(source: &str, language: Language) -> tree_sitter::Tree {
+        let mut parser = TreeSitterParser::new();
+        parser
+            .set_language(&super::language_grammar(language))
+            .expect("set raw parser language");
+        parser.parse(source, None).expect("parse raw source")
+    }
+
+    fn first_raw_node<'tree>(
+        node: TreeSitterNode<'tree>,
+        source: &str,
+        kind: &str,
+        text: &str,
+    ) -> TreeSitterNode<'tree> {
+        if node.kind() == kind && super::node_text(node, source) == text {
+            return node;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = first_raw_node_opt(child, source, kind, text) {
+                return found;
+            }
+        }
+        panic!("expected raw node kind={kind:?} text={text:?}");
+    }
+
+    fn first_raw_node_opt<'tree>(
+        node: TreeSitterNode<'tree>,
+        source: &str,
+        kind: &str,
+        text: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == kind && super::node_text(node, source) == text {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = first_raw_node_opt(child, source, kind, text) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    fn ruby_private_predicate(
+        source: &str,
+        language: Language,
+        suffix: &str,
+        method: &str,
+        kind: &str,
+        text: &str,
+    ) -> bool {
+        let mut file = tempfile::Builder::new()
+            .suffix(suffix)
+            .tempfile()
+            .expect("create ruby predicate temp source file");
+        file.write_all(source.as_bytes())
+            .expect("write ruby predicate temp source file");
+        let decomplex_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("decomplex rust dir should have gem parent");
+        let script = r#"
+          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          target_kind = ARGV.fetch(1)
+          target_text = ARGV.fetch(2)
+          method = ARGV.fetch(3)
+          target = nil
+          walk = lambda do |node|
+            if node.respond_to?(:kind)
+              target ||= node if node.kind == target_kind && node.text.to_s == target_text
+              node.named_children.each { |child| walk.call(child) }
+            end
+          end
+          walk.call(document.root)
+          abort "target node not found" unless target
+          normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
+          puts normalizer.send(method, target) ? "true" : "false"
+        "#;
+        let output = Command::new("ruby")
+            .current_dir(decomplex_dir)
+            .env("DECOMPLEX_FORCE_LANGUAGE", ruby_language_name(language))
+            .args([
+                "-I",
+                "lib",
+                "-r",
+                "decomplex/ast",
+                "-r",
+                "decomplex/syntax",
+                "-e",
+                script,
+            ])
+            .arg(file.path())
+            .arg(kind)
+            .arg(text)
+            .arg(method)
+            .output()
+            .expect("run ruby private predicate");
+        assert!(
+            output.status.success(),
+            "ruby predicate failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("ruby predicate output should be utf8")
+            .trim()
+            == "true"
+    }
+
+    fn ruby_private_string(
+        source: &str,
+        language: Language,
+        suffix: &str,
+        method: &str,
+        kind: &str,
+        text: &str,
+    ) -> String {
+        let mut file = tempfile::Builder::new()
+            .suffix(suffix)
+            .tempfile()
+            .expect("create ruby string temp source file");
+        file.write_all(source.as_bytes())
+            .expect("write ruby string temp source file");
+        let decomplex_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("decomplex rust dir should have gem parent");
+        let script = r#"
+          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          target_kind = ARGV.fetch(1)
+          target_text = ARGV.fetch(2)
+          method = ARGV.fetch(3)
+          target = nil
+          walk = lambda do |node|
+            if node.respond_to?(:kind)
+              target ||= node if node.kind == target_kind && node.text.to_s == target_text
+              node.named_children.each { |child| walk.call(child) }
+            end
+          end
+          walk.call(document.root)
+          abort "target node not found" unless target
+          normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
+          puts normalizer.send(method, target).to_s
+        "#;
+        let output = Command::new("ruby")
+            .current_dir(decomplex_dir)
+            .env("DECOMPLEX_FORCE_LANGUAGE", ruby_language_name(language))
+            .args([
+                "-I",
+                "lib",
+                "-r",
+                "decomplex/ast",
+                "-r",
+                "decomplex/syntax",
+                "-e",
+                script,
+            ])
+            .arg(file.path())
+            .arg(kind)
+            .arg(text)
+            .arg(method)
+            .output()
+            .expect("run ruby private string helper");
+        assert!(
+            output.status.success(),
+            "ruby string helper failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("ruby string helper output should be utf8")
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn tree_normalizer_new_initializes_empty_state() {
+        let normalizer = super::TreeSitterNormalizer::new("", Language::Ruby);
+
+        assert_eq!(normalizer.source, "");
+        assert_eq!(normalizer.language, Language::Ruby);
+        assert!(normalizer.local_stack.is_empty());
+        assert_eq!(normalizer.root_span, None);
+    }
+
+    #[test]
+    fn tree_normalizer_yield_statement_matches_ruby_private_predicate() {
+        for (source, language, suffix, kind, text) in [
+            (
+                "def each\n  yield :item\nend\n",
+                Language::Ruby,
+                ".rb",
+                "body_statement",
+                "yield :item",
+            ),
+            (
+                "def each\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "body_statement",
+                "value",
+            ),
+            (
+                "def gen():\n    yield item\n    other()\n",
+                Language::Python,
+                ".py",
+                "expression_statement",
+                "yield item",
+            ),
+            (
+                "def gen():\n    yield from items\n    other()\n",
+                Language::Python,
+                ".py",
+                "expression_statement",
+                "yield from items",
+            ),
+            (
+                "def gen():\n    yield item\n    other()\n",
+                Language::Python,
+                ".py",
+                "block",
+                "yield item\n    other()",
+            ),
+        ] {
+            let tree = raw_tree(source, language);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+            let normalizer = super::TreeSitterNormalizer::new(source, language);
+
+            assert_eq!(
+                normalizer.yield_statement(node),
+                ruby_private_predicate(source, language, suffix, "yield_statement?", kind, text),
+                "yield_statement? mismatch for {language:?} {kind} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_yield_statement_in_multi_statement_block_matches_ruby_ast() {
+        let source = "def gen():\n    yield item\n    other()\n";
+        assert_ruby_parity(source, Language::Python, ".py");
+
+        let root = parse_language_source(source, Language::Python, ".py");
+        let defn = first_node(&root, "DEFN", "def gen():\n    yield item\n    other()");
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(child_types(body), vec!["YIELD", "EXPRESSION_STATEMENT"]);
+    }
+
+    #[test]
+    fn tree_normalizer_super_statement_matches_ruby_private_predicate() {
+        for (source, kind, text) in [
+            (
+                "class Child < Parent\n  def call\n    super\n  end\nend\n",
+                "body_statement",
+                "super",
+            ),
+            (
+                "class Child < Parent\n  def call\n    super :item\n  end\nend\n",
+                "body_statement",
+                "super :item",
+            ),
+            (
+                "class Child < Parent\n  def call\n    value\n  end\nend\n",
+                "body_statement",
+                "value",
+            ),
+        ] {
+            let tree = raw_tree(source, Language::Ruby);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+            let normalizer = super::TreeSitterNormalizer::new(source, Language::Ruby);
+
+            assert_eq!(
+                normalizer.super_statement(node),
+                ruby_private_predicate(
+                    source,
+                    Language::Ruby,
+                    ".rb",
+                    "super_statement?",
+                    kind,
+                    text
+                ),
+                "super_statement? mismatch for {kind} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ruby_super_statement_normalization_matches_ruby_ast() {
+        let source = "class Child < Parent\n  def bare\n    super\n  end\n  def with_arg\n    super :item\n  end\nend\n";
+        assert_ruby_parity(source, Language::Ruby, ".rb");
+
+        let root = parse_language_source(source, Language::Ruby, ".rb");
+        let bare = first_node(&root, "SUPER", "super");
+        let with_arg = first_node(&root, "SUPER", "super :item");
+
+        assert_eq!(bare.children, vec![Child::Nil]);
+        assert_eq!(child_types(with_arg), vec!["LIST"]);
+        assert_eq!(child_types(child_node(with_arg, 0)), vec!["LIT"]);
+    }
+
+    #[test]
+    fn tree_normalizer_argument_list_element_reference_matches_ruby_private_predicate() {
+        for (source, text) in [
+            ("def indexed\n  return items[0]\nend\n", "items[0]"),
+            ("def indexed\n  return obj.foo[0]\nend\n", "obj.foo[0]"),
+            ("def indexed\n  return [0]\nend\n", "[0]"),
+            (
+                "def indexed\n  return items[0], other\nend\n",
+                "items[0], other",
+            ),
+            ("def indexed\n  return items[]\nend\n", "items[]"),
+            (
+                "def indexed\n  return items[0] { nope }\nend\n",
+                "items[0] { nope }",
+            ),
+        ] {
+            let tree = raw_tree(source, Language::Ruby);
+            let node = first_raw_node(tree.root_node(), source, "argument_list", text);
+            let normalizer = super::TreeSitterNormalizer::new(source, Language::Ruby);
+
+            assert_eq!(
+                normalizer.argument_list_element_reference(node),
+                ruby_private_predicate(
+                    source,
+                    Language::Ruby,
+                    ".rb",
+                    "argument_list_element_reference?",
+                    "argument_list",
+                    text
+                ),
+                "argument_list_element_reference? mismatch for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_scope_rewrites_locals_without_crossing_scope_boundaries() {
+        let inner_assignment = test_node("LASGN", vec![Child::Symbol("inner".to_string())]);
+        let node = test_node(
+            "BLOCK",
+            vec![
+                Child::Node(Box::new(test_node(
+                    "LASGN",
+                    vec![Child::Symbol("value".to_string())],
+                ))),
+                Child::Node(Box::new(test_node(
+                    "LVAR",
+                    vec![Child::Symbol("value".to_string())],
+                ))),
+                Child::Node(Box::new(test_node(
+                    "DEFN",
+                    vec![
+                        Child::Symbol("nested".to_string()),
+                        Child::Node(Box::new(test_node(
+                            "SCOPE",
+                            vec![
+                                Child::Nil,
+                                Child::Nil,
+                                Child::Node(Box::new(inner_assignment)),
+                            ],
+                        ))),
+                    ],
+                ))),
+            ],
+        );
+
+        let result = super::dynamic_scope(node);
+
+        assert_eq!(child_node(&result, 0).r#type, "DASGN");
+        assert_eq!(child_node(&result, 1).r#type, "DVAR");
+        let nested = child_node(&result, 2);
+        assert_eq!(nested.r#type, "DEFN");
+        let nested_scope = child_node(nested, 1);
+        assert_eq!(nested_scope.r#type, "SCOPE");
+        assert_eq!(child_node(nested_scope, 2).r#type, "LASGN");
+    }
+
+    #[test]
+    fn link_when_chain_sets_next_arm_and_pads_short_when_nodes() {
+        let fallback = test_node("ELSE", Vec::new());
+        let first = test_node(
+            "WHEN",
+            vec![
+                Child::Symbol("patterns".to_string()),
+                Child::Nil,
+                Child::Nil,
+            ],
+        );
+        let second = test_node(
+            "WHEN",
+            vec![
+                Child::Symbol("patterns".to_string()),
+                Child::Nil,
+                Child::Nil,
+            ],
+        );
+        let normalizer = super::TreeSitterNormalizer::new("", Language::Ruby);
+
+        let result = normalizer
+            .link_when_chain(vec![first, second], Some(fallback))
+            .expect("expected linked when chain");
+
+        assert_eq!(result.r#type, "WHEN");
+        let next = child_node(&result, 2);
+        assert_eq!(next.r#type, "WHEN");
+        assert_eq!(child_node(next, 2).r#type, "ELSE");
+
+        let short = test_node("WHEN", vec![Child::Symbol("patterns".to_string())]);
+        let fallback = test_node("ELSE", Vec::new());
+        let result = normalizer
+            .link_when_chain(vec![short], Some(fallback))
+            .expect("expected padded when chain");
+
+        assert_eq!(result.children.len(), 3);
+        assert_eq!(result.children[1], Child::Nil);
+        assert_eq!(child_node(&result, 2).r#type, "ELSE");
+    }
+
+    #[test]
+    fn link_rescue_chain_sets_next_rescue_and_pads_short_resbody_nodes() {
+        let first = test_node(
+            "RESBODY",
+            vec![
+                Child::Symbol("exceptions".to_string()),
+                Child::Nil,
+                Child::Nil,
+            ],
+        );
+        let second = test_node(
+            "RESBODY",
+            vec![
+                Child::Symbol("exceptions".to_string()),
+                Child::Nil,
+                Child::Nil,
+            ],
+        );
+        let normalizer = super::TreeSitterNormalizer::new("", Language::Ruby);
+
+        let result = normalizer
+            .link_rescue_chain(vec![first, second])
+            .expect("expected linked rescue chain");
+
+        assert_eq!(result.r#type, "RESBODY");
+        let next = child_node(&result, 2);
+        assert_eq!(next.r#type, "RESBODY");
+        assert_eq!(next.children[2], Child::Nil);
+
+        let short = test_node("RESBODY", vec![Child::Symbol("exceptions".to_string())]);
+        let result = normalizer
+            .link_rescue_chain(vec![short])
+            .expect("expected padded rescue chain");
+
+        assert_eq!(result.children.len(), 3);
+        assert_eq!(result.children[1], Child::Nil);
+        assert_eq!(result.children[2], Child::Nil);
+    }
+
+    #[test]
+    fn infix_statement_parts_extracts_allowed_wrapper_parts() {
+        let source = "def calc\n  left + right\nend\n";
+        let tree = raw_tree(source, Language::Ruby);
+        let normalizer = super::TreeSitterNormalizer::new(source, Language::Ruby);
+        let body = first_raw_node(tree.root_node(), source, "body_statement", "left + right");
+        let binary = first_raw_node(tree.root_node(), source, "binary", "left + right");
+
+        assert_eq!(
+            infix_parts_text(&normalizer, body, source),
+            Some(("left".to_string(), "+".to_string(), "right".to_string()))
+        );
+        assert_eq!(infix_parts_text(&normalizer, binary, source), None);
+
+        let source = "def calc\n  return left + right\nend\n";
+        let tree = raw_tree(source, Language::Ruby);
+        let normalizer = super::TreeSitterNormalizer::new(source, Language::Ruby);
+        let args = first_raw_node(tree.root_node(), source, "argument_list", "left + right");
+        assert_eq!(
+            infix_parts_text(&normalizer, args, source),
+            Some(("left".to_string(), "+".to_string(), "right".to_string()))
+        );
+
+        let source = "def calc\n  left && right\nend\n";
+        let tree = raw_tree(source, Language::Ruby);
+        let normalizer = super::TreeSitterNormalizer::new(source, Language::Ruby);
+        let boolean = first_raw_node(tree.root_node(), source, "body_statement", "left && right");
+        assert_eq!(infix_parts_text(&normalizer, boolean, source), None);
+    }
+
+    #[test]
+    fn argument_list_unary_not_matches_ruby_private_predicate() {
+        for (line, text) in [
+            ("return !flag", "!flag"),
+            ("return !!flag", "!!flag"),
+            ("return flag", "flag"),
+            ("return !flag, other", "!flag, other"),
+            ("return (!flag)", "(!flag)"),
+            ("return not flag", "not flag"),
+        ] {
+            let source = format!("def check\n  {line}\nend\n");
+            let tree = raw_tree(&source, Language::Ruby);
+            let node = first_raw_node(tree.root_node(), &source, "argument_list", text);
+            let normalizer = super::TreeSitterNormalizer::new(&source, Language::Ruby);
+
+            assert_eq!(
+                normalizer.argument_list_unary_not(node),
+                ruby_private_predicate(
+                    &source,
+                    Language::Ruby,
+                    ".rb",
+                    "argument_list_unary_not?",
+                    "argument_list",
+                    text
+                ),
+                "argument_list_unary_not? mismatch for {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unary_not_statement_matches_ruby_private_predicate() {
+        for (line, text) in [
+            ("!flag", "!flag"),
+            ("!!flag", "!!flag"),
+            ("flag", "flag"),
+            ("!flag; other", "!flag; other"),
+            ("(!flag)", "(!flag)"),
+            ("not flag", "not flag"),
+        ] {
+            let source = format!("def check\n  {line}\nend\n");
+            let tree = raw_tree(&source, Language::Ruby);
+            let node = first_raw_node(tree.root_node(), &source, "body_statement", text);
+            let normalizer = super::TreeSitterNormalizer::new(&source, Language::Ruby);
+
+            assert_eq!(
+                normalizer.unary_not_statement(node),
+                ruby_private_predicate(
+                    &source,
+                    Language::Ruby,
+                    ".rb",
+                    "unary_not_statement?",
+                    "body_statement",
+                    text
+                ),
+                "unary_not_statement? mismatch for {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unary_not_expression_matches_ruby_private_predicate() {
+        for (source, language, suffix, kind, text) in [
+            (
+                "def check\n  !flag\n  !!flag\n  -flag\n  not flag\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "!flag",
+            ),
+            (
+                "def check\n  !flag\n  !!flag\n  -flag\n  not flag\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "!!flag",
+            ),
+            (
+                "def check\n  !flag\n  !!flag\n  -flag\n  not flag\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "-flag",
+            ),
+            (
+                "def check\n  !flag\n  !!flag\n  -flag\n  not flag\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "not flag",
+            ),
+            (
+                "function check(flag: boolean) { return !flag; }\n",
+                Language::TypeScript,
+                ".ts",
+                "unary_expression",
+                "!flag",
+            ),
+            (
+                "if not flag:\n    pass\n",
+                Language::Python,
+                ".py",
+                "not_operator",
+                "not flag",
+            ),
+            (
+                "if not flag then end\n",
+                Language::Lua,
+                ".lua",
+                "unary_expression",
+                "not flag",
+            ),
+        ] {
+            let tree = raw_tree(source, language);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+            let normalizer = super::TreeSitterNormalizer::new(source, language);
+
+            assert_eq!(
+                normalizer.unary_not_expression(node),
+                ruby_private_predicate(
+                    source,
+                    language,
+                    suffix,
+                    "unary_not_expression?",
+                    kind,
+                    text
+                ),
+                "unary_not_expression? mismatch for {language:?} {kind} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unary_minus_expression_matches_ruby_private_predicate() {
+        for (source, language, suffix, kind, text) in [
+            (
+                "def check\n  -flag\n  !flag\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "-flag",
+            ),
+            (
+                "def check\n  -flag\n  !flag\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "unary",
+                "!flag",
+            ),
+            (
+                "function check(value: number) { return -value; }\n",
+                Language::TypeScript,
+                ".ts",
+                "unary_expression",
+                "-value",
+            ),
+            (
+                "x = -value\n",
+                Language::Python,
+                ".py",
+                "unary_operator",
+                "-value",
+            ),
+            (
+                "local x = -value\n",
+                Language::Lua,
+                ".lua",
+                "expression_list",
+                "-value",
+            ),
+        ] {
+            let tree = raw_tree(source, language);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+            let normalizer = super::TreeSitterNormalizer::new(source, language);
+
+            assert_eq!(
+                normalizer.unary_minus_expression(node),
+                ruby_private_predicate(
+                    source,
+                    language,
+                    suffix,
+                    "unary_minus_expression?",
+                    kind,
+                    text
+                ),
+                "unary_minus_expression? mismatch for {language:?} {kind} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn binary_operator_matches_ruby_private_helper() {
+        for (source, language, suffix, kind, text) in [
+            (
+                "def calc\n  left + right\n  left && right\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "binary",
+                "left + right",
+            ),
+            (
+                "def calc\n  left + right\n  left && right\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "binary",
+                "left && right",
+            ),
+            (
+                "def calc\n  left + right\n  left && right\n  value\nend\n",
+                Language::Ruby,
+                ".rb",
+                "body_statement",
+                "left + right\n  left && right\n  value",
+            ),
+            (
+                "const value = left + right && other;\n",
+                Language::TypeScript,
+                ".ts",
+                "binary_expression",
+                "left + right && other",
+            ),
+            (
+                "const value = left + right && other;\n",
+                Language::TypeScript,
+                ".ts",
+                "binary_expression",
+                "left + right",
+            ),
+            (
+                "value = left + right and other\n",
+                Language::Python,
+                ".py",
+                "boolean_operator",
+                "left + right and other",
+            ),
+            (
+                "value = left + right and other\n",
+                Language::Python,
+                ".py",
+                "binary_operator",
+                "left + right",
+            ),
+            (
+                "local value = left + right and other\n",
+                Language::Lua,
+                ".lua",
+                "expression_list",
+                "left + right and other",
+            ),
+            (
+                "local value = left + right and other\n",
+                Language::Lua,
+                ".lua",
+                "binary_expression",
+                "left + right",
+            ),
+        ] {
+            let tree = raw_tree(source, language);
+            let node = first_raw_node(tree.root_node(), source, kind, text);
+            let normalizer = super::TreeSitterNormalizer::new(source, language);
+
+            assert_eq!(
+                normalizer.binary_operator(node).unwrap_or_default(),
+                ruby_private_string(source, language, suffix, "binary_operator", kind, text),
+                "binary_operator mismatch for {language:?} {kind} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_f_string_interpolation_next_to_equals_is_evstr_not_assignment() {
+        let root = parse_language_source(
+            r#"
+class Tag:
+    @property
+    def markup(self):
+        return f"[{self.name}={self.parameters}]"
+"#,
+            Language::Python,
+            ".py",
+        );
+        let dstr = first_node(&root, "DSTR", r#"f"[{self.name}={self.parameters}]""#);
+
+        let types = child_types(dstr);
+        assert_eq!(
+            types,
+            vec![
+                "STRING_START",
+                "STR",
+                "EVSTR",
+                "STR",
+                "EVSTR",
+                "STR",
+                "STRING_END"
+            ],
+            "expected Ruby-style f-string interpolation parts in {dstr:#?}"
+        );
+        assert!(
+            !types.contains(&"LASGN"),
+            "interpolation next to '=' must not normalize as assignment: {dstr:#?}"
+        );
+    }
+
+    #[test]
+    fn python_relative_import_prefix_only_has_no_children() {
+        let root = parse_language_source(
+            r#"
+if __name__ == "__main__":
+    from . import box as box
+"#,
+            Language::Python,
+            ".py",
+        );
+        let relative_import = first_node(&root, "RELATIVE_IMPORT", ".");
+
+        assert!(
+            relative_import.children.is_empty(),
+            "Ruby exposes bare relative import prefix as an empty RELATIVE_IMPORT: {relative_import:#?}"
+        );
+    }
+
+    #[test]
+    fn python_annotation_type_wrappers_match_ruby_tree_shape() {
+        let root = parse_language_source(
+            r#"
+from typing import Callable
+
+_is_single_cell_widths: Callable[[str], bool] = value
+last_measured_character: str | None = None
+fileno: Callable[[], int] | None = value
+"#,
+            Language::Python,
+            ".py",
+        );
+
+        let str_list_type = first_node(&root, "TYPE", "[str]");
+        assert_eq!(child_types(str_list_type), vec!["LVAR"]);
+        assert_eq!(
+            child_node(str_list_type, 0).children,
+            vec![Child::String("str".to_string())]
+        );
+
+        let empty_list_type = first_node(&root, "TYPE", "[]");
+        assert!(
+            empty_list_type.children.is_empty(),
+            "Ruby keeps Callable[[]] list type empty: {empty_list_type:#?}"
+        );
+
+        let union_type = first_node(&root, "TYPE", "str | None");
+        assert_eq!(child_types(union_type), vec!["LVAR", "NIL"]);
+    }
+
+    #[test]
+    fn python_docstring_only_class_body_stays_block_wrapped() {
+        let root = parse_language_source(
+            r#"
+class ColorParseError(Exception):
+    """The color could not be parsed."""
+"#,
+            Language::Python,
+            ".py",
+        );
+        let class_node = first_node(
+            &root,
+            "CLASS",
+            "class ColorParseError(Exception):\n    \"\"\"The color could not be parsed.\"\"\"",
+        );
+        let scope = child_node(class_node, 2);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(
+            child_types(body),
+            vec!["STRING_START", "STR", "STRING_END"],
+            "Ruby exposes docstring-only class body as BLOCK of string parts: {body:#?}"
+        );
+    }
+
+    #[test]
+    fn python_ellipsis_only_function_body_is_empty_scope_with_root_source() {
+        let root = parse_language_source(
+            r#"def __rich__():
+    ...
+"#,
+            Language::Python,
+            ".py",
+        );
+        let defn = first_node(&root, "DEFN", "def __rich__():\n    ...");
+        let scope = child_node(defn, 1);
+
+        assert_eq!(scope.r#type, "SCOPE");
+        assert!(matches!(scope.children.get(2), Some(Child::Nil)));
+        assert_eq!(
+            scope.first_lineno, root.first_lineno,
+            "Ruby scope(body=nil,args=nil) falls back to document root source"
+        );
+        assert_eq!(scope.text, root.text);
+    }
+
+    #[test]
+    fn python_explicit_return_none_is_not_elided_from_function_body() {
+        let root = parse_language_source(
+            r#"
+class Thing:
+    def _repr_latex_(self):
+        return None
+"#,
+            Language::Python,
+            ".py",
+        );
+        let iter = first_node(
+            &root,
+            "ITER",
+            "def _repr_latex_(self):\n        return None",
+        );
+        let scope = child_node(iter, 1);
+
+        assert_eq!(
+            child_node(scope, 2).r#type,
+            "NIL",
+            "Ruby only elides implicit nil bodies for Ruby, not explicit Python return None: {scope:#?}"
+        );
+    }
+
+    #[test]
+    fn python_with_attribute_item_uses_ruby_clause_children() {
+        let root = parse_language_source(
+            r#"
+def page(self):
+    with self._console._lock:
+        buffer = self._console._buffer[:]
+"#,
+            Language::Python,
+            ".py",
+        );
+        let clause = first_node(&root, "WITH_CLAUSE", "self._console._lock");
+
+        assert_eq!(
+            child_types(clause),
+            vec!["CALL", "LVAR"],
+            "Ruby with_clause exposes attribute receiver and field separately: {clause:#?}"
+        );
+        assert_eq!(child_node(clause, 0).text, "self._console");
+        assert_eq!(child_node(clause, 1).text, "_lock");
+    }
+
+    #[test]
+    fn python_bare_identifier_expression_statement_has_no_children() {
+        let root = parse_language_source(
+            r#"
+def _is_jupyter():
+    try:
+        get_ipython  # type: ignore[name-defined]
+    except NameError:
+        return False
+"#,
+            Language::Python,
+            ".py",
+        );
+        let expression = first_node(&root, "EXPRESSION_STATEMENT", "get_ipython");
+
+        assert!(
+            expression.children.is_empty(),
+            "Ruby parser exposes bare identifier expression statements without named children: {expression:#?}"
+        );
+    }
+
+    #[test]
+    fn python_bare_identifier_only_block_has_no_children() {
+        let root = parse_language_source(
+            r#"
+def get_exception():
+    try:
+        pass
+    except:
+        foobarbaz
+"#,
+            Language::Python,
+            ".py",
+        );
+        let block = first_node(&root, "BLOCK", "foobarbaz");
+
+        assert!(
+            block.children.is_empty(),
+            "Ruby exposes a bare identifier-only block as an empty block: {block:#?}"
+        );
+    }
+
+    #[test]
+    fn python_bare_dotted_expression_statement_keeps_statement_wrapper() {
+        let root = parse_language_source("os.get_terminal_size\n", Language::Python, ".py");
+        let expression = first_node(&root, "EXPRESSION_STATEMENT", "os.get_terminal_size");
+
+        assert_eq!(
+            child_types(expression),
+            vec!["LVAR", "LVAR"],
+            "Ruby exposes bare dotted expression statements as expression_statement identifier children: {expression:#?}"
+        );
+    }
+
+    #[test]
+    fn python_bare_comparison_expression_statement_keeps_statement_wrapper() {
+        let root = parse_language_source(
+            r#"
+def test_get_style():
+    console.get_style("repr.brace") == Style(bold=True)
+"#,
+            Language::Python,
+            ".py",
+        );
+        let expression = first_node(
+            &root,
+            "EXPRESSION_STATEMENT",
+            r#"console.get_style("repr.brace") == Style(bold=True)"#,
+        );
+
+        assert_eq!(
+            child_types(expression),
+            vec!["CALL", "FCALL"],
+            "Ruby exposes bare comparison statements as expression_statement operand children: {expression:#?}"
+        );
+    }
+
+    #[test]
+    fn python_delete_statement_matches_ruby_block_contexts() {
+        let root = parse_language_source(
+            r#"
+def save(self, clear):
+    if clear:
+        del self._record_buffer[:]
+    with self._record_buffer_lock:
+        del self._record_buffer[:]
+        text = ""
+"#,
+            Language::Python,
+            ".py",
+        );
+        let if_node = first_node(&root, "IF", "if clear:\n        del self._record_buffer[:]");
+        assert_eq!(
+            child_node(if_node, 1).r#type,
+            "SUBSCRIPT",
+            "Ruby unwraps a single delete body to the deleted subscript: {if_node:#?}"
+        );
+
+        let delete = first_node(&root, "DELETE_STATEMENT", "del self._record_buffer[:]");
+        assert_eq!(
+            child_types(delete),
+            vec!["SUBSCRIPT"],
+            "Ruby keeps delete_statement wrapper in multi-statement bodies: {delete:#?}"
+        );
+    }
+
+    #[test]
+    fn python_single_subscript_expression_block_exposes_subscript_children() {
+        let root = parse_language_source(
+            r#"
+def test_render():
+    with pytest.raises(KeyError):
+        top["asdasd"]
+"#,
+            Language::Python,
+            ".py",
+        );
+        let block = first_node(&root, "BLOCK", r#"top["asdasd"]"#);
+
+        assert_eq!(
+            child_types(block),
+            vec!["LVAR", "STR"],
+            "Ruby exposes a single subscript expression block as subscript children: {block:#?}"
+        );
+    }
+
+    #[test]
+    fn python_single_if_block_under_try_exposes_ruby_if_children() {
+        let root = parse_language_source(
+            r#"
+def load(args):
+    try:
+        if args.path == "-":
+            json_data = sys.stdin.read()
+        else:
+            json_data = Path(args.path).read_text()
+    except Exception as error:
+        sys.exit(-1)
+"#,
+            Language::Python,
+            ".py",
+        );
+        let block = first_node(
+            &root,
+            "BLOCK",
+            "if args.path == \"-\":\n            json_data = sys.stdin.read()\n        else:\n            json_data = Path(args.path).read_text()",
+        );
+
+        assert_eq!(
+            child_types(block),
+            vec!["OPCALL", "BLOCK", "ELSE_CLAUSE"],
+            "Ruby block lacks an if_statement wrapper in this parser shape: {block:#?}"
+        );
+    }
+
+    #[test]
+    fn python_single_decorated_definition_block_exposes_decorator_and_function() {
+        let root = parse_language_source(
+            r#"
+def test_inspect_swig_edge_case():
+    class Thing:
+        @property
+        def __class__(self):
+            raise AttributeError
+"#,
+            Language::Python,
+            ".py",
+        );
+        let block = first_node(
+            &root,
+            "BLOCK",
+            "@property\n        def __class__(self):\n            raise AttributeError",
+        );
+
+        assert_eq!(
+            child_types(block),
+            vec!["IVAR", "DEFN"],
+            "Ruby exposes decorated definitions as direct block children: {block:#?}"
+        );
+    }
+
+    #[test]
+    fn python_nested_class_inside_class_body_matches_ruby_iter_shape() {
+        let root = parse_language_source(
+            r#"
+def test_can_handle_special_characters_in_docstrings():
+    class Something:
+        class Thing:
+            pass
+"#,
+            Language::Python,
+            ".py",
+        );
+        let iter = first_node(&root, "ITER", "class Thing:\n            pass");
+
+        assert_eq!(child_node(iter, 0).r#type, "VCALL");
+        assert_eq!(
+            child_node(iter, 0).children,
+            vec![Child::Symbol("Thing".to_string()), Child::Nil]
+        );
+        assert_eq!(child_node(iter, 1).r#type, "SCOPE");
+    }
+
+    #[test]
+    fn lua_local_assignment_call_rhs_matches_ruby_expression_list_shape() {
+        let root = parse_language_source(
+            r#"local test_env = require("spec.util.test_env")
+"#,
+            Language::Lua,
+            ".lua",
+        );
+        let expression_list =
+            first_node(&root, "EXPRESSION_LIST", r#"require("spec.util.test_env")"#);
+
+        assert_eq!(
+            child_types(expression_list),
+            vec!["LVAR", "ARGUMENTS"],
+            "Ruby exposes a Lua call RHS expression_list as the call function and arguments, without a FUNCTION_CALL wrapper: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_local_assignment_member_rhs_matches_ruby_expression_list_shape() {
+        let root = parse_language_source("local run = test_env.run\n", Language::Lua, ".lua");
+        let expression_list = first_node(&root, "EXPRESSION_LIST", "test_env.run");
+
+        assert_eq!(
+            child_types(expression_list),
+            vec!["LVAR", "LVAR"],
+            "Ruby exposes a Lua dotted RHS expression_list as receiver and field, without a DOT_INDEX_EXPRESSION wrapper: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_table_string_entry_matches_ruby_field_shape() {
+        let root = parse_language_source(
+            "local extra_rocks = {\n   \"/luasocket-${LUASOCKET}.src.rock\",\n}\n",
+            Language::Lua,
+            ".lua",
+        );
+        let expression_list = first_node(
+            &root,
+            "EXPRESSION_LIST",
+            "{\n   \"/luasocket-${LUASOCKET}.src.rock\",\n}",
+        );
+        let field = child_node(expression_list, 0);
+        let string = child_node(field, 0);
+
+        assert_eq!(
+            child_types(expression_list),
+            vec!["FIELD"],
+            "Ruby exposes a Lua table constructor assignment RHS as its field children: {expression_list:#?}"
+        );
+        assert_eq!(string.r#type, "STR");
+        assert_eq!(
+            string.children,
+            vec![Child::String("/luasocket-${LUASOCKET}.src.rock".to_string())],
+            "Ruby normalizes a Lua table string field from string_content, without quotes: {string:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_table_dollar_string_entry_matches_ruby_str_not_gvar() {
+        let root = parse_language_source(
+            "local incdirs = { \"$(FOO1_INCDIR)\" }\n",
+            Language::Lua,
+            ".lua",
+        );
+        let string = first_node(&root, "STR", "$(FOO1_INCDIR)");
+        let mut gvars = Vec::new();
+        nodes_of_type(&root, "GVAR", &mut gvars);
+
+        assert_eq!(
+            string.children,
+            vec![Child::String("$(FOO1_INCDIR)".to_string())],
+            "Ruby normalizes Lua table strings starting with $ as STR, not GVAR: {string:#?}"
+        );
+        assert!(
+            gvars.is_empty(),
+            "Lua string_content starting with $ must not normalize as GVAR: {gvars:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_table_call_entry_matches_ruby_field_children_shape() {
+        let root = parse_language_source(
+            "assert.same(install, { bin = { P\"bin/binfile\" } })\n",
+            Language::Lua,
+            ".lua",
+        );
+        let field = first_node(&root, "FIELD", "P\"bin/binfile\"");
+
+        assert_eq!(
+            child_types(field),
+            vec!["LVAR", "ARGUMENTS"],
+            "Ruby exposes a Lua table field call as the call children, without FUNCTION_CALL wrapper: {field:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_table_identifier_entry_matches_ruby_empty_field_shape() {
+        let root = parse_language_source(
+            "local rocks_path = table.concat({rocks_tree, \"a_rock\"})\n",
+            Language::Lua,
+            ".lua",
+        );
+        let field = first_node(&root, "FIELD", "rocks_tree");
+
+        assert!(
+            field.children.is_empty(),
+            "Ruby exposes a bare identifier Lua table field with no normalized children: {field:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_call_function_body_matches_ruby_block_shape() {
+        let root = parse_language_source(
+            "before_each(function()\n   test_env.setup_specs(extra_rocks)\nend)\n",
+            Language::Lua,
+            ".lua",
+        );
+        let defn = first_node(
+            &root,
+            "DEFN",
+            "function()\n   test_env.setup_specs(extra_rocks)\nend",
+        );
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(
+            child_types(body),
+            vec!["DOT_INDEX_EXPRESSION", "ARGUMENTS"],
+            "Ruby exposes a single Lua function-call body as a BLOCK of the call target and arguments: {body:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_assignment_function_body_matches_ruby_block_shape() {
+        let root = parse_language_source(
+            "lazy_setup(function()\n   git = git_repo.start()\nend)\n",
+            Language::Lua,
+            ".lua",
+        );
+        let defn = first_node(&root, "DEFN", "function()\n   git = git_repo.start()\nend");
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(
+            child_types(body),
+            vec!["VARIABLE_LIST", "EXPRESSION_LIST"],
+            "Ruby exposes a single Lua assignment body as a BLOCK of assignment children, without LASGN: {body:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_bare_assignment_function_body_matches_ruby_empty_lists() {
+        let root = parse_language_source("function()\n   x = y\nend\n", Language::Lua, ".lua");
+        let defn = first_node(&root, "DEFN", "function()\n   x = y\nend");
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+        let variable_list = child_node(body, 0);
+        let expression_list = child_node(body, 1);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(variable_list.r#type, "VARIABLE_LIST");
+        assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+        assert!(
+            variable_list.children.is_empty(),
+            "Ruby exposes a bare Lua single-assignment variable_list with no children: {variable_list:#?}"
+        );
+        assert!(
+            expression_list.children.is_empty(),
+            "Ruby exposes a bare identifier Lua single-assignment RHS with no children: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_dotted_assignment_function_body_keeps_ruby_variable_list_children() {
+        let root = parse_language_source(
+            "function()\n   package.path = oldpath\nend\n",
+            Language::Lua,
+            ".lua",
+        );
+        let defn = first_node(&root, "DEFN", "function()\n   package.path = oldpath\nend");
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+        let variable_list = child_node(body, 0);
+        let expression_list = child_node(body, 1);
+
+        assert_eq!(body.r#type, "BLOCK");
+        assert_eq!(variable_list.r#type, "VARIABLE_LIST");
+        assert_eq!(
+            child_types(variable_list),
+            vec!["LVAR", "LVAR"],
+            "Ruby keeps Lua dotted assignment targets as variable_list children: {variable_list:#?}"
+        );
+        assert!(
+            expression_list.children.is_empty(),
+            "Ruby exposes a bare identifier Lua dotted-assignment RHS with no children: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_local_assignment_function_body_matches_ruby_lasgn_shape() {
+        let root = parse_language_source(
+            "it(function()\n   local output = run.luarocks(\"show --rock-tree luacov\")\nend)\n",
+            Language::Lua,
+            ".lua",
+        );
+        let defn = first_node(
+            &root,
+            "DEFN",
+            "function()\n   local output = run.luarocks(\"show --rock-tree luacov\")\nend",
+        );
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "LASGN");
+        assert_eq!(
+            body.children.first(),
+            Some(&Child::String("output".to_string())),
+            "Ruby exposes a single Lua local assignment function body as the inner LASGN: {body:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_assigned_function_expression_matches_ruby_expression_list_shape() {
+        let root = parse_language_source(
+            "local test_with_location = function(location)\n   lfs.mkdir(location)\nend\n",
+            Language::Lua,
+            ".lua",
+        );
+        let assignment = first_node(
+            &root,
+            "LASGN",
+            "test_with_location = function(location)\n   lfs.mkdir(location)\nend",
+        );
+        let expression_list = child_node(assignment, 1);
+
+        assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+        assert_eq!(
+            child_types(expression_list),
+            vec!["PARAMETERS", "BLOCK"],
+            "Ruby exposes a Lua assigned function expression as PARAMETERS and BLOCK inside the RHS expression_list: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_assigned_function_if_else_matches_fixed_ruby_if_shape() {
+        let root = parse_language_source(
+            "local make_unreadable = function(path)\n  if is_win then\n    fs.execute(\"x\")\n  else\n    fs.execute(\"y\")\n  end\nend\n",
+            Language::Lua,
+            ".lua",
+        );
+        let expression_list = first_node(
+            &root,
+            "EXPRESSION_LIST",
+            "function(path)\n  if is_win then\n    fs.execute(\"x\")\n  else\n    fs.execute(\"y\")\n  end\nend",
+        );
+        let if_node = child_node(expression_list, 1);
+        let mut iters = Vec::new();
+        nodes_of_type(&root, "ITER", &mut iters);
+
+        assert_eq!(if_node.r#type, "IF");
+        assert_eq!(child_node(if_node, 2).r#type, "ELSE_STATEMENT");
+        assert!(
+            iters.is_empty(),
+            "Ruby no longer misclassifies a Lua if/else in an assigned function expression as ITER: {iters:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_return_function_body_matches_ruby_expression_list_shape() {
+        let root = parse_language_source(
+            "function sum.sum(a, b)\n   return a + b\nend\n",
+            Language::Lua,
+            ".lua",
+        );
+        let defn = first_node(
+            &root,
+            "DEFN",
+            "function sum.sum(a, b)\n   return a + b\nend",
+        );
+        let scope = child_node(defn, 1);
+        let body = child_node(scope, 2);
+
+        assert_eq!(body.r#type, "EXPRESSION_LIST");
+        assert_eq!(
+            child_types(body),
+            vec!["LVAR", "LVAR"],
+            "Ruby exposes a single Lua return body as the returned expression_list, without RETURN: {body:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_top_level_return_identifier_matches_ruby_empty_expression_list() {
+        let root = parse_language_source("return sum\n", Language::Lua, ".lua");
+        let return_node = first_node(&root, "RETURN", "return sum");
+        let expression_list = child_node(return_node, 0);
+
+        assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+        assert!(
+            expression_list.children.is_empty(),
+            "Ruby exposes a Lua return of a bare identifier as an empty expression_list: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_top_level_return_scalar_literals_match_ruby_empty_expression_list() {
+        for literal in ["true", "false", "nil", "0"] {
+            let root = parse_language_source(&format!("return {literal}\n"), Language::Lua, ".lua");
+            let return_node = first_node(&root, "RETURN", &format!("return {literal}"));
+            let expression_list = child_node(return_node, 0);
+
+            assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+            assert!(
+                expression_list.children.is_empty(),
+                "Ruby exposes a Lua return of {literal} as an empty expression_list: {expression_list:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lua_assignment_scalar_literals_match_ruby_empty_expression_list() {
+        for literal in ["true", "false", "nil", "0"] {
+            let root =
+                parse_language_source(&format!("tmpfile = {literal}\n"), Language::Lua, ".lua");
+            let assignment = first_node(&root, "LASGN", &format!("tmpfile = {literal}"));
+            let expression_list = child_node(assignment, 1);
+
+            assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+            assert!(
+                expression_list.children.is_empty(),
+                "Ruby exposes a Lua scalar literal assignment RHS as an empty expression_list: {expression_list:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lua_no_paren_string_argument_matches_ruby_string_content_shape() {
+        let root = parse_language_source("V\"foo\"\n", Language::Lua, ".lua");
+        let call = first_node(&root, "FUNCTION_CALL", "V\"foo\"");
+        let arguments = child_node(call, 1);
+        let string = child_node(arguments, 0);
+
+        assert_eq!(arguments.r#type, "ARGUMENTS");
+        assert_eq!(arguments.text, "\"foo\"");
+        assert_eq!(string.r#type, "STR");
+        assert_eq!(string.text, "foo");
+        assert_eq!(string.children, vec![Child::String("foo".to_string())]);
+    }
+
+    #[test]
+    fn lua_long_string_assignment_matches_ruby_expression_list_content_shape() {
+        let root = parse_language_source(
+            "local c_module_source = [[\n   #include <lua.h>\n]]\n",
+            Language::Lua,
+            ".lua",
+        );
+        let expression_list = first_node(&root, "EXPRESSION_LIST", "[[\n   #include <lua.h>\n]]");
+        let string = child_node(expression_list, 0);
+
+        assert_eq!(child_types(expression_list), vec!["STR"]);
+        assert_eq!(
+            string.children,
+            vec![Child::String("\n   #include <lua.h>\n".to_string())],
+            "Ruby normalizes a Lua long string assignment from string_content, without bracket delimiters: {string:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_elseif_branch_is_preserved_as_if_alternative() {
+        let root = parse_language_source(
+            r#"if test_env.LUA_V == "5.1" then
+  one()
+elseif test_env.LUA_V == "5.2" then
+  two()
+end
+"#,
+            Language::Lua,
+            ".lua",
+        );
+        let if_node = first_node(
+            &root,
+            "IF",
+            "if test_env.LUA_V == \"5.1\" then\n  one()\nelseif test_env.LUA_V == \"5.2\" then\n  two()\nend",
+        );
+        let alternative = child_node(if_node, 2);
+
+        assert_eq!(alternative.r#type, "ELSEIF_STATEMENT");
+    }
+
+    #[test]
+    fn lua_binary_assignment_rhs_matches_ruby_expression_list_shape() {
+        let root = parse_language_source(
+            "local rockspec = testing_paths.fixtures_dir .. \"/build_only_deps-0.1-1.rockspec\"\n",
+            Language::Lua,
+            ".lua",
+        );
+        let expression_list = first_node(
+            &root,
+            "EXPRESSION_LIST",
+            "testing_paths.fixtures_dir .. \"/build_only_deps-0.1-1.rockspec\"",
+        );
+
+        assert_eq!(
+            child_types(expression_list),
+            vec!["DOT_INDEX_EXPRESSION", "STR"],
+            "Ruby exposes a Lua binary RHS expression_list as the binary operands, without a BINARY_EXPRESSION wrapper: {expression_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_local_declaration_without_rhs_matches_ruby_empty_variable_list() {
+        let root = parse_language_source("local tmpdir\n", Language::Lua, ".lua");
+        let variable_list = first_node(&root, "VARIABLE_LIST", "tmpdir");
+
+        assert!(
+            variable_list.children.is_empty(),
+            "Ruby exposes a Lua local declaration without RHS as an empty VARIABLE_LIST: {variable_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_multi_local_declaration_without_rhs_keeps_ruby_variable_list_children() {
+        let root = parse_language_source("local cfg, fs\n", Language::Lua, ".lua");
+        let variable_list = first_node(&root, "VARIABLE_LIST", "cfg, fs");
+
+        assert_eq!(
+            child_types(variable_list),
+            vec!["LVAR", "LVAR"],
+            "Ruby keeps children for a multi-name Lua local declaration without RHS: {variable_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_single_generic_for_variable_matches_ruby_empty_variable_list() {
+        let root = parse_language_source(
+            "for f in lfs.dir(spec_quick) do end\n",
+            Language::Lua,
+            ".lua",
+        );
+        let variable_list = first_node(&root, "VARIABLE_LIST", "f");
+
+        assert!(
+            variable_list.children.is_empty(),
+            "Ruby exposes a single Lua generic-for variable list as empty: {variable_list:#?}"
+        );
+    }
+
+    #[test]
+    fn lua_multi_generic_for_variable_list_keeps_ruby_children() {
+        let root =
+            parse_language_source("for _, t in ipairs(tests) do end\n", Language::Lua, ".lua");
+        let variable_list = first_node(&root, "VARIABLE_LIST", "_, t");
+
+        assert_eq!(
+            child_types(variable_list),
+            vec!["LVAR", "LVAR"],
+            "Ruby keeps children for a multi-name Lua generic-for variable list: {variable_list:#?}"
+        );
     }
 
     #[test]

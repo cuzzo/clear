@@ -40,9 +40,160 @@ module Decomplex
       node.text.to_s.strip.gsub(/\s+/, " ")
     end
 
+    # Language-specific syntax-shape decisions live here, before nodes
+    # are converted into Decomplex's shared AST vocabulary.
+    class TreeSitterNormalizationAdapter
+      BINARY_WRAPPER_KINDS = %w[
+        binary binary_expression binary_operator boolean_operator comparison_operator
+      ].freeze
+
+      class << self
+        def for(document)
+          case document&.language&.to_sym
+          when :ruby then RubyTreeSitterNormalizationAdapter.new(document)
+          when :python then PythonTreeSitterNormalizationAdapter.new(document)
+          when :lua then LuaTreeSitterNormalizationAdapter.new(document)
+          when :typescript, :javascript then TypeScriptTreeSitterNormalizationAdapter.new(document)
+          else new(document)
+          end
+        end
+      end
+
+      attr_reader :document
+
+      def initialize(document)
+        @document = document
+      end
+
+      def ruby?
+        false
+      end
+
+      def yield_statement?(node)
+        %w[body_statement block block_body statement].include?(node.kind) &&
+          node.children.first&.text == "yield"
+      rescue StandardError
+        false
+      end
+
+      def super_statement?(_node)
+        false
+      end
+
+      def explicit_alternative(node)
+        node.named_children.find { |child| %w[else else_clause else_statement].include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+
+      def unary_not_expression?(node)
+        %w[unary unary_expression].include?(node.kind) && node.text.to_s.lstrip.start_with?("!")
+      end
+
+      def unary_minus_expression?(node)
+        %w[unary unary_expression].include?(node.kind) && node.text.to_s.lstrip.start_with?("-")
+      end
+
+      def binary_operator(node)
+        direct_binary_operator(node).to_s
+      end
+
+      private
+
+      def direct_binary_operator(node)
+        node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text
+      rescue StandardError
+        nil
+      end
+
+      def exact_single_named_child(node, kinds:)
+        children = node.named_children
+        return nil unless children.size == 1
+
+        child = children.first
+        return nil unless kinds.include?(child.kind)
+        return nil unless node.text.to_s == child.text.to_s
+
+        child
+      rescue StandardError
+        nil
+      end
+    end
+
+    class RubyTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      def ruby?
+        true
+      end
+
+      def super_statement?(node)
+        %w[body_statement block block_body statement].include?(node.kind) &&
+          (node.text.to_s.strip == "super" ||
+            (node.named_children.first&.kind == "super" &&
+              node.named_children.drop(1).all? { |child| child.kind == "argument_list" }))
+      rescue StandardError
+        false
+      end
+
+      def explicit_alternative(node)
+        node.named_children.find { |child| %w[elsif else].include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+    end
+
+    class PythonTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      def yield_statement?(node)
+        (%w[body_statement block block_body expression_statement statement].include?(node.kind) &&
+          node.children.first&.text == "yield")
+      rescue StandardError
+        false
+      end
+
+      def explicit_alternative(node)
+        node.named_children.find { |child| %w[elif_clause else else_clause].include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+
+      def unary_minus_expression?(node)
+        (%w[unary unary_expression unary_operator].include?(node.kind) && node.text.to_s.lstrip.start_with?("-"))
+      end
+    end
+
+    class LuaTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      def explicit_alternative(node)
+        node.named_children.find { |child| %w[elseif_statement else else_statement].include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+
+      def unary_minus_expression?(node)
+        super ||
+          (node.kind == "expression_list" && node.children.first&.text == "-" && node.named_children.size == 1)
+      rescue StandardError
+        false
+      end
+
+      def binary_operator(node)
+        direct = direct_binary_operator(node)
+        return direct.to_s if direct
+
+        child = exact_single_named_child(node, kinds: BINARY_WRAPPER_KINDS)
+        child ? binary_operator(child) : ""
+      end
+    end
+
+    class TypeScriptTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      def explicit_alternative(node)
+        node.named_children.find { |child| %w[else else_clause].include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+    end
+
     # Tree-sitter exposes each grammar's native node names. Decomplex's
     # detectors share a small language-neutral AST vocabulary, so this
-    # adapter normalizes common syntax categories into that vocabulary:
+    # normalizer converts common syntax categories into that vocabulary:
     # DEFN, CLASS, IF, CASE/WHEN, AND/OR, CALL, LASGN, ATTRASGN, IVAR,
     # LVAR, and friends. The goal is portable structural facts, not
     # Ruby semantics.
@@ -111,6 +262,7 @@ module Decomplex
 
       def initialize(document)
         @document = document
+        @normalization_adapter = TreeSitterNormalizationAdapter.for(document)
         @local_stack = []
         @normalizing = Set.new
       end
@@ -142,6 +294,8 @@ module Decomplex
 
           if leading_function_statement?(node)
             normalize_leading_function_statement(node)
+          elsif leading_if_statement?(node)
+            normalize_leading_if_statement(node)
           elsif modifier_statement?(node)
             normalize_modifier_statement(node)
           elsif ternary_statement?(node)
@@ -190,6 +344,8 @@ module Decomplex
             normalize_lambda(node)
           elsif node.kind == "yield"
             normalize_yield(node)
+          elsif yield_statement?(node)
+            normalize_yield_statement(node)
           elsif yield_argument_list?(node)
             normalize_yield_argument_list(node)
           elsif node.kind == "heredoc_beginning"
@@ -537,10 +693,7 @@ module Decomplex
       end
 
       def yield_statement?(node)
-        %w[body_statement block block_body statement].include?(node.kind) &&
-          node.children.first&.text == "yield"
-      rescue StandardError
-        false
+        normalization_adapter.yield_statement?(node)
       end
 
       def normalize_yield_statement(node)
@@ -572,16 +725,19 @@ module Decomplex
       end
 
       def super_statement?(node)
-        %w[body_statement block block_body statement].include?(node.kind) &&
-          node.named_children.first&.kind == "super" &&
-          node.named_children.drop(1).all? { |child| child.kind == "argument_list" }
-      rescue StandardError
-        false
+        normalization_adapter.super_statement?(node)
       end
 
       def normalize_super_statement(node)
         args_node = node.named_children.find { |child| child.kind == "argument_list" }
-        args = args_node ? args_node.named_children.map { |child| normalize_node(child) }.compact : []
+        args =
+          if args_node && args_node.named_children.empty?
+            [scalar_argument_list_value(args_node)].compact
+          elsif args_node
+            args_node.named_children.map { |child| normalize_node(child) }.compact
+          else
+            []
+          end
         wrap(:SUPER, children: [list(args, source: args_node || node)], source: node)
       end
 
@@ -1139,11 +1295,11 @@ module Decomplex
       end
 
       def unary_not_expression?(node)
-        %w[unary unary_expression].include?(node.kind) && node.text.to_s.lstrip.start_with?("!")
+        normalization_adapter.unary_not_expression?(node)
       end
 
       def unary_minus_expression?(node)
-        %w[unary unary_expression].include?(node.kind) && node.text.to_s.lstrip.start_with?("-")
+        normalization_adapter.unary_minus_expression?(node)
       end
 
       def boolean_operator(node)
@@ -1164,7 +1320,7 @@ module Decomplex
       end
 
       def binary_operator(node)
-        node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s
+        normalization_adapter.binary_operator(node)
       end
 
       def spaced_text(node)
@@ -1225,7 +1381,11 @@ module Decomplex
       end
 
       def ruby?
-        @document.language == :ruby
+        normalization_adapter.ruby?
+      end
+
+      def normalization_adapter
+        @normalization_adapter ||= TreeSitterNormalizationAdapter.for(@document)
       end
 
       def interpolated_string?(node)
@@ -1281,6 +1441,8 @@ module Decomplex
       end
 
       def assignment_rhs?(node)
+        return false if literal_fragment_assignment_context?(node)
+
         sibling = prev_sibling(node)
         sibling && assignment_operator?(sibling.text)
       end
@@ -1517,7 +1679,7 @@ module Decomplex
       end
 
       def explicit_alternative(node)
-        node.named_children.find { |child| %w[elsif else].include?(child.kind) }
+        normalization_adapter.explicit_alternative(node)
       end
 
       def const_for(node)

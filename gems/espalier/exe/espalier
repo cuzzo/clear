@@ -27,7 +27,7 @@ end
 OptionParser.new do |opts|
   opts.banner = "Usage: espalier [options] <files/directories...>"
 
-  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report, :sarif, :json], "Output format (markdown, yaml, report, sarif, json). Default: markdown") do |f|
+  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report, :dot, :sarif, :json], "Output format (markdown, yaml, report, dot, sarif, json). Default: markdown") do |f|
     options[:format] = f
   end
 
@@ -70,6 +70,8 @@ if options[:manifest]
                       ).to_markdown
                     elsif options[:format] == :yaml
                       Espalier::Formatter.to_yaml(manifest)
+                    elsif options[:format] == :dot
+                      Espalier::Formatter.to_dot(manifest)
                     elsif %i[sarif json].include?(options[:format])
                       Espalier::Formatter.to_sarif(manifest)
                     else
@@ -147,6 +149,8 @@ manifest = aggregator.aggregate(modules)
 # Format & Outflow
 output_contents = if options[:format] == :yaml
                     Espalier::Formatter.to_yaml(manifest)
+                  elsif options[:format] == :dot
+                    Espalier::Formatter.to_dot(manifest)
                   elsif %i[sarif json].include?(options[:format])
                     Espalier::Formatter.to_sarif(manifest)
                   elsif options[:format] == :report
