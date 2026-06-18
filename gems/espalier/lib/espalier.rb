@@ -5,6 +5,8 @@ require_relative "espalier/nil_kill_evidence"
 require_relative "espalier/privacy_analyzer"
 require_relative "espalier/architecture_analyzer"
 require_relative "espalier/aggregator"
+require_relative "espalier/dependency_graph"
+require_relative "espalier/graphviz_formatter"
 require_relative "espalier/formatter"
 require_relative "espalier/reporter"
 
