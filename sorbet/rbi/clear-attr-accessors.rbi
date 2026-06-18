@@ -145,7 +145,7 @@ class AST::BindExpr
 end
 
 class AST::BodySlot
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(AST::RawBody) }
   def body; end
 end
 
@@ -669,9 +669,9 @@ class Assignment
 end
 
 class AutoMapShapeEntry
-  sig { returns(T.untyped) }
+  sig { returns(AutoSlotId) }
   def key; end
-  sig { returns(T.untyped) }
+  sig { returns(AutoSlotId) }
   def value; end
 end
 
@@ -685,13 +685,13 @@ class AutoShapeSlots
 end
 
 class AutoSlotId
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Integer)) }
   def decl_id; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def fn_name; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Integer)) }
   def index; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def kind; end
 end
 
@@ -707,21 +707,21 @@ class AutoUnifier::MapPairResolution
 end
 
 class BasicBlock
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def id; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def id=(value); end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[BasicBlock]) }
   def predecessors; end
-  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(value: T::Array[BasicBlock]).returns(T::Array[BasicBlock]) }
   def predecessors=(value); end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(AST::RawBody) }
   def stmts; end
-  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(value: AST::RawBody).returns(AST::RawBody) }
   def stmts=(value); end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[BasicBlock]) }
   def successors; end
-  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(value: T::Array[BasicBlock]).returns(T::Array[BasicBlock]) }
   def successors=(value); end
 end
 
@@ -882,9 +882,9 @@ class Drop
 end
 
 class Edit
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def replacement; end
-  sig { returns(T.untyped) }
+  sig { returns(Span) }
   def span; end
 end
 
@@ -921,22 +921,22 @@ end
 class Fix
   sig { returns(Symbol) }
   def confidence; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def description; end
   sig { returns(T::Array[Edit]) }
   def edits; end
 end
 
 class FixableFinding
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def category; end
   sig { returns(T::Array[Fix]) }
   def fixes; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def level; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def message; end
-  sig { returns(T.untyped) }
+  sig { returns(DiagnosticToken) }
   def token; end
 end
 
@@ -1009,13 +1009,13 @@ class FuncCall
 end
 
 class FunctionCFG
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[BasicBlock]) }
   def blocks; end
   sig { returns(BasicBlock) }
   def entry; end
   sig { returns(BasicBlock) }
   def exit_block; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def fn_name; end
 end
 
@@ -1355,7 +1355,7 @@ class MIR::Program
 end
 
 class MIRChecker
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def errors; end
 end
 
@@ -1528,9 +1528,9 @@ class Program
 end
 
 class Schemas::EnumSchema
-  sig { returns(T.untyped) }
+  sig { returns(T::Set[String]) }
   def variants; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
@@ -1557,22 +1557,22 @@ class Schemas::ResourceSchema
 end
 
 class Schemas::StructSchema
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def extern_module; end
   sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(MethodsMap) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
 class Schemas::UnionSchema
   sig { returns(Schemas::UnionSchema::VariantMap) }
   def variants; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
@@ -1617,18 +1617,18 @@ class SourceError
   def original_message; end
   sig { returns(T.untyped) }
   def source_code; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Lexer::Token)) }
   def token; end
 end
 
 class Span
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def col; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def file; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def length; end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def line; end
 end
 
@@ -1779,11 +1779,11 @@ class TestBlock
 end
 
 class TestLowering::TestBlockCtx
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(TestLowering::MirBody) }
   def setup_mir; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[TestLowering::MirBody]) }
   def test_after_each_mir; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[TestLowering::MirBody]) }
   def test_before_each_mir; end
   sig { returns(AST::TestBlock) }
   def test_block; end
@@ -1917,13 +1917,13 @@ class WithBlock
 end
 
 class ZigTranspiler
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(EnumSchemaMap)) }
   def enum_schemas; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(ModuleTypeDefs)) }
   def module_type_defs; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(StructSchemaMap)) }
   def struct_schemas; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(UnionSchemaMap)) }
   def union_schemas; end
 end
 

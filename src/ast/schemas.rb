@@ -20,13 +20,26 @@ module Schemas
   class EnumSchema
       extend T::Sig
 
-    attr_reader :variants, :visibility
-    sig { params(variants: T::Array[String], visibility: Symbol).void }
+    VariantInput = T.type_alias { T.any(T::Array[T.any(String, Symbol)], T::Set[T.any(String, Symbol)]) }
+
+    sig { returns(T::Set[String]) }
+    attr_reader :variants
+    sig { returns(Symbol) }
+    attr_reader :visibility
+    sig { params(variants: VariantInput, visibility: Symbol).void }
     def initialize(variants:, visibility: :package)
-      @variants = T.let(variants, T::Array[String])
+      @variants = T.let(normalize_variants(variants).freeze, T::Set[String])
       @visibility = T.let(visibility, Symbol)
       freeze
     end
+
+    sig { params(variants: VariantInput).returns(T::Set[String]) }
+    def normalize_variants(variants)
+      variants.each_with_object(T.let(Set.new, T::Set[String])) do |variant, normalized|
+        normalized << variant.to_s
+      end
+    end
+    private :normalize_variants
 
     sig { returns(T.nilable(Symbol)) }
     def kind = :enum

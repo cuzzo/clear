@@ -1185,7 +1185,13 @@ module MIR
     # arms: [SwitchArm]
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      compact_child_exprs([subject, *(arms || []).flat_map(&:patterns)])
+      pattern_exprs = T.let([], T::Array[Emittable])
+      (arms || []).each do |arm|
+        arm.patterns.each do |pattern|
+          pattern_exprs << pattern if pattern.is_a?(Emittable)
+        end
+      end
+      compact_child_exprs([subject, pattern_exprs])
     end
     sig { returns(T::Array[BodySlot]) }
     def body_slots

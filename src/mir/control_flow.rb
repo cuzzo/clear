@@ -472,7 +472,7 @@ class OwnershipDataflow
     worklist.each { |b| in_worklist[b.id] = true }
 
     until worklist.empty?
-      block = worklist.shift
+      block = T.must(worklist.shift)
       in_worklist.delete(block.id)
 
       # Entry state: join predecessor exits (entry block uses init state).
@@ -860,7 +860,7 @@ class OwnershipDataflow
   def join_predecessors(block)
     preds = block.predecessors.select { |pred| @block_out[pred.id] }
     return empty_ownership_state if preds.empty?
-    first_out = T.must(@block_out[preds.first.id])
+    first_out = T.must(@block_out[T.must(preds.first).id])
     return first_out if preds.length == 1
 
     result = dup_state(first_out)

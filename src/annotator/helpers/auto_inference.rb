@@ -7,11 +7,15 @@ AutoInferenceWalkNode = T.type_alias do
     AST::Node,
     AST::RawBody,
     T::Hash[BasicObject, BasicObject],
+    Struct,
+    T::Struct,
+    SymbolEntry,
     Symbol,
     String,
     Numeric,
     TrueClass,
     FalseClass,
+    Lexer::Token,
     Type,
   ))
 end
@@ -230,7 +234,7 @@ class AutoConstraintCollector
   def walk(node, current_fn:)
     return if node.nil?
     case node
-    when Symbol, String, Numeric, TrueClass, FalseClass, Type
+    when Symbol, String, Numeric, TrueClass, FalseClass, Lexer::Token, Type, SymbolEntry
       # leaf
     when Array
       node.each { |c| walk(c, current_fn: current_fn) }
@@ -761,6 +765,8 @@ class ShapeEvidenceCollector
       walk_for_shape_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_for_shape_decls(c, &block) }
     when Hash
@@ -786,6 +792,8 @@ class ShapeEvidenceCollector
       walk(node.value, name_map)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk(c, name_map) }
     when Hash
@@ -916,6 +924,8 @@ class OperatorEvidenceCollector
       walk_for_local_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_for_local_decls(c, &block) }
     when Hash
@@ -946,6 +956,8 @@ class OperatorEvidenceCollector
       walk_binops(node.value, name_to_slot, fn)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
+    when Lexer::Token
+      # metadata leaf
     when Array
       node.each { |c| walk_binops(c, name_to_slot, fn) }
     when Hash

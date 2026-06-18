@@ -115,7 +115,8 @@ module Annotator
       def reject_duplicate_extern_method!(node, type_schema)
         T.bind(self, SemanticAnnotator)
 
-        return unless type_schema.methods.key?(node.name)
+        methods = type_schema.methods
+        return unless methods.is_a?(Hash) && methods.key?(node.name)
         owner = node.owner_type || "<unknown>"
         error!(node, :DUPLICATE_EXTERN_METHOD_DECLARATION, owner: owner, name: node.name)
       end

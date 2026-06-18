@@ -22,16 +22,16 @@ module AST
   class BodySlot
     extend T::Sig
 
-    sig { returns(RawBody) }
+    sig { returns(AST::RawBody) }
     attr_reader :body
 
-    sig { params(body: RawBody, writer: T.proc.params(body: RawBody).void).void }
+    sig { params(body: AST::RawBody, writer: T.proc.params(body: AST::RawBody).void).void }
     def initialize(body, writer)
-      @body = T.let(body, RawBody)
-      @writer = T.let(writer, T.proc.params(body: RawBody).void)
+      @body = T.let(body, AST::RawBody)
+      @writer = T.let(writer, T.proc.params(body: AST::RawBody).void)
     end
 
-    sig { params(body: RawBody).void }
+    sig { params(body: AST::RawBody).void }
     def replace(body)
       @body = body
       @writer.call(body)
@@ -39,11 +39,12 @@ module AST
   end
 
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, String, FunctionSignature) }
-  CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
+  CoerceTypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
   CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
   InitArgs = T.type_alias { T.untyped }
   SchemaLookup = T.type_alias { T.proc.params(type_name: T.any(String, Symbol)).returns(T.untyped) }
   PrecedenceInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Array[String])] }
+  LambdaBody = T.type_alias { T.any(AST::Node, RawBody) }
   PipelineRewriteMetadataIvars = T.let([
     :@type_object,
     :@coerced_type_object,
@@ -713,12 +714,22 @@ module AST
     when ListLit
       node.items.compact
     when HashLit
-      node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
+      hash_lit_pair_nodes(node.pairs)
     when Assert
       [node.condition].compact
     else
       []
     end
+  end
+
+  sig { params(pairs: T.untyped).returns(T::Array[AST::Node]) }
+  def self.hash_lit_pair_nodes(pairs)
+    nodes = T.let([], T::Array[AST::Node])
+    pairs.each do |key, value|
+      nodes << key if key.is_a?(AST::Locatable)
+      nodes << value if value.is_a?(AST::Locatable)
+    end
+    nodes
   end
 
   # Yield every BgBlock / BgStreamBlock reachable from `body`, including
@@ -769,7 +780,7 @@ module AST
     when ListLit
       expr.items.each { |v| _expr_each_bg_block_recursive(v, &block) }
     when HashLit
-      expr.entries.each { |k, v| _expr_each_bg_block_recursive(k, &block); _expr_each_bg_block_recursive(v, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_recursive(node, &block) }
     when BinaryOp
       _expr_each_bg_block_recursive(expr.left, &block)
       _expr_each_bg_block_recursive(expr.right, &block)
@@ -816,7 +827,7 @@ module AST
     when ListLit
       expr.items.each { |v| _expr_each_bg_block_shallow(v, &block) }
     when HashLit
-      expr.entries.each { |k, v| _expr_each_bg_block_shallow(k, &block); _expr_each_bg_block_shallow(v, &block) }
+      hash_lit_pair_nodes(expr.pairs).each { |node| _expr_each_bg_block_shallow(node, &block) }
     when BinaryOp
       _expr_each_bg_block_shallow(expr.left, &block)
       _expr_each_bg_block_shallow(expr.right, &block)
@@ -1069,7 +1080,8 @@ module AST
       return [declared_type, nil] if declared_type == inferred
 
       # Check if coercion is valid
-      error = Type.coerce_error(T.must(@type_object), declared_type)
+      coerce_target = T.let(declared_type.is_a?(FunctionSignature) ? Type.new(declared_type) : declared_type, Type::TypeInput)
+      error = Type.coerce_error(T.must(@type_object), coerce_target)
       return [nil, error] if error
 
       # Valid coercion - set coerced_type and return declared
@@ -1237,6 +1249,11 @@ module AST
   end
 
   Node = T.type_alias { Locatable }
+
+  sig { params(body: LambdaBody).returns(RawBody) }
+  def self.lambda_body_nodes(body)
+    body.is_a?(Array) ? body : [body]
+  end
 
   class PipelineShardContext < T::Struct
     extend T::Sig
@@ -1832,12 +1849,12 @@ module AST
       self[:params] = val || []
     end
 
-    sig { returns(RawBody) }
+    sig { returns(LambdaBody) }
     def body
       self[:body]
     end
 
-    sig { params(val: RawBody).returns(RawBody) }
+    sig { params(val: LambdaBody).returns(LambdaBody) }
     def body=(val)
       self[:body] = val
     end

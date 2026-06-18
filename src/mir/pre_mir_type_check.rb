@@ -25,8 +25,8 @@ module PreMirTypeCheck
 
   class InternalTypeResolutionError < StandardError; end
 
-  LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze
-  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass, Lexer::Token, SymbolEntry].freeze
+  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Struct, T::Struct, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
   Violation = T.type_alias { T::Hash[Symbol, String] }
 
 

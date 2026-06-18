@@ -28,7 +28,7 @@ module TestLowering
     extend T::Sig
 
   MirBody = T.type_alias { T::Array[MIR::Emittable] }
-  AstIdentifierSearchNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  AstIdentifierSearchNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
   TestDefs = T.type_alias { T::Array[MIR::TestDef] }
   LetAstMap = T.type_alias { T::Hash[String, AST::LetBinding] }
   StubInfo = T.type_alias { T::Hash[Symbol, T.any(Symbol, String)] }
@@ -196,14 +196,14 @@ module TestLowering
       @test_block = T.let(test_block, AST::TestBlock)
       @test_name  = T.let(test_block.name, String)
       @lowering   = lowering
-      @setup_mir  = T.let(lowering.lower_body(test_block.setup), MirBody)
+      @setup_mir  = T.let(lowering.lower_body(test_block.setup), TestLowering::MirBody)
       @test_before_each_mir = T.let(
         (test_block.before_each || []).map { |b| lowering.lower_body(b) },
-        T::Array[MirBody],
+        T::Array[TestLowering::MirBody],
       )
       @test_after_each_mir = T.let(
         (test_block.after_each || []).map { |b| lowering.lower_body(b) },
-        T::Array[MirBody],
+        T::Array[TestLowering::MirBody],
       )
     end
 
@@ -307,7 +307,7 @@ module TestLowering
   sig { params(node: AstIdentifierSearchNode, name_set: LetAstMap, out: T::Set[String]).void }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
-    return if node.nil? || AST.scalar_literal_value?(node)
+    return if node.nil? || AST.scalar_literal_value?(node) || node.is_a?(Lexer::Token)
     if node.is_a?(Array)
       node.each { |n| collect_identifier_refs(n, name_set, out) }
       return

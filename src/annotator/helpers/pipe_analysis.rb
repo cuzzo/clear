@@ -515,9 +515,9 @@ module PipeAnalysis
       with_new_scope do
         current_scope.declare(left_name, nil, left_type, false, false, nil, :stack)
         current_scope.declare(right_name, nil, right_type, false, false, nil, :stack)
-        key_expr.body.each { |stmt| visit(stmt) }
+        AST.lambda_body_nodes(key_expr.body).each { |stmt| visit(stmt) }
       end
-      key_result = key_expr.body.last
+      key_result = AST.lambda_body_nodes(key_expr.body).last
       unless key_result&.resolved_type == :Bool
         error!(key_expr, :JOIN_LAMBDA_NEEDS_BOOL, got: key_result&.resolved_type)
       end

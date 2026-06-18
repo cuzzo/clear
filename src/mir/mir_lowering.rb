@@ -3475,7 +3475,7 @@ class MIRLowering
 
   # Strip try-wrapping from a MIR node so it can be used inside catch/orelse.
   # Returns a new node without try, or the original node if not try-wrapped.
-  sig { params(left: MIR::Node, catch_body: MIR::Node, capture: T.nilable(String), fallback: T.nilable(AST::Node)).returns(MIR::TryCatch) }
+  sig { params(left: MIR::Node, catch_body: MIR::Node, capture: T.nilable(String), fallback: T.nilable(T.any(AST::Node, MIR::Node))).returns(MIR::TryCatch) }
   def try_catch_with_provenance(left, catch_body, capture, fallback: nil)
     stripped = strip_try(left)
     out = MIR::TryCatch.new(stripped, catch_body, capture)

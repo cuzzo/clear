@@ -257,14 +257,15 @@ module MIRLoweringControlFlow
     body = b.is_a?(Array) ? lower_body(b) : []
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
+    tight = node.tight == true
+    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
-    if !node.tight && current_function_has_rt? && !loop_body_exits?(body)
+    if !tight && current_function_has_rt? && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, nil, nil, node.mark_per_iter, !!node.tight)
+    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, nil, nil, node.mark_per_iter, tight)
   end
 
   sig { params(node: AST::WhileBindLoop).returns(MIR::WhileStmt) }
@@ -283,13 +284,14 @@ module MIRLoweringControlFlow
     end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
+    tight = node.tight == true
+    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
-    if !node.tight && current_function_has_rt? && !loop_body_exits?(body)
+    if !tight && current_function_has_rt? && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, false)
+    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, tight)
   end
 
   # Returns true when the last reachable statement in a loop body is an

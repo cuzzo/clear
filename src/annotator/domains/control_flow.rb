@@ -667,7 +667,7 @@ module Annotator
         return unless plan.enum? || plan.union?
 
         covered = node.cases.flat_map { |match_case| match_variant_names(match_case) }.to_set
-        all_variants = plan.enum? ? match_enum_schema(plan).variants : match_union_schema(plan).variants.keys.to_set
+        all_variants = plan.enum? ? match_enum_schema(plan).variants.to_set : match_union_schema(plan).variants.keys.to_set
         missing = all_variants - covered
         return if missing.empty?
 
