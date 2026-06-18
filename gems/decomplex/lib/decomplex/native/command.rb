@@ -42,7 +42,7 @@ module Decomplex
         case File.extname(path)
         when ".rb" then "ruby"
         when ".py" then "python"
-        when ".js" then "javascript"
+        when ".js", ".jsx", ".mjs", ".cjs" then "javascript"
         when ".ts", ".tsx" then "typescript"
         when ".java" then "java"
         when ".swift" then "swift"

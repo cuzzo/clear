@@ -95,6 +95,12 @@ fn walk_lasgns<'a>(n: &'a Node, acc: &mut Vec<&'a Node>) {
 }
 
 fn lvars(node: &Node, acc: &mut Vec<String>) {
+    if matches!(
+        node.r#type.as_str(),
+        "BRACKETED_ARGUMENT_LIST" | "bracketed_argument_list"
+    ) {
+        return;
+    }
     if node.r#type == "LVAR" {
         if let Some(Child::String(name)) = node.children.first() {
             acc.push(name.clone());
@@ -108,7 +114,11 @@ fn lvars(node: &Node, acc: &mut Vec<String>) {
 fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
     let asgns: Vec<_> = lasgns(stmts)
         .iter()
-        .map(|n| {
+        .filter_map(|n| {
+            let name = match n.children.first() {
+                Some(Child::String(name)) => name.clone(),
+                _ => return None,
+            };
             let mut deps = Vec::new();
             if let Some(val) = n.children.get(1).and_then(ast::node) {
                 lvars(val, &mut deps);
@@ -119,15 +129,12 @@ fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
                 .into_iter()
                 .collect();
             deps.sort();
-            Asgn {
-                name: match n.children.first().unwrap() {
-                    Child::String(s) => s.clone(),
-                    _ => panic!("LASGN without name"),
-                },
+            Some(Asgn {
+                name,
                 deps,
                 line: n.first_lineno,
                 span: [n.first_lineno, n.first_column, n.last_lineno, n.last_column],
-            }
+            })
         })
         .collect();
 

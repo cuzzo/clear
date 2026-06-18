@@ -13,6 +13,19 @@ use decomplex::syntax::Language;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
+    let worker = std::thread::Builder::new()
+        .name("decomplex-rust".to_string())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(run)
+        .with_context(|| "failed to start decomplex worker thread")?;
+
+    match worker.join() {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn run() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     parallel::set_jobs_for_process(command.jobs())?;
     match command {

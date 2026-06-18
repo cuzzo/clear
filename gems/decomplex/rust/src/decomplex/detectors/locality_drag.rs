@@ -442,7 +442,7 @@ impl LocalityDrag {
             ));
         }
         parts.push(format!(
-            "method local complexity {}",
+            "method local complexity {:.1}",
             self.round(local_complexity)
         ));
         parts.join("; ")

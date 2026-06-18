@@ -694,8 +694,11 @@ module Decomplex
 	          File.expand_path("../../vendor/tree-sitter", __dir__),
 	          File.expand_path("../../vendor/tree-sitter/#{language}", __dir__),
           File.expand_path("../../node_modules/#{pkg}", __dir__),
+          File.expand_path("../../node_modules/#{pkg}/build/Release", __dir__),
           File.expand_path("../../../../node_modules/#{pkg}", __dir__),
-          File.expand_path("../../../../../node_modules/#{pkg}", __dir__)
+          File.expand_path("../../../../node_modules/#{pkg}/build/Release", __dir__),
+          File.expand_path("../../../../../node_modules/#{pkg}", __dir__),
+          File.expand_path("../../../../../node_modules/#{pkg}/build/Release", __dir__)
 	        ]
 	        all_prebuilds = roots.flat_map do |root|
 	          stems.flat_map do |stem|

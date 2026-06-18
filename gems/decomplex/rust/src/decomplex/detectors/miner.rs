@@ -46,17 +46,19 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<MinerReport> 
 
 struct Miner {
     sites: Vec<DecisionSite>,
-    groups: BTreeMap<(String, Vec<String>), Vec<DecisionSite>>,
+    groups: Vec<((String, Vec<String>), Vec<DecisionSite>)>,
 }
 
 impl Miner {
     fn new(sites: Vec<DecisionSite>) -> Self {
-        let mut groups = BTreeMap::new();
+        let mut groups: Vec<((String, Vec<String>), Vec<DecisionSite>)> = Vec::new();
         for s in &sites {
-            groups
-                .entry((s.kind.clone(), s.members.clone()))
-                .or_insert_with(Vec::new)
-                .push(s.clone());
+            let key = (s.kind.clone(), s.members.clone());
+            if let Some((_, grouped)) = groups.iter_mut().find(|(existing, _)| existing == &key) {
+                grouped.push(s.clone());
+            } else {
+                groups.push((key, vec![s.clone()]));
+            }
         }
         Self { sites, groups }
     }

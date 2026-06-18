@@ -254,7 +254,7 @@ impl Scanner {
                 child_masses.push(child_mass);
             }
         }
-        Some(Candidate {
+        let candidate = Candidate {
             file: file.to_string(),
             line,
             span: node.span,
@@ -267,7 +267,8 @@ impl Scanner {
             raw: normalize_text(&node.text),
             child_fingerprints,
             child_masses,
-        })
+        };
+        Some(candidate)
     }
 
     fn type2_findings(&self, candidates: &[Candidate]) -> Vec<SimilarityFinding> {
@@ -525,7 +526,17 @@ fn fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, usize) 
         return (String::new(), 0);
     }
     active.insert(key.clone());
-    let out = if CALL_KINDS.contains(&node.kind.as_str()) && call_message(node).is_some() {
+    let out = if matches!(
+        node.kind.as_str(),
+        "predefined_type" | "abstract_pointer_declarator" | "storage_class_specifier" | "ERROR"
+    ) {
+        let token = terminal_token(node);
+        if token.is_empty() {
+            (String::new(), 0)
+        } else {
+            (token, 1)
+        }
+    } else if CALL_KINDS.contains(&node.kind.as_str()) && call_message(node).is_some() {
         fingerprint_call(node, active)
     } else if node.children.is_empty() {
         let token = terminal_token(node);

@@ -299,9 +299,16 @@ impl Report {
             *ess.entry(&h.contract).or_insert(0) += 1;
         }
 
-        let mut rows_map: BTreeMap<String, Vec<&Hit>> = BTreeMap::new();
+        let mut rows_map: Vec<(String, Vec<&Hit>)> = Vec::new();
         for h in &self.guard {
-            rows_map.entry(h.contract.clone()).or_default().push(h);
+            if let Some((_, hits)) = rows_map
+                .iter_mut()
+                .find(|(contract, _)| contract == &h.contract)
+            {
+                hits.push(h);
+            } else {
+                rows_map.push((h.contract.clone(), vec![h]));
+            }
         }
 
         let rows: Vec<_> = rows_map

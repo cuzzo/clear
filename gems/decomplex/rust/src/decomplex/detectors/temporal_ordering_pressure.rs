@@ -262,8 +262,8 @@ impl TemporalOrderingPressure {
         }
 
         let n = state_methods.len();
-        let state_space_exp = fields.len().min(12);
-        let state_space = 2usize.pow(state_space_exp as u32);
+        let state_space_exp = fields.len();
+        let state_space = 2usize.pow(state_space_exp.min(12) as u32);
         let score = (n * writers.len() * shared_fields.len().max(1)) + state_space;
 
         let first_line = state_methods.first()?.line;

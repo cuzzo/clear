@@ -189,7 +189,7 @@ impl PathCondition {
 
 struct Report {
     sites: Vec<Site>,
-    groups: BTreeMap<Vec<String>, Vec<Site>>,
+    groups: Vec<(Vec<String>, Vec<Site>)>,
 }
 
 impl Report {

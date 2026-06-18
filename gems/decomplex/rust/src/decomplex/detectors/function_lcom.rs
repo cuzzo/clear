@@ -1,4 +1,4 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow;
 use crate::decomplex::syntax::Language;
 use anyhow::Result;
@@ -8,21 +8,32 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct FunctionLcomRow {
-    pub at: String,
-    pub owner: String,
+    pub file: String,
     pub defn: String,
+    pub owner: String,
+    pub method: String,
+    pub line: usize,
+    pub at: String,
     pub score: usize,
-    pub components: usize,
     pub mode: String,
+    pub components: usize,
     pub locals: usize,
     pub statements: usize,
+    pub terminal_join: bool,
+    pub component_vars: Vec<Vec<String>>,
+    pub component_lines: Vec<Vec<usize>>,
     pub spans: BTreeMap<String, Span>,
+}
+
+#[derive(Clone, Debug)]
+struct Component {
+    vars: BTreeSet<String>,
+    statements: Vec<usize>,
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FunctionLcomRow>> {
     let summaries = local_flow::scan_files(files, language)?;
-    let mut detector = FunctionLcom::new(summaries);
-    Ok(detector.findings())
+    Ok(FunctionLcom::new(summaries).findings())
 }
 
 struct FunctionLcom {
@@ -44,151 +55,232 @@ impl FunctionLcom {
         }
     }
 
-    fn findings(&mut self) -> Vec<FunctionLcomRow> {
-        let mut out: Vec<_> = self
+    fn findings(&self) -> Vec<FunctionLcomRow> {
+        let mut out = self
             .summaries
             .iter()
-            .filter_map(|s| self.finding_for(s))
-            .collect();
-        out.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.at.cmp(&b.at)));
+            .filter_map(|summary| self.finding_for(summary))
+            .collect::<Vec<_>>();
+        out.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.file.cmp(&b.file))
+                .then_with(|| a.line.cmp(&b.line))
+        });
         out
     }
 
     fn finding_for(&self, summary: &local_flow::MethodSummary) -> Option<FunctionLcomRow> {
-        let all_locals = self.all_locals(summary);
-        if all_locals.len() < self.min_locals {
-            return None;
-        }
         if summary.statements.len() < self.min_statements {
             return None;
         }
 
-        let components = self.connected_components(summary, &all_locals);
-        if components.len() < self.min_components {
+        let full_components =
+            self.substantial_components(self.components(&summary.statements), &summary.statements);
+        let pre_terminal = self.pre_terminal_statements(summary);
+        let pre_components =
+            self.substantial_components(self.components(pre_terminal), pre_terminal);
+        let local_count = self.local_names(&summary.statements).len();
+        if local_count < self.min_locals {
             return None;
         }
 
-        let score = (components.len() * 10) + all_locals.len() + summary.statements.len();
+        let terminal_join = self.terminal_join(summary, &pre_components);
+        let mut report_components = full_components;
+        let mut mode = "disjoint".to_string();
+        if report_components.len() < self.min_components
+            && terminal_join
+            && pre_components.len() >= self.min_components
+        {
+            report_components = pre_components;
+            mode = "late_join".to_string();
+        }
+        if report_components.len() < self.min_components {
+            return None;
+        }
+
+        let score = self.score_for(
+            &report_components,
+            local_count,
+            summary.statements.len(),
+            terminal_join,
+        );
         if score < self.min_score {
             return None;
         }
-        let mode = if self.late_join(summary, &components) {
-            "late_join".to_string()
-        } else {
-            "disjoint".to_string()
-        };
 
         let at = format!("{}:{}:{}", summary.file, summary.name, summary.line);
         let mut spans = BTreeMap::new();
         spans.insert(at.clone(), summary.span);
-
         Some(FunctionLcomRow {
-            at,
-            owner: summary.owner.clone(),
+            file: summary.file.clone(),
             defn: summary.name.clone(),
+            owner: summary.owner.clone(),
+            method: summary.name.clone(),
+            line: summary.line,
+            at,
             score,
-            components: components.len(),
             mode,
-            locals: all_locals.len(),
+            components: report_components.len(),
+            locals: local_count,
             statements: summary.statements.len(),
+            terminal_join,
+            component_vars: report_components
+                .iter()
+                .map(|component| component.vars.iter().cloned().collect())
+                .collect(),
+            component_lines: report_components
+                .iter()
+                .map(|component| {
+                    component
+                        .statements
+                        .iter()
+                        .map(|index| summary.statements[*index].line)
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect()
+                })
+                .collect(),
             spans,
         })
     }
 
-    fn all_locals(&self, summary: &local_flow::MethodSummary) -> BTreeSet<String> {
-        let mut locals = BTreeSet::new();
-        for s in &summary.statements {
-            locals.extend(s.reads.clone());
-            locals.extend(s.writes.clone());
+    fn pre_terminal_statements<'a>(
+        &self,
+        summary: &'a local_flow::MethodSummary,
+    ) -> &'a [local_flow::Statement] {
+        if summary.statements.len() <= 1 {
+            &[]
+        } else {
+            &summary.statements[..summary.statements.len() - 1]
         }
-        locals
     }
 
-    fn connected_components(
+    fn terminal_join(
         &self,
         summary: &local_flow::MethodSummary,
-        locals: &BTreeSet<String>,
-    ) -> Vec<BTreeSet<String>> {
-        let mut adj: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for s in &summary.statements {
-            let mut touched: Vec<_> = s.reads.union(&s.writes).cloned().collect();
-            for (lhs, rhs) in &s.dependencies {
-                touched.push(lhs.clone());
-                touched.push(rhs.clone());
-            }
-            for i in 0..touched.len() {
-                for j in i + 1..touched.len() {
-                    adj.entry(touched[i].clone())
-                        .or_default()
-                        .insert(touched[j].clone());
-                    adj.entry(touched[j].clone())
-                        .or_default()
-                        .insert(touched[i].clone());
-                }
+        pre_components: &[Component],
+    ) -> bool {
+        let Some(terminal) = summary.statements.last() else {
+            return false;
+        };
+        let mut component_index = BTreeMap::new();
+        for (index, component) in pre_components.iter().enumerate() {
+            for name in &component.vars {
+                component_index.insert(name.clone(), index);
             }
         }
+        self.touched_vars(terminal)
+            .into_iter()
+            .filter_map(|name| component_index.get(&name).copied())
+            .collect::<BTreeSet<_>>()
+            .len()
+            >= self.min_components
+    }
 
+    fn score_for(
+        &self,
+        components: &[Component],
+        local_count: usize,
+        statement_count: usize,
+        terminal_join: bool,
+    ) -> usize {
+        (components.len() * 10) + local_count + statement_count + if terminal_join { 5 } else { 0 }
+    }
+
+    fn substantial_components(
+        &self,
+        raw_components: Vec<BTreeSet<String>>,
+        statements: &[local_flow::Statement],
+    ) -> Vec<Component> {
+        raw_components
+            .into_iter()
+            .filter_map(|vars| {
+                let touched = statements
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, statement)| {
+                        if !self.touched_vars(statement).is_disjoint(&vars) {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if vars.len() < 2 || touched.len() < 2 {
+                    return None;
+                }
+                Some(Component {
+                    vars,
+                    statements: touched,
+                })
+            })
+            .collect()
+    }
+
+    fn components(&self, statements: &[local_flow::Statement]) -> Vec<BTreeSet<String>> {
+        let vars = self.local_names(statements);
+        let edges = self.graph_edges(statements);
+        let mut adjacency = vars
+            .iter()
+            .map(|name| (name.clone(), BTreeSet::new()))
+            .collect::<BTreeMap<_, _>>();
+        for (left, right) in edges {
+            if left == right {
+                continue;
+            }
+            adjacency
+                .entry(left.clone())
+                .or_default()
+                .insert(right.clone());
+            adjacency.entry(right).or_default().insert(left);
+        }
+
+        let mut visited = BTreeSet::new();
         let mut components = Vec::new();
-        let mut unvisited = locals.clone();
-
-        while let Some(start) = unvisited.iter().next().cloned() {
+        for name in vars {
+            if visited.contains(&name) {
+                continue;
+            }
             let mut component = BTreeSet::new();
-            let mut queue = vec![start];
-            while let Some(node) = queue.pop() {
-                if !unvisited.contains(&node) {
+            let mut stack = vec![name];
+            while let Some(current) = stack.pop() {
+                if visited.contains(&current) {
                     continue;
                 }
-                unvisited.remove(&node);
-                component.insert(node.clone());
-                if let Some(neighbors) = adj.get(&node) {
-                    for n in neighbors {
-                        if unvisited.contains(n) {
-                            queue.push(n.clone());
+                visited.insert(current.clone());
+                component.insert(current.clone());
+                if let Some(neighbors) = adjacency.get(&current) {
+                    for neighbor in neighbors {
+                        if !visited.contains(neighbor) {
+                            stack.push(neighbor.clone());
                         }
                     }
                 }
             }
-            if component.len() > 0 {
-                components.push(component);
-            }
+            components.push(component);
         }
-
-        components.retain(|c| {
-            c.len() > 1 || self.standalone_state_usage(summary, c.iter().next().unwrap())
-        });
         components
     }
 
-    fn standalone_state_usage(&self, summary: &local_flow::MethodSummary, local: &str) -> bool {
-        let reads: usize = summary
-            .statements
-            .iter()
-            .map(|s| s.reads.contains(local) as usize)
-            .sum();
-        let writes: usize = summary
-            .statements
-            .iter()
-            .map(|s| s.writes.contains(local) as usize)
-            .sum();
-        reads + writes > 1
+    fn graph_edges(&self, statements: &[local_flow::Statement]) -> Vec<(String, String)> {
+        let mut edges = Vec::new();
+        for statement in statements {
+            edges.extend(statement.dependencies.iter().cloned());
+            edges.extend(statement.co_uses.iter().cloned());
+        }
+        edges
     }
 
-    fn late_join(
-        &self,
-        summary: &local_flow::MethodSummary,
-        components: &[BTreeSet<String>],
-    ) -> bool {
-        let Some(last) = summary.statements.last() else {
-            return false;
-        };
-        let mut joined = 0;
-        for c in components {
-            if last.reads.intersection(c).next().is_some()
-                || last.writes.intersection(c).next().is_some()
-            {
-                joined += 1;
-            }
+    fn local_names(&self, statements: &[local_flow::Statement]) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for statement in statements {
+            names.extend(self.touched_vars(statement));
         }
-        joined >= 2
+        names
+    }
+
+    fn touched_vars(&self, statement: &local_flow::Statement) -> BTreeSet<String> {
+        statement.reads.union(&statement.writes).cloned().collect()
     }
 }

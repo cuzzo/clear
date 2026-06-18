@@ -17,7 +17,7 @@ pub struct FalseSimplicityRow {
 }
 
 #[derive(Clone, Debug)]
-struct Site {
+struct Hit {
     kind: String,
     detail: String,
     file: String,
@@ -26,212 +26,1169 @@ struct Site {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FalseSimplicityRow>> {
-    let mut sites = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = FalseSimplicity::new(file.to_string_lossy().to_string(), lines);
-        detector.walk(&root, &Vec::new());
-        sites.extend(detector.sites);
-    }
-    Ok(Report::new(sites).findings())
+#[derive(Clone, Debug)]
+struct ClassRec {
+    name: String,
+    file: String,
+    line: usize,
+    core: bool,
+    span: Span,
 }
 
-const DISPATCH_MIDS: &[&str] = &["send", "public_send", "method", "public_method", "__send__"];
-const IO_MIDS: &[&str] = &[
-    "puts",
-    "print",
-    "p",
-    "open",
+#[derive(Clone, Copy)]
+struct Lexicon {
+    dispatch_mids: &'static [&'static str],
+    meta_mids: &'static [&'static str],
+    method_obj_mids: &'static [&'static str],
+    io_consts: &'static [&'static str],
+    io_bare: &'static [&'static str],
+    dir_context: &'static [&'static str],
+    context_pairs: &'static [(&'static str, &'static [&'static str])],
+    context_bare: &'static [&'static str],
+    callback_set: &'static [&'static str],
+    core_consts: &'static [&'static str],
+}
+
+pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FalseSimplicityRow>> {
+    let mut hits = Vec::new();
+    let mut classrecs = Vec::new();
+    for file in files {
+        let (root, lines) = ast::parse_with_language(file, language)?;
+        let mut detector =
+            FalseSimplicity::new(file.to_string_lossy().to_string(), lines, language);
+        detector.walk(&root, &[], &[]);
+        hits.extend(detector.hits);
+        classrecs.extend(detector.classrecs);
+    }
+    Ok(Report::new(hits, classrecs).findings())
+}
+
+const EMPTY: &[&str] = &[];
+const EMPTY_PAIRS: &[(&str, &[&str])] = &[];
+const COMMON_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+];
+
+const RUBY_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("Time", &["now", "current"]),
+    ("Date", &["today", "current"]),
+    ("DateTime", &["now", "current"]),
+    ("Process", &["pid", "ppid", "uid", "gid", "euid"]),
+    ("Thread", &["current", "list", "main"]),
+    ("Fiber", &["current"]),
+    ("Random", &["rand", "bytes"]),
+    ("GC", &["stat", "count"]),
+    ("ObjectSpace", &["each_object", "count_objects"]),
+];
+const PYTHON_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("time", &["time", "monotonic", "perf_counter"]),
+    ("datetime", &["now", "today", "utcnow"]),
+    ("random", &["random", "randint", "randrange", "choice"]),
+];
+const JS_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("Date", &["now"]),
+    ("Math", &["random"]),
+    ("performance", &["now"]),
+];
+const GO_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("time", &["Now", "Since", "Until"]),
+    ("rand", &["Int", "Intn", "Float64", "Read"]),
+];
+const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
+const ZIG_CONTEXT_PAIRS: &[(&str, &[&str])] =
+    &[("time", &["timestamp", "nanoTimestamp", "milliTimestamp"])];
+const LUA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("os", &["time", "clock", "date", "getenv"]),
+    ("math", &["random"]),
+];
+const CPP_CONTEXT_PAIRS: &[(&str, &[&str])] =
+    &[("chrono", &["now"]), ("random_device", &["operator()"])];
+const CSHARP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("DateTime", &["Now", "UtcNow", "Today"]),
+    ("Guid", &["NewGuid"]),
+    ("Random", &["Next", "NextDouble"]),
+];
+const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    (
+        "System",
+        &["currentTimeMillis", "nanoTime", "getenv", "getProperty"],
+    ),
+    ("Instant", &["now"]),
+    ("UUID", &["randomUUID"]),
+    ("Math", &["random"]),
+];
+const SWIFT_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("Date", &["now"]), ("UUID", &["init"])];
+const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    (
+        "System",
+        &["currentTimeMillis", "nanoTime", "getenv", "getProperty"],
+    ),
+    ("Instant", &["now"]),
+    ("UUID", &["randomUUID"]),
+    ("Random", &["nextInt", "nextLong", "nextDouble"]),
+];
+
+const RUBY_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "reentrant",
+    "subscribe",
+    "callback",
+    "hook",
+];
+const GO_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "Lock",
+    "Unlock",
+    "RLock",
+    "RUnlock",
+    "Do",
+    "Go",
+    "Add",
+    "Done",
+    "Wait",
+];
+const RUST_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
     "read",
     "write",
-    "sysread",
-    "syswrite",
-    "recv",
-    "send",
-    "gets",
-    "read_nonblock",
-    "write_nonblock",
+    "spawn",
+    "await",
 ];
-const REFLECTION_MIDS: &[&str] = &[
-    "instance_eval",
-    "class_eval",
-    "module_eval",
-    "instance_exec",
-    "class_exec",
-    "module_exec",
-    "define_method",
-    "define_singleton_method",
-    "const_get",
-    "const_set",
-    "const_missing",
-    "method_missing",
-    "respond_to_missing?",
+const ZIG_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "spawn",
+    "wait",
+    "signal",
 ];
+const C_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "pthread_mutex_lock",
+    "pthread_mutex_unlock",
+];
+const CPP_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "try_lock",
+    "wait",
+    "notify_one",
+    "notify_all",
+];
+const CSHARP_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "Lock",
+    "Monitor",
+    "Enter",
+    "Exit",
+    "Wait",
+    "Pulse",
+];
+const JAVA_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "wait",
+    "notify",
+    "notifyAll",
+    "submit",
+    "execute",
+];
+const SWIFT_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "async",
+    "sync",
+];
+const KOTLIN_CALLBACK_SET: &[&str] = &[
+    "transaction",
+    "synchronize",
+    "lock",
+    "with_lock",
+    "unlock",
+    "mutex",
+    "atomic",
+    "subscribe",
+    "callback",
+    "hook",
+    "synchronized",
+    "launch",
+    "async",
+    "await",
+];
+
+const RUBY_CORE_CONSTS: &[&str] = &[
+    "String",
+    "Symbol",
+    "Integer",
+    "Float",
+    "Numeric",
+    "Rational",
+    "Complex",
+    "Array",
+    "Hash",
+    "Set",
+    "Range",
+    "Struct",
+    "Object",
+    "BasicObject",
+    "Kernel",
+    "Module",
+    "Class",
+    "Comparable",
+    "Enumerable",
+    "Enumerator",
+    "Proc",
+    "Method",
+    "UnboundMethod",
+    "NilClass",
+    "TrueClass",
+    "FalseClass",
+    "Exception",
+    "StandardError",
+    "RuntimeError",
+    "ArgumentError",
+    "TypeError",
+    "NameError",
+    "NoMethodError",
+    "IO",
+    "File",
+    "Dir",
+    "Time",
+    "Date",
+    "DateTime",
+    "Regexp",
+    "MatchData",
+    "Thread",
+    "Mutex",
+    "Fiber",
+    "Process",
+    "Math",
+    "GC",
+    "ObjectSpace",
+    "Marshal",
+    "Random",
+    "Encoding",
+];
+
+fn lexicon_for(language: Language) -> Lexicon {
+    match language {
+        Language::Ruby => Lexicon {
+            dispatch_mids: &[
+                "send",
+                "__send__",
+                "public_send",
+                "const_get",
+                "constantize",
+                "instance_variable_get",
+            ],
+            meta_mids: &[
+                "define_method",
+                "define_singleton_method",
+                "alias_method",
+                "class_eval",
+                "module_eval",
+                "instance_eval",
+                "class_exec",
+                "module_exec",
+                "instance_exec",
+                "eval",
+                "const_set",
+                "instance_variable_set",
+                "remove_method",
+                "undef_method",
+                "prepend",
+                "singleton_class",
+                "binding",
+            ],
+            method_obj_mids: &["method", "public_method", "instance_method"],
+            io_consts: &[
+                "File",
+                "IO",
+                "Dir",
+                "FileUtils",
+                "Open3",
+                "Socket",
+                "TCPSocket",
+                "UDPSocket",
+                "TCPServer",
+                "UNIXSocket",
+                "Tempfile",
+                "Pathname",
+                "Marshal",
+            ],
+            io_bare: &[
+                "puts",
+                "print",
+                "warn",
+                "gets",
+                "readline",
+                "readlines",
+                "system",
+                "exec",
+                "spawn",
+                "fork",
+                "sleep",
+                "open",
+                "abort",
+                "exit",
+                "exit!",
+            ],
+            dir_context: &["pwd", "getwd", "home"],
+            context_pairs: RUBY_CONTEXT_PAIRS,
+            context_bare: &["rand", "srand"],
+            callback_set: RUBY_CALLBACK_SET,
+            core_consts: RUBY_CORE_CONSTS,
+        },
+        Language::Python => Lexicon {
+            dispatch_mids: &[
+                "getattr",
+                "setattr",
+                "hasattr",
+                "__getattr__",
+                "__setattr__",
+                "import_module",
+            ],
+            meta_mids: &[
+                "eval", "exec", "compile", "type", "globals", "locals", "vars", "setattr",
+                "delattr",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "Path",
+                "pathlib",
+                "os",
+                "sys",
+                "subprocess",
+                "socket",
+                "shutil",
+            ],
+            io_bare: &["print", "input", "open", "exec", "eval"],
+            dir_context: &["getcwd", "home"],
+            context_pairs: PYTHON_CONTEXT_PAIRS,
+            context_bare: &["random", "randint", "randrange"],
+            callback_set: COMMON_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::JavaScript | Language::TypeScript => Lexicon {
+            dispatch_mids: &["eval", "Function", "call", "apply", "bind"],
+            meta_mids: &[
+                "eval",
+                "Function",
+                "defineProperty",
+                "defineProperties",
+                "setPrototypeOf",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &["console", "Console", "fs", "process", "Deno", "Bun"],
+            io_bare: &["setTimeout", "setInterval", "fetch", "require", "import"],
+            dir_context: EMPTY,
+            context_pairs: JS_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: COMMON_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Go => Lexicon {
+            dispatch_mids: &[
+                "Call",
+                "CallSlice",
+                "Method",
+                "MethodByName",
+                "ValueOf",
+                "TypeOf",
+            ],
+            meta_mids: &["Call", "CallSlice", "MethodByName", "New", "MakeFunc"],
+            method_obj_mids: &["method"],
+            io_consts: &["os", "io", "ioutil", "fs", "net", "http", "exec", "syscall"],
+            io_bare: &["panic", "print", "println", "recover"],
+            dir_context: &["Getwd", "UserHomeDir"],
+            context_pairs: GO_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: GO_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Rust => Lexicon {
+            dispatch_mids: &[
+                "downcast",
+                "downcast_ref",
+                "downcast_mut",
+                "call",
+                "call_mut",
+                "call_once",
+            ],
+            meta_mids: &["transmute", "from_raw_parts", "from_raw_parts_mut"],
+            method_obj_mids: &["method"],
+            io_consts: &["std", "tokio", "fs", "env", "process", "net", "io"],
+            io_bare: &["panic", "todo", "unimplemented", "unreachable"],
+            dir_context: &["current_dir", "home_dir"],
+            context_pairs: RUST_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: RUST_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Zig => Lexicon {
+            dispatch_mids: &["field", "fieldParentPtr", "ptrCast", "alignCast", "call"],
+            meta_mids: &[
+                "typeInfo",
+                "TypeOf",
+                "ptrCast",
+                "intFromPtr",
+                "ptrFromInt",
+                "eval",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "std", "os", "fs", "process", "net", "Thread", "Mutex", "Atomic",
+            ],
+            io_bare: &["panic", "unreachable"],
+            dir_context: EMPTY,
+            context_pairs: ZIG_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: ZIG_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Lua => Lexicon {
+            dispatch_mids: &["load", "loadfile", "dofile", "require", "rawget", "rawset"],
+            meta_mids: &[
+                "setmetatable",
+                "getmetatable",
+                "debug",
+                "eval",
+                "load",
+                "loadfile",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &["io", "os", "debug", "package"],
+            io_bare: &["print", "error", "assert", "require", "collectgarbage"],
+            dir_context: EMPTY,
+            context_pairs: LUA_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: COMMON_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::C => Lexicon {
+            dispatch_mids: &["dlsym", "dlopen", "GetProcAddress"],
+            meta_mids: &["setjmp", "longjmp", "va_start", "va_arg"],
+            method_obj_mids: &["method"],
+            io_consts: &["FILE", "DIR", "pthread", "mutex", "atomic"],
+            io_bare: &[
+                "printf", "fprintf", "fopen", "open", "read", "write", "close", "system", "exec",
+                "abort", "exit", "assert",
+            ],
+            dir_context: &["getcwd", "getenv"],
+            context_pairs: EMPTY_PAIRS,
+            context_bare: &["rand", "time", "clock"],
+            callback_set: C_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Cpp => Lexicon {
+            dispatch_mids: &[
+                "dynamic_cast",
+                "typeid",
+                "any_cast",
+                "get_if",
+                "visit",
+                "invoke",
+            ],
+            meta_mids: &["reinterpret_cast", "const_cast", "dlsym", "dlopen"],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "std",
+                "filesystem",
+                "fstream",
+                "iostream",
+                "thread",
+                "mutex",
+                "atomic",
+            ],
+            io_bare: &["throw", "abort", "exit", "assert", "system"],
+            dir_context: &["current_path"],
+            context_pairs: CPP_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: CPP_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::CSharp => Lexicon {
+            dispatch_mids: &[
+                "Invoke",
+                "GetMethod",
+                "GetProperty",
+                "GetField",
+                "Activator",
+                "CreateInstance",
+            ],
+            meta_mids: &["Invoke", "GetType", "Reflection", "Emit", "DynamicMethod"],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "Console",
+                "File",
+                "Directory",
+                "Path",
+                "Process",
+                "Socket",
+                "HttpClient",
+                "Environment",
+            ],
+            io_bare: &["throw"],
+            dir_context: &["CurrentDirectory", "GetEnvironmentVariable"],
+            context_pairs: CSHARP_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: CSHARP_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Java => Lexicon {
+            dispatch_mids: &[
+                "invoke",
+                "getMethod",
+                "getDeclaredMethod",
+                "getField",
+                "getDeclaredField",
+                "forName",
+            ],
+            meta_mids: &["invoke", "setAccessible", "newInstance", "Proxy"],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "System",
+                "File",
+                "Files",
+                "Paths",
+                "ProcessBuilder",
+                "Socket",
+                "HttpClient",
+                "Thread",
+                "Lock",
+                "AtomicReference",
+            ],
+            io_bare: &["throw"],
+            dir_context: &["getProperty", "getenv"],
+            context_pairs: JAVA_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: JAVA_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Swift => Lexicon {
+            dispatch_mids: &[
+                "perform",
+                "value",
+                "setValue",
+                "selector",
+                "NSClassFromString",
+            ],
+            meta_mids: &[
+                "Mirror",
+                "unsafeBitCast",
+                "withUnsafePointer",
+                "withUnsafeBytes",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "FileManager",
+                "Process",
+                "URLSession",
+                "DispatchQueue",
+                "Thread",
+                "Lock",
+                "NSLock",
+            ],
+            io_bare: &[
+                "print",
+                "fatalError",
+                "preconditionFailure",
+                "assertionFailure",
+            ],
+            dir_context: &["currentDirectoryPath", "homeDirectoryForCurrentUser"],
+            context_pairs: SWIFT_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: SWIFT_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Kotlin => Lexicon {
+            dispatch_mids: &[
+                "invoke",
+                "call",
+                "callBy",
+                "memberProperties",
+                "declaredMemberFunctions",
+            ],
+            meta_mids: &[
+                "reflection",
+                "javaClass",
+                "Class",
+                "forName",
+                "setAccessible",
+            ],
+            method_obj_mids: &["method"],
+            io_consts: &[
+                "System",
+                "File",
+                "Files",
+                "Paths",
+                "ProcessBuilder",
+                "Socket",
+                "HttpClient",
+                "Thread",
+                "Mutex",
+                "AtomicReference",
+            ],
+            io_bare: &["println", "print", "error", "check", "require", "TODO"],
+            dir_context: &["getProperty", "getenv"],
+            context_pairs: KOTLIN_CONTEXT_PAIRS,
+            context_bare: EMPTY,
+            callback_set: KOTLIN_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+    }
+}
 
 struct FalseSimplicity {
     file: String,
     lines: Vec<String>,
-    sites: Vec<Site>,
+    language: Language,
+    lexicon: Lexicon,
+    hits: Vec<Hit>,
+    classrecs: Vec<ClassRec>,
 }
 
 impl FalseSimplicity {
-    fn new(file: String, lines: Vec<String>) -> Self {
+    fn new(file: String, lines: Vec<String>, language: Language) -> Self {
         Self {
             file,
             lines,
-            sites: Vec::new(),
+            language,
+            lexicon: lexicon_for(language),
+            hits: Vec::new(),
+            classrecs: Vec::new(),
         }
     }
 
-    fn walk(&mut self, node: &Node, defstack: &[String]) {
-        let mut next_defstack = defstack.to_vec();
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                next_defstack.push(name.clone());
-            }
-        }
-
-        self.inspect_node(node, &next_defstack);
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk(child, &next_defstack);
-        }
-    }
-
-    fn inspect_node(&mut self, node: &Node, defstack: &[String]) {
+    fn walk(&mut self, node: &Node, defs: &[String], cls: &[String]) {
         match node.r#type.as_str() {
-            "CALL" | "OPCALL" | "FCALL" | "VCALL" => {
-                let mid = self.call_mid(node);
-                if let Some(mid) = mid {
-                    if DISPATCH_MIDS.contains(&mid.as_str()) {
-                        self.add_site("dynamic_dispatch", &mid, node, defstack);
-                    } else if IO_MIDS.contains(&mid.as_str()) && !self.receiver_is_explicit(node) {
-                        self.add_site("hidden_io", &mid, node, defstack);
-                    } else if REFLECTION_MIDS.contains(&mid.as_str()) {
-                        self.add_site("runtime_reflection", &mid, node, defstack);
+            "CLASS" | "MODULE" => {
+                self.walk_class(node, defs, cls);
+                return;
+            }
+            "SCLASS" => {
+                if self.language == Language::Ruby {
+                    if let Some(recv) = node.children.first().and_then(ast::node) {
+                        if recv.r#type != "SELF" {
+                            self.emit(
+                                "metaprogramming",
+                                &format!("class << {}", ast::slice(recv, &self.lines)),
+                                self.defn_name(defs),
+                                node,
+                            );
+                        }
                     }
                 }
             }
+            "DEFN" | "DEFS" => {
+                let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
+                let name = ast::child_to_string(node.children.get(name_index));
+                if self.language == Language::Ruby {
+                    if let Some(name) = name.as_deref() {
+                        if matches!(name, "method_missing" | "respond_to_missing?") {
+                            self.emit(
+                                "metaprogramming",
+                                &format!("def {name}"),
+                                self.defn_name(defs),
+                                node,
+                            );
+                        }
+                    }
+                }
+                let mut next_defs = defs.to_vec();
+                if let Some(name) = name {
+                    next_defs.push(name);
+                }
+                for child in node.children.iter().filter_map(ast::node) {
+                    self.walk(child, &next_defs, cls);
+                }
+                return;
+            }
+            "CALL" | "FCALL" | "VCALL" | "OPCALL" => self.classify_call(node, defs),
             "ATTRASGN" => {
-                let mid = self.call_mid(node).unwrap_or_default();
-                if mid.ends_with("eval=") {
-                    self.add_site("runtime_reflection", &mid, node, defstack);
+                if let Some(mid) = ast::child_to_string(node.children.get(1)) {
+                    self.emit("hidden_mutation", &mid, self.defn_name(defs), node);
                 }
             }
-            "SUPER" | "ZSUPER" => {
-                self.add_site("context_dependency", "super", node, defstack);
+            "OP_ASGN1" | "OP_ASGN2" => {
+                self.emit("hidden_mutation", "op-assign", self.defn_name(defs), node);
             }
             "GVAR" | "GASGN" => {
-                if let Some(name) = ast::child_to_string(node.children.get(0)) {
-                    if !name.starts_with("$PREMATCH")
-                        && !name.starts_with("$POSTMATCH")
-                        && !name.starts_with("$MATCH")
-                        && !name.starts_with("$&")
-                        && !name.starts_with("$'")
-                        && !name.starts_with("$`")
-                    {
-                        self.add_site("context_dependency", &name, node, defstack);
+                if self.language == Language::Ruby {
+                    if let Some(name) = ast::child_to_string(node.children.first()) {
+                        self.emit("context_dependency", &name, self.defn_name(defs), node);
                     }
                 }
             }
-            "CVAR" | "CVDASGN" | "CVDECL" => {
-                self.add_site("hidden_mutation", "class_var", node, defstack);
-            }
-            "CLASS" | "MODULE" => {
-                if !defstack.is_empty() {
-                    self.add_site("monkeypatch", "nested_reopen", node, defstack);
+            "XSTR" | "DXSTR" => {
+                if self.language == Language::Ruby {
+                    self.emit("hidden_io", "backtick", self.defn_name(defs), node);
                 }
             }
-            "ALIAS" => {
-                self.add_site("runtime_reflection", "alias", node, defstack);
+            "YIELD" => {
+                if self.language == Language::Ruby {
+                    self.emit("dynamic_dispatch", "yield", self.defn_name(defs), node);
+                }
             }
-            "UNDEF" => {
-                self.add_site("runtime_reflection", "undef", node, defstack);
+            "ITER" => {
+                if let Some(call) = node.children.first().and_then(ast::node) {
+                    if let Some(mid) = self.callee_mid(call) {
+                        if self.callback(&mid) && !self.lexicon.meta_mids.contains(&mid.as_str()) {
+                            self.emit("callback_inversion", &mid, self.defn_name(defs), node);
+                        }
+                    }
+                }
             }
             _ => {}
         }
+
+        for child in node.children.iter().filter_map(ast::node) {
+            self.walk(child, defs, cls);
+        }
     }
 
-    fn call_mid(&self, node: &Node) -> Option<String> {
-        match node.r#type.as_str() {
-            "CALL" | "OPCALL" | "ATTRASGN" => ast::child_to_string(node.children.get(1)),
-            "FCALL" | "VCALL" => ast::child_to_string(node.children.get(0)),
+    fn walk_class(&mut self, node: &Node, defs: &[String], cls: &[String]) {
+        let Some(cpath) = node.children.first().and_then(ast::node) else {
+            return;
+        };
+        let body = if node.r#type == "CLASS" {
+            node.children.get(2).and_then(ast::node)
+        } else {
+            node.children.get(1).and_then(ast::node)
+        };
+        let simple = self.const_simple(cpath);
+        let based = cpath.r#type == "COLON2"
+            && !matches!(cpath.children.first(), None | Some(Child::Nil))
+            && !cpath.text.starts_with("::");
+        let mut name_parts = cls.to_vec();
+        name_parts.push(self.const_text(cpath));
+        let fqn = name_parts.join("::");
+        if body.is_some_and(|body| self.has_def(body)) {
+            let core =
+                cls.is_empty() && !based && self.lexicon.core_consts.contains(&simple.as_str());
+            self.classrecs.push(ClassRec {
+                name: fqn.clone(),
+                file: self.file.clone(),
+                line: node.first_lineno,
+                core,
+                span: self.span(node),
+            });
+            if core {
+                self.emit("monkeypatch", &simple, &simple, node);
+            }
+        }
+        let mut next_cls = cls.to_vec();
+        next_cls.push(self.const_text(cpath));
+        for child in node.children.iter().filter_map(ast::node) {
+            self.walk(child, defs, &next_cls);
+        }
+    }
+
+    fn classify_call(&mut self, call: &Node, defs: &[String]) {
+        let (recv, mid) = match call.r#type.as_str() {
+            "CALL" | "OPCALL" => (
+                call.children.first().and_then(ast::node),
+                ast::child_to_string(call.children.get(1)),
+            ),
+            _ => (None, ast::child_to_string(call.children.first())),
+        };
+        let Some(mid) = mid else {
+            return;
+        };
+
+        if self.block_pass(call)
+            && self.callback(&mid)
+            && !self.lexicon.meta_mids.contains(&mid.as_str())
+        {
+            self.emit("callback_inversion", &mid, self.defn_name(defs), call);
+            return;
+        }
+        if self.lexicon.meta_mids.contains(&mid.as_str()) {
+            self.emit("metaprogramming", &mid, self.defn_name(defs), call);
+            return;
+        }
+        if self.lexicon.dispatch_mids.contains(&mid.as_str()) {
+            self.emit("dynamic_dispatch", &mid, self.defn_name(defs), call);
+            return;
+        }
+
+        if mid == "call" {
+            if let Some(recv) = recv {
+                if self.method_obj(recv) {
+                    self.emit(
+                        "dynamic_dispatch",
+                        "method(...).call",
+                        self.defn_name(defs),
+                        call,
+                    );
+                    return;
+                }
+                if self.var_recv(recv) {
+                    self.emit(
+                        "dynamic_dispatch",
+                        &format!("{}.call", ast::slice(recv, &self.lines)),
+                        self.defn_name(defs),
+                        call,
+                    );
+                    return;
+                }
+            }
+        }
+
+        if let Some(cp) = recv.and_then(|recv| self.const_recv(recv)) {
+            let base = cp
+                .trim_start_matches("::")
+                .split("::")
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if base == "Dir" && self.lexicon.dir_context.contains(&mid.as_str()) {
+                self.emit(
+                    "context_dependency",
+                    &format!("Dir.{mid}"),
+                    self.defn_name(defs),
+                    call,
+                );
+                return;
+            }
+            if self.lexicon.io_consts.contains(&base.as_str())
+                || (self.language == Language::Ruby && cp.starts_with("Net::"))
+            {
+                self.emit(
+                    "hidden_io",
+                    &format!("{cp}.{mid}"),
+                    self.defn_name(defs),
+                    call,
+                );
+                return;
+            }
+            if self.language == Language::Ruby {
+                if base == "URI" && mid == "open" {
+                    self.emit("hidden_io", "URI.open", self.defn_name(defs), call);
+                    return;
+                }
+                if cp == "ENV" {
+                    self.emit("context_dependency", "ENV", self.defn_name(defs), call);
+                    return;
+                }
+            }
+            if self.context_pair(&base, &mid) {
+                self.emit(
+                    "context_dependency",
+                    &format!("{base}.{mid}"),
+                    self.defn_name(defs),
+                    call,
+                );
+                return;
+            }
+        }
+
+        if recv.is_none() {
+            if self.lexicon.io_bare.contains(&mid.as_str()) {
+                self.emit("hidden_io", &mid, self.defn_name(defs), call);
+                return;
+            }
+            if self.lexicon.context_bare.contains(&mid.as_str()) {
+                self.emit("context_dependency", &mid, self.defn_name(defs), call);
+                return;
+            }
+        }
+
+        if mid.len() > 1 && mid.ends_with('!') && !matches!(mid.as_str(), "!=" | "!~") {
+            self.emit("hidden_mutation", &mid, self.defn_name(defs), call);
+            return;
+        }
+        if call.r#type == "OPCALL" && mid == "<<" {
+            self.emit("hidden_mutation", "<<", self.defn_name(defs), call);
+        }
+    }
+
+    fn emit(&mut self, kind: &str, detail: &str, defn: &str, node: &Node) {
+        self.hits.push(Hit {
+            kind: kind.to_string(),
+            detail: detail.to_string(),
+            file: self.file.clone(),
+            defn: defn.to_string(),
+            line: node.first_lineno,
+            span: self.span(node),
+        });
+    }
+
+    fn defn_name<'a>(&self, defs: &'a [String]) -> &'a str {
+        defs.last().map(String::as_str).unwrap_or("(top-level)")
+    }
+
+    fn span(&self, node: &Node) -> Span {
+        [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]
+    }
+
+    fn callback(&self, mid: &str) -> bool {
+        self.lexicon.callback_set.contains(&mid)
+            || ["with_", "around_", "on_", "before_", "after_"]
+                .iter()
+                .any(|prefix| mid.starts_with(prefix))
+            || mid.ends_with("_hook")
+    }
+
+    fn callee_mid(&self, call: &Node) -> Option<String> {
+        match call.r#type.as_str() {
+            "CALL" | "OPCALL" => ast::child_to_string(call.children.get(1)),
+            "FCALL" | "VCALL" => ast::child_to_string(call.children.first()),
             _ => None,
         }
     }
 
-    fn receiver_is_explicit(&self, node: &Node) -> bool {
-        if matches!(node.r#type.as_str(), "FCALL" | "VCALL") {
+    fn block_pass(&self, call: &Node) -> bool {
+        let args = match call.r#type.as_str() {
+            "CALL" | "OPCALL" => call.children.get(2),
+            "FCALL" => call.children.get(1),
+            _ => None,
+        };
+        let Some(args) = args.and_then(ast::node) else {
             return false;
-        }
-        if let Some(recv) = node.children.get(0).and_then(ast::node) {
-            recv.r#type != "SELF"
+        };
+        args.r#type == "BLOCK_PASS"
+            || (args.r#type == "LIST"
+                && args
+                    .children
+                    .iter()
+                    .filter_map(ast::node)
+                    .any(|child| child.r#type == "BLOCK_PASS"))
+    }
+
+    fn method_obj(&self, recv: &Node) -> bool {
+        let mid = match recv.r#type.as_str() {
+            "CALL" => ast::child_to_string(recv.children.get(1)),
+            "FCALL" => ast::child_to_string(recv.children.first()),
+            _ => None,
+        };
+        mid.is_some_and(|mid| self.lexicon.method_obj_mids.contains(&mid.as_str()))
+    }
+
+    fn var_recv(&self, recv: &Node) -> bool {
+        matches!(
+            recv.r#type.as_str(),
+            "VCALL" | "LVAR" | "DVAR" | "IVAR" | "CVAR" | "GVAR"
+        )
+    }
+
+    fn const_recv(&self, recv: &Node) -> Option<String> {
+        if matches!(recv.r#type.as_str(), "CONST" | "COLON2" | "COLON3") {
+            Some(self.const_text(recv))
         } else {
-            false
+            None
         }
     }
 
-    fn add_site(&mut self, kind: &str, detail: &str, node: &Node, defstack: &[String]) {
-        self.sites.push(Site {
-            kind: kind.to_string(),
-            detail: detail.to_string(),
-            file: self.file.clone(),
-            defn: defstack
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "(top-level)".to_string()),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-        });
+    fn const_text(&self, node: &Node) -> String {
+        match node.r#type.as_str() {
+            "CONST" => ast::child_to_string(node.children.first()).unwrap_or_default(),
+            "COLON3" => format!(
+                "::{}",
+                ast::child_to_string(node.children.first()).unwrap_or_default()
+            ),
+            "COLON2" => {
+                let name = ast::child_to_string(node.children.get(1)).unwrap_or_default();
+                if node.text.starts_with("::") {
+                    format!("::{name}")
+                } else if let Some(base) = node.children.first().and_then(ast::node) {
+                    format!("{}::{name}", self.const_text(base))
+                } else {
+                    name
+                }
+            }
+            _ => ast::slice(node, &self.lines),
+        }
+    }
+
+    fn const_simple(&self, node: &Node) -> String {
+        match node.r#type.as_str() {
+            "CONST" | "COLON3" => ast::child_to_string(node.children.first()).unwrap_or_default(),
+            "COLON2" => ast::child_to_string(node.children.get(1)).unwrap_or_default(),
+            _ => self.const_text(node),
+        }
+    }
+
+    fn has_def(&self, node: &Node) -> bool {
+        let _ = self.language;
+        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
+            return true;
+        }
+        if matches!(node.r#type.as_str(), "CLASS" | "MODULE") {
+            return false;
+        }
+        node.children
+            .iter()
+            .filter_map(ast::node)
+            .any(|child| self.has_def(child))
+    }
+
+    fn context_pair(&self, base: &str, mid: &str) -> bool {
+        self.lexicon
+            .context_pairs
+            .iter()
+            .any(|(key, mids)| *key == base && mids.contains(&mid))
     }
 }
 
 struct Report {
-    sites: Vec<Site>,
+    hits: Vec<Hit>,
 }
 
 impl Report {
-    fn new(sites: Vec<Site>) -> Self {
-        Self { sites }
+    fn new(mut hits: Vec<Hit>, classrecs: Vec<ClassRec>) -> Self {
+        let mut grouped: Vec<(String, Vec<ClassRec>)> = Vec::new();
+        for rec in classrecs {
+            if let Some((_, recs)) = grouped.iter_mut().find(|(name, _)| name == &rec.name) {
+                recs.push(rec);
+            } else {
+                grouped.push((rec.name.clone(), vec![rec]));
+            }
+        }
+        for (_name, recs) in grouped {
+            if recs.first().is_some_and(|rec| rec.core) {
+                continue;
+            }
+            let file_count = recs
+                .iter()
+                .map(|rec| rec.file.clone())
+                .collect::<BTreeSet<_>>()
+                .len();
+            if file_count < 2 {
+                continue;
+            }
+            for rec in recs {
+                hits.push(Hit {
+                    kind: "monkeypatch".to_string(),
+                    detail: format!("reopen {}", rec.name),
+                    file: rec.file.clone(),
+                    defn: rec.name.clone(),
+                    line: rec.line,
+                    span: rec.span,
+                });
+            }
+        }
+        Self { hits }
     }
 
     fn findings(&self) -> Vec<FalseSimplicityRow> {
-        let mut groups: BTreeMap<(String, String), Vec<&Site>> = BTreeMap::new();
-        for s in &self.sites {
-            groups
-                .entry((s.kind.clone(), s.detail.clone()))
-                .or_default()
-                .push(s);
+        let mut groups: Vec<((String, String), Vec<&Hit>)> = Vec::new();
+        for hit in &self.hits {
+            let key = (hit.kind.clone(), hit.detail.clone());
+            if let Some((_, hits)) = groups.iter_mut().find(|(existing, _)| existing == &key) {
+                hits.push(hit);
+            } else {
+                groups.push((key, vec![hit]));
+            }
         }
 
         let mut out = Vec::new();
-        for ((kind, detail), sts) in groups {
-            let mut defns = BTreeSet::new();
-            for s in &sts {
-                defns.insert((s.file.clone(), s.defn.clone()));
-            }
-            let scatter = defns.len();
-
+        for ((kind, detail), hits) in groups {
+            let units = hits
+                .iter()
+                .map(|hit| (hit.file.clone(), hit.defn.clone()))
+                .collect::<BTreeSet<_>>();
             let mut sites = Vec::new();
             let mut spans = BTreeMap::new();
-            for s in &sts {
-                let loc = format!("{}:{}:{}", s.file, s.defn, s.line);
-                sites.push(loc.clone());
-                spans.insert(loc, s.span);
+            for hit in &hits {
+                let loc = format!("{}:{}:{}", hit.file, hit.defn, hit.line);
+                if !sites.contains(&loc) {
+                    sites.push(loc.clone());
+                }
+                spans.entry(loc).or_insert(hit.span);
             }
-
             out.push(FalseSimplicityRow {
                 kind,
                 detail,
-                support: sts.len(),
-                scatter,
+                support: hits.len(),
+                scatter: units.len(),
                 at: sites.first().cloned().unwrap_or_default(),
                 sites,
                 spans,

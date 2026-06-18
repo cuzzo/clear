@@ -692,7 +692,12 @@ impl EffectCollector {
             return;
         }
         if node.r#type == "CALL"
-            && !self.self_receiver(node.children.get(0).and_then(ast::node).unwrap())
+            && !node
+                .children
+                .get(0)
+                .and_then(ast::node)
+                .map(|receiver| self.self_receiver(receiver))
+                .unwrap_or(false)
         {
             return;
         }

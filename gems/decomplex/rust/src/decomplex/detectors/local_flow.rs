@@ -319,11 +319,9 @@ impl LocalFlow {
     fn local_reads(&self, node: &Node) -> BTreeSet<String> {
         let mut reads = Vec::new();
         self.walk_local(node, &mut |child| {
-            if LOCAL_READ_TYPES.contains(&child.r#type.as_str())
-                || (self.language != Language::Ruby && child.r#type == "VCALL")
-            {
+            if LOCAL_READ_TYPES.contains(&child.r#type.as_str()) {
                 if let Some(name) = local_read_name(child) {
-                    reads.push(name.clone());
+                    reads.push(name);
                 }
             }
         });
@@ -384,9 +382,10 @@ impl LocalFlow {
     }
 }
 
-fn local_read_name(node: &Node) -> Option<&String> {
+fn local_read_name(node: &Node) -> Option<String> {
     match node.children.first() {
-        Some(Child::String(name)) | Some(Child::Symbol(name)) => Some(name),
+        Some(Child::String(name)) | Some(Child::Symbol(name)) => Some(name.clone()),
+        Some(Child::Nil) => Some(String::new()),
         _ => None,
     }
 }
