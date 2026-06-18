@@ -10,6 +10,8 @@ impl<'a> FileIndexer<'a> {
                 if let Some(value) = pair_value(*arg) {
                     let record = self.param_origin_record(node, value, &callee, "keyword", &key, state, frame);
                     self.facts.param_origins.push(record);
+                    self.record_callsite_hash_shape(&callee, "keyword", &key, value, frame);
+                    self.record_callsite_array_element_shape(&callee, "keyword", &key, value, frame);
                 }
             } else {
                 let record = self.param_origin_record(
@@ -22,7 +24,67 @@ impl<'a> FileIndexer<'a> {
                     frame,
                 );
                 self.facts.param_origins.push(record);
+                self.record_callsite_hash_shape(&callee, "positional", &idx.to_string(), *arg, frame);
+                self.record_callsite_array_element_shape(&callee, "positional", &idx.to_string(), *arg, frame);
             }
+        }
+    }
+
+    fn record_callsite_hash_shape(
+        &mut self,
+        callee: &str,
+        kind: &str,
+        slot: &str,
+        arg: Node<'_>,
+        frame: &mut Frame,
+    ) {
+        let Some(shape) = self.hash_shape_for_value(arg, frame) else { return };
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        for name in self.callsite_callee_names(callee) {
+            let key = (name, kind.to_string(), slot.to_string());
+            let merged = self
+                .global
+                .inferred_param_hash_shapes
+                .get(&key)
+                .cloned()
+                .map(|current| merge_hash_record_shapes(current, shape.clone()))
+                .unwrap_or_else(|| clone_hash_shape(&shape));
+            self.global.inferred_param_hash_shapes.insert(key, merged);
+        }
+    }
+
+    fn record_callsite_array_element_shape(
+        &mut self,
+        callee: &str,
+        kind: &str,
+        slot: &str,
+        arg: Node<'_>,
+        frame: &mut Frame,
+    ) {
+        let Some(shape) = self.array_element_shape_for_value(arg, frame) else { return };
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        for name in self.callsite_callee_names(callee) {
+            let key = (name, kind.to_string(), slot.to_string());
+            let merged = self
+                .global
+                .inferred_param_array_element_shapes
+                .get(&key)
+                .cloned()
+                .map(|current| merge_hash_record_shapes(current, shape.clone()))
+                .unwrap_or_else(|| clone_hash_shape(&shape));
+            self.global.inferred_param_array_element_shapes.insert(key, merged);
+        }
+    }
+
+    fn callsite_callee_names(&self, callee: &str) -> Vec<String> {
+        if callee == "new" {
+            vec!["new".to_string(), "initialize".to_string()]
+        } else {
+            vec![callee.to_string()]
         }
     }
 
@@ -62,13 +124,24 @@ impl<'a> FileIndexer<'a> {
             "arg_kind": kind,
             "slot": slot,
             "origin_kind": origin_kind,
-            "receiver": call_receiver(call_node, self.file).map(|receiver| const_name(Some(receiver), self.file)),
+            "receiver": self.call_receiver_name(call_node),
             "source_method": source_method,
             "type": ty,
             "code": node_text(arg, self.file),
             "hash_shape": self.hash_shape_for_value(arg, frame),
             "array_element_shape": self.array_element_shape_for_value(arg, frame),
             "unknown_reasons": if origin_kind == "unknown" { self.unknown_expression_reasons(arg, frame) } else { Vec::<String>::new() },
+        })
+    }
+
+    fn call_receiver_name(&self, call_node: Node<'_>) -> Option<String> {
+        call_receiver(call_node, self.file).map(|receiver| {
+            let name = const_name(Some(receiver), self.file);
+            if name.is_empty() {
+                node_text(receiver, self.file)
+            } else {
+                name
+            }
         })
     }
 
@@ -220,6 +293,100 @@ impl<'a> FileIndexer<'a> {
         }
     }
 
+    fn inspect_attribute_shape_write(&mut self, node: Node<'_>, frame: &mut Frame) {
+        if normalized_kind(node, self.file) != NormKind::Call || call_receiver(node, self.file).is_none() {
+            return;
+        }
+        let Some(name) = call_name(node, self.file) else { return };
+        if !name.ends_with('=') || name == "==" {
+            return;
+        }
+        let args = call_arguments(node, self.file);
+        if args.len() != 1 {
+            return;
+        }
+        let attr = name.trim_end_matches('=');
+        if let Some(shape) = self.hash_shape_for_value(args[0], frame) {
+            self.merge_attribute_hash_shape(attr, shape);
+        }
+        if let Some(shape) = self.array_element_shape_for_value(args[0], frame) {
+            self.merge_attribute_array_element_shape(attr, shape);
+        }
+    }
+
+    fn merge_attribute_hash_shape(&mut self, attr: &str, shape: Value) {
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let merged = self
+            .global
+            .attribute_hash_shapes
+            .get(attr)
+            .cloned()
+            .map(|current| merge_hash_record_shapes(current, shape.clone()))
+            .unwrap_or_else(|| clone_hash_shape(&shape));
+        self.global.attribute_hash_shapes.insert(attr.to_string(), merged);
+    }
+
+    fn merge_attribute_array_element_shape(&mut self, attr: &str, shape: Value) {
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let merged = self
+            .global
+            .attribute_array_element_shapes
+            .get(attr)
+            .cloned()
+            .map(|current| merge_hash_record_shapes(current, shape.clone()))
+            .unwrap_or_else(|| clone_hash_shape(&shape));
+        self.global.attribute_array_element_shapes.insert(attr.to_string(), merged);
+    }
+
+    fn merge_struct_field_hash_shape(&mut self, klass: &str, field: &str, shape: Value) {
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let key = (klass.to_string(), field.to_string());
+        let merged = self
+            .global
+            .struct_field_hash_shapes
+            .get(&key)
+            .cloned()
+            .map(|current| merge_hash_record_shapes(current, shape.clone()))
+            .unwrap_or_else(|| clone_hash_shape(&shape));
+        self.global.struct_field_hash_shapes.insert(key, merged);
+    }
+
+    fn merge_struct_field_array_element_shape(&mut self, klass: &str, field: &str, shape: Value) {
+        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let key = (klass.to_string(), field.to_string());
+        let merged = self
+            .global
+            .struct_field_array_element_shapes
+            .get(&key)
+            .cloned()
+            .map(|current| merge_hash_record_shapes(current, shape.clone()))
+            .unwrap_or_else(|| clone_hash_shape(&shape));
+        self.global.struct_field_array_element_shapes.insert(key, merged);
+    }
+
+    fn merge_struct_field_static_type(&mut self, klass: &str, field: &str, type_text: Option<String>) {
+        let Some(type_text) = type_text else { return };
+        if !useful_type(&type_text) && type_text != "NilClass" {
+            return;
+        }
+        let entry = self
+            .global
+            .struct_field_static_types
+            .entry((klass.to_string(), field.to_string()))
+            .or_default();
+        if !entry.contains(&type_text) {
+            entry.push(type_text);
+        }
+    }
+
     fn unknown_expression_reasons(&mut self, node: Node<'_>, frame: &mut Frame) -> Vec<String> {
         let mut reasons = BTreeSet::new();
         self.collect_unknown_expression_reasons(node, frame, &mut reasons);
@@ -313,7 +480,7 @@ fn params(node: Node<'_>, sig: Option<&str>, file: &SourceFile) -> Vec<Value> {
             let name = parameter_name(param, file)?;
             Some(json!({
                 "name": name,
-                "nil_default": parameter_value(param).is_some_and(|value| normalized_kind(value, file) == NormKind::Nil),
+                "nil_default": nil_default(param, file),
                 "type": sig_types.get(&name).cloned(),
             }))
         })
@@ -345,6 +512,19 @@ fn parameter_value(node: Node<'_>) -> Option<Node<'_>> {
             .into_iter()
             .find(|child| Some(*child) != name && child.kind() != "identifier")
     })
+}
+
+fn nil_default(node: Node<'_>, file: &SourceFile) -> bool {
+    parameter_value(node).is_some_and(|value| normalized_kind(value, file) == NormKind::Nil)
+}
+
+fn uses_yield(node: Node<'_>, file: &SourceFile) -> bool {
+    if normalized_kind(node, file) == NormKind::Yield {
+        return true;
+    }
+    named_children(node)
+        .into_iter()
+        .any(|child| uses_yield(child, file))
 }
 
 fn sig_above(lines: &[String], line: usize) -> Option<String> {
@@ -461,12 +641,6 @@ fn non_nil_sig_params(sig: Option<&str>) -> Vec<String> {
             (!ty.contains("T.nilable") && ty != "T.untyped" && ty != "NilClass").then(|| name.trim().to_string())
         })
         .collect()
-}
-
-fn non_nil_return_sig(sig: &str) -> bool {
-    extract_return_type(sig).is_some_and(|ty| {
-        !ty.contains("T.nilable") && ty != "T.untyped" && ty != "NilClass"
-    })
 }
 
 fn unwrap_alias_source(node: Node<'_>, file: &SourceFile) -> Option<String> {

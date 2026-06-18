@@ -223,7 +223,14 @@ impl<'a> FileIndexer<'a> {
     }
 }
 
-fn collect_return_usage_facts(file: &SourceFile, facts: &mut FileFacts) {
+fn each_ast(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
+    f(node);
+    for child in named_children(node) {
+        each_ast(child, f);
+    }
+}
+
+fn collect_return_usage_sites(file: &SourceFile, facts: &mut FileFacts) {
     collect_return_usage_site_context(
         file.root_node(), file, "statement", None, None,
         &mut facts.return_usage_sites, &mut facts.rescue_handlers, false,
@@ -335,8 +342,8 @@ fn collect_return_usage_site_context(
     }
 }
 
-fn collect_hash_record_escape_facts(file: &SourceFile, facts: &mut FileFacts) {
-    walk_raw(file.root_node(), &mut |node| {
+fn collect_hash_record_escape_sites(file: &SourceFile, facts: &mut FileFacts) {
+    each_ast(file.root_node(), &mut |node| {
         if normalized_kind(node, file) != NormKind::Hash {
             return;
         }
@@ -441,6 +448,22 @@ fn escape_uses_of_local(root: Node<'_>, name: &str, file: &SourceFile) -> bool {
 
 fn collection_append_method(name: &str) -> bool {
     matches!(name, "<<" | "push" | "unshift" | "append" | "prepend" | "concat")
+}
+
+#[allow(dead_code)]
+fn each_node(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
+    each_ast(node, f);
+}
+
+#[allow(dead_code)]
+fn node_contains(root: Node<'_>, target: Node<'_>) -> bool {
+    let mut found = false;
+    each_node(root, &mut |node| {
+        if node == target {
+            found = true;
+        }
+    });
+    found
 }
 
 fn case_literal_values(case_node: Node<'_>, file: &SourceFile) -> Vec<Value> {

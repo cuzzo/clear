@@ -21,7 +21,7 @@ impl<'a> FileIndexer<'a> {
             "line": line(node),
             "size": values.len(),
             "types": values,
-            "confidence": "high",
+            "confidence": tuple_confidence(&values),
             "code": node_text(node, self.file),
         }));
     }
@@ -300,74 +300,6 @@ impl<'a> FileIndexer<'a> {
         }
     }
 
-    fn collection_index_return_type(
-        &mut self,
-        node: Node<'_>,
-        receiver_type: Option<&str>,
-        frame: &mut Frame,
-    ) -> Option<String> {
-        let args = call_arguments(node, self.file);
-        if args.len() != 1 {
-            return None;
-        }
-        if let Some(shape_type) = self.hash_shape_index_return_type(call_receiver(node, self.file), args[0], frame) {
-            if useful_type(&shape_type) {
-                return Some(shape_type);
-            }
-        }
-        let info = collection_type_info(receiver_type.unwrap_or(""))?;
-        match info.kind.as_str() {
-            "array" => {
-                let elem = info.element?;
-                if elem.is_empty() || elem.contains("T.untyped") {
-                    return None;
-                }
-                if normalized_kind(args[0], self.file) == NormKind::Range {
-                    Some(format!("T::Array[{elem}]"))
-                } else if self.expression_type(args[0], frame).as_deref() == Some("Integer") {
-                    Some(nilable_type(&elem))
-                } else {
-                    None
-                }
-            }
-            "hash" => {
-                let value = info.value?;
-                if value.is_empty() || value.contains("T.untyped") {
-                    None
-                } else {
-                    Some(nilable_type(&value))
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn hash_shape_index_return_type(
-        &mut self,
-        receiver: Option<Node<'_>>,
-        index: Node<'_>,
-        frame: &mut Frame,
-    ) -> Option<String> {
-        let shape = self.hash_shape_for_receiver(receiver?, frame)?;
-        if shape.get("poisoned").and_then(Value::as_bool) == Some(true) {
-            return None;
-        }
-        let key = hash_key_name(index, self.file)?;
-        let types = shape
-            .get("keys")
-            .and_then(|keys| keys.get(&key))
-            .and_then(Value::as_array)?
-            .iter()
-            .filter_map(Value::as_str)
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        if types.is_empty() {
-            return None;
-        }
-        let value = static_sorbet_type(&types);
-        useful_type(&value).then(|| nilable_type(&value))
-    }
-
     fn inspect_struct_constructor(&mut self, node: Node<'_>, frame: &mut Frame) {
         if call_name(node, self.file).as_deref() != Some("new") {
             return;
@@ -403,6 +335,13 @@ impl<'a> FileIndexer<'a> {
                 "type": ty,
                 "expression": node_text(*arg, self.file),
             }));
+            self.merge_struct_field_static_type(&full_class, &fields[idx], ty);
+            if let Some(shape) = self.hash_shape_for_value(*arg, frame) {
+                self.merge_struct_field_hash_shape(&full_class, &fields[idx], shape);
+            }
+            if let Some(shape) = self.array_element_shape_for_value(*arg, frame) {
+                self.merge_struct_field_array_element_shape(&full_class, &fields[idx], shape);
+            }
         }
     }
 
@@ -441,13 +380,19 @@ impl<'a> FileIndexer<'a> {
         for arg in call_arguments(node, self.file) {
             if normalized_kind(arg, self.file) == NormKind::Pair {
                 if let Some(value) = pair_value(arg) {
-                    let _ = self.expression_type(value, frame);
+                    let Some(field) = pair_key(arg).and_then(|key| hash_key_name(key, self.file)) else { continue };
+                    let ty = self.expression_type(value, frame);
+                    self.merge_struct_field_static_type(&klass, &field, ty);
+                    if let Some(shape) = self.hash_shape_for_value(value, frame) {
+                        self.merge_struct_field_hash_shape(&klass, &field, shape);
+                    }
+                    if let Some(shape) = self.array_element_shape_for_value(value, frame) {
+                        self.merge_struct_field_array_element_shape(&klass, &field, shape);
+                    }
                 }
             }
         }
     }
-
-    fn inspect_attribute_shape_write(&mut self, _node: Node<'_>, _frame: &mut Frame) {}
 
     fn inspect_dispatcher(&mut self, node: Node<'_>, record: &Value) {
         let params = value_array(record.get("params"));
@@ -571,6 +516,31 @@ fn hash_key_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
     }
 }
 
+fn tuple_confidence(types: &[String]) -> &'static str {
+    let constants = types
+        .iter()
+        .filter(|ty| {
+            let mut chars = ty.chars();
+            chars.next().is_some_and(|ch| ch.is_ascii_uppercase())
+                && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':')
+        })
+        .collect::<Vec<_>>();
+    let namespaces = constants
+        .iter()
+        .filter_map(|ty| ty.contains("::").then(|| ty.split("::").next().unwrap_or("")))
+        .collect::<BTreeSet<_>>();
+    if namespaces.len() == 1 && constants.len() == types.len() {
+        return "review";
+    }
+    let unique = types.iter().collect::<BTreeSet<_>>();
+    if unique.len() == types.len() { "high" } else { "review" }
+}
+
+fn non_nil_return_sig(sig: &str) -> bool {
+    let Some(type_text) = extract_return_type(sig) else { return false };
+    !type_text.contains("T.nilable") && type_text != "T.untyped" && type_text != "NilClass"
+}
+
 fn struct_new_call(node: Node<'_>, file: &SourceFile) -> bool {
     normalized_kind(node, file) == NormKind::Call
         && call_name(node, file).as_deref() == Some("new")
@@ -600,25 +570,6 @@ fn class_name_node(node: Node<'_>) -> Option<Node<'_>> {
 
 fn const_name(node: Option<Node<'_>>, file: &SourceFile) -> String {
     node.map(|node| node_text(node, file)).unwrap_or_default()
-}
-
-fn literal_type(node: Node<'_>, file: &SourceFile) -> Option<String> {
-    match normalized_kind(node, file) {
-        NormKind::String => Some("String".to_string()),
-        NormKind::Symbol => Some("Symbol".to_string()),
-        NormKind::Integer => Some("Integer".to_string()),
-        NormKind::Float => Some("Float".to_string()),
-        NormKind::True | NormKind::False => Some("T::Boolean".to_string()),
-        NormKind::Nil => Some("NilClass".to_string()),
-        NormKind::Range => Some("Range".to_string()),
-        NormKind::InterpolatedString => Some("String".to_string()),
-        NormKind::Array => Some("T::Array[T.untyped]".to_string()),
-        NormKind::Hash | NormKind::KeywordHash => Some("T::Hash[T.untyped, T.untyped]".to_string()),
-        NormKind::Call if call_name(node, file).as_deref() == Some("new") => {
-            call_receiver(node, file).map(|receiver| node_text(receiver, file))
-        }
-        _ => None,
-    }
 }
 
 fn collection_index_status(receiver_type: Option<&str>, lookup_type: Option<&str>) -> &'static str {

@@ -50,7 +50,7 @@ pub fn run(
         let lines = source.lines().map(ToString::to_string).collect::<Vec<_>>();
         let file = SourceFile::new(path, rel, source, lines, tree);
         let mut facts = FileFacts::new();
-        collect_return_usage_facts(&file, &mut facts);
+        collect_return_usage_sites(&file, &mut facts);
         bundle.add_usage_file(facts);
     }
 
@@ -70,7 +70,15 @@ struct GlobalState {
     static_return_types: BTreeMap<String, String>,
     static_hash_return_shapes: BTreeMap<String, Value>,
     static_array_element_return_shapes: BTreeMap<String, Value>,
+    attribute_hash_shapes: BTreeMap<String, Value>,
+    attribute_array_element_shapes: BTreeMap<String, Value>,
+    struct_field_hash_shapes: BTreeMap<(String, String), Value>,
+    struct_field_array_element_shapes: BTreeMap<(String, String), Value>,
     struct_field_static_types: BTreeMap<(String, String), Vec<String>>,
+    inferred_param_hash_shapes: BTreeMap<(String, String, String), Value>,
+    inferred_param_array_element_shapes: BTreeMap<(String, String, String), Value>,
+    ivar_tlet_names: BTreeSet<String>,
+    ivar_tlet_types: BTreeMap<(String, String), String>,
     noreturn_methods: BTreeSet<String>,
 }
 
@@ -108,12 +116,12 @@ impl SourceFile {
     }
 
     fn collect_prescan(&mut self, global: &mut GlobalState) {
-        let mut state = ScopeState::default();
-        collect_prescan_node(self, self.root_node(), &mut state, global);
+        collect_prescan(self, global);
     }
 }
 
 type ScopeKey = (usize, usize);
+type WalkKey = (usize, usize, String);
 
 #[derive(Default, Clone)]
 struct ScopeState {
@@ -128,6 +136,7 @@ struct Frame {
     current_scope: Vec<String>,
     param_types: BTreeMap<String, Option<String>>,
     local_types: BTreeMap<String, String>,
+    collection_builders: BTreeMap<String, CollectionBuilder>,
     non_nil_locals: BTreeSet<String>,
     maybe_nil_locals: BTreeSet<String>,
     local_container_origins: BTreeMap<String, Value>,
@@ -135,6 +144,36 @@ struct Frame {
     hash_shapes: BTreeMap<String, Value>,
     array_element_shapes: BTreeMap<String, Value>,
     hash_shape_sources: BTreeMap<String, Value>,
+    expression_type_stack: BTreeSet<ScopeKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CollectionBuilderKind {
+    Array,
+    Hash,
+    Set,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CollectionBuilder {
+    kind: CollectionBuilderKind,
+    types: BTreeSet<String>,
+    key_types: BTreeSet<String>,
+    value_types: BTreeSet<String>,
+    poisoned: bool,
+}
+
+impl CollectionBuilder {
+    fn new(kind: CollectionBuilderKind) -> Self {
+        Self {
+            kind,
+            types: BTreeSet::new(),
+            key_types: BTreeSet::new(),
+            value_types: BTreeSet::new(),
+            poisoned: false,
+        }
+    }
 }
 
 struct FileFacts {
@@ -377,6 +416,7 @@ struct FileIndexer<'a> {
     global: &'a mut GlobalState,
     facts: FileFacts,
     method_nodes: Vec<(Node<'a>, Value)>,
+    walk_stack: BTreeSet<WalkKey>,
 }
 
 impl<'a> FileIndexer<'a> {
@@ -386,6 +426,7 @@ impl<'a> FileIndexer<'a> {
             global,
             facts: FileFacts::new(),
             method_nodes: Vec::new(),
+            walk_stack: BTreeSet::new(),
         }
     }
 
@@ -393,12 +434,12 @@ impl<'a> FileIndexer<'a> {
         let mut state = ScopeState::default();
         self.walk(self.file.root_node(), &mut state, &mut Frame::default());
         if !self.method_nodes.is_empty() {
-            self.recompute_return_origins();
-            self.recompute_collection_lookups();
-            self.recompute_struct_field_static();
+            self.recompute_return_origins_with_inferred_shapes();
+            self.recompute_collection_index_lookups_with_inferred_shapes();
+            self.recompute_struct_field_static_with_inferred_locals();
         }
-        collect_return_usage_facts(self.file, &mut self.facts);
-        collect_hash_record_escape_facts(self.file, &mut self.facts);
+        collect_return_usage_sites(self.file, &mut self.facts);
+        collect_hash_record_escape_sites(self.file, &mut self.facts);
         self.facts
     }
 }

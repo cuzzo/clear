@@ -140,14 +140,8 @@ fn write_name(node: Node<'_>, file: &SourceFile) -> Option<String> {
 }
 
 fn hidden_or_body_statement(node: Node<'_>) -> bool {
-    matches!(node.kind(), "body_statement" | "block_body" | "then")
-        && (all_children(node)
-            .iter()
-            .any(|child| !child.is_named() && matches!(node_text_raw(*child).as_str(), "||" | "or"))
-            || named_children(node).into_iter().any(|child| {
-                child.kind() == "binary"
-                    && binary_operator(child).is_some_and(|op| matches!(op.as_str(), "||" | "or"))
-            }))
+    let _ = node;
+    false
 }
 
 fn condition_node(node: Node<'_>) -> Option<Node<'_>> {
@@ -438,6 +432,10 @@ fn scope_key(node: Node<'_>) -> ScopeKey {
     (node.start_byte(), node.end_byte())
 }
 
+fn walk_key(node: Node<'_>) -> WalkKey {
+    (node.start_byte(), node.end_byte(), node.kind().to_string())
+}
+
 fn lhs_element_reference_node(node: Node<'_>) -> bool {
     node.kind() == "element_reference"
         && node.parent().is_some_and(|parent| {
@@ -471,10 +469,6 @@ fn binary_operator(node: Node<'_>) -> Option<String> {
         .map(node_text_raw)
 }
 
-fn contains_kind(node: Node<'_>, kind: &str) -> bool {
-    node.kind() == kind || named_children(node).into_iter().any(|child| contains_kind(child, kind))
-}
-
 fn walk_raw(node: Node<'_>, f: &mut impl FnMut(Node<'_>)) {
     f(node);
     for child in named_children(node) {
@@ -490,12 +484,16 @@ fn end_line(node: Node<'_>) -> usize {
 
 fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
-    node.named_children(&mut cursor).collect()
+    node.named_children(&mut cursor)
+        .filter(|child| *child != node)
+        .collect()
 }
 
 fn all_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).collect()
+    node.children(&mut cursor)
+        .filter(|child| *child != node)
+        .collect()
 }
 
 fn node_text(node: Node<'_>, file: &SourceFile) -> String {

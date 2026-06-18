@@ -1,9 +1,17 @@
 impl<'a> FileIndexer<'a> {
+    fn recompute_return_origins_with_inferred_shapes(&mut self) {
+        self.recompute_return_origins();
+    }
+
     fn recompute_return_origins(&mut self) {
         let nodes: Vec<_> = self.method_nodes.iter().map(|&(n, ref r)| (n, r.clone())).collect();
         for _ in 0..2 {
             for &(node, ref record) in &nodes {
-                if let Some(origin) = self.analyze_return_origin(node, record, &mut Frame::default()) {
+                let mut frame = self.scoped_facts(record);
+                if let Some(body) = method_body(node) {
+                    self.collect_local_type_facts(body, &mut frame);
+                }
+                if let Some(origin) = self.analyze_return_origin(node, record, &mut frame) {
                     if origin.get("confidence").and_then(Value::as_str) == Some("strong") {
                         if let Some(t) = origin.get("candidate_type").and_then(Value::as_str) {
                             if useful_type(t) {
@@ -29,13 +37,16 @@ impl<'a> FileIndexer<'a> {
         }
     }
 
+    fn recompute_collection_index_lookups_with_inferred_shapes(&mut self) {
+        self.recompute_collection_lookups();
+    }
+
     fn recompute_collection_lookups(&mut self) {
         self.facts.collection_index_lookups.clear();
         self.facts.hash_record_blockers.clear();
         let nodes: Vec<_> = self.method_nodes.iter().map(|&(n, ref r)| (n, r.clone())).collect();
         for (node, record) in &nodes {
-            let mut frame = Frame::default();
-            scope_method_frame(record, &mut frame);
+            let mut frame = self.scoped_facts(record);
             if let Some(body) = method_body(*node) {
                 let scope_vec: Vec<String> = record.get("scope")
                     .and_then(Value::as_array)
@@ -45,6 +56,10 @@ impl<'a> FileIndexer<'a> {
                 self.collect_collection_index_facts(body, &scope, &mut frame);
             }
         }
+    }
+
+    fn recompute_struct_field_static_with_inferred_locals(&mut self) {
+        self.recompute_struct_field_static();
     }
 
     fn recompute_struct_field_static(&mut self) {
@@ -60,18 +75,38 @@ impl<'a> FileIndexer<'a> {
             );
             index.entry(key).or_default().push(entry.clone());
         }
+        let nodes: Vec<_> = self.method_nodes.iter().map(|&(n, ref r)| (n, r.clone())).collect();
         for &(node, ref record) in &nodes {
-            let mut frame = Frame::default();
-            scope_method_frame(record, &mut frame);
+            let mut frame = self.scoped_facts(record);
             if let Some(body) = method_body(node) {
                 self.collect_local_type_facts(body, &mut frame);
-                self.refill_struct_constructor_types(body, &index, &mut frame);
+                self.refill_struct_constructor_types(body, &mut index, &mut frame);
             }
+        }
+        self.facts.struct_field_static = index.into_values().flatten().collect();
+    }
+
+    fn child_walk(&mut self, node: Node<'a>, state: &mut ScopeState, frame: &mut Frame) {
+        for child in named_children(node) {
+            self.walk(child, state, frame);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn collect_local_container_origins(&mut self, node: Node<'_>, frame: &mut Frame) {
+        if nested_scope_node(node, self.file) {
+            return;
+        }
+        if normalized_kind(node, self.file) == NormKind::LocalWrite {
+            self.inspect_local_container_origin(node, frame);
+        }
+        for child in named_children(node) {
+            self.collect_local_container_origins(child, frame);
         }
     }
 
     fn refill_struct_constructor_types(&mut self, node: Node<'_>,
-        index: &BTreeMap<(String, usize, String, String, String), Vec<Value>>, frame: &mut Frame) {
+        index: &mut BTreeMap<(String, usize, String, String, String), Vec<Value>>, frame: &mut Frame) {
         if nested_scope_node(node, self.file) { return; }
         if normalized_kind(node, self.file) == NormKind::Call && call_name(node, self.file).as_deref() == Some("new")
             && call_receiver(node, self.file).is_some()
@@ -101,10 +136,13 @@ impl<'a> FileIndexer<'a> {
                         let resolved = self.expression_type(*arg, frame);
                         if let Some(ref resolved) = resolved {
                             if useful_type(resolved) {
-                                for e in entries {
-                                    // mutate e["type"] = resolved
+                                if let Some(entries) = index.get_mut(&key) {
+                                    for e in entries {
+                                        if !useful_type(e.get("type").and_then(Value::as_str).unwrap_or("")) {
+                                            object_insert(e, "type", json!(resolved));
+                                        }
+                                    }
                                 }
-                                // merge_struct_field_static_type
                                 let sk = (full_class.clone(), fields[idx].clone());
                                 self.global.struct_field_static_types.entry(sk).or_default().push(resolved.clone());
                             }
@@ -155,14 +193,10 @@ impl<'a> FileIndexer<'a> {
         let old_hs = frame.hash_shapes.clone();
         frame.hash_shapes = clone_hash_shapes(&frame.hash_shapes);
         let names = block_param_names(block, self.file);
+        let shapes = self.block_param_shapes_for_call(node, frame);
         for (i, name) in names.iter().enumerate() {
-            // block_param_shapes_for_call equivalent — use array_element_shapes
-            if i == 0 {
-                if let Some(rcv) = call_receiver(node, self.file) {
-                    if let Some(shape) = self.array_element_shape_for_receiver(Some(rcv), frame) {
-                        frame.hash_shapes.insert(name.clone(), clone_hash_shape(&shape));
-                    }
-                }
+            if let Some(shape) = shapes.get(i) {
+                frame.hash_shapes.insert(name.clone(), clone_hash_shape(shape));
             }
         }
         for child in named_children(node) {
@@ -171,7 +205,12 @@ impl<'a> FileIndexer<'a> {
         frame.hash_shapes = old_hs;
     }
 
-    fn walk(&mut self, node: Node<'_>, state: &mut ScopeState, frame: &mut Frame) {
+    fn walk(&mut self, node: Node<'a>, state: &mut ScopeState, frame: &mut Frame) {
+        let walk_key = walk_key(node);
+        if self.walk_stack.contains(&walk_key) {
+            return;
+        }
+        self.walk_stack.insert(walk_key.clone());
         match normalized_kind(node, self.file) {
             NormKind::Class | NormKind::Module => {
                 let name = const_name(class_name_node(node), self.file);
@@ -185,29 +224,8 @@ impl<'a> FileIndexer<'a> {
                 }
             }
             NormKind::Def => {
-                let method = self.method_source_record(node, state);
-                let mut method_frame = Frame::default();
-                method_frame.current_method = method.get("method").and_then(Value::as_str).map(ToString::to_string);
-                method_frame.current_class = method.get("class").and_then(Value::as_str).map(ToString::to_string);
-                method_frame.current_scope = state.scope.clone();
-                for param in value_array(method.get("params")) {
-                    let name = param.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                    let ty = param.get("type").and_then(Value::as_str).map(ToString::to_string);
-                    method_frame.param_types.insert(name.clone(), ty.clone());
-                    method_frame.local_container_origins.insert(
-                        name.clone(),
-                        json!({
-                            "kind": "method parameter",
-                            "name": name,
-                            "type": ty,
-                            "path": self.file.rel,
-                            "line": line(node),
-                        }),
-                    );
-                    if value_string_array(method.get("non_nil_params")).contains(&name) {
-                        method_frame.non_nil_locals.insert(name);
-                    }
-                }
+                let method = self.method_record(node, state);
+                let mut method_frame = self.scoped_facts(&method);
                 if let Some(body) = method_body(node) {
                     self.collect_local_type_facts(body, &mut method_frame);
                 }
@@ -257,18 +275,15 @@ impl<'a> FileIndexer<'a> {
             }
             NormKind::If => {
                 self.inspect_branch_guard(node, false, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::Unless => {
                 self.inspect_branch_guard(node, true, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::Call => {
                 if lhs_element_reference_node(node) {
+                    self.walk_stack.remove(&walk_key);
                     return;
                 }
                 self.inspect_param_origins(node, state, frame);
@@ -284,50 +299,37 @@ impl<'a> FileIndexer<'a> {
             }
             NormKind::Array => {
                 self.inspect_array_literal(node, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::Hash => {
                 self.inspect_hash_literal(node, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::KeywordHash => {
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::ConstWrite => {
                 self.inspect_struct_declaration(node, state);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::LocalWrite => {
                 self.update_local_fact(node, frame);
                 self.inspect_local_container_origin(node, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             NormKind::IvarWrite | NormKind::ClassVarWrite | NormKind::GlobalVarWrite => {
                 self.inspect_variable_write(node, frame);
                 self.inspect_ivar_container_origin(node, frame);
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
             _ => {
-                for child in named_children(node) {
-                    self.walk(child, state, frame);
-                }
+                self.child_walk(node, state, frame);
             }
         }
+        self.walk_stack.remove(&walk_key);
     }
 
-    fn walk_call_children(&mut self, node: Node<'_>, state: &mut ScopeState, frame: &mut Frame) {
+    fn walk_call_children(&mut self, node: Node<'a>, state: &mut ScopeState, frame: &mut Frame) {
         let block = call_block(node);
         let seed_shape = call_receiver(node, self.file).and_then(|receiver| {
             if normalized_kind(receiver, self.file) == NormKind::LocalRead
@@ -361,6 +363,11 @@ impl<'a> FileIndexer<'a> {
             }
         }
     }
+}
+
+fn collect_prescan(file: &SourceFile, global: &mut GlobalState) {
+    let mut state = ScopeState::default();
+    collect_prescan_node(file, file.root_node(), &mut state, global);
 }
 
 fn collect_prescan_node(
@@ -416,6 +423,22 @@ fn collect_prescan_node(
                     }
                     global.class_like_constants.insert(klass);
                     global.class_like_constants.insert(name);
+                }
+            }
+        }
+        NormKind::IvarWrite => {
+            if let (Some(name), Some(value)) = (write_name(node, file), write_value(node)) {
+                if normalized_kind(value, file) == NormKind::Call
+                    && call_name(value, file).as_deref() == Some("let")
+                    && call_receiver(value, file).map(|receiver| node_text(receiver, file)) == Some("T".to_string())
+                {
+                    global.ivar_tlet_names.insert(name.clone());
+                    if let (Some(class_name), Some(type_node)) = (state.class_name.as_ref(), call_arguments(value, file).get(1)) {
+                        let type_text = node_text(*type_node, file);
+                        if useful_type(&type_text) {
+                            global.ivar_tlet_types.insert((class_name.clone(), name), type_text);
+                        }
+                    }
                 }
             }
         }
