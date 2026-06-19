@@ -125,6 +125,25 @@ class SyntaxTest < Minitest::Test
     refute csharp.first_argument_receiver?
   end
 
+  def test_tree_sitter_document_walks_seed_language_context
+    adapter = Decomplex::Syntax::TreeSitterAdapter.new
+    document = Struct.new(:root, :file, :language, :lines)
+                     .new(Object.new, "/tmp/demo.py", :python, [])
+    captured = []
+
+    adapter.define_singleton_method(:walk) do |_root, stack, &_block|
+      captured << stack
+    end
+
+    adapter.decision_sites(document)
+    adapter.branch_decisions(document, immutable_readers: {}, immutable_reader_types: {}, type_aliases: {})
+    adapter.branch_arms(document)
+    adapter.structural_facts(document)
+
+    expected = [{ file_owner: "demo", language: :python }]
+    assert_equal [expected, expected, expected, expected], captured
+  end
+
   def test_force_language_override_handles_ambiguous_headers
     assert_equal :c, Decomplex::Syntax.language_for("include/demo.h")
 

@@ -291,37 +291,37 @@ module Decomplex
         case node.kind
 	        when "method", "function_definition", "function_declaration",
 	             "method_definition", "function_item"
-	          syntax.send(:named_field, node, "name")&.text ||
-	            syntax.send(:declarator_name, syntax.send(:named_field, node, "declarator")) ||
-	            syntax.send(:first_named_text, node, %w[identifier constant property_identifier])
+	          syntax.named_field(node, "name")&.text ||
+	            syntax.declarator_name(syntax.named_field(node, "declarator")) ||
+	            syntax.first_named_text(node, %w[identifier constant property_identifier])
         when "method_declaration"
-          syntax.send(:named_field, node, "name")&.text ||
-            syntax.send(:first_named_text, node, %w[field_identifier identifier])
+          syntax.named_field(node, "name")&.text ||
+            syntax.first_named_text(node, %w[field_identifier identifier])
         end
       end
 
       def function_kind(syntax, node, stack)
-        syntax.send(:owner_for_node, nil, node, stack: stack) ? :method : :function
+        syntax.owner_for_node(nil, node, stack: stack) ? :method : :function
       end
 
       def visibility(syntax, _document, node)
-        syntax.send(:modifier_visibility, node)
+        syntax.modifier_visibility(node)
       end
 
       def owner_name_from_declaration(syntax, document, node)
         case node.kind
 	        when "class", "class_definition", "class_declaration", "class_specifier", "module"
-	          syntax.send(:named_field, node, "name")&.text ||
-              syntax.send(:first_named_text, node, %w[constant identifier type_identifier])
+	          syntax.named_field(node, "name")&.text ||
+              syntax.first_named_text(node, %w[constant identifier type_identifier])
         when "impl_item", "impl_block"
-          syntax.send(:impl_owner_name, node)
+          syntax.impl_owner_name(node)
         when "struct_item", "struct_spec", "struct_specifier", "type_spec", "type_declaration"
-          syntax.send(:named_field, node, "name")&.text ||
-            syntax.send(:first_named_text, node, %w[type_identifier identifier])
+          syntax.named_field(node, "name")&.text ||
+            syntax.first_named_text(node, %w[type_identifier identifier])
         when "struct_declaration", "union_declaration", "enum_declaration"
-          syntax.send(:bound_container_name, node) ||
-            syntax.send(:returned_container_owner, document, node) ||
-            syntax.send(:anonymous_owner_name, document, node)
+          syntax.bound_container_name(node) ||
+            syntax.returned_container_owner(document, node) ||
+            syntax.anonymous_owner_name(document, node)
         end
       end
 
@@ -338,30 +338,30 @@ module Decomplex
       end
 
       def function_receiver_name(syntax, node, stack)
-        receiver_param = syntax.send(:method_receiver_param_node, node)
+        receiver_param = syntax.method_receiver_param_node(node)
         receiver_param&.text ||
-          receiver_convention_param_name(syntax, node, language: syntax.send(:current_language, stack))
+          receiver_convention_param_name(syntax, node, language: syntax.current_language(stack))
       end
 
       def receiver_convention_owner_name(syntax, node, language:)
         return nil unless first_argument_receiver?
         return nil unless node.kind == "function_definition"
 
-        receiver = syntax.send(:first_argument_receiver_parameter, node)
+        receiver = syntax.first_argument_receiver_parameter(node)
         return nil unless receiver
 
-        type = syntax.send(:normalize_type_owner, receiver[:type])
+        type = syntax.normalize_type_owner(receiver[:type])
         name = function_name(syntax, node).to_s
         return nil if type.empty? || name.empty?
 
-        prefix = syntax.send(:snake_case_type_name, type)
+        prefix = syntax.snake_case_type_name(type)
         name.start_with?("#{prefix}_") ? type : nil
       end
 
       def receiver_convention_param_name(syntax, node, language:)
         return nil unless first_argument_receiver?
 
-        syntax.send(:first_argument_receiver_parameter, node)&.fetch(:name, nil)
+        syntax.first_argument_receiver_parameter(node)&.fetch(:name, nil)
       end
 
       def generated_prelude?(_syntax, _document, _node)
@@ -371,23 +371,23 @@ module Decomplex
       def call_target(syntax, document, node)
         case node.kind
         when "call_expression", "method_invocation", "invocation_expression"
-          syntax.send(:generic_call_target, document, node)
+          syntax.generic_call_target(document, node)
 	      when "attribute", "selector_expression", "field", "field_access", "member_expression",
 	           "member_access_expression", "field_expression", "expression_list"
-          syntax.send(:adjacent_argument_call_target, node)
+          syntax.adjacent_argument_call_target(node)
         end
       end
 
       def state_declaration(syntax, node)
-        syntax.send(:generic_state_declaration, node, language: language)
+        syntax.generic_state_declaration(node, language: language)
       end
 
       def state_read_target(syntax, node)
-        syntax.send(:generic_state_read_target, node)
+        syntax.generic_state_read_target(node)
       end
 
       def state_target(syntax, lhs)
-        syntax.send(:generic_state_target, lhs)
+        syntax.generic_state_target(lhs)
       end
     end
 
@@ -395,34 +395,34 @@ module Decomplex
       def function_name(syntax, node)
         case node.kind
         when "body_statement"
-          syntax.send(:hidden_ruby_method_name, node)
+          syntax.hidden_ruby_method_name(node)
         when "singleton_method"
-          name = syntax.send(:named_field, node, "name")&.text ||
+          name = syntax.named_field(node, "name")&.text ||
                  node.named_children.reverse.find do |child|
                    %w[identifier field_identifier property_identifier].include?(child.kind)
                  end&.text
           name && "self.#{name}"
         when "argument_list"
-          syntax.send(:inline_def_name, node)
+          syntax.inline_def_name(node)
         else
           super
         end
       end
 
       def visibility(syntax, _document, node)
-        return syntax.send(:ruby_inline_def_visibility, node) if syntax.send(:inline_def_argument_list?, node)
+        return syntax.ruby_inline_def_visibility(node) if syntax.inline_def_argument_list?(node)
 
-        syntax.send(:ruby_method_visibility, node)
+        syntax.ruby_method_visibility(node)
       end
 
       def owner_name_from_declaration(syntax, document, node)
-        return syntax.send(:hidden_ruby_owner_name, node) if syntax.send(:hidden_ruby_owner_declaration?, node)
+        return syntax.hidden_ruby_owner_name(node) if syntax.hidden_ruby_owner_declaration?(node)
 
         super
       end
 
       def owner_kind(syntax, node)
-        return syntax.send(:hidden_ruby_owner_kind, node) if syntax.send(:hidden_ruby_owner_declaration?, node)
+        return syntax.hidden_ruby_owner_kind(node) if syntax.hidden_ruby_owner_declaration?(node)
 
         super
       end
@@ -430,11 +430,11 @@ module Decomplex
       def call_target(syntax, document, node)
         case node.kind
         when "call"
-          syntax.send(:ruby_call_target, node)
+          syntax.ruby_call_target(node)
         when "body_statement"
-          syntax.send(:ruby_bare_body_call_target, document, node)
+          syntax.ruby_bare_body_call_target(document, node)
         when "identifier"
-          syntax.send(:ruby_bare_call_target, document, node)
+          syntax.ruby_bare_call_target(document, node)
         else
           super
         end
@@ -452,19 +452,19 @@ module Decomplex
 
     class GoSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:exported_name_visibility, function_name(syntax, node))
+        syntax.exported_name_visibility(function_name(syntax, node))
       end
     end
 
     class RustSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:modifier_visibility, node) || :private
+        syntax.modifier_visibility(node) || :private
       end
     end
 
     class JavaScriptSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:modifier_visibility, node) || typescript_visibility(syntax, node)
+        syntax.modifier_visibility(node) || typescript_visibility(syntax, node)
       end
 
       private
@@ -476,28 +476,58 @@ module Decomplex
 
     class CppSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:modifier_visibility, node) || syntax.send(:cpp_visibility, node)
+        syntax.modifier_visibility(node) || syntax.cpp_visibility(node)
       end
     end
 
     class CSharpSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:modifier_visibility, node) || :private
+        syntax.modifier_visibility(node) || :private
       end
     end
 
     class CSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.send(:c_visibility, node)
+        syntax.c_visibility(node)
       end
     end
 
     class LuaSyntaxAdapter < TreeSitterLanguageAdapter
       def generated_prelude?(syntax, document, node)
-        return false unless syntax.send(:line, node) == 1
+        return false unless syntax.line(node) == 1
 
         first_line = document.lines.first.to_s
         first_line.include?("_tl_compat") && first_line.include?("compat53.module")
+      end
+    end
+
+    class TreeSitterLanguageAdapterHelpers
+      HELPER_METHODS = %i[
+        adjacent_argument_call_target anonymous_owner_name bound_container_name
+        c_visibility cpp_visibility current_language declarator_name
+        exported_name_visibility first_argument_receiver_parameter first_named_text
+        generic_call_target generic_state_declaration generic_state_read_target
+        generic_state_target hidden_ruby_method_name hidden_ruby_owner_declaration?
+        hidden_ruby_owner_kind hidden_ruby_owner_name impl_owner_name
+        inline_def_argument_list? inline_def_name line method_receiver_param_node
+        modifier_visibility named_field normalize_type_owner owner_for_node
+        returned_container_owner ruby_bare_body_call_target ruby_bare_call_target
+        ruby_call_target ruby_inline_def_visibility ruby_method_visibility
+        snake_case_type_name
+      ].freeze
+
+      def initialize(adapter)
+        @adapter = adapter
+      end
+
+      HELPER_METHODS.each do |helper|
+        define_method(helper) do |*args, **kwargs, &block|
+          if kwargs.empty?
+            @adapter.__send__(helper, *args, &block)
+          else
+            @adapter.__send__(helper, *args, **kwargs, &block)
+          end
+        end
       end
     end
 
@@ -1030,7 +1060,7 @@ module Decomplex
 
       def decision_sites(document)
         out = []
-        walk(document.root, []) do |node, stack|
+        walk(document.root, initial_stack(document)) do |node, stack|
           record_decision_site(document, node, stack, out)
         end
         out
@@ -1046,7 +1076,7 @@ module Decomplex
 
       def branch_decisions(document, immutable_readers:, immutable_reader_types:, type_aliases:)
         out = []
-        walk(document.root, []) do |node, stack|
+        walk(document.root, initial_stack(document)) do |node, stack|
           record_branch_decision(
             document,
             node,
@@ -1093,7 +1123,7 @@ module Decomplex
             state_reads: [],
             state_writes: []
           }
-          walk(document.root, [{ file_owner: file_owner(document.file), language: document.language }]) do |node, stack|
+          walk(document.root, initial_stack(document)) do |node, stack|
             record_function_def(document, node, stack, out[:function_defs])
             record_owner_def(document, node, stack, out[:owner_defs])
             record_call_site(document, node, stack, out[:call_sites])
@@ -1116,7 +1146,7 @@ module Decomplex
 
       def branch_arms(document)
         out = []
-        walk(document.root, []) do |node, stack|
+        walk(document.root, initial_stack(document)) do |node, stack|
           record_branch_arm(document, node, stack, out)
         end
         out
@@ -1135,6 +1165,14 @@ module Decomplex
       end
 
       private
+
+      def initial_stack(document)
+        [{ file_owner: file_owner(document.file), language: document.language }]
+      end
+
+      def adapter_helpers
+        @adapter_helpers ||= TreeSitterLanguageAdapterHelpers.new(self)
+      end
 
       def syntax_profile(language)
         language ? Syntax.language_profile(language) : Syntax::GENERIC_LANGUAGE_PROFILE
@@ -1313,15 +1351,15 @@ module Decomplex
       end
 
       def function_name(node, language: nil)
-        syntax_profile(language).function_name(self, node)
+        syntax_profile(language).function_name(adapter_helpers, node)
       end
 
       def function_kind(node, stack)
-        syntax_profile(current_language(stack)).function_kind(self, node, stack)
+        syntax_profile(current_language(stack)).function_kind(adapter_helpers, node, stack)
       end
 
       def visibility_for(document, node)
-        syntax_profile(document.language).visibility(self, document, node)
+        syntax_profile(document.language).visibility(adapter_helpers, document, node)
       end
 
       def ruby_method_visibility(node)
@@ -1891,7 +1929,7 @@ module Decomplex
 
         locals = local_declaration_index(document)
         params = function_param_index(out[:function_defs])
-        walk(document.root, [{ file_owner: file_owner(document.file), language: document.language }]) do |node, stack|
+        walk(document.root, initial_stack(document)) do |node, stack|
           next unless implicit_state_identifier?(node)
 
           owner = current_owner(document, stack)
@@ -1943,7 +1981,7 @@ module Decomplex
 
       def local_declaration_index(document)
         index = Hash.new { |h, k| h[k] = Set.new }
-        walk(document.root, [{ file_owner: file_owner(document.file), language: document.language }]) do |node, stack|
+        walk(document.root, initial_stack(document)) do |node, stack|
           next unless local_variable_declarator?(node)
 
           owner = current_owner(document, stack)
@@ -2383,11 +2421,11 @@ module Decomplex
       end
 
       def owner_name_from_declaration(document, node, language: nil)
-        syntax_profile(language || document&.language).owner_name_from_declaration(self, document, node)
+        syntax_profile(language || document&.language).owner_name_from_declaration(adapter_helpers, document, node)
       end
 
       def owner_kind(node, language: nil)
-        syntax_profile(language).owner_kind(self, node)
+        syntax_profile(language).owner_kind(adapter_helpers, node)
       end
 
       def impl_owner_name(node)
@@ -2402,7 +2440,7 @@ module Decomplex
       end
 
       def function_receiver_name(node, stack)
-        syntax_profile(current_language(stack)).function_receiver_name(self, node, stack)
+        syntax_profile(current_language(stack)).function_receiver_name(adapter_helpers, node, stack)
       end
 
       def method_receiver_type_node(node)
@@ -2429,11 +2467,11 @@ module Decomplex
       end
 
       def receiver_convention_owner_name(node, language:)
-        syntax_profile(language).receiver_convention_owner_name(self, node, language: language)
+        syntax_profile(language).receiver_convention_owner_name(adapter_helpers, node, language: language)
       end
 
       def receiver_convention_param_name(node, language:)
-        syntax_profile(language).receiver_convention_param_name(self, node, language: language)
+        syntax_profile(language).receiver_convention_param_name(adapter_helpers, node, language: language)
       end
 
       def first_argument_receiver_parameter(node)
@@ -2522,7 +2560,7 @@ module Decomplex
       end
 
       def call_target(document, node)
-        syntax_profile(document.language).call_target(self, document, node)
+        syntax_profile(document.language).call_target(adapter_helpers, document, node)
       end
 
       def ruby_call_target(node)
@@ -2678,7 +2716,7 @@ module Decomplex
       end
 
       def state_declaration(node, language: nil)
-        syntax_profile(language).state_declaration(self, node)
+        syntax_profile(language).state_declaration(adapter_helpers, node)
       end
 
       def generic_state_declaration(node, language: nil)
@@ -2800,11 +2838,11 @@ module Decomplex
       end
 
       def generated_lua_compat_prelude?(document, node)
-        syntax_profile(document.language).generated_prelude?(self, document, node)
+        syntax_profile(document.language).generated_prelude?(adapter_helpers, document, node)
       end
 
       def state_read_target(node, language: nil)
-        syntax_profile(language).state_read_target(self, node)
+        syntax_profile(language).state_read_target(adapter_helpers, node)
       end
 
       def generic_state_read_target(node)
@@ -2847,7 +2885,7 @@ module Decomplex
       end
 
       def state_target(lhs, language: nil)
-        syntax_profile(language).state_target(self, lhs)
+        syntax_profile(language).state_target(adapter_helpers, lhs)
       end
 
       def generic_state_target(lhs)
