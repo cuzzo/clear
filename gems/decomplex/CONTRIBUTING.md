@@ -36,6 +36,20 @@ Prefer one clear signal over a broad blended score. If a metric is noisy,
 mark it tier 3 or make it supporting evidence for convergence/root-cause
 clusters.
 
+## Running Tests
+
+Run the Decomplex Minitest suite in parallel with:
+
+```bash
+bundle exec parallel_test gems/decomplex/test
+```
+
+For a smaller local run while debugging output, cap workers explicitly:
+
+```bash
+bundle exec parallel_test gems/decomplex/test -n 4 --serialize-stdout
+```
+
 ## Language Support
 
 New language work should go through the syntax/profile boundary:

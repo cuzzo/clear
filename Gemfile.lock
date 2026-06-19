@@ -124,6 +124,8 @@ GEM
     parallel_rspec (3.0.0)
       rake (> 10.0)
       rspec
+    parallel_tests (5.7.0)
+      parallel
     parlour (9.1.2)
       commander (~> 5.0)
       parser
@@ -298,6 +300,7 @@ DEPENDENCIES
   mutant-rspec
   nil-kill!
   parallel_rspec
+  parallel_tests (~> 5.7)
   reek
   rspec
   rubocop

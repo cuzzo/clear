@@ -8,6 +8,7 @@ group :development do
   gem 'minitest', '~> 5.25'
   gem 'rspec'
   gem 'parallel_rspec'
+  gem "parallel_tests", "~> 5.7", require: false
   gem 'tty-cursor', require: false
   gem 'tty-reader', require: false
   gem 'tty-screen', require: false
