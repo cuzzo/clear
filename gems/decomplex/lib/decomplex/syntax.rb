@@ -464,12 +464,12 @@ module Decomplex
 
     class JavaScriptSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(syntax, _document, node)
-        syntax.modifier_visibility(node) || typescript_visibility(syntax, node)
+        syntax.modifier_visibility(node) || private_name_visibility(syntax, node)
       end
 
       private
 
-      def typescript_visibility(syntax, node)
+      def private_name_visibility(syntax, node)
         function_name(syntax, node).to_s.start_with?("#") ? :private : :public
       end
     end
@@ -517,16 +517,25 @@ module Decomplex
       ].freeze
 
       def initialize(adapter)
-        @adapter = adapter
+        @helpers = HELPER_METHODS.each_with_object({}) do |helper, helpers|
+          helpers[helper] = adapter.method(helper)
+        end.freeze
       end
 
       HELPER_METHODS.each do |helper|
         define_method(helper) do |*args, **kwargs, &block|
-          if kwargs.empty?
-            @adapter.__send__(helper, *args, &block)
-          else
-            @adapter.__send__(helper, *args, **kwargs, &block)
-          end
+          call_helper(helper, *args, **kwargs, &block)
+        end
+      end
+
+      private
+
+      def call_helper(helper, *args, **kwargs, &block)
+        method = @helpers.fetch(helper)
+        if kwargs.empty?
+          method.call(*args, &block)
+        else
+          method.call(*args, **kwargs, &block)
         end
       end
     end
@@ -626,12 +635,6 @@ module Decomplex
     LANGUAGE_BY_EXTENSION = LANGUAGE_PROFILES.values.each_with_object({}) do |profile, index|
       profile.extensions.each { |extension| index[extension] ||= profile.language }
     end.freeze
-    GENERIC_LANGUAGE_PROFILE = TreeSitterLanguageAdapter.new(
-      language: :generic,
-      extensions: [],
-      lexicon: RUBY_LEXICON,
-      package: ""
-    ).freeze
 
     module_function
 
@@ -697,12 +700,16 @@ module Decomplex
     end
 
     def language_lexicon(language)
-      key = language.to_s.empty? ? nil : language.to_sym
-      language_profile(key).lexicon
+      language_profile(language).lexicon
     end
 
     def language_profile(language)
-      LANGUAGE_PROFILES.fetch(language.to_sym)
+      key = language.to_s.empty? ? nil : language.to_sym
+      raise ArgumentError, "missing Syntax language profile" unless key
+
+      LANGUAGE_PROFILES.fetch(key)
+    rescue KeyError
+      raise ArgumentError, "unsupported Syntax language profile: #{language.inspect}"
     end
 
     class Document
@@ -1175,7 +1182,9 @@ module Decomplex
       end
 
       def syntax_profile(language)
-        language ? Syntax.language_profile(language) : Syntax::GENERIC_LANGUAGE_PROFILE
+        raise ArgumentError, "missing Syntax language profile context" if language.nil?
+
+        Syntax.language_profile(language)
       end
 
 	      def parser_for(language)
@@ -1366,24 +1375,11 @@ module Decomplex
         modifier_visibility(node)
       end
 
-      def python_visibility(node)
-        name = function_name(node).to_s
-        return :private if name.start_with?("_") && !name.start_with?("__")
-
-        :public
-      end
-
       def exported_name_visibility(name)
         text = name.to_s
         return nil if text.empty?
 
         text.match?(/\A[A-Z]/) ? :public : :private
-      end
-
-      def typescript_visibility(node)
-        return :private if function_name(node).to_s.start_with?("#")
-
-        :public
       end
 
       def modifier_visibility(node)
@@ -2394,7 +2390,7 @@ module Decomplex
         stacked_owner = current_owner_from_stack(Array(stack))
         return stacked_owner if stacked_owner
 
-        chain = owner_chain_for_node(document, node)
+        chain = owner_chain_for_node(document, node, language: language)
         return chain.join("::") unless chain.empty?
 
         return file_owner(document.file) if document
@@ -2402,14 +2398,14 @@ module Decomplex
         nil
       end
 
-      def owner_chain_for_node(document, node)
+      def owner_chain_for_node(document, node, language: nil)
         chain = []
         seen = Set.new
         seen_nodes = Set.new
         parent = parent_node(node)
         while parent && !seen_nodes.include?(node_key(parent))
           seen_nodes << node_key(parent)
-          if (owner = owner_name_from_declaration(document, parent))
+          if (owner = owner_name_from_declaration(document, parent, language: language))
             unless seen.include?(owner)
               chain << owner
               seen << owner

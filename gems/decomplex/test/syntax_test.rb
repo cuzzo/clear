@@ -125,6 +125,29 @@ class SyntaxTest < Minitest::Test
     refute csharp.first_argument_receiver?
   end
 
+  def test_language_profile_fails_loudly_without_supported_language
+    refute Decomplex::Syntax.const_defined?(:GENERIC_LANGUAGE_PROFILE, false)
+
+    missing = assert_raises(ArgumentError) do
+      Decomplex::Syntax.language_profile(nil)
+    end
+    assert_match(/missing Syntax language profile/, missing.message)
+
+    unsupported = assert_raises(ArgumentError) do
+      Decomplex::Syntax.language_profile(:wat)
+    end
+    assert_match(/unsupported Syntax language profile/, unsupported.message)
+  end
+
+  def test_tree_sitter_adapter_requires_language_profile_context
+    adapter = Decomplex::Syntax::TreeSitterAdapter.new
+
+    error = assert_raises(ArgumentError) do
+      adapter.send(:syntax_profile, nil)
+    end
+    assert_match(/missing Syntax language profile context/, error.message)
+  end
+
   def test_tree_sitter_document_walks_seed_language_context
     adapter = Decomplex::Syntax::TreeSitterAdapter.new
     document = Struct.new(:root, :file, :language, :lines)
