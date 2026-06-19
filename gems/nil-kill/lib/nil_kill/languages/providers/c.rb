@@ -4,21 +4,17 @@
 module NilKill
   module Languages
     module Providers
-      class Rust < Provider
+      class C < Provider
         def language
-          "rust"
-        end
-
-        def aliases
-          ["rs"]
+          "c"
         end
 
         def display_name
-          "Rust"
+          "C"
         end
 
         def extensions
-          [".rs"]
+          %w[.c .h]
         end
 
         def runtime_tracing?
@@ -26,11 +22,11 @@ module NilKill
         end
 
         def notes
-          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Rust"]
+          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for C"]
         end
       end
     end
   end
 end
 
-NilKill::Languages.register(NilKill::Languages::Providers::Rust.new)
+NilKill::Languages.register(NilKill::Languages::Providers::C.new)

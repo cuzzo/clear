@@ -4,21 +4,21 @@
 module NilKill
   module Languages
     module Providers
-      class Rust < Provider
+      class Kotlin < Provider
         def language
-          "rust"
+          "kotlin"
         end
 
         def aliases
-          ["rs"]
+          ["kt"]
         end
 
         def display_name
-          "Rust"
+          "Kotlin"
         end
 
         def extensions
-          [".rs"]
+          %w[.kt .kts]
         end
 
         def runtime_tracing?
@@ -26,11 +26,11 @@ module NilKill
         end
 
         def notes
-          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Rust"]
+          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Kotlin"]
         end
       end
     end
   end
 end
 
-NilKill::Languages.register(NilKill::Languages::Providers::Rust.new)
+NilKill::Languages.register(NilKill::Languages::Providers::Kotlin.new)

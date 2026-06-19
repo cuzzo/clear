@@ -105,7 +105,7 @@ module NilKill
 
     def scan_raw_body(raw, syntax_context, ctx)
       return unless raw
-      return if nested_scope_raw?(raw)
+      return if nested_scope_raw?(raw, syntax_context)
 
       node = interesting_node(raw, syntax_context)
       case node
@@ -119,15 +119,16 @@ module NilKill
         inspect_state_write(node, ctx)
       end
 
-      raw.named_children.each { |child| scan_raw_body(child, syntax_context, ctx) }
+      raw_named_children(syntax_context, raw).each { |child| scan_raw_body(child, syntax_context, ctx) }
     end
 
     def interesting_node(raw, syntax_context)
       case raw.kind
       when "body_statement"
-        first = raw.children.first
+        first = raw_children(syntax_context, raw).first
         return syntax_context.wrap(raw, force: Syntax::CaseNode) if first&.kind == "case"
-        return syntax_context.wrap(raw, force: body_statement_assignment_class(raw)) if body_statement_assignment?(raw)
+        assignment_class = body_statement_assignment_class(raw, syntax_context)
+        return syntax_context.wrap(raw, force: assignment_class) if assignment_class && body_statement_assignment?(raw, syntax_context)
       when "case"
         syntax_context.wrap(raw, force: Syntax::CaseNode)
       when "call", "binary", "assignment", "operator_assignment", "element_reference"
@@ -135,14 +136,15 @@ module NilKill
       end
     end
 
-    def body_statement_assignment?(raw)
-      !body_statement_assignment_class(raw).nil? &&
-        raw.children.any? { |child| !child.named? && child.text.to_s == "=" } &&
-        !raw.children.any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
+    def body_statement_assignment?(raw, syntax_context)
+      children = raw_children(syntax_context, raw)
+      !body_statement_assignment_class(raw, syntax_context).nil? &&
+        children.any? { |child| !child.named? && child.text.to_s == "=" } &&
+        !children.any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
     end
 
-    def body_statement_assignment_class(raw)
-      case raw.named_children.first&.kind
+    def body_statement_assignment_class(raw, syntax_context)
+      case raw_named_children(syntax_context, raw).first&.kind
       when "identifier" then Syntax::LocalVariableWriteNode
       when "instance_variable" then Syntax::InstanceVariableWriteNode
       when "class_variable" then Syntax::ClassVariableWriteNode
@@ -150,11 +152,19 @@ module NilKill
       end
     end
 
-    def nested_scope_raw?(raw)
+    def nested_scope_raw?(raw, syntax_context)
       return true if %w[method singleton_method class module singleton_class lambda].include?(raw.kind)
-      return true if raw.kind == "body_statement" && %w[def class module].include?(raw.children.first&.kind)
+      return true if raw.kind == "body_statement" && %w[def class module].include?(raw_children(syntax_context, raw).first&.kind)
 
       false
+    end
+
+    def raw_children(syntax_context, raw)
+      syntax_context.children(raw)
+    end
+
+    def raw_named_children(syntax_context, raw)
+      syntax_context.named_children(raw)
     end
 
     def inspect_case(node, ctx)

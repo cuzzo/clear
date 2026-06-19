@@ -51,6 +51,8 @@ module NilKill
         }.tap do |out|
           if raw["kind"] == "espalier_static_evidence"
             out["methods"] = Array(raw["methods"])
+            out["facts"] = raw["facts"] || {}
+            out["summary"] = raw["summary"] || {}
             out["language_extensions"]["nil_kill_static_evidence"] = {
               "facts" => raw["facts"] || {},
               "summary" => raw["summary"] || {},

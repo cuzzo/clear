@@ -18,6 +18,7 @@ module Decomplex
         @facts = structural_facts
         @language = document.language.to_s
         @root = root
+        @ts_node_cache = {}
       end
 
       def build
@@ -28,8 +29,11 @@ module Decomplex
           methods: methods,
           fields: fields(state_declarations, known_states),
           state_types: state_types(state_declarations),
+          state_type_records: state_type_records(state_declarations),
           state_protocols: state_protocols(known_states),
           state_param_origins: state_param_origins(known_states),
+          state_protocol_records: state_protocol_records(known_states),
+          state_param_origin_records: state_param_origin_records(known_states),
           signatures: signatures,
           type_definitions: type_definitions(state_declarations),
           hash_shapes: literal_shapes(:hash),
@@ -105,6 +109,28 @@ module Decomplex
         end
       end
 
+      def state_type_records(state_declarations)
+        state_declarations.filter_map do |state|
+          type = state.type.to_s
+          next if type.empty?
+
+          field = declared_state_field(state.field)
+          {
+            "language" => @language,
+            "path" => rel(state.file),
+            "owner" => state.owner.to_s,
+            "field" => field.to_s,
+            "declared_type" => type,
+            "line" => state.line,
+            "span" => state.span,
+            "key" => state_key(state.owner, field),
+          }
+        end.uniq do |record|
+          [record["language"], record["path"], record["owner"],
+            record["field"], record["declared_type"], record["line"]]
+        end
+      end
+
       def state_protocols(known_states)
         out = Hash.new { |hash, key| hash[key] = Set.new }
         Array(@facts[:call_sites]).each do |call|
@@ -114,6 +140,28 @@ module Decomplex
           out[state_key(call.owner, state)].add(call.message.to_s)
         end
         stringify_set_map(out)
+      end
+
+      def state_protocol_records(known_states)
+        Array(@facts[:call_sites]).filter_map do |call|
+          state = receiver_state_field(call.receiver, known_states[call.owner.to_s])
+          next unless state
+
+          {
+            "language" => @language,
+            "path" => rel(call.file),
+            "owner" => call.owner.to_s,
+            "function" => call.function.to_s,
+            "field" => state.to_s,
+            "protocol" => call.message.to_s,
+            "line" => call.line,
+            "span" => call.span,
+            "key" => state_key(call.owner, state),
+          }
+        end.uniq do |record|
+          [record["language"], record["path"], record["owner"], record["function"],
+            record["field"], record["protocol"], record["line"]]
+        end
       end
 
       def state_param_origins(known_states)
@@ -126,6 +174,29 @@ module Decomplex
           out[state_key(origin.owner, field)].add(origin.param.to_s)
         end
         stringify_set_map(out)
+      end
+
+      def state_param_origin_records(known_states)
+        Array(@facts[:state_param_origins]).filter_map do |origin|
+          next unless owned_state?(origin, known_states[origin.owner.to_s])
+          next if self_receiver_names.include?(origin.param.to_s)
+
+          field = canonical_state_field(origin.field, receiver: origin.receiver)
+          {
+            "language" => @language,
+            "path" => rel(origin.file),
+            "owner" => origin.owner.to_s,
+            "function" => origin.function.to_s,
+            "field" => field.to_s,
+            "param" => origin.param.to_s,
+            "line" => origin.line,
+            "span" => origin.span,
+            "key" => state_key(origin.owner, field),
+          }
+        end.uniq do |record|
+          [record["language"], record["path"], record["owner"], record["function"],
+            record["field"], record["param"], record["line"]]
+        end
       end
 
       def signatures
@@ -175,7 +246,7 @@ module Decomplex
         walk_tree(@document.root) do |node|
           next unless %w[assignment assignment_expression assignment_statement].include?(node.kind.to_s)
 
-          lhs = named_child(node, "left") || node.named_children.first
+          lhs = named_child(node, "left") || node_named_children(node).first
           target = state_target(lhs)
           next unless target
 
@@ -752,8 +823,9 @@ module Decomplex
           { receiver: node_text(receiver), field: node_text(method).sub(/=\z/, "") }
         when "field", "selector_expression", "member_expression", "attribute", "field_expression", "expression_list"
           object = named_child(node, "object") || named_child(node, "receiver") ||
-            named_child(node, "operand") || named_child(node, "value")
-          field = named_child(node, "field") || named_child(node, "property") || node.named_children.last
+            named_child(node, "operand") || named_child(node, "value") ||
+            node_named_children(node).first
+          field = named_child(node, "field") || named_child(node, "property") || node_named_children(node).last
           return nil unless object && field
 
           { receiver: node_text(object), field: node_text(field).sub(/=\z/, "") }
@@ -774,23 +846,23 @@ module Decomplex
       end
 
       def hash_literal_node?(node)
-        %w[hash dictionary object map literal_value].include?(node.kind.to_s) ||
+        %w[hash dictionary object map literal_value table_constructor].include?(node.kind.to_s) ||
           (node_text(node).start_with?("{") && node_text(node).end_with?("}") && hash_pair_nodes(node).any?)
       end
 
       def hash_pair_nodes(node)
-        Array(node.named_children).select do |child|
-          %w[pair hash_pair pair_pattern keyed_element field_initializer].include?(child.kind.to_s) ||
+        node_named_children(node).select do |child|
+          %w[pair hash_pair pair_pattern keyed_element field field_initializer].include?(child.kind.to_s) ||
             named_child(child, "key")
         end
       end
 
       def hash_pair_key(pair)
-        named_child(pair, "key") || pair.named_children.first
+        named_child(pair, "key") || node_named_children(pair).first
       end
 
       def hash_pair_value(pair)
-        named_child(pair, "value") || named_child(pair, "field") || pair.named_children[1]
+        named_child(pair, "value") || named_child(pair, "field") || node_named_children(pair)[1]
       end
 
       def hash_key_name(node)
@@ -809,7 +881,7 @@ module Decomplex
       end
 
       def array_elements(node)
-        Array(node.named_children).reject { |child| %w[comment].include?(child.kind.to_s) }
+        node_named_children(node).reject { |child| %w[comment].include?(child.kind.to_s) }
       end
 
       def method_owner(fn)
@@ -963,17 +1035,17 @@ module Decomplex
 
       def constant_assignment(node)
         if %w[assignment assignment_expression assignment_statement].include?(node.kind.to_s)
-          target = named_child(node, "left") || node.named_children.first
+          target = named_child(node, "left") || node_named_children(node).first
           return [nil, nil] unless target && target.kind.to_s == "constant"
 
-          return [node_text(target), named_child(node, "right") || node.named_children[1]]
+          return [node_text(target), named_child(node, "right") || node_named_children(node)[1]]
         end
 
         match = node_text(node).match(/\A([A-Z]\w*)\s*=\s*(.+)\z/m)
         return [nil, nil] unless match
 
-        value = node.named_children.drop(1).find { |child| node_text(child) == match[2].strip } ||
-          node.named_children[1]
+        value = node_named_children(node).drop(1).find { |child| node_text(child) == match[2].strip } ||
+          node_named_children(node)[1]
         [match[1], value]
       end
 
@@ -984,6 +1056,7 @@ module Decomplex
         text = node_text(node)
         case kind
         when "string", "string_literal", "interpreted_string_literal", "raw_string_literal" then "String"
+        when "number" then "number"
         when "integer", "integer_literal" then "Integer"
         when "float", "float_literal" then "Float"
         when "true", "false", "true_literal", "false_literal", "boolean" then "T::Boolean"
@@ -1055,36 +1128,75 @@ module Decomplex
       end
 
       def walk_tree(node, &block)
-        return unless ts_node?(node)
+        pending = [node]
+        seen = Set.new
+        until pending.empty?
+          current = pending.pop
+          next unless ts_node?(current)
+          key = current.object_id
+          next if seen.include?(key)
 
-        yield node
-        node.children.each { |child| walk_tree(child, &block) }
+          seen << key
+          yield current
+          node_children(current).reverse_each { |child| pending << child }
+        end
       end
 
       def ts_node?(node)
         node && node.respond_to?(:kind) && node.respond_to?(:children)
       end
 
+      def node_cache(node)
+        @ts_node_cache[node.object_id] ||= {}
+      end
+
+      def node_children(node)
+        node_cache(node).fetch(:children) do
+          node_cache(node)[:children] = Array(node.children)
+        end
+      rescue StandardError
+        []
+      end
+
+      def node_named_children(node)
+        node_cache(node).fetch(:named_children) do
+          node_cache(node)[:named_children] = Array(node.named_children)
+        end
+      rescue StandardError
+        []
+      end
+
       def named_child(node, name)
-        node.child_by_field_name(name)
+        fields = (node_cache(node)[:fields] ||= {})
+        fields.fetch(name) do
+          fields[name] = node.child_by_field_name(name)
+        end
       rescue StandardError
         nil
       end
 
       def node_line(node)
-        node.start_point.row + 1
+        node_cache(node).fetch(:line) do
+          node_cache(node)[:line] = node.start_point.row + 1
+        end
       rescue StandardError
         1
       end
 
       def node_span(node)
-        [node.start_point.row + 1, node.start_point.column, node.end_point.row + 1, node.end_point.column]
+        node_cache(node).fetch(:span) do
+          node_cache(node)[:span] = [node.start_point.row + 1, node.start_point.column, node.end_point.row + 1, node.end_point.column]
+        end
       rescue StandardError
         nil
       end
 
       def node_text(node)
-        node&.text.to_s.strip
+        node_cache(node).fetch(:text) do
+          node_cache(node)[:text] = node&.text.to_s.strip
+        end
+      rescue StandardError
+        ""
       end
 
       def normalize_text(text)

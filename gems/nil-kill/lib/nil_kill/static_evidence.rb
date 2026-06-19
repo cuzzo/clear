@@ -11,6 +11,7 @@ else
   require "decomplex/source_filter"
   require "decomplex/syntax"
 end
+require_relative "alias_recommendations"
 require_relative "decomplex_static_facts"
 
 module NilKill
@@ -18,21 +19,25 @@ module NilKill
   # Nil-Kill's Ruby runtime/Sorbet inference path and consumes the shared
   # Tree-sitter facts exposed by Decomplex.
   class StaticEvidence
-    def self.build(targets = nil, root: NilKill::ROOT)
-      new(targets, root: root).build
+    def self.build(targets = nil, root: NilKill::ROOT, language: nil)
+      new(targets, root: root, language: language).build
     end
 
-    def initialize(targets = nil, root: NilKill::ROOT)
+    def initialize(targets = nil, root: NilKill::ROOT, language: nil)
       @targets = Array(targets).compact
       @root = root
+      @language = normalize_language(language)
     end
 
     def build
       methods = []
       fields = []
       state_types = {}
+      state_type_records = []
       state_protocols = Hash.new { |h, k| h[k] = Set.new }
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
+      state_protocol_records = []
+      state_param_origin_records = []
       signatures = {}
       type_definitions = []
       hash_shapes = []
@@ -40,13 +45,16 @@ module NilKill
       files = target_files
 
       files.each do |file|
-        doc = Decomplex::Syntax.parse(file, parser: "tree_sitter")
+        doc = Decomplex::Syntax.parse(file, parser: "tree_sitter", language: @language)
         facts = doc.static_facts(root: @root)
         methods.concat(facts.fetch(:methods, []))
         fields.concat(facts.fetch(:fields, []))
         state_types.merge!(facts.fetch(:state_types, {}))
+        state_type_records.concat(facts.fetch(:state_type_records, []))
         merge_set_map!(state_protocols, facts.fetch(:state_protocols, {}))
         merge_set_map!(state_param_origins, facts.fetch(:state_param_origins, {}))
+        state_protocol_records.concat(facts.fetch(:state_protocol_records, []))
+        state_param_origin_records.concat(facts.fetch(:state_param_origin_records, []))
         signatures.merge!(facts.fetch(:signatures, {}))
         type_definitions.concat(facts.fetch(:type_definitions, []))
         hash_shapes.concat(facts.fetch(:hash_shapes, []))
@@ -55,6 +63,18 @@ module NilKill
 
       state_protocols = stringify_set_map(state_protocols)
       state_param_origins = stringify_set_map(state_param_origins)
+      state_type_records = state_type_records.uniq do |record|
+        [record["language"], record["path"], record["owner"],
+          record["field"], record["declared_type"], record["line"]]
+      end
+      state_protocol_records = state_protocol_records.uniq do |record|
+        [record["language"], record["path"], record["owner"], record["function"],
+          record["field"], record["protocol"], record["line"]]
+      end
+      state_param_origin_records = state_param_origin_records.uniq do |record|
+        [record["language"], record["path"], record["owner"], record["function"],
+          record["field"], record["param"], record["line"]]
+      end
       type_definitions = type_definitions.uniq do |definition|
         [definition["language"], definition["path"], definition["owner"], definition["kind"],
           definition["name"], definition["line"], definition["type_system"]]
@@ -83,8 +103,11 @@ module NilKill
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "state_types" => Hash[state_types.sort],
+          "state_type_records" => state_type_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s] },
           "state_protocols" => state_protocols,
           "state_param_origins" => state_param_origins,
+          "state_protocol_records" => state_protocol_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s, record["protocol"].to_s] },
+          "state_param_origin_records" => state_param_origin_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s, record["param"].to_s] },
           "signatures" => Hash[signatures.sort],
           "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
           "alias_recommendations" => alias_recommendations,
@@ -100,8 +123,11 @@ module NilKill
           "fields" => fields.uniq { |field| field["id"] }.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
+          "state_type_records" => state_type_records.size,
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
+          "state_protocol_records" => state_protocol_records.size,
+          "state_param_origin_records" => state_param_origin_records.size,
           "type_definitions" => type_definitions.size,
           "alias_recommendations" => alias_recommendations.size,
           "hash_shapes" => hash_shapes.size,
@@ -151,14 +177,35 @@ module NilKill
     def file_record(file)
       {
         "path" => rel(file),
-        "language" => Decomplex::Syntax.language_for(file).to_s,
+        "language" => file_language(file).to_s,
         "digest" => "sha256:#{Digest::SHA256.file(file).hexdigest}",
         "parser" => "tree_sitter",
       }
     end
 
     def languages_for(files)
-      files.map { |file| Decomplex::Syntax.language_for(file).to_s }.uniq.sort
+      files.map { |file| file_language(file).to_s }.uniq.sort
+    end
+
+    def file_language(file)
+      @language || Decomplex::Syntax.language_for(file)
+    end
+
+    def normalize_language(language)
+      text = language.to_s.strip
+      return nil if text.empty?
+
+      normalized = text.downcase.tr("-", "_")
+      case normalized
+      when "c++", "cplusplus" then :cpp
+      when "c#", "c_sharp", "cs" then :csharp
+      when "ts" then :typescript
+      when "py" then :python
+      when "rs" then :rust
+      when "golang" then :go
+      when "kt", "kts" then :kotlin
+      else normalized.to_sym
+      end
     end
 
     def merge_set_map!(target, source)

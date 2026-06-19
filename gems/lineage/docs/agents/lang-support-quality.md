@@ -20,12 +20,15 @@ This pass spot checked the validation DBs created for Python, TypeScript, Go, Lu
 - Decomplex extracts Go `name type` struct field declarations, so fields like `I16 []int16` keep their type.
 - Nil-kill no longer treats Python `-> None` as nullable pressure by itself. `str | None`, `None | str`, `Optional[...]`, `null`, and `undefined` still count.
 - Nil-kill Go static evidence now preserves typed struct fields through to SARIF; fzf no longer reports `Slab#I16` as an untyped field.
+- Nil-kill static evidence now consumes Decomplex Tree-sitter facts for Lua, Rust, Zig, C, C++, C#, Go, Java, Kotlin, and Swift through language providers instead of Ruby-specific extraction.
+- Nil-kill preserves collision-free `state_type_records`, `state_protocol_records`, and `state_param_origin_records` so same owner/field names in different languages do not overwrite each other.
+- Decomplex Tree-sitter node facade traversal is lazy/cached and nil-kill static fact walks are iterative, avoiding eager full-tree O(n) child indexing per Tree-sitter operation.
 
 Regression tests added:
 
 - `gems/decomplex/test/syntax_test.rb`: Lua generated prelude suppression and Go name-type struct fields.
 - `gems/decomplex/test/report_test.rb`: actionable SARIF messages for derived-state staleness and broken protocols.
-- `gems/nil-kill/spec/multi_language_runtime_spec.rb`: Python `-> None` nullable handling and Go typed struct field evidence.
+- `gems/nil-kill/spec/multi_language_runtime_spec.rb`: Python `-> None` nullable handling, Go typed struct field evidence, and Decomplex-backed nil-kill static facts for Lua, Rust, Zig, C, C++, C#, Go, Java, Kotlin, and Swift.
 
 ## Current Validation DBs
 
@@ -45,6 +48,34 @@ All UI servers responded with HTTP 200 on ports `8081` through `8090` after SARI
 | Kotlin | Okio | 8090 | 3,357 | 6 | 2,243 | 0 | 0 |
 
 Swift and Kotlin SARIF reingest skipped two non-SARIF JSON evidence files in each `tmp/lineage-sarif` directory. That is expected because the ingest command accepts directories and ignores JSON files that are not SARIF documents.
+
+## Nil-kill Static Evidence Spot Check
+
+Static evidence was generated through `NilKill::StaticEvidence.build` with Tree-sitter grammars loaded from local `node_modules`. Output files were written under `/tmp/nil-kill-static-spots`. These timings were collected after the lazy Tree-sitter facade and iterative nil-kill fact walk changes, using full repository roots unless noted.
+
+| Language Focus | Repo / Target | Time | Files | Methods | Fields | State Type Records | Protocol Records | Param-Origin Records | Parsed Languages |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Ruby | `gems/nil-kill` | 19.254s | 95 | 1,765 | 288 | 14 | 426 | 87 | Python, Ruby |
+| Python | Rich | 16.773s | 213 | 1,792 | 496 | 68 | 211 | 470 | Python |
+| TypeScript | Zod | 36.036s | 405 | 1,143 | 113 | 15 | 94 | 12 | JavaScript, TypeScript |
+| Lua | LuaRocks | 11.602s | 172 | 1,008 | 20 | 17 | 12 | 2 | C, C++, Lua |
+| Rust | `gems/lineage` | 14.192s | 19 | 772 | 701 | 701 | 121 | 0 | JavaScript, Ruby, Rust |
+| Zig | `zig/` | 39.656s | 279 | 2,907 | 2,289 | 2,228 | 1,422 | 178 | C++, Zig |
+| C | libuv | 31.700s | 368 | 3,249 | 1,201 | 961 | 590 | 0 | C, JavaScript, Python |
+| C++ | fmt | 37.257s | 77 | 3,291 | 322 | 306 | 112 | 12 | C, C++, JavaScript, Python |
+| C# | Serilog | 7.727s | 216 | 1,382 | 439 | 439 | 148 | 0 | C# |
+| Go | fzf | 20.238s | 90 | 1,358 | 848 | 808 | 733 | 26 | Go, Ruby |
+| Java | Gson | 14.725s | 262 | 3,041 | 1,071 | 1,071 | 73 | 23 | Java |
+| Kotlin | Okio | 21.500s | 351 | 4,094 | 549 | 535 | 1,161 | 17 | C, Java, Kotlin |
+| Swift | Argument Parser | 7.743s | 165 | 977 | 2,192 | 1,559 | 473 | 0 | Swift |
+
+Spot checks of the generated JSON confirmed anchored facts for representative real code:
+
+- Go/fzf: `Slab.I16 []int16` and `Slab.I32 []int32` are typed fields; Go methods carry params and signatures.
+- Java/Gson: `Gson#getAdapter`, `GsonBuilder#setDateFormat`, and `Gson` typed fields are anchored with Java signatures, protocols, and param origins.
+- Kotlin/Okio: `Segment#limit`, `Segment#prev`, `Buffer#offset`, and `FakeFileSystem` state/protocol records are anchored to Kotlin files.
+- Swift/Argument Parser: `ArgumentSet` methods, typed fields, and collection protocols are anchored to Swift source.
+- Rust, Zig, C, C++, C#, Lua, Python, TypeScript, and Ruby outputs were spot checked for non-empty methods/fields and language-specific protocol/origin records where the language adapter emits them.
 
 ## Language Findings
 

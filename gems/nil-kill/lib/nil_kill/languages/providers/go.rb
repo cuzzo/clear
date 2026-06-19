@@ -4,21 +4,21 @@
 module NilKill
   module Languages
     module Providers
-      class Rust < Provider
+      class Go < Provider
         def language
-          "rust"
+          "go"
         end
 
         def aliases
-          ["rs"]
+          ["golang"]
         end
 
         def display_name
-          "Rust"
+          "Go"
         end
 
         def extensions
-          [".rs"]
+          [".go"]
         end
 
         def runtime_tracing?
@@ -26,11 +26,11 @@ module NilKill
         end
 
         def notes
-          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Rust"]
+          ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Go"]
         end
       end
     end
   end
 end
 
-NilKill::Languages.register(NilKill::Languages::Providers::Rust.new)
+NilKill::Languages.register(NilKill::Languages::Providers::Go.new)
