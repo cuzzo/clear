@@ -12,8 +12,9 @@ module NilKill
         output = option("--output") || File.join(TMP_DIR, "static.json")
         root = File.expand_path(option("--root") || ROOT)
         language = option("--language")
+        vcs = option("--vcs")
         targets = @argv.reject { |arg| arg.start_with?("--") }
-        evidence = StaticEvidence.build(targets.empty? ? nil : targets, root: root, language: language)
+        evidence = StaticEvidence.build(targets.empty? ? nil : targets, root: root, language: language, vcs: vcs)
         FileUtils.mkdir_p(File.dirname(output))
         File.write(output, JSON.pretty_generate(evidence))
         puts "wrote static evidence to #{NilKill.rel(output)}"

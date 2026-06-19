@@ -1,6 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
+require "open3"
+
 sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
 if File.file?("#{sibling_decomplex}/source_filter.rb") && File.file?("#{sibling_decomplex}/syntax.rb")
   require "#{sibling_decomplex}/ast"
@@ -19,14 +21,15 @@ module NilKill
   # Nil-Kill's Ruby runtime/Sorbet inference path and consumes the shared
   # Tree-sitter facts exposed by Decomplex.
   class StaticEvidence
-    def self.build(targets = nil, root: NilKill::ROOT, language: nil)
-      new(targets, root: root, language: language).build
+    def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil)
+      new(targets, root: root, language: language, vcs: vcs).build
     end
 
-    def initialize(targets = nil, root: NilKill::ROOT, language: nil)
+    def initialize(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil)
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
+      @vcs = normalize_vcs(vcs)
     end
 
     def build
@@ -95,6 +98,7 @@ module NilKill
         "parser" => "tree_sitter",
         "generated_at" => Time.now.utc.iso8601,
         "root" => @root,
+        "vcs" => @vcs&.to_s,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => NilKill.target_exclude_dirs.map { |dir| rel(dir) },
         "runtime_fields" => false,
@@ -151,6 +155,8 @@ module NilKill
 
     def target_files
       exts = Decomplex::Syntax.supported_exts(parser: "tree_sitter")
+      return git_tracked_target_files(exts) if @vcs == :git
+
       target_dirs.flat_map do |target|
         if File.directory?(target)
           Decomplex::SourceFilter.collect(
@@ -164,6 +170,40 @@ module NilKill
           []
         end
       end.uniq.sort
+    end
+
+    def git_tracked_target_files(exts)
+      targets = target_dirs
+      git_tracked_files.select do |path|
+        target_path?(path, targets) && source_file?(path, exts)
+      end.uniq.sort
+    end
+
+    def git_tracked_files
+      top = git_root
+      out, status = Open3.capture2e("git", "-C", top, "ls-files", "-z")
+      raise ArgumentError, "git ls-files failed under #{top}: #{out.strip}" unless status.success?
+
+      out.split("\0").reject(&:empty?).map { |path| File.expand_path(path, top) }
+    end
+
+    def git_root
+      out, status = Open3.capture2e("git", "-C", @root, "rev-parse", "--show-toplevel")
+      raise ArgumentError, "--vcs=git requires #{@root} to be inside a git worktree" unless status.success?
+
+      File.expand_path(out.strip)
+    end
+
+    def target_path?(path, targets)
+      expanded = File.expand_path(path)
+      targets.any? do |target|
+        target = File.expand_path(target, @root)
+        if File.directory?(target)
+          expanded == target || expanded.start_with?("#{target}#{File::SEPARATOR}")
+        else
+          expanded == target
+        end
+      end
     end
 
     def source_file?(path, exts)
@@ -206,6 +246,14 @@ module NilKill
       when "kt", "kts" then :kotlin
       else normalized.to_sym
       end
+    end
+
+    def normalize_vcs(vcs)
+      text = vcs.to_s.strip.downcase
+      return nil if text.empty? || %w[none false off].include?(text)
+      return :git if text == "git"
+
+      raise ArgumentError, "unsupported --vcs=#{vcs}; supported values: git"
     end
 
     def merge_set_map!(target, source)

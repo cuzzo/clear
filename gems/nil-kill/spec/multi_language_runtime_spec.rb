@@ -484,6 +484,47 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
+  it "limits static evidence to git tracked files with --vcs=git" do
+    require_tree_sitter_language!(:ruby)
+
+    Dir.mktmpdir("nil-kill-vcs-static", NilKill::ROOT) do |dir|
+      File.write(File.join(dir, "tracked.rb"), <<~RUBY)
+        class Tracked
+          def call(value)
+            value
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "untracked.rb"), <<~RUBY)
+        class Untracked
+          def call(value)
+            value
+          end
+        end
+      RUBY
+      system("git", "init", "--quiet", chdir: dir) || raise("git init failed")
+      system("git", "add", "tracked.rb", chdir: dir) || raise("git add failed")
+      output = File.join(dir, "static.json")
+
+      NilKill::Commands::StaticCommand.new([
+        "--root", dir,
+        "--language", "ruby",
+        "--vcs=git",
+        "--output", output,
+        dir,
+      ]).run
+      evidence = JSON.parse(File.read(output))
+
+      expect(evidence["vcs"]).to eq("git")
+      expect(evidence.fetch("files").map { |file| file.fetch("path") }).to eq(["tracked.rb"])
+      expect(evidence.fetch("methods")).to include(a_hash_including(
+        "language" => "ruby",
+        "owner" => "Tracked",
+        "name" => "call"
+      ))
+    end
+  end
+
   it "exposes provider capabilities from trace-spec" do
     spec = NilKill::Commands::TraceSpecCommand.new([]).spec
     languages = spec.fetch("language_capabilities").to_h { |cap| [cap.fetch("language"), cap] }
