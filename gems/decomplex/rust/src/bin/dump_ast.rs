@@ -63,6 +63,8 @@ fn child_value(child: &Child) -> Value {
     match child {
         Child::Node(node) => node_value(node),
         Child::Symbol(value) | Child::String(value) => Value::String(value.clone()),
+        Child::Integer(value) => Value::Number((*value).into()),
+        Child::Bool(value) => Value::Bool(*value),
         Child::Nil => Value::Null,
     }
 }

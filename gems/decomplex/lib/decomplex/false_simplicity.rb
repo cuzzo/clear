@@ -395,7 +395,8 @@ module Decomplex
         end
       m = mid.to_s
 
-      if block_pass?(call) && callback?(m) && !@lexicon.meta_mids.include?(m)
+      if (block_pass?(call) || block_literal_call?(call)) &&
+          callback?(m) && !@lexicon.meta_mids.include?(m)
         return emit(:callback_inversion, m, dn(defs), call)
       end
       return emit(:metaprogramming, m, dn(defs), call) if @lexicon.meta_mids.include?(m)
@@ -467,6 +468,11 @@ module Decomplex
 
       args.type == :LIST &&
         args.children.any? { |c| Ast.node?(c) && c.type == :BLOCK_PASS }
+    end
+
+    def block_literal_call?(call)
+      text = call.text.to_s
+      text.include?("{") || text.match?(/\bdo\b/)
     end
 
     def method_obj?(recv)

@@ -8,6 +8,217 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Language as TreeSitterLanguage, Node, Parser};
 
+trait LanguageProfile {
+    fn language(&self) -> Language;
+    fn grammar(&self) -> TreeSitterLanguage;
+
+    fn first_argument_receiver(&self) -> bool {
+        false
+    }
+
+    fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
+        generic_function_name(node, source)
+    }
+
+    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
+        generic_owner_name_from_declaration(node, source)
+    }
+
+    fn generated_prelude(&self, _node: Node<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn receiver_convention_owner_name(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if !self.first_argument_receiver() || node.kind() != "function_definition" {
+            return None;
+        }
+
+        let (type_name, _) = first_argument_receiver_parameter(node, source)?;
+        let type_name = normalize_type_owner(&type_name);
+        let name = self.function_name(node, source)?;
+
+        if name.starts_with(&snake_case_type_name(&type_name)) {
+            Some(type_name)
+        } else if type_name.ends_with("_t")
+            && name.starts_with(type_name.strip_suffix("_t").unwrap())
+        {
+            Some(type_name)
+        } else {
+            None
+        }
+    }
+
+    fn function_receiver_name(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if self.first_argument_receiver() && node.kind() == "function_definition" {
+            if let Some((_, name)) = first_argument_receiver_parameter(node, source) {
+                return Some(name);
+            }
+        }
+        None
+    }
+
+    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
+        generic_state_target(lhs, source)
+    }
+}
+
+macro_rules! default_profile {
+    ($name:ident, $language:ident, $grammar:expr) => {
+        struct $name;
+
+        impl LanguageProfile for $name {
+            fn language(&self) -> Language {
+                Language::$language
+            }
+
+            fn grammar(&self) -> TreeSitterLanguage {
+                $grammar.into()
+            }
+        }
+    };
+}
+
+struct RubyProfile;
+
+impl LanguageProfile for RubyProfile {
+    fn language(&self) -> Language {
+        Language::Ruby
+    }
+
+    fn grammar(&self) -> TreeSitterLanguage {
+        tree_sitter_ruby::LANGUAGE.into()
+    }
+
+    fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
+        match node.kind() {
+            "singleton_method" => {
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|name| node_text(name, source).to_string())
+                    .or_else(|| {
+                        named_children(node)
+                            .into_iter()
+                            .rev()
+                            .find(|child| {
+                                matches!(
+                                    child.kind(),
+                                    "identifier" | "field_identifier" | "property_identifier"
+                                )
+                            })
+                            .map(|child| node_text(child, source).to_string())
+                    })?;
+                Some(format!("self.{name}"))
+            }
+            "body_statement" if first_child_kind(node) == Some("def") => {
+                hidden_ruby_method_name(node, source)
+            }
+            "argument_list" if first_child_kind(node) == Some("def") => {
+                inline_def_name(node, source)
+            }
+            _ => generic_function_name(node, source),
+        }
+    }
+
+    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node.kind() == "body_statement"
+            && matches!(first_child_kind(node), Some("class" | "module"))
+        {
+            return first_named_text(node, source, &["constant", "identifier", "type_identifier"]);
+        }
+        generic_owner_name_from_declaration(node, source)
+    }
+}
+
+struct CProfile;
+
+impl LanguageProfile for CProfile {
+    fn language(&self) -> Language {
+        Language::C
+    }
+
+    fn grammar(&self) -> TreeSitterLanguage {
+        tree_sitter_c::LANGUAGE.into()
+    }
+
+    fn first_argument_receiver(&self) -> bool {
+        true
+    }
+}
+
+struct LuaProfile;
+
+impl LanguageProfile for LuaProfile {
+    fn language(&self) -> Language {
+        Language::Lua
+    }
+
+    fn grammar(&self) -> TreeSitterLanguage {
+        tree_sitter_lua::LANGUAGE.into()
+    }
+
+    fn generated_prelude(&self, node: Node<'_>, source: &str) -> bool {
+        if line(node) != 1 {
+            return false;
+        }
+        let first_line = source.lines().next().unwrap_or("");
+        first_line.contains("_tl_compat") && first_line.contains("compat53.module")
+    }
+}
+
+default_profile!(PythonProfile, Python, tree_sitter_python::LANGUAGE);
+default_profile!(
+    JavaScriptProfile,
+    JavaScript,
+    tree_sitter_javascript::LANGUAGE
+);
+default_profile!(JavaProfile, Java, tree_sitter_java::LANGUAGE);
+default_profile!(
+    TypeScriptProfile,
+    TypeScript,
+    tree_sitter_typescript::LANGUAGE_TYPESCRIPT
+);
+default_profile!(SwiftProfile, Swift, tree_sitter_swift::LANGUAGE);
+default_profile!(KotlinProfile, Kotlin, tree_sitter_kotlin_ng::LANGUAGE);
+default_profile!(GoProfile, Go, tree_sitter_go::LANGUAGE);
+default_profile!(RustProfile, Rust, tree_sitter_rust::LANGUAGE);
+default_profile!(ZigProfile, Zig, tree_sitter_zig::LANGUAGE);
+default_profile!(CppProfile, Cpp, tree_sitter_cpp::LANGUAGE);
+default_profile!(CSharpProfile, CSharp, tree_sitter_c_sharp::LANGUAGE);
+
+static RUBY_PROFILE: RubyProfile = RubyProfile;
+static PYTHON_PROFILE: PythonProfile = PythonProfile;
+static JAVASCRIPT_PROFILE: JavaScriptProfile = JavaScriptProfile;
+static JAVA_PROFILE: JavaProfile = JavaProfile;
+static TYPESCRIPT_PROFILE: TypeScriptProfile = TypeScriptProfile;
+static SWIFT_PROFILE: SwiftProfile = SwiftProfile;
+static KOTLIN_PROFILE: KotlinProfile = KotlinProfile;
+static GO_PROFILE: GoProfile = GoProfile;
+static RUST_PROFILE: RustProfile = RustProfile;
+static ZIG_PROFILE: ZigProfile = ZigProfile;
+static LUA_PROFILE: LuaProfile = LuaProfile;
+static C_PROFILE: CProfile = CProfile;
+static CPP_PROFILE: CppProfile = CppProfile;
+static CSHARP_PROFILE: CSharpProfile = CSharpProfile;
+
+fn language_profile(language: Language) -> &'static dyn LanguageProfile {
+    match language {
+        Language::Ruby => &RUBY_PROFILE,
+        Language::Python => &PYTHON_PROFILE,
+        Language::JavaScript => &JAVASCRIPT_PROFILE,
+        Language::Java => &JAVA_PROFILE,
+        Language::TypeScript => &TYPESCRIPT_PROFILE,
+        Language::Swift => &SWIFT_PROFILE,
+        Language::Kotlin => &KOTLIN_PROFILE,
+        Language::Go => &GO_PROFILE,
+        Language::Rust => &RUST_PROFILE,
+        Language::Zig => &ZIG_PROFILE,
+        Language::Lua => &LUA_PROFILE,
+        Language::C => &C_PROFILE,
+        Language::Cpp => &CPP_PROFILE,
+        Language::CSharp => &CSHARP_PROFILE,
+    }
+}
+
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let parsed = ParsedDocument::parse(file, language)?;
     let mut function_defs = Vec::new();
@@ -48,25 +259,6 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     })
 }
 
-fn language_grammar(language: Language) -> TreeSitterLanguage {
-    match language {
-        Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-        Language::Python => tree_sitter_python::LANGUAGE.into(),
-        Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
-        Language::Java => tree_sitter_java::LANGUAGE.into(),
-        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        Language::Swift => tree_sitter_swift::LANGUAGE.into(),
-        Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
-        Language::Go => tree_sitter_go::LANGUAGE.into(),
-        Language::Rust => tree_sitter_rust::LANGUAGE.into(),
-        Language::Zig => tree_sitter_zig::LANGUAGE.into(),
-        Language::Lua => tree_sitter_lua::LANGUAGE.into(),
-        Language::C => tree_sitter_c::LANGUAGE.into(),
-        Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-        Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
-    }
-}
-
 struct ParsedDocument {
     file: PathBuf,
     source: String,
@@ -79,7 +271,7 @@ impl ParsedDocument {
             .with_context(|| format!("failed to read {}", file.display()))?;
         let mut parser = Parser::new();
         parser
-            .set_language(&language_grammar(language))
+            .set_language(&language_profile(language).grammar())
             .with_context(|| "failed to initialize tree-sitter parser")?;
         let tree = parser
             .parse(&source, None)
@@ -184,11 +376,11 @@ fn record_function_def(
     node: Node<'_>,
     source: &str,
     file: &Path,
-    _language: Language,
+    language: Language,
     context: &ContextState,
     out: &mut Vec<FunctionDef>,
 ) {
-    let Some(name) = function_name(node, source) else {
+    let Some(name) = language_profile(language).function_name(node, source) else {
         return;
     };
     let function = FunctionDef {
@@ -222,13 +414,13 @@ fn record_predicate_alias(
     node: Node<'_>,
     source: &str,
     file: &Path,
-    _language: Language,
+    language: Language,
     out: &mut Vec<PredicateAlias>,
 ) {
     if !matches!(node.kind(), "method" | "function_definition") {
         return;
     }
-    let Some(name) = function_name(node, source) else {
+    let Some(name) = language_profile(language).function_name(node, source) else {
         return;
     };
     let Some(body) = method_single_expression_body(node) else {
@@ -295,7 +487,7 @@ fn record_decision_site(
     out: &mut Vec<DecisionSite>,
     seen: &mut HashSet<String>,
 ) {
-    if generated_lua_compat_prelude(node, source, language) {
+    if language_profile(language).generated_prelude(node, source) {
         return;
     }
 
@@ -327,17 +519,6 @@ fn record_decision_site(
             },
         );
     }
-}
-
-fn generated_lua_compat_prelude(node: Node<'_>, source: &str, language: Language) -> bool {
-    if language != Language::Lua {
-        return false;
-    }
-    if line(node) != 1 {
-        return false;
-    }
-    let first_line = source.lines().next().unwrap_or("");
-    first_line.contains("_tl_compat") && first_line.contains("compat53.module")
 }
 
 fn record_conjunction_decision(
@@ -446,8 +627,10 @@ fn push_owner_context(
     context: &ContextState,
     language: Language,
 ) -> ContextState {
-    let Some(owner) = owner_name_from_declaration(node, source)
-        .or_else(|| receiver_convention_owner_name(node, source, language))
+    let profile = language_profile(language);
+    let Some(owner) = profile
+        .owner_name_from_declaration(node, source)
+        .or_else(|| profile.receiver_convention_owner_name(node, source))
     else {
         return context.clone();
     };
@@ -472,13 +655,14 @@ fn push_function_context(
     source: &str,
     language: Language,
 ) -> ContextState {
-    let Some(function) = function_name(node, source) else {
+    let profile = language_profile(language);
+    let Some(function) = profile.function_name(node, source) else {
         return context;
     };
     let owner = context.current_owner();
     context.function = Some(function);
     context.owner = Some(owner);
-    context.receiver = function_receiver_name(node, source, language);
+    context.receiver = profile.function_receiver_name(node, source);
     context
 }
 
@@ -486,7 +670,7 @@ fn record_state_write(
     node: Node<'_>,
     source: &str,
     file: &Path,
-    _language: Language,
+    language: Language,
     context: &ContextState,
     out: &mut Vec<StateWrite>,
     seen: &mut HashSet<String>,
@@ -498,7 +682,7 @@ fn record_state_write(
     let Some(assignment) = assignment_target(node) else {
         return;
     };
-    let Some(target) = state_target(assignment.lhs, source) else {
+    let Some(target) = language_profile(language).state_target(assignment.lhs, source) else {
         return;
     };
     let target = normalize_target_receiver(target, context);
@@ -569,7 +753,7 @@ fn assignment_lhs_node(node: Node<'_>) -> bool {
     )
 }
 
-fn state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
+fn generic_state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
     if previous_sibling_text(lhs, source).as_deref() == Some(":") {
         return None;
     }
@@ -622,7 +806,7 @@ fn state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
     }
 }
 
-fn function_name(node: Node<'_>, source: &str) -> Option<String> {
+fn generic_function_name(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
         "method"
         | "function_definition"
@@ -690,12 +874,7 @@ fn declarator_name(node: Option<Node<'_>>, source: &str) -> Option<String> {
     None
 }
 
-fn owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
-    if node.kind() == "body_statement" && matches!(first_child_kind(node), Some("class" | "module"))
-    {
-        return first_named_text(node, source, &["constant", "identifier", "type_identifier"]);
-    }
-
+fn generic_owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
         "class" | "module" | "class_definition" | "class_declaration" | "class_specifier" => node
             .child_by_field_name("name")
@@ -1276,6 +1455,33 @@ end
         assert_eq!(doc.state_writes[0].function, "set");
         assert_eq!(doc.state_writes[0].field, "state");
     }
+
+    #[test]
+    fn language_profiles_own_parser_and_receiver_metadata() {
+        assert_eq!(language_profile(Language::Ruby).language(), Language::Ruby);
+        assert_eq!(language_profile(Language::C).language(), Language::C);
+        assert!(language_profile(Language::C).first_argument_receiver());
+        assert!(!language_profile(Language::Lua).first_argument_receiver());
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language_profile(Language::Lua).grammar())
+            .expect("lua grammar");
+    }
+
+    #[test]
+    fn lua_profile_owns_generated_prelude_filter() {
+        let source = "local _tl_compat; local ok, compat53 = pcall(require, \"compat53.module\")\nfunction real() end\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language_profile(Language::Lua).grammar())
+            .expect("lua grammar");
+        let tree = parser.parse(source, None).expect("parse lua");
+        let node = tree.root_node().named_child(0).expect("first lua node");
+
+        assert!(language_profile(Language::Lua).generated_prelude(node, source));
+        assert!(!language_profile(Language::Ruby).generated_prelude(node, source));
+    }
 }
 
 #[cfg(test)]
@@ -1287,14 +1493,13 @@ mod c_tests {
     #[test]
     fn test_c_assignment() {
         let mut file = NamedTempFile::new().unwrap();
-        file.write_all(b"void foo() { handle->loop = 1; }").unwrap();
+        file.write_all(b"typedef struct Node { int storage; } Node; void node_set(Node* node) { node->storage = 1; }")
+            .unwrap();
         let doc = parse_file(file.path().to_path_buf(), Language::C).unwrap();
-        assert!(!doc.state_writes.is_empty());
+        assert_eq!(doc.function_defs[0].owner, "Node");
+        assert_eq!(doc.state_writes[0].receiver, "self");
+        assert_eq!(doc.state_writes[0].field, "storage");
     }
-}
-
-fn first_argument_receiver_language(language: Language) -> bool {
-    matches!(language, Language::C)
 }
 
 fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(String, String)> {
@@ -1320,16 +1525,14 @@ fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(St
         )
     })?;
 
-    let name_node = named_children(first)
+    let name = named_children(first)
         .into_iter()
         .rev()
         .find(|child| matches!(child.kind(), "identifier" | "field_identifier"))
-        .or_else(|| first_named_child(first))?;
+        .map(|child| node_text(child, source).to_string())
+        .or_else(|| declarator_name(Some(first), source))?;
 
-    Some((
-        node_text(type_node, source).to_string(),
-        node_text(name_node, source).to_string(),
-    ))
+    Some((node_text(type_node, source).to_string(), name))
 }
 
 fn snake_case_type_name(type_str: &str) -> String {
@@ -1338,38 +1541,6 @@ fn snake_case_type_name(type_str: &str) -> String {
     // Simplified snake casing logic
     last.make_ascii_lowercase();
     last
-}
-
-fn receiver_convention_owner_name(
-    node: Node<'_>,
-    source: &str,
-    language: Language,
-) -> Option<String> {
-    if !first_argument_receiver_language(language) || node.kind() != "function_definition" {
-        return None;
-    }
-
-    let (type_name, _) = first_argument_receiver_parameter(node, source)?;
-    let type_name = normalize_type_owner(&type_name);
-    let name = function_name(node, source)?;
-
-    if name.starts_with(&snake_case_type_name(&type_name)) {
-        Some(type_name)
-    } else if type_name.ends_with("_t") && name.starts_with(type_name.strip_suffix("_t").unwrap()) {
-        Some(type_name)
-    } else {
-        None
-    }
-}
-
-fn function_receiver_name(node: Node<'_>, source: &str, language: Language) -> Option<String> {
-    // Only handling C convention for now
-    if first_argument_receiver_language(language) && node.kind() == "function_definition" {
-        if let Some((_, name)) = first_argument_receiver_parameter(node, source) {
-            return Some(name);
-        }
-    }
-    None
 }
 
 fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Target {

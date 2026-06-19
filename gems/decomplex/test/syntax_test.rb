@@ -111,6 +111,20 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_language_profile_owns_parser_metadata
+    c = Decomplex::Syntax.language_profile(:c)
+    assert_equal %w[.c .h], c.extensions
+    assert_equal "tree-sitter-c", c.package
+    assert_equal %w[c], c.grammar_names
+    assert c.first_argument_receiver?
+
+    csharp = Decomplex::Syntax.language_profile(:csharp)
+    assert_equal "tree-sitter-c-sharp", csharp.package
+    assert_equal %w[c-sharp csharp], csharp.grammar_names
+    assert_equal "c_sharp", csharp.tree_sitter_language_name
+    refute csharp.first_argument_receiver?
+  end
+
   def test_force_language_override_handles_ambiguous_headers
     assert_equal :c, Decomplex::Syntax.language_for("include/demo.h")
 

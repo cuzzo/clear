@@ -63,7 +63,7 @@ module Decomplex
           [binary_path, *args]
         else
           ["cargo", "run", "--quiet", "--release", "--manifest-path",
-           File.join(crate_root, "Cargo.toml"), "--", *args]
+           File.join(crate_root, "Cargo.toml"), "--bin", "decomplex-rust", "--", *args]
         end
       end
 
