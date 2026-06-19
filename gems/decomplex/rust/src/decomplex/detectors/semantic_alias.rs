@@ -1,5 +1,5 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::ast::{self, Span};
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,142 +48,60 @@ struct Use {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<SemanticAliasReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> SemanticAliasReport {
     let mut preds = Vec::new();
     let mut uses = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut scanner = SemanticAlias::new(file.to_string_lossy().to_string(), lines);
-        scanner.walk(&root, &Vec::new());
-        preds.extend(scanner.preds);
-        uses.extend(scanner.uses);
-    }
-    Ok(Report::new(preds, uses).findings())
-}
-
-struct SemanticAlias {
-    file: String,
-    lines: Vec<String>,
-    preds: Vec<Pred>,
-    uses: Vec<Use>,
-}
-
-impl SemanticAlias {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self {
-            file,
-            lines,
-            preds: Vec::new(),
-            uses: Vec::new(),
-        }
-    }
-
-    fn walk(&mut self, node: &Node, defstack: &[String]) {
-        let mut next_defstack = defstack.to_vec();
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                next_defstack.push(name.clone());
+    for document in documents {
+        for predicate in &document.predicate_aliases {
+            if !semantic_predicate_definition(&predicate.name, &predicate.body) {
+                continue;
             }
-        }
-
-        if node.r#type == "DEFN" {
-            self.record_pred(node);
-        }
-
-        if matches!(node.r#type.as_str(), "CALL" | "OPCALL") && self.comparison(node) {
-            let c = self.canon(&ast::slice(node, &self.lines));
-            self.uses.push(Use {
-                canon: c,
-                file: self.file.clone(),
-                defn: next_defstack
-                    .last()
-                    .cloned()
-                    .unwrap_or_else(|| "(top-level)".to_string()),
-                line: node.first_lineno,
-                raw: ast::slice(node, &self.lines),
-                span: [
-                    node.first_lineno,
-                    node.first_column,
-                    node.last_lineno,
-                    node.last_column,
-                ],
+            preds.push(Pred {
+                name: predicate.name.clone(),
+                canon: canon(&predicate.body),
+                file: predicate.file.clone(),
+                line: predicate.line,
+                span: predicate.span,
             });
         }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk(child, &next_defstack);
-        }
+        uses.extend(document.comparison_uses.iter().map(|comparison| Use {
+            canon: canon(&comparison.raw),
+            file: comparison.file.clone(),
+            defn: comparison.function.clone(),
+            line: comparison.line,
+            raw: comparison.raw.clone(),
+            span: comparison.span,
+        }));
     }
+    Report::new(preds, uses).findings()
+}
 
-    fn canon(&self, text: &str) -> String {
-        let (mut t, _) = ast::canon_polarity(text);
-        t = t.strip_prefix("self.").unwrap_or(&t).to_string();
-        t = t.strip_prefix('@').unwrap_or(&t).to_string();
+fn canon(text: &str) -> String {
+    let (mut t, _) = ast::canon_polarity(text);
+    t = t.strip_prefix("self.").unwrap_or(&t).to_string();
+    t = t.strip_prefix('@').unwrap_or(&t).to_string();
 
-        // Ruby: t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
-        let re = regex::Regex::new(
-            r"^[A-Za-z_]\w*(?:\([^)]*\))?\.(?P<rest>[A-Za-z_]\w*\s*(?:==|!=|\.))",
-        )
-        .unwrap();
-        t = re.replace(&t, "$rest").to_string();
+    // Ruby: t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
+    let re =
+        regex::Regex::new(r"^[A-Za-z_]\w*(?:\([^)]*\))?\.(?P<rest>[A-Za-z_]\w*\s*(?:==|!=|\.))")
+            .unwrap();
+    t = re.replace(&t, "$rest").to_string();
 
-        t.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
-    fn comparison(&self, node: &Node) -> bool {
-        let mid = node.children.get(1);
-        match mid {
-            Some(Child::Symbol(s)) => matches!(s.as_str(), "==" | "!=" | "nil?"),
-            _ => false,
-        }
-    }
-
-    fn record_pred(&mut self, node: &Node) {
-        if let Some(Child::Symbol(name)) = node.children.first() {
-            let stmts = ast::body_stmts(node);
-            if stmts.len() != 1 {
-                return;
-            }
-            let Some(body) = self.predicate_body(stmts[0]) else {
-                return;
-            };
-            let body_source = ast::slice(body, &self.lines);
-            if !self.semantic_predicate_definition(name, &body_source) {
-                return;
-            }
-
-            self.preds.push(Pred {
-                name: name.clone(),
-                canon: self.canon(&body_source),
-                file: self.file.clone(),
-                line: node.first_lineno,
-                span: [
-                    node.first_lineno,
-                    node.first_column,
-                    node.last_lineno,
-                    node.last_column,
-                ],
-            });
-        }
-    }
-
-    fn predicate_body<'a>(&self, node: &'a Node) -> Option<&'a Node> {
-        if node.r#type == "RETURN" {
-            node.children.iter().filter_map(ast::node).next()
-        } else {
-            Some(node)
-        }
-    }
-
-    fn semantic_predicate_definition(&self, name: &str, body: &str) -> bool {
-        name.ends_with('?')
-            || body.contains("==")
-            || body.contains("!=")
-            || body.contains("&&")
-            || body.contains("||")
-            || body.contains(" and ")
-            || body.contains(" or ")
-    }
+fn semantic_predicate_definition(name: &str, body: &str) -> bool {
+    name.ends_with('?')
+        || body.contains("==")
+        || body.contains("!=")
+        || body.contains("&&")
+        || body.contains("||")
+        || body.contains(" and ")
+        || body.contains(" or ")
 }
 
 struct Report {

@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PathConditionReport {
     pub neglected: Vec<NeglectedPathCondition>,
+    pub scattered: Vec<ScatteredPathCondition>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -18,6 +19,16 @@ pub struct NeglectedPathCondition {
     pub at: String,
     pub spans: BTreeMap<String, Span>,
     pub action: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScatteredPathCondition {
+    pub guards: Vec<String>,
+    pub support: usize,
+    pub scatter: usize,
+    pub rank: usize,
+    pub sites: Vec<String>,
+    pub spans: BTreeMap<String, Span>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,14 +42,18 @@ struct Site {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PathConditionReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
     let mut sites = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut pc = PathCondition::new(file.to_string_lossy().to_string(), lines);
-        pc.walk(&root, &Vec::new(), &Vec::new());
+    for document in documents {
+        let mut pc = PathCondition::new(document.file.clone(), document.lines.clone());
+        pc.walk(&document.normalized_root, &Vec::new(), &Vec::new());
         sites.extend(pc.sites);
     }
-    Ok(Report::new(sites).findings())
+    Report::new(sites).findings()
 }
 
 struct PathCondition {
@@ -220,7 +235,46 @@ impl Report {
     fn findings(&self) -> PathConditionReport {
         PathConditionReport {
             neglected: self.neglected(3),
+            scattered: self.scattered(2),
         }
+    }
+
+    fn scattered(&self, min_scatter: usize) -> Vec<ScatteredPathCondition> {
+        let mut out = Vec::new();
+        for (guards, sites) in &self.groups {
+            let scatter = sites
+                .iter()
+                .map(|site| (site.file.clone(), site.defn.clone()))
+                .collect::<BTreeSet<_>>()
+                .len();
+            if scatter < min_scatter {
+                continue;
+            }
+
+            let locations = sites
+                .iter()
+                .map(|site| format!("{}:{}:{}", site.file, site.defn, site.line))
+                .collect::<Vec<_>>();
+            let spans = sites
+                .iter()
+                .map(|site| {
+                    (
+                        format!("{}:{}:{}", site.file, site.defn, site.line),
+                        site.span,
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            out.push(ScatteredPathCondition {
+                guards: guards.clone(),
+                support: sites.len(),
+                scatter,
+                rank: sites.len() * scatter,
+                sites: locations,
+                spans,
+            });
+        }
+        out.sort_by(|a, b| b.rank.cmp(&a.rank).then_with(|| a.guards.cmp(&b.guards)));
+        out
     }
 
     fn neglected(&self, min_support: usize) -> Vec<NeglectedPathCondition> {

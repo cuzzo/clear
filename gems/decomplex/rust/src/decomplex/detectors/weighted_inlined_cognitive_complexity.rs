@@ -1,6 +1,6 @@
 use crate::decomplex::ast::{self, Node, Span};
 use crate::decomplex::detectors::structural_topology;
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,21 +26,18 @@ pub fn scan_files(
     files: &[PathBuf],
     language: Language,
 ) -> Result<Vec<WeightedInlinedCognitiveComplexityRow>> {
-    let mut parsed = BTreeMap::new();
-    for file in files {
-        parsed.insert(
-            file.to_string_lossy().to_string(),
-            ast::parse_with_language(file, language)?,
-        );
-    }
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
 
-    let topology_report = structural_topology::scan_files(files, language)?;
+pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveComplexityRow> {
+    let topology_report = structural_topology::scan_documents(documents);
     let topology = structural_topology::Graph::new(topology_report.methods, topology_report.edges);
 
     let mut bodies = Vec::new();
-    for (file, (root, lines)) in &parsed {
-        let mut collector = MethodBodyCollector::new(file.clone(), lines.clone());
-        bodies.extend(collector.scan(root));
+    for document in documents {
+        let mut collector = MethodBodyCollector::new(document.file.clone(), document.lines.clone());
+        bodies.extend(collector.scan(&document.normalized_root));
     }
 
     let mut scores = BTreeMap::new();
@@ -62,7 +59,7 @@ pub fn scan_files(
     }
 
     let analyzer = Analyzer::new(topology, scores, 12.0, 15.0, 2);
-    Ok(analyzer.findings())
+    analyzer.findings()
 }
 
 struct MethodBody {

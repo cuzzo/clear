@@ -1,6 +1,6 @@
 use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::{local_flow, weighted_inlined_cognitive_complexity};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -47,8 +47,16 @@ pub struct BoundaryInfo {
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<LocalityDragRow>> {
     let summaries = local_flow::scan_files(files, language)?;
+    Ok(scan_summaries(summaries))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<LocalityDragRow> {
+    scan_summaries(local_flow::scan_documents(documents))
+}
+
+pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<LocalityDragRow> {
     let mut detector = LocalityDrag::new(summaries);
-    Ok(detector.findings())
+    detector.findings()
 }
 
 struct LocalityDrag {

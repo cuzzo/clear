@@ -1,8 +1,8 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -23,14 +23,19 @@ const LIMIT: usize = 3;
 const PREDICATE_NODES: &[&str] = &["IF", "WHILE", "UNTIL"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ResultReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> ResultReport {
     let mut findings = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut scanner = OversizedPredicate::new(file.to_string_lossy().to_string(), lines, LIMIT);
-        scanner.walk(&root, &Vec::new());
+    for document in documents {
+        let mut scanner =
+            OversizedPredicate::new(document.file.clone(), document.lines.clone(), LIMIT);
+        scanner.walk(&document.normalized_root, &Vec::new());
         findings.extend(scanner.findings);
     }
-    Ok(ResultReport { findings })
+    ResultReport { findings }
 }
 
 struct OversizedPredicate {

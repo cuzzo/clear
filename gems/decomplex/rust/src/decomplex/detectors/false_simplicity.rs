@@ -2,7 +2,7 @@ use crate::decomplex::ast::{self, Child, Node, Span};
 use crate::decomplex::syntax::adapters::false_simplicity_lexicon::{
     false_simplicity_lexicon, FalseSimplicityLexicon,
 };
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,17 +39,24 @@ struct ClassRec {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FalseSimplicityRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<FalseSimplicityRow> {
     let mut hits = Vec::new();
     let mut classrecs = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector =
-            FalseSimplicity::new(file.to_string_lossy().to_string(), lines, language);
-        detector.walk(&root, &[], &[]);
+    for document in documents {
+        let mut detector = FalseSimplicity::new(
+            document.file.clone(),
+            document.lines.clone(),
+            document.language,
+        );
+        detector.walk(&document.normalized_root, &[], &[]);
         hits.extend(detector.hits);
         classrecs.extend(detector.classrecs);
     }
-    Ok(Report::new(hits, classrecs).findings())
+    Report::new(hits, classrecs).findings()
 }
 
 struct FalseSimplicity {

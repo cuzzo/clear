@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,11 +35,15 @@ struct VariantReads {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<FatUnionReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> FatUnionReport {
     let mut out = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = FatUnion::new(file.to_string_lossy().to_string(), lines);
-        detector.walk(&root, &Vec::new());
+    for document in documents {
+        let mut detector = FatUnion::new(document.file.clone(), document.lines.clone());
+        detector.walk(&document.normalized_root, &Vec::new());
         out.extend(detector.findings());
     }
     out.sort_by(|a, b| {
@@ -48,7 +52,7 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<FatUnionRepor
             .cmp(&a.common.len())
             .then_with(|| a.at.cmp(&b.at))
     });
-    Ok(FatUnionReport { fat_unions: out })
+    FatUnionReport { fat_unions: out }
 }
 
 struct FatUnion {

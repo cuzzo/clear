@@ -1,6 +1,6 @@
 use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow;
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,8 +46,18 @@ pub fn scan_files(
     language: Language,
 ) -> Result<Vec<OperationalDiscontinuityRow>> {
     let summaries = local_flow::scan_files(files, language)?;
+    Ok(scan_summaries(summaries))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<OperationalDiscontinuityRow> {
+    scan_summaries(local_flow::scan_documents(documents))
+}
+
+pub fn scan_summaries(
+    summaries: Vec<local_flow::MethodSummary>,
+) -> Vec<OperationalDiscontinuityRow> {
     let detector = OperationalDiscontinuity::new(summaries);
-    Ok(detector.findings())
+    detector.findings()
 }
 
 struct OperationalDiscontinuity {
@@ -104,7 +114,7 @@ impl OperationalDiscontinuity {
 
         let score = resets
             .iter()
-            .map(|r| (r.dead.len() as isize + r.new.len() as isize - r.continuing.len() as isize))
+            .map(|r| r.dead.len() as isize + r.new.len() as isize - r.continuing.len() as isize)
             .sum::<isize>()
             + (resets.len() as isize * 8);
         if score < self.min_score {

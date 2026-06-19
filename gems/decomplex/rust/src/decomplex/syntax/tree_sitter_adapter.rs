@@ -2,7 +2,7 @@ use super::{
     adapters::{language_profile, LanguageProfile},
     ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite,
 };
-use crate::decomplex::ast::{line, node_text, normalize_text, span, RawNode};
+use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
@@ -41,6 +41,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         source: parsed.source.clone(),
         lines: parsed.source.lines().map(ToString::to_string).collect(),
         root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
+        normalized_root: normalize_tree(parsed.tree.root_node(), &parsed.source, language),
         function_defs,
         state_writes,
         decision_sites,

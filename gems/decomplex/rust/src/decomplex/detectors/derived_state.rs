@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,16 +27,20 @@ struct Asgn {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DerivedStateRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<DerivedStateRow> {
     let mut out = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let detector = DerivedState::new(file.to_string_lossy().to_string(), lines);
-        detector.each_method(&root, &mut |file, defn, stmts| {
+    for document in documents {
+        let detector = DerivedState::new(document.file.clone(), document.lines.clone());
+        detector.each_method(&document.normalized_root, &mut |file, defn, stmts| {
             out.extend(analyze(file, defn, stmts));
         });
     }
     out.sort_by(|a, b| b.gap.cmp(&a.gap));
-    Ok(out)
+    out
 }
 
 struct DerivedState {

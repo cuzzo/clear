@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -167,27 +167,25 @@ const NON_MUTATING_OPERATOR_MIDS: &[&str] = &["!", "!=", "!~"];
 const MUTATING_SUFFIXES: &[&str] = &["!"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ImplicitControlFlowReport> {
-    let mut parsed = BTreeMap::new();
-    for file in files {
-        parsed.insert(
-            file.to_string_lossy().to_string(),
-            ast::parse_with_language(file, language)?,
-        );
-    }
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
 
-    let effect_index = EffectIndex::build(&parsed);
+pub fn scan_documents(documents: &[Document]) -> ImplicitControlFlowReport {
+    let effect_index = EffectIndex::build_documents(documents);
     let mut sequences = Vec::new();
-    for (file, (root, lines)) in &parsed {
-        let mut miner = ImplicitControlFlow::new(file.clone(), lines.clone(), &effect_index);
-        miner.walk(root, &Vec::new());
+    for document in documents {
+        let mut miner =
+            ImplicitControlFlow::new(document.file.clone(), document.lines.clone(), &effect_index);
+        miner.walk(&document.normalized_root, &Vec::new());
         sequences.extend(miner.sequences);
     }
 
     let report = Report::new(sequences);
-    Ok(ImplicitControlFlowReport {
+    ImplicitControlFlowReport {
         ordered_protocols: report.ordered_protocols(1),
         order_drift: report.drift(4, 0.75),
-    })
+    }
 }
 
 struct ImplicitControlFlow<'a> {
@@ -501,11 +499,18 @@ struct EffectIndex {
 }
 
 impl EffectIndex {
-    fn build(parsed: &BTreeMap<String, (Node, Vec<String>)>) -> Self {
+    fn build_documents(documents: &[Document]) -> Self {
         let mut effects = Vec::new();
-        for (file, (root, lines)) in parsed {
-            effects.extend(EffectCollector::new(file.clone(), lines.clone()).scan(root));
+        for document in documents {
+            effects.extend(
+                EffectCollector::new(document.file.clone(), document.lines.clone())
+                    .scan(&document.normalized_root),
+            );
         }
+        Self::from_effects(effects)
+    }
+
+    fn from_effects(effects: Vec<MethodEffect>) -> Self {
         let mut by_owner_name = BTreeMap::new();
         let mut by_name = BTreeMap::new();
         for e in effects {

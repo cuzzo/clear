@@ -1,14 +1,14 @@
 pub(crate) mod adapters;
 pub mod tree_sitter_adapter;
 
-use crate::decomplex::ast::{RawNode, Span};
+use crate::decomplex::ast::{Node as NormalizedNode, RawNode, Span};
 use crate::decomplex::parallel;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Language {
     Ruby,
     Python,
@@ -48,6 +48,47 @@ impl Language {
             _ => bail!("unsupported Decomplex native language: {value}"),
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ruby => "ruby",
+            Self::Python => "python",
+            Self::JavaScript => "javascript",
+            Self::Java => "java",
+            Self::TypeScript => "typescript",
+            Self::Swift => "swift",
+            Self::Kotlin => "kotlin",
+            Self::Go => "go",
+            Self::Rust => "rust",
+            Self::Zig => "zig",
+            Self::Lua => "lua",
+            Self::C => "c",
+            Self::Cpp => "cpp",
+            Self::CSharp => "csharp",
+            Self::Php => "php",
+        }
+    }
+
+    pub fn for_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "rb" => Some(Self::Ruby),
+            "py" => Some(Self::Python),
+            "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
+            "java" => Some(Self::Java),
+            "ts" | "tsx" => Some(Self::TypeScript),
+            "swift" => Some(Self::Swift),
+            "kt" | "kts" => Some(Self::Kotlin),
+            "go" => Some(Self::Go),
+            "rs" => Some(Self::Rust),
+            "zig" => Some(Self::Zig),
+            "lua" => Some(Self::Lua),
+            "c" | "h" => Some(Self::C),
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Some(Self::Cpp),
+            "cs" => Some(Self::CSharp),
+            "php" => Some(Self::Php),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -57,6 +98,7 @@ pub struct Document {
     pub source: String,
     pub lines: Vec<String>,
     pub root: RawNode,
+    pub normalized_root: NormalizedNode,
     pub function_defs: Vec<FunctionDef>,
     pub state_writes: Vec<StateWrite>,
     pub decision_sites: Vec<DecisionSite>,

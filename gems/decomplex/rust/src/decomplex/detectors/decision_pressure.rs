@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,18 +38,22 @@ struct Hit {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DecisionPressureRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<DecisionPressureRow> {
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
 
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = DecisionPressure::new(file.to_string_lossy().to_string(), lines);
-        detector.walk(&root, &Vec::new(), &BTreeMap::new());
+    for document in documents {
+        let mut detector = DecisionPressure::new(document.file.clone(), document.lines.clone());
+        detector.walk(&document.normalized_root, &Vec::new(), &BTreeMap::new());
         guard.extend(detector.guard_hits);
         dispatch.extend(detector.dispatch_hits);
     }
 
-    Ok(Report::new(guard, dispatch).ranked())
+    Report::new(guard, dispatch).ranked()
 }
 
 struct DecisionPressure {

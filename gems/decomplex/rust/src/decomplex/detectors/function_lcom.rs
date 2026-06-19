@@ -1,6 +1,6 @@
 use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow;
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,7 +33,15 @@ struct Component {
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FunctionLcomRow>> {
     let summaries = local_flow::scan_files(files, language)?;
-    Ok(FunctionLcom::new(summaries).findings())
+    Ok(scan_summaries(summaries))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<FunctionLcomRow> {
+    scan_summaries(local_flow::scan_documents(documents))
+}
+
+pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<FunctionLcomRow> {
+    FunctionLcom::new(summaries).findings()
 }
 
 struct FunctionLcom {

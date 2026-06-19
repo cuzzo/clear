@@ -1,5 +1,5 @@
 use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, DecisionSite, Language};
+use crate::decomplex::syntax::{self, DecisionSite, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,15 +33,19 @@ pub struct NeglectedCondition {
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<MinerReport> {
     let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> MinerReport {
     let mut sites = Vec::new();
     for doc in documents {
-        sites.extend(doc.decision_sites);
+        sites.extend(doc.decision_sites.clone());
     }
     let m = Miner::new(sites);
-    Ok(MinerReport {
+    MinerReport {
         missing_abstractions: m.missing_abstractions(2),
         neglected_conditions: m.neglected_conditions(3),
-    })
+    }
 }
 
 struct Miner {

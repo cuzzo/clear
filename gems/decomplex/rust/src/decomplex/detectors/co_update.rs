@@ -1,5 +1,5 @@
 use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, Language, StateWrite};
+use crate::decomplex::syntax::{self, Document, Language, StateWrite};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,34 +40,45 @@ struct Write {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<CoUpdateReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> CoUpdateReport {
     let mut writes = Vec::new();
-    for file in files {
-        let doc = syntax::parse_file(file.clone(), language)?;
-        for w in doc.state_writes {
-            writes.push(Write {
-                attr: w.field,
-                recv: w.receiver,
-                file: w.file,
-                defn: w.function,
-                line: w.line,
-                span: w.span,
-            });
+    for doc in documents {
+        for w in &doc.state_writes {
+            writes.push(write_from_state_write(w));
         }
     }
     let report = Report::new(writes);
-    Ok(CoUpdateReport {
+    CoUpdateReport {
         co_written_pairs: report.co_written_pairs(3),
         neglected_updates: report.neglected_updates(3),
-    })
+    }
+}
+
+pub fn state_writes_for_documents(documents: &[Document]) -> Vec<StateWrite> {
+    documents
+        .iter()
+        .flat_map(|document| document.state_writes.clone())
+        .collect()
 }
 
 pub fn state_writes_for_files(files: &[PathBuf], language: Language) -> Result<Vec<StateWrite>> {
-    let mut out = Vec::new();
-    for file in files {
-        let doc = syntax::parse_file(file.clone(), language)?;
-        out.extend(doc.state_writes);
+    let documents = syntax::parse_files(files, language)?;
+    Ok(state_writes_for_documents(&documents))
+}
+
+fn write_from_state_write(w: &StateWrite) -> Write {
+    Write {
+        attr: w.field.clone(),
+        recv: w.receiver.clone(),
+        file: w.file.clone(),
+        defn: w.function.clone(),
+        line: w.line,
+        span: w.span,
     }
-    Ok(out)
 }
 
 struct Report {

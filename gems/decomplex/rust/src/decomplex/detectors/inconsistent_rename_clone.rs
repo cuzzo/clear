@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,13 +44,17 @@ pub fn scan_files(
     files: &[PathBuf],
     language: Language,
 ) -> Result<Vec<InconsistentRenameCloneRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<InconsistentRenameCloneRow> {
     let mut blocks = Vec::new();
-    for file in files {
-        let (root, _lines) = ast::parse_with_language(file, language)?;
-        let detector = InconsistentRenameClone::new(file.to_string_lossy().to_string());
-        detector.collect(&root, &Vec::new(), &mut blocks);
+    for document in documents {
+        let detector = InconsistentRenameClone::new(document.file.clone());
+        detector.collect(&document.normalized_root, &Vec::new(), &mut blocks);
     }
-    Ok(Report::new(blocks).inconsistent_renames())
+    Report::new(blocks).inconsistent_renames()
 }
 
 struct InconsistentRenameClone {

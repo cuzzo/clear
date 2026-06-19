@@ -1,5 +1,5 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::ast::Span;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,76 +29,23 @@ struct Pred {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PredicateAliasReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> PredicateAliasReport {
     let mut preds = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut p = PredicateAlias::new(file.to_string_lossy().to_string(), lines);
-        p.walk(&root);
-        preds.extend(p.preds);
+    for document in documents {
+        preds.extend(document.predicate_aliases.iter().map(|predicate| Pred {
+            name: predicate.name.clone(),
+            body: predicate.body.clone(),
+            file: predicate.file.clone(),
+            defn: predicate.defn.clone(),
+            line: predicate.line,
+            span: predicate.span,
+        }));
     }
-    Ok(Report::new(preds).findings())
-}
-
-struct PredicateAlias {
-    file: String,
-    lines: Vec<String>,
-    preds: Vec<Pred>,
-}
-
-impl PredicateAlias {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self {
-            file,
-            lines,
-            preds: Vec::new(),
-        }
-    }
-
-    fn walk(&mut self, node: &Node) {
-        if node.r#type == "DEFN" {
-            self.record_def(node);
-        }
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk(child);
-        }
-    }
-
-    fn record_def(&mut self, node: &Node) {
-        let name = match node.children.get(0) {
-            Some(Child::Symbol(s)) => s.clone(),
-            _ => return,
-        };
-        let scope = node.children.get(1).and_then(ast::node);
-        let Some(scope) = scope else { return };
-        if scope.r#type != "SCOPE" {
-            return;
-        };
-
-        let body = scope.children.get(2).and_then(ast::node);
-        let Some(body) = body else { return };
-        if body.r#type == "BLOCK" {
-            return;
-        };
-
-        let txt = ast::slice(body, &self.lines);
-        if txt.is_empty() || txt.len() > 200 {
-            return;
-        };
-
-        self.preds.push(Pred {
-            name: name.clone(),
-            body: txt,
-            file: self.file.clone(),
-            defn: name,
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-        });
-    }
+    Report::new(preds).findings()
 }
 
 struct Report {

@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -53,13 +53,21 @@ const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSummary>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
     let mut out = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = LocalFlow::new(file.to_string_lossy().to_string(), lines, language);
-        out.extend(detector.scan(&root));
+    for document in documents {
+        let mut detector = LocalFlow::new(
+            document.file.clone(),
+            document.lines.clone(),
+            document.language,
+        );
+        out.extend(detector.scan(&document.normalized_root));
     }
-    Ok(out)
+    out
 }
 
 struct LocalFlow {

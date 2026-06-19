@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../decomplex"
+require_relative "report_facts"
 
 module Decomplex
   # Aggregates every detector over a file set and renders a single
@@ -8,134 +9,68 @@ module Decomplex
   # prioritisation, per-detector sections, run summary). Every number
   # is a ranked CANDIDATE count, never a verdict.
   class Report
-    def initialize(files)
+    def initialize(files, facts: nil)
       @files = files
-      run
+      facts ? apply_facts(facts) : run
+    end
+
+    def self.from_facts(facts)
+      normalized = ReportFacts.normalize(facts)
+      new(normalized.fetch(:files), facts: normalized)
     end
 
     def run
-      m = Miner.scan(@files)
-      @miss   = m.missing_abstractions
-      @negc   = m.neglected_conditions
-      cu      = CoUpdate.scan(@files)
-      @negu   = cu.neglected_updates
-      @copair = cu.co_written_pairs
-      pa      = PredicateAlias.scan(@files)
-      @palias = pa.alias_clusters
-      sa      = SemanticAlias.scan(@files)
-      @salias = sa.alias_clusters
-      @reif   = sa.reification_misses
-      pc      = PathCondition.scan(@files)
-      @pcneg  = pc.neglected
-      @pcsc   = pc.scattered
-      sm      = SequenceMine.scan(@files)
-      @broken = sm.broken_protocol
-      icf     = ImplicitControlFlow.scan(@files)
-      @implicit_control_flow = icf.ordered_protocols(
-        min_support: Integer(ENV.fetch("DECOMPLEX_ICF_MIN_SUPPORT", "1"))
-      )
-      @derived = DerivedState.scan(@files)
-      @rename_clones = InconsistentRenameClone.scan(@files)
-      @similarity = FlaySimilarity.scan(
-        @files,
-        mass: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_MASS",
-                                ENV.fetch("DECOMPLEX_FLAY_MASS", FlaySimilarity::DEFAULT_MASS))),
-        fuzzy: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_FUZZY",
-                                 ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY)))
-      )
-      @pressure = DecisionPressure.scan(@files).ranked
-      @redundant_nil = RedundantNilGuard.scan(@files)
-      @fsimple = FalseSimplicity.scan(@files).findings
-      @oversized_predicates = OversizedPredicate.scan(@files).findings
-      @fatu = FatUnion.scan(@files).fat_unions
-      state_mesh = StateMesh.scan(@files, min_writes: 1)
-      state_mesh.run
-      @state_heat = state_mesh.findings
-      @state_branch = StateBranchDensity.scan(@files).findings
-      @temporal_ordering = TemporalOrderingPressure.scan(@files)
-      @weighted_inlined_complexity = WeightedInlinedCognitiveComplexity.scan(
-        @files,
-        min_score: Float(ENV.fetch(
-          "DECOMPLEX_WICC_MIN_SCORE",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_SCORE
-        )),
-        min_hidden: Float(ENV.fetch(
-          "DECOMPLEX_WICC_MIN_HIDDEN",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_HIDDEN
-        )),
-        max_depth: Integer(ENV.fetch(
-          "DECOMPLEX_WICC_MAX_DEPTH",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
-        ))
-      )
-      @locality_drag = LocalityDrag.scan(
-        @files,
-        min_unrelated_statements: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_UNRELATED_STATEMENTS",
-          LocalityDrag::DEFAULT_MIN_UNRELATED_STATEMENTS
-        )),
-        min_gap_lines: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_GAP_LINES",
-          LocalityDrag::DEFAULT_MIN_GAP_LINES
-        )),
-        min_local_complexity: Float(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_LOCAL_COMPLEXITY",
-          LocalityDrag::DEFAULT_MIN_LOCAL_COMPLEXITY
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_SCORE",
-          LocalityDrag::DEFAULT_MIN_SCORE
-        )),
-        max_findings_per_method: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MAX_FINDINGS_PER_METHOD",
-          LocalityDrag::DEFAULT_MAX_FINDINGS_PER_METHOD
-        ))
-      )
-      @function_lcom = FunctionLCOM.scan(
-        @files,
-        min_components: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_COMPONENTS",
-          FunctionLCOM::DEFAULT_MIN_COMPONENTS
-        )),
-        min_locals: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_LOCALS",
-          FunctionLCOM::DEFAULT_MIN_LOCALS
-        )),
-        min_statements: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_STATEMENTS",
-          FunctionLCOM::DEFAULT_MIN_STATEMENTS
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_SCORE",
-          FunctionLCOM::DEFAULT_MIN_SCORE
-        ))
-      )
-      operational_discontinuity = OperationalDiscontinuity.scan(
-        @files,
-        min_dead: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_DEAD",
-          OperationalDiscontinuity::DEFAULT_MIN_DEAD
-        )),
-        min_new: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_NEW",
-          OperationalDiscontinuity::DEFAULT_MIN_NEW
-        )),
-        max_continuing: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MAX_CONTINUING",
-          OperationalDiscontinuity::DEFAULT_MAX_CONTINUING
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_SCORE",
-          OperationalDiscontinuity::DEFAULT_MIN_SCORE
-        ))
-      )
+      apply_facts(ReportFacts.from_files(@files, engine: "ruby"))
+    end
+
+    def apply_facts(facts)
+      normalized = ReportFacts.normalize(facts)
+      @files = normalized.fetch(:files)
+      detectors = normalized.fetch(:detectors)
+
+      miner = detectors.fetch(:miner)
+      @miss = miner.fetch(:missing_abstractions, [])
+      @negc = miner.fetch(:neglected_conditions, [])
+
+      co_update = detectors.fetch(:co_update)
+      @negu = co_update.fetch(:neglected_updates, [])
+      @copair = co_update.fetch(:co_written_pairs, [])
+
+      @palias = detectors.fetch(:predicate_alias).fetch(:alias_clusters, [])
+
+      semantic_alias = detectors.fetch(:semantic_alias)
+      @salias = semantic_alias.fetch(:alias_clusters, [])
+      @reif = semantic_alias.fetch(:reification_misses, [])
+
+      path_condition = detectors.fetch(:path_condition)
+      @pcneg = path_condition.fetch(:neglected, [])
+      @pcsc = path_condition.fetch(:scattered, [])
+
+      @broken = detectors.fetch(:sequence_mine).fetch(:broken_protocol, [])
+      @implicit_control_flow = detectors.fetch(:implicit_control_flow).fetch(:ordered_protocols, [])
+      @derived = detectors.fetch(:derived_state, [])
+      @rename_clones = detectors.fetch(:inconsistent_rename_clone, [])
+      @similarity = detectors.fetch(:flay_similarity, [])
+      @pressure = detectors.fetch(:decision_pressure, [])
+      @redundant_nil = detectors.fetch(:redundant_nil_guard, [])
+      @fsimple = detectors.fetch(:false_simplicity, [])
+      @oversized_predicates = detectors.fetch(:oversized_predicate, [])
+      @fatu = detectors.fetch(:fat_union).fetch(:fat_unions, [])
+      @state_heat = detectors.fetch(:state_heatmap, [])
+      @state_branch = detectors.fetch(:state_branch_density, [])
+      @temporal_ordering = detectors.fetch(:temporal_ordering_pressure, [])
+      @weighted_inlined_complexity = detectors.fetch(:weighted_inlined_complexity, [])
+      @locality_drag = detectors.fetch(:locality_drag, [])
+      @function_lcom = detectors.fetch(:function_lcom, [])
+      operational_discontinuity = detectors.fetch(:operational_discontinuity, [])
       @operational_discontinuity_high_confidence, @operational_discontinuity =
-        operational_discontinuity.partition { |finding| OperationalDiscontinuity.high_confidence?(finding) }
+        operational_discontinuity.partition { |finding| finding[:confidence].to_s == "high" }
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
       @convergence = Convergence.rollup(sd)
       @root = RootCause.cluster(sd)
+      self
     end
 
     # tier = signal quality (1 = highest signal / lowest false-positive,

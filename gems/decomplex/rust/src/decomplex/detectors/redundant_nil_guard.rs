@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -64,11 +64,15 @@ const NIL_PREDICATE_MIDS: &[&str] = &["nil?", "isNull", "is_null", "nil", "is_no
 const NON_NIL_PREDICATE_MIDS: &[&str] = &["isSome", "is_some", "present"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<RedundantNilGuardRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<RedundantNilGuardRow> {
     let mut findings = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut scanner = RedundantNilGuard::new(file.to_string_lossy().to_string(), lines);
-        scanner.walk(&root, &Vec::new());
+    for document in documents {
+        let mut scanner = RedundantNilGuard::new(document.file.clone(), document.lines.clone());
+        scanner.walk(&document.normalized_root, &Vec::new());
         findings.extend(scanner.findings);
     }
     let mut out: Vec<_> = findings.into_iter().map(|f| f.to_h()).collect();
@@ -79,7 +83,7 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<Redundant
             .then_with(|| a.local.cmp(&b.local))
             .then_with(|| a.guard.cmp(&b.guard))
     });
-    Ok(out)
+    out
 }
 
 struct RedundantNilGuard {

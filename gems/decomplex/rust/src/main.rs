@@ -9,8 +9,11 @@ use decomplex::detectors::{
     structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use decomplex::parallel;
+use decomplex::report_facts::{self, Options as ReportFactsOptions};
 use decomplex::syntax::Language;
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Command as ProcessCommand, Stdio};
 
 fn main() -> Result<()> {
     let worker = std::thread::Builder::new()
@@ -233,6 +236,27 @@ fn run() -> Result<()> {
                 .with_context(|| "failed to scan fat-union facts")?;
             println!("{}", serde_json::to_string(&findings)?);
         }
+        Command::Facts {
+            options,
+            targets,
+            output,
+            ..
+        } => {
+            let facts = report_facts::collect(&targets, &options)
+                .with_context(|| "failed to collect report facts")?;
+            write_json(&facts, output.as_ref())?;
+        }
+        Command::Report {
+            options,
+            targets,
+            format,
+            output,
+            ..
+        } => {
+            let facts = report_facts::collect(&targets, &options)
+                .with_context(|| "failed to collect report facts")?;
+            render_report_with_ruby(&facts, &format, output.as_ref())?;
+        }
     }
     Ok(())
 }
@@ -365,6 +389,19 @@ enum Command {
         files: Vec<PathBuf>,
         jobs: Option<usize>,
     },
+    Facts {
+        options: ReportFactsOptions,
+        targets: Vec<PathBuf>,
+        output: Option<PathBuf>,
+        jobs: Option<usize>,
+    },
+    Report {
+        options: ReportFactsOptions,
+        targets: Vec<PathBuf>,
+        format: String,
+        output: Option<PathBuf>,
+        jobs: Option<usize>,
+    },
 }
 
 impl Command {
@@ -394,7 +431,9 @@ impl Command {
             | Self::SequenceMine { jobs, .. }
             | Self::FunctionLcom { jobs, .. }
             | Self::FalseSimplicity { jobs, .. }
-            | Self::FatUnion { jobs, .. } => *jobs,
+            | Self::FatUnion { jobs, .. }
+            | Self::Facts { jobs, .. }
+            | Self::Report { jobs, .. } => *jobs,
         }
     }
 }
@@ -405,6 +444,31 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         bail!("usage: decomplex-rust COMMAND [--language ruby] [--jobs N] FILE...");
     };
     match command.as_str() {
+        "facts" => {
+            let args = parse_report_facts_args(cursor.collect(), false)?;
+            if args.targets.is_empty() {
+                bail!("facts requires at least one file or directory");
+            }
+            Ok(Command::Facts {
+                options: args.options,
+                targets: args.targets,
+                output: args.output,
+                jobs: args.jobs,
+            })
+        }
+        "report" => {
+            let args = parse_report_facts_args(cursor.collect(), true)?;
+            if args.targets.is_empty() {
+                bail!("report requires at least one file or directory");
+            }
+            Ok(Command::Report {
+                options: args.options,
+                targets: args.targets,
+                format: args.format,
+                output: args.output,
+                jobs: args.jobs,
+            })
+        }
         "state-writes" => {
             let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
             if files.is_empty() {
@@ -722,6 +786,153 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         }
         _ => bail!("unknown decomplex-rust command: {command}"),
     }
+}
+
+struct ReportFactsArgs {
+    options: ReportFactsOptions,
+    targets: Vec<PathBuf>,
+    output: Option<PathBuf>,
+    jobs: Option<usize>,
+    format: String,
+}
+
+fn parse_report_facts_args(args: Vec<String>, allow_format: bool) -> Result<ReportFactsArgs> {
+    let mut options = ReportFactsOptions::default();
+    let mut targets = Vec::new();
+    let mut output = None;
+    let mut jobs = None;
+    let mut format = "markdown".to_string();
+    let mut cursor = args.into_iter();
+    while let Some(arg) = cursor.next() {
+        if arg == "--language" {
+            let value = cursor
+                .next()
+                .with_context(|| "--language requires a value")?;
+            options.language = Some(Language::parse(&value)?);
+        } else if let Some(value) = arg.strip_prefix("--language=") {
+            options.language = Some(Language::parse(value)?);
+        } else if arg == "--jobs" {
+            jobs = Some(parse_jobs(
+                cursor.next().with_context(|| "--jobs requires a value")?,
+            )?);
+        } else if let Some(value) = arg.strip_prefix("--jobs=") {
+            jobs = Some(parse_jobs(value.to_string())?);
+        } else if arg == "--exclude" {
+            options.excludes.push(
+                cursor
+                    .next()
+                    .with_context(|| "--exclude requires a value")?,
+            );
+        } else if let Some(value) = arg.strip_prefix("--exclude=") {
+            options.excludes.push(value.to_string());
+        } else if arg == "--output" {
+            output = Some(PathBuf::from(
+                cursor.next().with_context(|| "--output requires a value")?,
+            ));
+        } else if let Some(value) = arg.strip_prefix("--output=") {
+            output = Some(PathBuf::from(value));
+        } else if arg == "--format" {
+            if !allow_format {
+                bail!("facts does not support --format");
+            }
+            format = cursor.next().with_context(|| "--format requires a value")?;
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            if !allow_format {
+                bail!("facts does not support --format");
+            }
+            format = value.to_string();
+        } else if arg == "--mass" {
+            options.mass = cursor
+                .next()
+                .with_context(|| "--mass requires a value")?
+                .parse()
+                .with_context(|| "--mass must be an integer")?;
+        } else if let Some(value) = arg.strip_prefix("--mass=") {
+            options.mass = value.parse().with_context(|| "--mass must be an integer")?;
+        } else if arg == "--fuzzy" {
+            options.fuzzy = cursor
+                .next()
+                .with_context(|| "--fuzzy requires a value")?
+                .parse()
+                .with_context(|| "--fuzzy must be an integer")?;
+        } else if let Some(value) = arg.strip_prefix("--fuzzy=") {
+            options.fuzzy = value
+                .parse()
+                .with_context(|| "--fuzzy must be an integer")?;
+        } else {
+            targets.push(PathBuf::from(arg));
+        }
+    }
+    Ok(ReportFactsArgs {
+        options,
+        targets,
+        output,
+        jobs,
+        format,
+    })
+}
+
+fn write_json(value: &serde_json::Value, output: Option<&PathBuf>) -> Result<()> {
+    let text = serde_json::to_string_pretty(value)?;
+    if let Some(path) = output {
+        std::fs::write(path, text)?;
+    } else {
+        println!("{text}");
+    }
+    Ok(())
+}
+
+fn render_report_with_ruby(
+    facts: &serde_json::Value,
+    format: &str,
+    output: Option<&PathBuf>,
+) -> Result<()> {
+    let mut command = ruby_renderer_command();
+    command
+        .arg("render-report")
+        .arg("--from-stdin")
+        .arg(format!("--format={format}"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(path) = output {
+        command.arg(format!("--output={}", path.display()));
+    }
+
+    let mut child = command
+        .spawn()
+        .with_context(|| "failed to start Ruby decomplex renderer")?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .with_context(|| "failed to open Ruby renderer stdin")?;
+        stdin.write_all(serde_json::to_string(facts)?.as_bytes())?;
+    }
+    let status = child
+        .wait()
+        .with_context(|| "failed to wait for Ruby decomplex renderer")?;
+    if !status.success() {
+        bail!("Ruby decomplex renderer failed with status {status}");
+    }
+    Ok(())
+}
+
+fn ruby_renderer_command() -> ProcessCommand {
+    if let Ok(program) = std::env::var("DECOMPLEX_RUBY_RENDERER") {
+        if !program.trim().is_empty() {
+            return ProcessCommand::new(program);
+        }
+    }
+
+    let mut command = ProcessCommand::new("ruby");
+    command.arg(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("exe")
+            .join("decomplex"),
+    );
+    command
 }
 
 fn parse_language_files_and_jobs(

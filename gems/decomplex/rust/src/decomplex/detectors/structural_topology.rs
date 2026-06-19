@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -44,23 +44,25 @@ const CONDITIONAL_TYPES: &[&str] = &["IF", "UNLESS", "CASE", "CASE2"];
 const ITERATION_TYPES: &[&str] = &["ITER", "FOR", "WHILE", "UNTIL"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StructuralTopologyReport> {
-    let mut methods = Vec::new();
-    let mut parsed = Vec::new();
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
 
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut mc = MethodCollector::new(file.to_string_lossy().to_string(), lines.clone());
-        methods.extend(mc.scan(&root));
-        parsed.push((file.to_string_lossy().to_string(), root, lines));
+pub fn scan_documents(documents: &[Document]) -> StructuralTopologyReport {
+    let mut methods = Vec::new();
+
+    for document in documents {
+        let mut mc = MethodCollector::new(document.file.clone(), document.lines.clone());
+        methods.extend(mc.scan(&document.normalized_root));
     }
 
     let mut edges = Vec::new();
-    for (file, root, lines) in &parsed {
-        let mut ec = EdgeCollector::new(file.clone(), lines.clone(), &methods);
-        edges.extend(ec.scan(root));
+    for document in documents {
+        let mut ec = EdgeCollector::new(document.file.clone(), document.lines.clone(), &methods);
+        edges.extend(ec.scan(&document.normalized_root));
     }
 
-    Ok(StructuralTopologyReport { methods, edges })
+    StructuralTopologyReport { methods, edges }
 }
 
 pub struct Graph {

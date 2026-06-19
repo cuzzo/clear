@@ -1,6 +1,7 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::parallel;
 use crate::decomplex::syntax::adapters::language_profile;
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,49 +36,53 @@ const NOISE_MIDS: &[&str] = &[
 ];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBranchDensityRow>> {
-    let profile = language_profile(language);
-    let mut parsed = Vec::new();
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<StateBranchDensityRow> {
     let mut global_immutable_readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> =
         BTreeMap::new();
     let mut global_type_aliases: BTreeMap<String, String> = BTreeMap::new();
 
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
+    for document in documents {
+        let profile = language_profile(document.language);
 
-        for (name, readers) in profile.immutable_struct_readers(&lines) {
+        for (name, readers) in profile.immutable_struct_readers(&document.lines) {
             global_immutable_readers
                 .entry(name)
                 .or_default()
                 .extend(readers);
         }
-        for (name, reader_types) in profile.immutable_struct_reader_types(&lines) {
+        for (name, reader_types) in profile.immutable_struct_reader_types(&document.lines) {
             global_immutable_reader_types
                 .entry(name)
                 .or_default()
                 .extend(reader_types);
         }
-        global_type_aliases.extend(profile.type_aliases(&lines));
-
-        parsed.push((file.to_string_lossy().to_string(), root, lines));
+        global_type_aliases.extend(profile.type_aliases(&document.lines));
     }
 
-    let mut all_decisions = Vec::new();
-    for (file, root, lines) in parsed {
-        let method_param_types = profile.method_param_types(&lines);
+    let decision_chunks = parallel::map_ordered(documents, |document| {
+        let profile = language_profile(document.language);
+        let method_param_types = profile.method_param_types(&document.lines);
         let mut scanner = StateBranchDensity::new(
-            Some(file),
-            lines,
+            Some(document.file.clone()),
+            document.lines.clone(),
             Some(global_immutable_readers.clone()),
             Some(global_immutable_reader_types.clone()),
             Some(global_type_aliases.clone()),
             Some(method_param_types),
         );
-        scanner.walk(&root, &Vec::new());
-        all_decisions.extend(scanner.decisions);
-    }
+        scanner.walk(&document.normalized_root, &Vec::new());
+        Ok(scanner.decisions)
+    })
+    .expect("state-branch-density document scan");
 
-    Ok(Report::new(all_decisions).findings())
+    let all_decisions = decision_chunks.into_iter().flatten().collect();
+
+    Report::new(all_decisions).findings()
 }
 
 struct StateBranchDensity {

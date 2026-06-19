@@ -158,6 +158,16 @@ fn detectors_do_not_import_tree_sitter_directly() {
 }
 
 #[test]
+fn report_facts_uses_document_detector_apis() {
+    let path = crate_src().join("report_facts.rs");
+    let source = fs::read_to_string(&path).expect("read report_facts.rs");
+    assert!(
+        !source.contains("::scan_files("),
+        "report_facts.rs must build shared documents once and call detector scan_documents APIs"
+    );
+}
+
+#[test]
 fn false_simplicity_detector_does_not_own_language_lexicons() {
     let path = crate_src().join("detectors/false_simplicity.rs");
     let source = fs::read_to_string(&path).expect("read false_simplicity.rs");

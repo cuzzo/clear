@@ -254,9 +254,13 @@ pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec
     let tree = parser
         .parse(&source, None)
         .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
-    let root = TreeSitterNormalizer::new(&source, language).normalize(tree.root_node());
+    let root = normalize_tree(tree.root_node(), &source, language);
     let lines = source.lines().map(ToString::to_string).collect();
     Ok((root, lines))
+}
+
+pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language) -> Node {
+    TreeSitterNormalizer::new(source, language).normalize(root)
 }
 
 fn language_grammar(language: Language) -> TreeSitterLanguage {

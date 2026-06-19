@@ -1,6 +1,6 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
 use crate::decomplex::detectors::semantic_alias;
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -147,15 +147,30 @@ struct FieldMetrics {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StateMeshReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> StateMeshReport {
+    let semantic_aliases = semantic_alias::scan_documents(documents);
+    scan_documents_with_semantic_aliases(documents, &semantic_aliases)
+}
+
+pub fn scan_documents_with_semantic_aliases(
+    documents: &[Document],
+    semantic_aliases: &semantic_alias::SemanticAliasReport,
+) -> StateMeshReport {
     let mut src_map = BTreeMap::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        src_map.insert(file.to_string_lossy().to_string(), (root, lines));
+    for document in documents {
+        src_map.insert(
+            document.file.clone(),
+            (document.normalized_root.clone(), document.lines.clone()),
+        );
     }
 
     let mut sm = StateMesh::new(src_map);
-    sm.run(language)?;
-    Ok(sm.to_json_graph())
+    sm.run(semantic_aliases);
+    sm.to_json_graph()
 }
 
 struct StateMesh {
@@ -179,15 +194,14 @@ impl StateMesh {
         }
     }
 
-    fn run(&mut self, language: Language) -> Result<()> {
+    fn run(&mut self, semantic_aliases: &semantic_alias::SemanticAliasReport) {
         self.discover_fields();
         if self.known_field_norms().is_empty() {
-            return Ok(());
+            return;
         }
 
         self.find_reads();
-        self.find_re_derivations(language)?;
-        Ok(())
+        self.find_re_derivations(semantic_aliases);
     }
 
     fn discover_fields(&mut self) {
@@ -386,16 +400,13 @@ impl StateMesh {
         }
     }
 
-    fn find_re_derivations(&mut self, language: Language) -> Result<()> {
+    fn find_re_derivations(&mut self, semantic_aliases: &semantic_alias::SemanticAliasReport) {
         let field_norms = self.known_field_norms();
         if field_norms.is_empty() {
-            return Ok(());
+            return;
         }
 
-        let files: Vec<_> = self.src_map.keys().map(PathBuf::from).collect();
-        let sa = semantic_alias::scan_files(&files, language)?;
-
-        for m in sa.reification_misses {
+        for m in &semantic_aliases.reification_misses {
             let loc = m.at.clone();
             let parts: Vec<&str> = loc.split(':').collect();
             if parts.len() < 3 {
@@ -414,13 +425,12 @@ impl StateMesh {
                     file,
                     defn,
                     line,
-                    raw: m.raw,
-                    predicate: m.predicate,
-                    canon: m.canon,
+                    raw: m.raw.clone(),
+                    predicate: m.predicate.clone(),
+                    canon: m.canon.clone(),
                 });
             }
         }
-        Ok(())
     }
 
     fn metrics(&self) -> Vec<FieldMetrics> {

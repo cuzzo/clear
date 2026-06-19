@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,11 +36,16 @@ pub fn scan_files(
     files: &[PathBuf],
     language: Language,
 ) -> Result<Vec<TemporalOrderingPressureRow>> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> Vec<TemporalOrderingPressureRow> {
     let mut rows = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut detector = TemporalOrderingPressure::new(file.to_string_lossy().to_string(), lines);
-        rows.extend(detector.scan(&root));
+    for document in documents {
+        let mut detector =
+            TemporalOrderingPressure::new(document.file.clone(), document.lines.clone());
+        rows.extend(detector.scan(&document.normalized_root));
     }
     rows.sort_by(|a, b| {
         b.score
@@ -49,7 +54,7 @@ pub fn scan_files(
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.owner.cmp(&b.owner))
     });
-    Ok(rows)
+    rows
 }
 
 struct TemporalOrderingPressure {

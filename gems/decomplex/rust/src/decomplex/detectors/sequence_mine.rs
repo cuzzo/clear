@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::Language;
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -31,14 +31,18 @@ struct Call {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<BrokenProtocolReport> {
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
+}
+
+pub fn scan_documents(documents: &[Document]) -> BrokenProtocolReport {
     let mut calls = Vec::new();
-    for file in files {
-        let (root, lines) = ast::parse_with_language(file, language)?;
-        let mut sm = SequenceMine::new(file.to_string_lossy().to_string(), lines);
-        sm.walk(&root, &Vec::new());
+    for document in documents {
+        let mut sm = SequenceMine::new(document.file.clone(), document.lines.clone());
+        sm.walk(&document.normalized_root, &Vec::new());
         calls.extend(sm.calls);
     }
-    Ok(Report::new(calls).findings())
+    Report::new(calls).findings()
 }
 
 const DECLARATIVE_MIDS: &[&str] = &[

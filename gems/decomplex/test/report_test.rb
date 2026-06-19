@@ -49,6 +49,35 @@ class ReportTest < Minitest::Test
     assert_equal JSON.parse(r.to_sarif), JSON.parse(r.to_json)
   end
 
+  def test_report_facts_round_trip_to_same_markdown
+    f = Tempfile.new(["rep_facts", ".rb"])
+    f.write("def a(n)\n  case n\n  when A then 1\n  when B then 2\n  end\nend\n" \
+            "def b(n)\n  case n\n  when A then 3\n  when B then 4\n  end\nend\n")
+    f.close
+
+    facts = Decomplex::ReportFacts.from_files([f.path], engine: "ruby")
+    from_source = Decomplex::Report.new([f.path]).to_markdown
+    from_facts = Decomplex::Report.from_facts(JSON.generate(facts)).to_markdown
+
+    assert_equal Decomplex::ReportFacts::FORMAT, facts.fetch("format")
+    assert_equal from_source, from_facts
+  ensure
+    f&.unlink
+  end
+
+  def test_report_from_facts_does_not_reparse_source
+    f = Tempfile.new(["rep_facts_deleted", ".rb"])
+    f.write("def a(n)\n  if n && ready?\n    run\n  end\nend\n")
+    f.close
+
+    facts = Decomplex::ReportFacts.from_files([f.path], engine: "ruby")
+    f.unlink
+
+    md = Decomplex::Report.from_facts(JSON.generate(facts)).to_markdown
+    assert_includes md, "# Decomplex Report"
+    assert_includes md, "Files analyzed: 1"
+  end
+
   def test_compact_sarif_omits_heavy_payloads_for_ci_uploads
     sarif = JSON.parse(report.to_sarif(include_snapshot: false, include_finding_payload: false, max_results: 2))
     run = sarif.fetch("runs").first
