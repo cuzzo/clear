@@ -5,8 +5,6 @@ require_relative "spec_helper"
 RSpec.describe "nil-kill multi-language runtime pipeline" do
   def require_tree_sitter_language!(language)
     Decomplex::Syntax::TreeSitterAdapter.new.send(:parser_for, language)
-  rescue LoadError => e
-    skip e.message
   end
 
   it "publishes language provider capabilities for Ruby, Python, TypeScript, Lua, Go, Rust, Zig, C, C++, C#, Java, Kotlin, and Swift" do
@@ -86,8 +84,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses the Decomplex extension for Python Tree-sitter static evidence" do
-    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
-    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+    require_tree_sitter_language!(:python)
 
     Dir.mktmpdir("nil-kill-python-static", NilKill::ROOT) do |dir|
       src = File.join(dir, "src")
@@ -173,8 +170,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "uses the Decomplex extension for TypeScript Tree-sitter static evidence" do
-    grammar = ENV["DECOMPLEX_TS_TYPESCRIPT_PATH"]
-    skip "set DECOMPLEX_TS_TYPESCRIPT_PATH to run TypeScript Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+    require_tree_sitter_language!(:typescript)
 
     Dir.mktmpdir("nil-kill-typescript-static", NilKill::ROOT) do |dir|
       src = File.join(dir, "src")
@@ -240,8 +236,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   end
 
   it "keeps Go name-type struct fields typed in static evidence" do
-    grammar = ENV["DECOMPLEX_TS_GO_PATH"]
-    skip "set DECOMPLEX_TS_GO_PATH to run Go Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+    require_tree_sitter_language!(:go)
 
     Dir.mktmpdir("nil-kill-go-static", NilKill::ROOT) do |dir|
       src = File.join(dir, "src")
