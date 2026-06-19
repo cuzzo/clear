@@ -30,50 +30,6 @@ module NilKill
             signature.start_with?("sig ") ? signature : ""
           end
 
-          def type_definitions(rel_path:, function_defs:, state_declarations:, provider:)
-            definitions = []
-            function_defs.each do |fn|
-              signature = signature_for(fn)
-              next if signature.empty?
-
-              definitions << {
-                "id" => ["ruby", rel_path, fn.owner, "method_signature", fn.name, fn.line, "sorbet"].map(&:to_s).join("\u0000"),
-                "language" => "ruby",
-                "type_system" => "sorbet",
-                "kind" => "method_signature",
-                "path" => rel_path,
-                "owner" => fn.owner.to_s,
-                "name" => fn.name.to_s,
-                "line" => fn.line,
-                "signature" => signature,
-                "return_type" => NilKill.extract_return_type(signature),
-                "params" => NilKill.extract_param_entries(signature).map do |name, type|
-                  { "name" => name, "type" => type }
-                end,
-              }
-            end
-
-            state_declarations.each do |state|
-              type = state.type.to_s
-              next if type.empty?
-
-              field = provider.declared_state_field(state.field)
-              definitions << {
-                "id" => ["ruby", rel_path, state.owner, "state_field", field, state.line, "sorbet"].map(&:to_s).join("\u0000"),
-                "language" => "ruby",
-                "type_system" => "sorbet",
-                "kind" => "state_field",
-                "path" => rel_path,
-                "owner" => state.owner.to_s,
-                "name" => field.to_s,
-                "line" => state.line,
-                "declared_type" => type,
-              }
-            end
-
-            definitions
-          end
-
           def return_type_index(root:)
             NilKill::RbiReturnIndex.build
           end
@@ -84,21 +40,6 @@ module NilKill
               load_field_types(path, types)
             end
             types
-          end
-
-          def external_type_definitions(root:)
-            field_type_index(root: root).map do |(klass, field), type|
-              {
-                "id" => ["ruby", "rbi", klass, "state_field", field, "sorbet"].map(&:to_s).join("\u0000"),
-                "language" => "ruby",
-                "type_system" => "rbi",
-                "kind" => "state_field",
-                "path" => File.join("sorbet", "rbi"),
-                "owner" => klass,
-                "name" => field,
-                "declared_type" => type,
-              }
-            end
           end
 
           private

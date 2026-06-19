@@ -3,12 +3,15 @@
 
 sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
 if File.file?("#{sibling_decomplex}/source_filter.rb") && File.file?("#{sibling_decomplex}/syntax.rb")
+  require "#{sibling_decomplex}/ast"
   require "#{sibling_decomplex}/source_filter"
   require "#{sibling_decomplex}/syntax"
 else
+  require "decomplex/ast"
   require "decomplex/source_filter"
   require "decomplex/syntax"
 end
+require_relative "decomplex_static_facts"
 
 module NilKill
   # Static, language-neutral evidence for Espalier. This intentionally avoids
@@ -32,21 +35,22 @@ module NilKill
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
       signatures = {}
       type_definitions = []
+      hash_shapes = []
+      array_shapes = []
       files = target_files
 
       files.each do |file|
         doc = Decomplex::Syntax.parse(file, parser: "tree_sitter")
-        provider = Languages.provider_for(doc.language)
-        facts = doc.adapter.structural_facts(doc)
-        rel_path = rel(file)
-        evidence = provider.static_evidence(document: doc, facts: facts, rel_path: rel_path)
-        methods.concat(evidence.fetch("methods", []))
-        fields.concat(evidence.fetch("fields", []))
-        state_types.merge!(evidence.fetch("state_types", {}))
-        merge_set_map!(state_protocols, evidence.fetch("state_protocols", {}))
-        merge_set_map!(state_param_origins, evidence.fetch("state_param_origins", {}))
-        signatures.merge!(evidence.fetch("signatures", {}))
-        type_definitions.concat(evidence.fetch("type_definitions", []))
+        facts = doc.static_facts(root: @root)
+        methods.concat(facts.fetch(:methods, []))
+        fields.concat(facts.fetch(:fields, []))
+        state_types.merge!(facts.fetch(:state_types, {}))
+        merge_set_map!(state_protocols, facts.fetch(:state_protocols, {}))
+        merge_set_map!(state_param_origins, facts.fetch(:state_param_origins, {}))
+        signatures.merge!(facts.fetch(:signatures, {}))
+        type_definitions.concat(facts.fetch(:type_definitions, []))
+        hash_shapes.concat(facts.fetch(:hash_shapes, []))
+        array_shapes.concat(facts.fetch(:array_shapes, []))
       end
 
       state_protocols = stringify_set_map(state_protocols)
@@ -55,7 +59,14 @@ module NilKill
         [definition["language"], definition["path"], definition["owner"], definition["kind"],
           definition["name"], definition["line"], definition["type_system"]]
       end
+      alias_recommendations = AliasRecommendations.build(type_definitions: type_definitions)
       typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
+      hash_shapes = hash_shapes.uniq do |shape|
+        [shape["path"], shape["line"], Array(shape["keys"]), Array(shape["value_types"])]
+      end
+      array_shapes = array_shapes.uniq do |shape|
+        [shape["path"], shape["line"], Array(shape["tuple_types"]), shape["size"]]
+      end
 
       {
         "version" => 2,
@@ -76,6 +87,9 @@ module NilKill
           "state_param_origins" => state_param_origins,
           "signatures" => Hash[signatures.sort],
           "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
+          "alias_recommendations" => alias_recommendations,
+          "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
+          "array_shapes" => array_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -89,6 +103,9 @@ module NilKill
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
           "type_definitions" => type_definitions.size,
+          "alias_recommendations" => alias_recommendations.size,
+          "hash_shapes" => hash_shapes.size,
+          "array_shapes" => array_shapes.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },

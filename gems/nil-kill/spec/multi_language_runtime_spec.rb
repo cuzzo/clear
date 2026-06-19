@@ -12,12 +12,12 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(ruby).to include("runtime_tracing" => true)
     expect(ruby["type_systems"]).to include("sorbet", "rbi")
     expect(python).to include("runtime_tracing" => true)
-    expect(python).to include("type_indexing" => true)
-    expect(python["type_systems"]).to include("python-typing")
+    expect(python).to include("type_indexing" => false)
+    expect(python["annotation_systems"]).to include("python-typing")
     expect(python.dig("runtime_capabilities", "params")).to be(true)
     expect(python.dig("runtime_capabilities", "line_coverage")).to be(true)
-    expect(typescript).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => true)
-    expect(typescript["type_systems"]).to include("typescript")
+    expect(typescript).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => false)
+    expect(typescript["annotation_systems"]).to include("typescript")
     expect(zig).to include("static_analysis" => true, "runtime_tracing" => false)
     expect(zig["notes"].join).to include("runtime tracing is not implemented")
   end
@@ -39,25 +39,15 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     }.to raise_error(NilKill::Languages::UnsupportedRuntimeTracer, /Zig/)
   end
 
-  it "canonicalizes Python instance fields through the language provider" do
+  it "does not expose static field policy through the language provider" do
     provider = NilKill::Languages.provider_for("python")
-    origin = Decomplex::Syntax::StateParamOrigin.new(
-      field: "items",
-      receiver: "self",
-      owner: "Worker",
-      param: "items",
-      file: "src/demo.py",
-      function: "__init__",
-      line: 2,
-      span: nil
-    )
 
-    expect(provider.owned_state_origin?(origin, Set.new)).to be(true)
-    expect(provider.canonical_state_field("items", receiver: "self")).to eq("@items")
-    expect(provider.receiver_state_field("self.items", Set.new)).to eq("@items")
+    expect(provider).not_to respond_to(:canonical_state_field)
+    expect(provider).not_to respond_to(:owned_state_origin?)
+    expect(provider).not_to respond_to(:receiver_state_field)
   end
 
-  it "uses Python provider field policy when building Tree-sitter static evidence" do
+  it "uses the Decomplex extension for Python Tree-sitter static evidence" do
     grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
     skip "set DECOMPLEX_TS_PYTHON_PATH to run Python Tree-sitter static evidence test" unless grammar && File.file?(grammar)
 
@@ -144,7 +134,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(maybe_findings.map { |finding| finding["kind"] }).to include("nullable_signature")
   end
 
-  it "uses TypeScript provider annotations when building Tree-sitter static evidence" do
+  it "uses the Decomplex extension for TypeScript Tree-sitter static evidence" do
     grammar = ENV["DECOMPLEX_TS_TYPESCRIPT_PATH"]
     skip "set DECOMPLEX_TS_TYPESCRIPT_PATH to run TypeScript Tree-sitter static evidence test" unless grammar && File.file?(grammar)
 
@@ -206,7 +196,8 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
         "name" => "name",
         "declared_type" => "string | null"
       ))
-      expect(evidence.dig("language_capabilities", "typescript", "type_indexing")).to be(true)
+      expect(evidence.dig("language_capabilities", "typescript", "type_indexing")).to be(false)
+      expect(evidence.dig("language_capabilities", "typescript", "annotation_systems")).to include("typescript")
     end
   end
 
@@ -247,7 +238,8 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     languages = spec.fetch("language_capabilities").to_h { |cap| [cap.fetch("language"), cap] }
 
     expect(languages.fetch("python")).to include("runtime_tracing" => true)
-    expect(languages.fetch("typescript")).to include("type_indexing" => true)
+    expect(languages.fetch("typescript")).to include("type_indexing" => false)
+    expect(languages.fetch("typescript")["annotation_systems"]).to include("typescript")
     expect(languages.fetch("zig")).to include("runtime_tracing" => false)
   end
 
