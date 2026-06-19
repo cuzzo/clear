@@ -1,0 +1,1 @@
+class Example { static boolean one(boolean a, boolean b, boolean c) { return a && b && c; } static boolean two(boolean a, boolean b, boolean c) { return a && b && c; } static boolean three(boolean a, boolean b, boolean c) { return a && b && c; } static boolean broken(boolean a, boolean b) { return a && b; } }

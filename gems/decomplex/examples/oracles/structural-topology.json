@@ -1,0 +1,9 @@
+{
+  "detector": "structural-topology",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": {
+    "present": true
+  }
+}

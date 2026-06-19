@@ -1,0 +1,12 @@
+{
+  "detector": "inconsistent-rename-clone",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "ref_name": "src",
+      "divergent_count": 2
+    }
+  ]
+}

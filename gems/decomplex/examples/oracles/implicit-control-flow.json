@@ -1,0 +1,18 @@
+{
+  "detector": "implicit-control-flow",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": {
+    "ordered_protocols": [
+      {
+        "present": true
+      }
+    ],
+    "order_drift": [
+      {
+        "present": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+class Worker { run(items) { this.prepare(); if (this.ready()) { this.validate(); } for (const item of items) { this.helper(item); } } prepare() {} ready() { return true; } validate() {} helper(item) { return item; } }

@@ -1,0 +1,1 @@
+class StateMeshExample { int a; int b; void initialize() { this.a = 1; this.b = 2; } void writer() { this.a = 3; } int reader() { return this.a + this.b; } int a_alias() { return this.a; } }

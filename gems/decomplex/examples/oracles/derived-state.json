@@ -1,0 +1,12 @@
+{
+  "detector": "derived-state",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "derived": "cached",
+      "source": "input"
+    }
+  ]
+}

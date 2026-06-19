@@ -68,6 +68,23 @@ class StateBranchDensityTest < Minitest::Test
     assert_empty rows
   end
 
+  def test_scan_uses_syntax_facts_not_legacy_ast_parse
+    f = Tempfile.new(["state_branch", ".rb"])
+    f.write(<<~RB)
+      def risky(user)
+        pay if user.name
+      end
+    RB
+    f.close
+    @files << f
+
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      rows = Decomplex::StateBranchDensity.scan([f.path]).findings
+
+      assert_equal ["user.name"], rows.first[:state_refs]
+    end
+  end
+
   def test_groups_multiple_state_branches_per_method_and_keeps_spans
     rows = scan(<<~RB)
       def lifecycle(order)

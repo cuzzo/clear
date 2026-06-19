@@ -1,0 +1,11 @@
+{
+  "detector": "function-lcom",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "present": true
+    }
+  ]
+}

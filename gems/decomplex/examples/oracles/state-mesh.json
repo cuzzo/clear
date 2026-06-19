@@ -1,0 +1,11 @@
+{
+  "detector": "state-mesh",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": {
+    "state_mesh": {
+      "present": true
+    }
+  }
+}

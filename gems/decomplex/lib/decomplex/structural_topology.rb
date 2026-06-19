@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # StructuralTopology is Decomplex's conservative static model of method
-  # ownership and direct internal calls over the normalized Tree-sitter AST.
-  # It deliberately resolves only same-owner bare/self calls; dynamic dispatch
+  # ownership and direct internal calls over Syntax structural facts. It
+  # deliberately resolves only same-owner bare/self calls; dynamic dispatch
   # belongs to higher-recall detectors.
   class StructuralTopology
     Method = Struct.new(:id, :owner, :name, :file, :line, :span, :visibility, keyword_init: true)
@@ -14,25 +14,16 @@ module Decomplex
       keyword_init: true
     )
 
-    VISIBILITY_MIDS = %i[public protected private].freeze
-    OWNER_TYPES = %i[CLASS MODULE].freeze
-    METHOD_TYPES = %i[DEFN DEFS].freeze
-    SKIP_NESTED_TYPES = %i[CLASS MODULE DEFN DEFS LAMBDA].freeze
-    CONDITIONAL_TYPES = %i[IF UNLESS CASE CASE2].freeze
-    ITERATION_TYPES = %i[ITER FOR WHILE UNTIL].freeze
-
     def self.scan(files)
-      methods = []
-      parsed = files.each_with_object({}) do |file, out|
-        out[file] = Ast.parse(file)
+      documents = files.to_h do |file|
+        [file, Syntax.parse(file, parser: "tree_sitter")]
       end
 
-      parsed.each do |file, (root, lines)|
-        methods.concat(MethodCollector.new(file, lines).scan(root))
+      methods = documents.flat_map do |file, document|
+        MethodFacts.new(file, document).methods
       end
-
-      edges = parsed.flat_map do |file, (root, lines)|
-        EdgeCollector.new(file, lines, methods).scan(root)
+      edges = documents.flat_map do |file, document|
+        EdgeFacts.new(file, document, methods).edges
       end
 
       Graph.new(methods, edges)
@@ -102,237 +93,61 @@ module Decomplex
       end
     end
 
-    class MethodCollector
-      def initialize(file, lines)
+    class MethodFacts
+      def initialize(file, document)
         @file = file
-        @lines = lines
+        @document = document
       end
 
-      def scan(root)
-        out = []
-        top_level_methods(root).each { |method| out << method }
-        walk(root, [], out)
-        out
+      def methods
+        @document.function_defs.map do |function|
+          owner = owner_for_fact(function)
+          Method.new(
+            id: "#{owner}##{function.name}",
+            owner: owner,
+            name: function.name,
+            file: @file,
+            line: function.line,
+            span: function.span,
+            visibility: function.visibility || :public
+          )
+        end
       end
 
       private
 
-      def top_level_methods(root)
-        methods_from_statements(top_level_statements(root), top_level_owner)
-      end
-
-      def walk(node, owners, out)
-        return unless Ast.node?(node)
-
-        if OWNER_TYPES.include?(node.type)
-          owner = full_owner_name(owners, node)
-          owner_methods(node, owner).each { |method| out << method }
-          node.children.each { |child| walk(child, owners + [owner_segment(node)], out) }
-        else
-          node.children.each { |child| walk(child, owners, out) }
-        end
-      end
-
-      def owner_methods(owner_node, owner)
-        body = owner_body(owner_node)
-        return [] unless Ast.node?(body)
-
-        methods_from_statements(owner_statements(body), owner)
-      end
-
-      def methods_from_statements(statements, owner)
-        methods = []
-        visibility = :public
-        statements.each do |stmt|
-          next unless Ast.node?(stmt)
-
-          if bare_visibility_marker?(stmt)
-            visibility = stmt.children[0].to_sym
-          elsif visibility_call?(stmt)
-            visibility = handle_visibility_call(stmt, owner, visibility, methods)
-          elsif METHOD_TYPES.include?(stmt.type)
-            methods << method_record(stmt, owner, visibility)
-          end
-        end
-        methods
-      end
-
-      def handle_visibility_call(stmt, owner, current_visibility, methods)
-        visibility = stmt.children[0].to_sym
-        args = stmt.children[1]
-        return visibility unless Ast.node?(args)
-
-        each_arg(args) do |arg|
-          if METHOD_TYPES.include?(arg.type)
-            methods << method_record(arg, owner, visibility)
-          elsif (name = literal_method_name(arg))
-            method = methods.reverse.find { |row| row.name == name }
-            method.visibility = visibility if method
-          end
-        end
-
-        current_visibility
-      end
-
-      def owner_body(owner_node)
-        scope = owner_node.children[owner_node.type == :CLASS ? 2 : 1]
-        return nil unless Ast.node?(scope) && scope.type == :SCOPE
-
-        scope.children[2]
-      end
-
-      def owner_statements(body)
-        body.type == :BLOCK ? body.children.compact : [body]
-      end
-
-      def top_level_statements(root)
-        return [] unless Ast.node?(root)
-
-        root.children.compact.flat_map do |child|
-          Ast.node?(child) && child.type == :BLOCK ? child.children.compact : [child]
-        end
-      end
-
-      def bare_visibility_marker?(node)
-        node.type == :VCALL && VISIBILITY_MIDS.include?(node.children[0])
-      end
-
-      def visibility_call?(node)
-        node.type == :FCALL && VISIBILITY_MIDS.include?(node.children[0])
-      end
-
-      def each_arg(args)
-        args.children.compact.each do |arg|
-          yield arg if Ast.node?(arg)
-        end
-      end
-
-      def literal_method_name(node)
-        return node.children[0].to_s if node.type == :LIT && node.children[0].is_a?(Symbol)
-        return node.children[0].to_s if %i[STR DSTR].include?(node.type)
-
-        nil
-      end
-
-      def method_record(node, owner, visibility)
-        name = method_name(node)
-        Method.new(
-          id: "#{owner}##{name}",
-          owner: owner,
-          name: name,
-          file: @file,
-          line: node.first_lineno,
-          span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
-          visibility: node.type == :DEFS ? :public : visibility
-        )
-      end
-
-      def method_name(node)
-        if node.type == :DEFS
-          receiver = node.children[0]
-          prefix = Ast.node?(receiver) && receiver.type == :SELF ? "self" : Ast.slice(receiver, @lines)
-          "#{prefix}.#{node.children[1]}"
-        else
-          node.children[0].to_s
-        end
-      end
-
-      def full_owner_name(owners, node)
-        (owners + [owner_segment(node)]).join("::")
-      end
-
-      def top_level_owner
-        "(top-level:#{@file})"
-      end
-
-      def owner_segment(node)
-        text = Ast.slice(node.children[0], @lines)
-        text.empty? ? "(anonymous)" : text
+      def owner_for_fact(fact)
+        TopLevelOwner.new(@file, @document).owner_for(fact)
       end
     end
 
-    class EdgeCollector
-      def initialize(file, lines, methods)
+    class EdgeFacts
+      def initialize(file, document, methods)
         @file = file
-        @lines = lines
+        @document = document
         @method_by_id = methods.to_h { |method| [method.id, method] }
+        @owner_mapper = TopLevelOwner.new(file, document)
       end
 
-      def scan(root)
-        out = []
-        top_level_methods(root).each do |method_node|
-          method = @method_by_id["#{top_level_owner}##{method_name(method_node)}"]
-          collect_calls(method_node, method, [], out) if method
+      def edges
+        @document.call_sites.filter_map do |call|
+          edge_for_call(call)
         end
-        walk(root, [], out)
-        out
       end
 
       private
 
-      def top_level_methods(root)
-        top_level_statements(root).select { |stmt| Ast.node?(stmt) && METHOD_TYPES.include?(stmt.type) }
-      end
+      def edge_for_call(call)
+        return nil unless call.receiver.to_s == "self"
 
-      def walk(node, owners, out)
-        return unless Ast.node?(node)
+        owner = @owner_mapper.owner_for(call)
+        caller = @method_by_id["#{owner}##{call.function}"]
+        return nil unless caller
 
-        if OWNER_TYPES.include?(node.type)
-          owner = (owners + [owner_segment(node)]).join("::")
-          owner_methods(node).each do |method_node|
-            method = @method_by_id["#{owner}##{method_name(method_node)}"]
-            collect_calls(method_node, method, [], out) if method
-          end
-          node.children.each { |child| walk(child, owners + [owner_segment(node)], out) }
-        else
-          node.children.each { |child| walk(child, owners, out) }
-        end
-      end
-
-      def owner_methods(owner_node)
-        body = owner_body(owner_node)
-        return [] unless Ast.node?(body)
-
-        owner_statements(body).flat_map do |stmt|
-          next [] unless Ast.node?(stmt)
-
-          if METHOD_TYPES.include?(stmt.type)
-            [stmt]
-          elsif visibility_call?(stmt)
-            inline_methods(stmt)
-          else
-            []
-          end
-        end
-      end
-
-      def inline_methods(stmt)
-        args = stmt.children[1]
-        return [] unless Ast.node?(args)
-
-        args.children.compact.select { |arg| Ast.node?(arg) && METHOD_TYPES.include?(arg.type) }
-      end
-
-      def collect_calls(node, caller, context_stack, out)
-        return unless Ast.node?(node)
-        return if SKIP_NESTED_TYPES.include?(node.type) && !METHOD_TYPES.include?(node.type)
-
-        context_stack = context_stack + [:conditional] if CONDITIONAL_TYPES.include?(node.type)
-        context_stack = context_stack + [:iterates] if ITERATION_TYPES.include?(node.type)
-
-        if (edge = internal_edge(node, caller, context_stack))
-          out << edge unless edge.caller == edge.callee
-        end
-
-        node.children.each { |child| collect_calls(child, caller, context_stack, out) }
-      end
-
-      def internal_edge(node, caller, context_stack)
-        call = internal_call_name(node, caller)
-        return nil unless call
-
-        callee = @method_by_id["#{caller.owner}##{call[:name]}"]
+        callee_name = scoped_name(caller, call.message)
+        callee = @method_by_id["#{owner}##{callee_name}"]
         return nil unless callee
+        return nil if caller.id == callee.id
 
         Edge.new(
           caller: caller.id,
@@ -340,70 +155,74 @@ module Decomplex
           caller_name: caller.name,
           callee_name: callee.name,
           file: @file,
-          line: node.first_lineno,
-          span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
-          type: edge_type(context_stack),
-          kind: call[:kind],
-          confidence: call[:confidence]
+          line: call.line,
+          span: call.span,
+          type: edge_type(call.control),
+          kind: call_kind(call),
+          confidence: :high
         )
       end
 
-      def internal_call_name(node, caller)
-        case node.type
-        when :FCALL, :VCALL
-          { name: scoped_name(caller, node.children[0]), kind: :bare_internal, confidence: :high }
-        when :CALL, :OPCALL
-          receiver, mid = node.children
-          return nil unless Ast.node?(receiver) && receiver.type == :SELF
+      def scoped_name(caller, message)
+        caller.name.to_s.start_with?("self.") ? "self.#{message}" : message.to_s
+      end
 
-          { name: scoped_name(caller, mid), kind: :direct_self, confidence: :high }
+      def edge_type(control)
+        %i[conditional iterates].include?(control) ? control : :always
+      end
+
+      def call_kind(call)
+        source_text(call.span).lstrip.start_with?("self.") ? :direct_self : :bare_internal
+      end
+
+      def source_text(span)
+        return "" unless span
+
+        first_line, first_column, last_line, last_column = span
+        if first_line == last_line
+          return @document.lines[first_line - 1].to_s[first_column...last_column].to_s
+        end
+
+        parts = []
+        parts << @document.lines[first_line - 1].to_s[first_column..].to_s
+        parts.concat(@document.lines[first_line...(last_line - 1)] || [])
+        parts << @document.lines[last_line - 1].to_s[0...last_column].to_s
+        parts.join
+      end
+    end
+
+    class TopLevelOwner
+      def initialize(file, document)
+        @file = file
+        @document = document
+      end
+
+      def owner_for(fact)
+        owner = fact.owner.to_s
+        return owner unless owner == file_owner
+        return owner if enclosed_by_matching_owner?(fact)
+
+        top_level_owner
+      end
+
+      private
+
+      def enclosed_by_matching_owner?(fact)
+        @document.owner_defs.any? do |owner|
+          owner.name.to_s == fact.owner.to_s && encloses?(owner.span, fact.span)
         end
       end
 
-      def scoped_name(caller, mid)
-        caller.name.start_with?("self.") ? "self.#{mid}" : mid.to_s
+      def encloses?(outer, inner)
+        return false unless outer && inner
+
+        starts_before = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1])
+        ends_after = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3])
+        starts_before && ends_after
       end
 
-      def edge_type(context_stack)
-        context_stack.last || :always
-      end
-
-      def owner_body(owner_node)
-        scope = owner_node.children[owner_node.type == :CLASS ? 2 : 1]
-        return nil unless Ast.node?(scope) && scope.type == :SCOPE
-
-        scope.children[2]
-      end
-
-      def owner_statements(body)
-        body.type == :BLOCK ? body.children.compact : [body]
-      end
-
-      def top_level_statements(root)
-        return [] unless Ast.node?(root)
-
-        root.children.compact.flat_map do |child|
-          Ast.node?(child) && child.type == :BLOCK ? child.children.compact : [child]
-        end
-      end
-
-      def visibility_call?(node)
-        node.type == :FCALL && VISIBILITY_MIDS.include?(node.children[0])
-      end
-
-      def method_name(node)
-        if node.type == :DEFS
-          receiver = node.children[0]
-          prefix = Ast.node?(receiver) && receiver.type == :SELF ? "self" : Ast.slice(receiver, @lines)
-          "#{prefix}.#{node.children[1]}"
-        else
-          node.children[0].to_s
-        end
-      end
-
-      def owner_segment(node)
-        text = Ast.slice(node.children[0], @lines)
-        text.empty? ? "(anonymous)" : text
+      def file_owner
+        File.basename(@file.to_s, File.extname(@file.to_s))
       end
 
       def top_level_owner

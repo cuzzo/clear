@@ -25,6 +25,21 @@ class SequenceMineTest < Minitest::Test
     assert(pairs.any? { |h| h[:pair] == %w[alloc_mark cleanup] && h[:support] == 4 })
   end
 
+  def test_scan_uses_syntax_not_ast_facades
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      Decomplex::Ast.stub(:parse_semantic, ->(*) { raise "Ast.parse_semantic should not be used" }) do
+        r = scan(<<~RB)
+          def a; alloc_mark(x); cleanup(x); end
+          def b; alloc_mark(y); cleanup(y); end
+          def c; alloc_mark(z); cleanup(z); end
+          def d; alloc_mark(w); cleanup(w); end
+        RB
+
+        assert(r.co_called_pairs(min_support: 4).any? { |h| h[:pair] == %w[alloc_mark cleanup] })
+      end
+    end
+  end
+
   def test_method_calling_one_without_the_other_is_broken_protocol
     r = scan(<<~RB)
       def a; alloc_mark(x); cleanup(x); end

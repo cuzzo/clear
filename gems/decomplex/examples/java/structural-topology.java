@@ -1,0 +1,1 @@
+class Worker { public void run(Items items) { prepare(); if (ready()) { validate(); } for (Item item : items) { helper(item); } } private void prepare() {} private boolean ready() { return true; } public void validate() {} private void helper(Item item) { item.use(); } }

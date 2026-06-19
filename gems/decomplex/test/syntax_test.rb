@@ -259,6 +259,40 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_ruby_adapter_applies_method_visibility
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Tree-sitter adapter smoke test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RB) do |path|
+      class Worker
+        def run; end
+
+        private
+        def prepare; end
+        def validate; end
+
+        public :validate
+        protected
+        def guarded; end
+
+        private def inline_helper; end
+        def self.build; end
+        def Worker.explicit; end
+      end
+    RB
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :ruby)
+      functions = doc.function_defs.to_h { |fn| [fn.name, fn] }
+
+      assert_equal :public, functions.fetch("run").visibility
+      assert_equal :private, functions.fetch("prepare").visibility
+      assert_equal :public, functions.fetch("validate").visibility
+      assert_equal :protected, functions.fetch("guarded").visibility
+      assert_equal :private, functions.fetch("inline_helper").visibility
+      assert_equal :public, functions.fetch("self.build").visibility
+      assert_equal :public, functions.fetch("Worker.explicit").visibility
+    end
+  end
+
   def test_tree_sitter_language_profiles_extract_portable_facts_when_grammars_are_available
     profiles = {
       python: [
@@ -393,8 +427,11 @@ class SyntaxTest < Minitest::Test
           def __init__(self, items):
               self.items = items
 
-          def call(self):
-              self.items.append("x")
+      def call(self):
+          self.items.append("x")
+
+      def run(items):
+          prepare(items)
     PY
       doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
 
@@ -403,6 +440,8 @@ class SyntaxTest < Minitest::Test
         ["Worker", "__init__", "self", "items", "items"]
       assert_includes doc.call_sites.map { |call| [call.owner, call.function, call.receiver, call.message] },
         ["Worker", "call", "self.items", "append"]
+      assert_includes doc.call_sites.map { |call| [call.function, call.receiver, call.message, call.arguments] },
+        ["run", "self", "prepare", ["items"]]
     end
   end
 

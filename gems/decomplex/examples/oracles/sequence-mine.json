@@ -1,0 +1,17 @@
+{
+  "detector": "sequence-mine",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "pair": [
+        "alloc_mark",
+        "cleanup"
+      ],
+      "support": 4,
+      "has": "alloc_mark",
+      "missing": "cleanup"
+    }
+  ]
+}

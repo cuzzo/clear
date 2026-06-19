@@ -328,6 +328,7 @@ class AstTest < Minitest::Test
 
   def test_unary_not_expression_predicate
     normalizer = Decomplex::Ast::TreeSitterNormalizer.allocate
+    normalizer.instance_variable_set(:@document, fake_document(:ruby))
     ruby_source = "def check\n  !flag\n  !!flag\n  -flag\n  not flag\nend\n"
 
     assert normalizer.send(:unary_not_expression?, ruby_syntax_node(ruby_source, "unary", "!flag"))
@@ -337,6 +338,7 @@ class AstTest < Minitest::Test
 
     with_language_file("function check(flag: boolean) { return !flag; }\n", ".ts", :typescript) do |file|
       document = parse_syntax(file, :typescript)
+      normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
       node = ts_nodes(document.root).find { |candidate| candidate.kind == "unary_expression" && candidate.text == "!flag" }
       refute_nil node
       assert normalizer.send(:unary_not_expression?, node)
@@ -344,6 +346,7 @@ class AstTest < Minitest::Test
 
     with_language_file("if not flag:\n    pass\n", ".py", :python) do |file|
       document = parse_syntax(file, :python)
+      normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
       node = ts_nodes(document.root).find { |candidate| candidate.kind == "not_operator" && candidate.text == "not flag" }
       refute_nil node
       refute normalizer.send(:unary_not_expression?, node)
@@ -351,6 +354,7 @@ class AstTest < Minitest::Test
 
     with_language_file("if not flag then end\n", ".lua", :lua) do |file|
       document = parse_syntax(file, :lua)
+      normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
       node = ts_nodes(document.root).find { |candidate| candidate.kind == "unary_expression" && candidate.text == "not flag" }
       refute_nil node
       refute normalizer.send(:unary_not_expression?, node)
@@ -359,6 +363,7 @@ class AstTest < Minitest::Test
 
   def test_unary_minus_expression_predicate
     normalizer = Decomplex::Ast::TreeSitterNormalizer.allocate
+    normalizer.instance_variable_set(:@document, fake_document(:ruby))
     ruby_source = "def check\n  -flag\n  !flag\n  value\nend\n"
 
     assert normalizer.send(:unary_minus_expression?, ruby_syntax_node(ruby_source, "unary", "-flag"))
@@ -398,6 +403,50 @@ class AstTest < Minitest::Test
       javascript: Decomplex::Ast::TypeScriptTreeSitterNormalizationAdapter
     }.each do |language, adapter_class|
       assert_instance_of adapter_class, Decomplex::Ast::TreeSitterNormalizationAdapter.for(fake_document(language))
+    end
+  end
+
+  def test_tree_sitter_normalizer_rejects_unsupported_normalization_languages
+    error = assert_raises(Decomplex::Ast::UnsupportedLanguageError) do
+      Decomplex::Ast::TreeSitterNormalizationAdapter.for(fake_document(:go))
+    end
+
+    assert_includes error.message, ":go"
+  end
+
+  def test_parse_semantic_returns_language_neutral_ruby_facts
+    with_language_file(<<~RB, ".rb", :ruby) do |file|
+      class User
+        def active?
+          admin?
+        end
+      end
+    RB
+      root, = Decomplex::Ast.parse_semantic(file, language: :ruby)
+
+      assert Decomplex::Ast.semantic_node?(root)
+      assert_equal :root, root.type
+      assert_equal :ruby, root.language
+      assert root.children.any? { |node| node.type == :owner && node[:name] == "User" }
+      assert root.children.any? { |node| node.type == :function && node[:name] == "active?" }
+      assert root.children.any? { |node| node.type == :call && node[:message] == "admin?" }
+      refute root.children.any? { |node| %i[DEFN VCALL FCALL CALL].include?(node.type) }
+    end
+  end
+
+  def test_parse_semantic_returns_language_neutral_python_facts
+    with_python_file(<<~PY) do |file|
+      def check(user):
+          return user.active()
+    PY
+      root, = Decomplex::Ast.parse_semantic(file, language: :python)
+
+      assert Decomplex::Ast.semantic_node?(root)
+      assert_equal :root, root.type
+      assert_equal :python, root.language
+      assert root.children.any? { |node| node.type == :function && node[:name] == "check" }
+      assert root.children.any? { |node| node.type == :call && node[:receiver] == "user" && node[:message] == "active" }
+      refute root.children.any? { |node| %i[DEFN VCALL FCALL CALL].include?(node.type) }
     end
   end
 

@@ -1,0 +1,12 @@
+{
+  "detector": "local-flow",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "statement_count": 6,
+      "boundary_count": 1
+    }
+  ]
+}

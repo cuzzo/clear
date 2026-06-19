@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tempfile"
+require_relative "../lib/decomplex/ast"
 require_relative "../lib/decomplex/weighted_inlined_cognitive_complexity"
 
 class WeightedInlinedCognitiveComplexityTest < Minitest::Test
@@ -242,6 +243,28 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
     refute_nil left
     assert_operator left[:depth], :<=, 1
     assert_equal %w[left right], left[:call_chain]
+  end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      out = scan(<<~RB, min_score: 2, min_hidden: 1, max_depth: 2)
+        class Pipeline
+          def run(input)
+            prepare(input)
+          end
+
+          def prepare(input)
+            if input.ready?
+              if input.valid? && !input.locked?
+                true
+              end
+            end
+          end
+        end
+      RB
+
+      refute_empty out
+    end
   end
 
   def test_handles_modules_inline_visibility_loops_rescue_and_shared_reason

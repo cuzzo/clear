@@ -2,7 +2,6 @@
 
 require "set"
 require "rbconfig"
-require_relative "ast"
 
 module Decomplex
   module Syntax
@@ -10,17 +9,27 @@ module Decomplex
                              :params, :signature, :kind, keyword_init: true)
     OwnerDef = Struct.new(:file, :name, :kind, :line, :span, keyword_init: true)
     CallSite = Struct.new(:receiver, :message, :file, :function, :owner, :line, :span,
-                          :conditional, :arguments, :control, keyword_init: true)
+                          :conditional, :arguments, :control, :safe_navigation, :block,
+                          keyword_init: true)
     StateDeclaration = Struct.new(:field, :owner, :type, :file, :line, :span, keyword_init: true)
     StateParamOrigin = Struct.new(:field, :receiver, :owner, :param, :file, :function,
                                   :line, :span, keyword_init: true)
-    DecisionSite = Struct.new(:kind, :members, :file, :function, :line, :span, :predicate, keyword_init: true)
+    DecisionSite = Struct.new(:kind, :members, :file, :function, :line, :span, :predicate,
+                              :enclosing_span, keyword_init: true)
     StateRead = Struct.new(:field, :receiver, :file, :function, :line, :span, :owner, keyword_init: true)
     StateWrite = Struct.new(:field, :receiver, :file, :function, :line, :span, :owner, keyword_init: true)
     BranchDecision = Struct.new(:file, :function, :line, :span, :predicate, :state_refs, keyword_init: true)
     BranchArm = Struct.new(:file, :function, :kind, :line, :span,
                            :decision_line, :decision_span, :predicate,
                            :member, :body, keyword_init: true)
+    PredicateDef = Struct.new(:file, :name, :owner, :body, :line, :span, keyword_init: true)
+    ComparisonSite = Struct.new(:file, :function, :line, :span, :source, :operator, keyword_init: true)
+    LocalMethod = Struct.new(:id, :owner, :name, :file, :line, :span, :node,
+                             :statements, :boundaries, keyword_init: true)
+    LocalStatement = Struct.new(:index, :line, :end_line, :span, :source, :reads,
+                                :writes, :dependencies, :co_uses, keyword_init: true)
+    LocalBoundary = Struct.new(:before_index, :after_index, :line, :kind, :text, keyword_init: true)
+    PathConditionSite = Struct.new(:guards, :action, :file, :function, :line, :span, keyword_init: true)
     LanguageLexicon = Struct.new(
       :type_guard_patterns, :diagnostic_patterns, :trivial_patterns,
       :nil_literal_patterns,
@@ -370,10 +379,11 @@ module Decomplex
 
       def call_target(document, node)
         case node.kind
-        when "call_expression", "method_invocation", "invocation_expression"
+	      when "call_expression", "method_invocation", "invocation_expression", "function_call", "method_call"
           generic_call_target(document, node)
 	      when "attribute", "selector_expression", "field", "field_access", "member_expression",
-	           "member_access_expression", "field_expression", "expression_list"
+	           "member_access_expression", "field_expression", "expression_list",
+             "dot_index_expression", "variable_list", "identifier", "simple_identifier"
           adjacent_argument_call_target(node)
         end
       end
@@ -391,55 +401,7 @@ module Decomplex
       end
     end
 
-    class RubySyntaxAdapter < TreeSitterLanguageAdapter
-      def function_name(node)
-        case node.kind
-        when "body_statement"
-          hidden_ruby_method_name(node)
-        when "singleton_method"
-          name = named_field(node, "name")&.text ||
-                 node.named_children.reverse.find do |child|
-                   %w[identifier field_identifier property_identifier].include?(child.kind)
-                 end&.text
-          name && "self.#{name}"
-        when "argument_list"
-          inline_def_name(node)
-        else
-          super
-        end
-      end
-
-      def visibility(_document, node)
-        return ruby_inline_def_visibility(node) if inline_def_argument_list?(node)
-
-        ruby_method_visibility(node)
-      end
-
-      def owner_name_from_declaration(document, node)
-        return hidden_ruby_owner_name(node) if hidden_ruby_owner_declaration?(node)
-
-        super
-      end
-
-      def owner_kind(node)
-        return hidden_ruby_owner_kind(node) if hidden_ruby_owner_declaration?(node)
-
-        super
-      end
-
-      def call_target(document, node)
-        case node.kind
-        when "call"
-          ruby_call_target(node)
-        when "body_statement"
-          ruby_bare_body_call_target(node)
-        when "identifier"
-          ruby_bare_call_target(node)
-        else
-          super
-        end
-      end
-    end
+    class RubySyntaxAdapter < TreeSitterLanguageAdapter; end
 
     class PythonSyntaxAdapter < TreeSitterLanguageAdapter
       def visibility(_document, node)
@@ -447,6 +409,39 @@ module Decomplex
         return :private if name.start_with?("_") && !name.start_with?("__")
 
         :public
+      end
+
+      def call_target(document, node)
+        python_adjacent_call_target(node) || super
+      end
+
+      def local_methods(document)
+        super
+      end
+
+      private
+
+      def python_function_body_statements(node)
+        body = named_field(node, "body") ||
+               node.named_children.find { |child| child.kind == "block" }
+        return [] unless body
+
+        body.named_children.reject { |child| child.kind == "comment" }
+      end
+
+      def python_adjacent_call_target(node)
+        return nil unless %w[identifier].include?(node.kind)
+
+        args = next_sibling(node)
+        return nil unless args&.kind == "argument_list"
+
+        {
+          receiver: "self",
+          message: node.text,
+          arguments: args.named_children.map { |child| normalize_text(child.text) }
+        }
+      rescue StandardError
+        nil
       end
     end
 
@@ -502,6 +497,10 @@ module Decomplex
     end
 
     class ZigSyntaxAdapter < TreeSitterLanguageAdapter
+      def visibility(_document, node)
+        modifier_visibility(node) || :private
+      end
+
       def state_declaration(node)
         return zig_container_field_declaration(node) if node.kind == "container_field"
 
@@ -573,380 +572,12 @@ module Decomplex
       end
     end
 
-    class RubySyntaxAdapter
-      def function_params(node)
-        return hidden_ruby_method_params(node) if hidden_ruby_method_definition?(node)
-
-        params = super
-        if inline_def_argument_list?(node)
-          params = node.named_children.find { |child| child.kind == "method_parameters" }
-                       &.named_children
-                       &.filter_map { |param| parameter_name(param) }
-                       &.uniq || params
-        end
-        params
-      end
-
-      def function_signature(document, node)
-        if hidden_ruby_method_definition?(node)
-          return normalize_text(hidden_ruby_method_signature(document, node))
-        end
-
-        signature = preceding_ruby_signature(document, node)
-        return signature unless signature.empty?
-
-        super
-      end
-
-      def state_declaration(node)
-        ruby_t_let_state_declaration(node) || super
-      end
-
-      def state_read_target(node)
-        ruby_state_variable_target(node) || super
-      end
-
-      def state_target(lhs)
-        ruby_state_variable_target(lhs) || super
-      end
-
-      private
-
-      def inline_def_argument_list?(node)
-        ts_node?(node) && node.kind == "argument_list" && node.children.first&.kind.to_s == "def"
-      end
-
-      def inline_def_name(node)
-        return nil unless inline_def_argument_list?(node)
-
-        receiver_index = node.named_children.index { |child| child.kind == "self" || child.kind == "constant" }
-        search = receiver_index ? node.named_children[(receiver_index + 1)..] : node.named_children
-        name = search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
-        receiver_index ? "self.#{name}" : name
-      end
-
-      def hidden_ruby_method_definition?(node)
-        ts_node?(node) && node.kind == "body_statement" && node.children.first&.kind.to_s == "def"
-      end
-
-      def hidden_ruby_method_name(node)
-        return nil unless hidden_ruby_method_definition?(node)
-
-        receiver_index = node.named_children.index { |child| child.kind == "self" || child.kind == "constant" }
-        search = receiver_index ? node.named_children[(receiver_index + 1)..] : node.named_children
-        name = search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
-        receiver_index ? "self.#{name}" : name
-      end
-
-      def hidden_ruby_method_params(node)
-        params = node.named_children.find { |child| child.kind == "method_parameters" }
-        return [] unless params
-
-        params.named_children.filter_map { |param| parameter_name(param) }.uniq
-      end
-
-      def hidden_ruby_method_signature(document, node)
-        body = node.named_children.find { |child| child.kind == "body_statement" }
-        end_byte = body ? body.start_byte : node.end_byte
-        document.source.byteslice(node.start_byte, end_byte - node.start_byte).to_s.strip.sub(/;+\z/, "")
-      rescue StandardError
-        line_text(document, node).strip
-      end
-
-      def hidden_ruby_owner_declaration?(node)
-        return false unless ts_node?(node)
-        return false unless node.kind == "body_statement"
-
-        %w[class module].include?(node.children.first&.kind.to_s)
-      end
-
-      def hidden_ruby_owner_name(node)
-        node.named_children.find { |child| %w[constant identifier type_identifier].include?(child.kind) }&.text
-      end
-
-      def hidden_ruby_owner_kind(node)
-        node.children.first&.kind.to_s == "module" ? :module : :class
-      end
-
-      def ruby_method_visibility(node)
-        modifier_visibility(node)
-      end
-
-      def ruby_inline_def_visibility(node)
-        parent = parent_node(node)
-        return nil unless parent&.kind == "call"
-
-        target = ruby_call_target(parent)
-        visibility = target && target[:receiver] == "self" && target[:message]&.to_sym
-        %i[private protected public].include?(visibility) ? visibility : nil
-      end
-
-      def ruby_call_target(node)
-        receiver = named_field(node, "receiver")
-        method = named_field(node, "method")
-        message = method&.text || first_named_text(node, %w[identifier constant])
-        message ||= normalize_text(node.text) if receiver.nil? && ruby_simple_call_text?(node.text)
-        return nil unless message
-
-        {
-          receiver: receiver ? normalize_text(receiver.text) : "self",
-          message: message,
-          arguments: ruby_argument_texts(node)
-        }
-      end
-
-      def ruby_bare_call_target(node)
-        return nil unless ruby_bare_call_identifier?(node)
-
-        {
-          receiver: "self",
-          message: node.text,
-          arguments: []
-        }
-      end
-
-      def ruby_bare_body_call_target(node)
-        return nil if hidden_ruby_method_definition?(node) || hidden_ruby_owner_declaration?(node)
-
-        explicit = ruby_explicit_receiver_body_call_target(node)
-        return explicit if explicit
-
-        message = node.text.to_s.strip
-        return nil unless ruby_simple_call_text?(message)
-        return nil if %w[true false nil self].include?(message)
-
-        {
-          receiver: "self",
-          message: message,
-          arguments: []
-        }
-      end
-
-      def ruby_explicit_receiver_body_call_target(node)
-        receiver, message = node.named_children
-        return nil unless receiver && message
-        return nil unless %w[self constant identifier].include?(receiver.kind)
-        return nil unless %w[identifier constant].include?(message.kind)
-
-        {
-          receiver: normalize_text(receiver.text),
-          message: message.text,
-          arguments: []
-        }
-      end
-
-      def ruby_simple_call_text?(text)
-        text.to_s.strip.match?(/\A[a-z_]\w*[!?=]?\z/)
-      end
-
-      def ruby_bare_call_identifier?(node)
-        parent = parent_node(node)
-        return false unless parent
-        return false if ruby_declaration_name?(node, parent)
-        return false if %w[method_parameters block_parameters argument_list assignment].include?(parent.kind)
-        if parent.kind == "call"
-          return false if named_field(parent, "receiver")
-
-          first = parent.named_children.first
-          return first == node && next_sibling(node)&.kind == "argument_list"
-        end
-        return false if next_sibling(node)&.text == "=" || prev_sibling(node)&.text == "="
-        return false if next_sibling(node)&.text == "." || prev_sibling(node)&.text == "."
-
-        %w[body_statement then else elsif ensure rescue].include?(parent.kind) ||
-          next_sibling(node)&.kind == "argument_list"
-      end
-
-      def ruby_declaration_name?(node, parent)
-        return true if hidden_ruby_method_definition?(parent)
-        return true if hidden_ruby_owner_declaration?(parent)
-        return true if %w[method singleton_method class module].include?(parent.kind)
-
-        false
-      end
-
-      def ruby_argument_texts(node)
-        args = named_field(node, "arguments") || node.named_children.find { |child| child.kind == "argument_list" }
-        return [] unless args
-
-        values = args.named_children.map { |child| normalize_text(child.text) }
-        return values unless values.empty?
-
-        text = args.text.to_s.strip
-        text = text[1...-1] if text.start_with?("(") && text.end_with?(")")
-        text.split(/\s*,\s*/).map { |arg| normalize_text(arg) }.reject(&:empty?)
-      end
-
-      def ruby_t_let_state_declaration(node)
-        lhs = named_field(node, "left") || node.named_children.first
-        rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
-        target = state_target(lhs)
-        return nil unless target && target[:receiver] == "self" && target[:field].to_s.start_with?("@")
-        return nil unless rhs&.kind == "call"
-
-        receiver = named_field(rhs, "receiver") || rhs.named_children.first
-        method = named_field(rhs, "method") || rhs.named_children.find { |child| child.kind == "identifier" }
-        return nil unless receiver&.text == "T" && method&.text == "let"
-
-        args = named_field(rhs, "arguments") || rhs.named_children.find { |child| child.kind == "argument_list" }
-        type = args&.named_children&.[](1)&.text
-        return nil if type.to_s.empty?
-
-        { field: target[:field], type: normalize_text(type) }
-      end
-
-      def skip_state_write_node?(node)
-        node.kind == "operator_assignment" ||
-          (assignment_lhs?(node) && next_sibling(node)&.text.to_s != "=" && !ruby_instance_variable_node?(node))
-      end
-
-      def skip_state_write_target?(target)
-        super || target[:field].to_s.start_with?("$")
-      end
-
-      def state_write_source_node(node)
-        assignment_lhs?(node) ? (parent_node(node) || node) : super
-      end
-
-      def direct_state_ref(node)
-        node.text if ruby_state_variable_node?(node)
-      end
-
-      def hidden_if?(node)
-        return false unless ts_node?(node)
-        return false unless %w[expression_statement block body_statement].include?(node.kind)
-
-        %w[if unless].include?(first_token_kind(node))
-      end
-
-      def hidden_modifier_if?(node)
-        return false unless ts_node?(node)
-        return false unless node.kind == "body_statement"
-
-        seen_named = false
-        node.children.any? do |child|
-          seen_named ||= child.named?
-          seen_named && !child.named? && %w[if unless].include?(child.kind)
-        end
-      end
-
-      def modifier_condition(node)
-        node.named_children.last
-      end
-
-      def hidden_case?(node)
-        return false unless ts_node?(node)
-        return false unless %w[body_statement block_body argument_list].include?(node.kind)
-
-        first_token_kind(node) == "case"
-      end
-
-      def hidden_match?(node)
-        node.kind == "expression_statement" &&
-          first_token_kind(node) == "match" &&
-          node.named_children.any? { |child| child.kind == "match_block" }
-      end
-
-      def case_pattern_texts(patterns)
-        texts = super
-        return texts unless texts.any? { |text| text.start_with?("*") }
-
-        out = []
-        pending_plain = []
-        texts.each_with_index do |text, index|
-          if text.start_with?("*")
-            out << pending_plain.join(", ") unless pending_plain.empty?
-            pending_plain = []
-            out << if texts.size == 1 || index.positive?
-                     text.delete_prefix("*")
-                   else
-                     text
-                   end
-          else
-            pending_plain << text
-          end
-        end
-        out << pending_plain.join(", ") unless pending_plain.empty?
-        out
-      end
-
-      def ruby_state_variable_target(node)
-        return nil unless ruby_state_variable_node?(node)
-
-        { receiver: "self", field: node.text }
-      end
-
-      def ruby_state_variable_node?(node)
-        ts_node?(node) && %w[instance_variable global_variable].include?(node.kind)
-      end
-
-      def ruby_instance_variable_node?(node)
-        ts_node?(node) && node.kind == "instance_variable"
-      end
-
-      def preceding_ruby_signature(document, node)
-        cursor = line(node) - 2
-        lines = document.lines
-        cursor -= 1 while cursor >= 0 && lines[cursor].to_s.strip.empty?
-        return "" if cursor.negative?
-
-        stripped = lines[cursor].to_s.strip
-        if stripped == "end"
-          start = cursor
-          while start >= 0
-            text = lines[start].to_s.strip
-            return normalize_text(lines[start..cursor].join("\n")) if text == "sig do"
-            return "" if start != cursor && text.match?(/\A(?:def|class|module)\b/)
-
-            start -= 1
-          end
-          return "" if start.negative?
-        end
-
-        return normalize_text(stripped) if stripped.start_with?("sig ")
-        return "" unless stripped == "}" || stripped.end_with?("}")
-
-        start = cursor
-        while start >= 0
-          text = lines[start].to_s.strip
-          return normalize_text(lines[start..cursor].join("\n")) if text.start_with?("sig ")
-          return "" if text.match?(/\A(?:def|class|module)\b/)
-
-          start -= 1
-        end
-        ""
-      end
-
-      def method_param_types(document)
-        types_by_method = {}
-        pending_sig = +""
-        document.lines.each do |line|
-          pending_sig << line if pending_sig_active?(line, pending_sig)
-          if (match = line.match(/\A\s*def\s+([A-Za-z_]\w*[!?=]?)(?:\s|\(|$)/))
-            types_by_method[match[1]] = sig_param_types(pending_sig)
-            pending_sig = +""
-          end
-        end
-        types_by_method
-      end
-
-      def pending_sig_active?(line, pending_sig)
-        !pending_sig.empty? || line.match?(/\A\s*sig\b/)
-      end
-
-      def sig_param_types(sig_source)
-        match = sig_source.match(/params\s*\((.*?)\)/m)
-        return {} unless match
-
-        match[1].scan(/([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)/).to_h
-      end
-    end
-
     class TreeSitterLanguageAdapter
       BRANCH_KINDS = %w[if unless if_statement if_modifier unless_modifier if_expression
                         while until while_statement for for_statement
                         case switch_statement expression_switch_statement switch_expression
                         match_statement match_expression when_expression].freeze
+      COMPARISON_OPERATORS = %w[== !=].freeze
       NOISE_MESSAGES = %w[! != == === < <= > >= [] []= to_s inspect class].freeze
 
       def initial_stack(document)
@@ -1012,20 +643,40 @@ module Decomplex
         out
       end
 
+      def comparison_site_facts(document, node, stack)
+        target = comparison_target(node)
+        return [] unless target
+
+        [
+          ComparisonSite.new(
+            file: document.file,
+            function: current_function(stack),
+            line: line(node),
+            span: span(node),
+            source: target[:source],
+            operator: target[:operator]
+          )
+        ]
+      end
+
       def implicit_state_accesses?
         false
       end
 
       def function_params(node)
         params = if node.kind == "method_declaration"
-                   node.named_children.select { |child| child.kind == "parameter_list" }[1]
+                   lists = node.named_children.select { |child| child.kind == "parameter_list" }
+                   lists.size > 1 ? lists[1] : lists.first
                  else
                    named_field(node, "parameters") ||
-                     node.named_children.find { |child| %w[parameters formal_parameters parameter_list].include?(child.kind) }
+                     node.named_children.find do |child|
+                       %w[parameters formal_parameters function_value_parameters parameter_list].include?(child.kind)
+                     end
                  end
+        params ||= node.named_children.select { |child| child.kind == "parameter" } if node.kind == "function_declaration"
         return [] unless params
 
-        params.named_children.filter_map do |param|
+        Array(params.respond_to?(:named_children) ? params.named_children : params).filter_map do |param|
           parameter_name(param)
         end.uniq
       end
@@ -1047,7 +698,402 @@ module Decomplex
         {}
       end
 
+      def predicate_def(_document, function_def)
+        body = generic_predicate_body(function_def.body)
+        return nil unless body
+
+        PredicateDef.new(
+          file: function_def.file,
+          name: function_def.name,
+          owner: function_def.owner,
+          body: body,
+          line: function_def.line,
+          span: function_def.span
+        )
+      end
+
+      def local_methods(document)
+        document.function_defs.map do |function_def|
+          statements = generic_function_body_statements(function_def.body)
+          local_names = generic_local_names(function_def, statements)
+          local_statements = statements.each_with_index.map do |statement, index|
+            generic_local_statement(statement, index, local_names)
+          end
+          owner = function_def.owner.to_s == file_owner(document.file) ? "(top-level)" : function_def.owner
+
+          LocalMethod.new(
+            id: "#{owner}##{function_def.name}",
+            owner: owner,
+            name: function_def.name,
+            file: function_def.file,
+            line: function_def.line,
+            span: function_def.span,
+            node: function_def.body,
+            statements: local_statements,
+            boundaries: generic_structural_boundaries(document, local_statements)
+          )
+        end
+      end
+
+      def path_condition_sites(document)
+        out = []
+        document.function_defs.each do |function_def|
+          generic_function_body_statements(function_def.body).each do |statement|
+            generic_path_walk(document, statement, function_def.name, [], out)
+          end
+        end
+        out
+      end
+
       private
+
+      def generic_predicate_body(node)
+        body = generic_function_body_node(node)
+        return nil unless body
+
+        statement = generic_function_body_statements(node).last || body
+        source = normalize_text(statement.text)
+        source = source.sub(/\Areturn\s+/, "").sub(/;\z/, "").strip
+        return nil if source.empty? || source.length > 200
+        return nil unless source.match?(/\A(?:true|false)\z|\b(?:true|false|null|nil)\b|(?:==|!=|&&|\|\||\band\b|\bor\b)/i)
+
+        source
+      end
+
+      def generic_function_body_node(node)
+        return nil unless ts_node?(node)
+
+        named_field(node, "body") ||
+          node.named_children.reverse.find do |child|
+            %w[block body body_statement function_body statement_block compound_statement declaration_list].include?(child.kind)
+          end
+      end
+
+      def generic_function_body_statements(node)
+        body = generic_function_body_node(node)
+        return [] unless body
+
+        named = body.named_children.reject { |child| comment_node?(child) }
+        if named.size == 1 && %w[statements statement_list].include?(named.first.kind)
+          return [named.first] if branch_node?(named.first)
+
+          named = named.first.named_children.reject { |child| comment_node?(child) }
+        end
+        return [] if named.empty? && body.text.to_s.strip.empty?
+        return [body] if branch_node?(body)
+        return [body] if generic_assignment_statement?(body)
+        return [body] if named.empty?
+
+        named
+      end
+
+      def generic_local_names(function_def, statements)
+        names = Set.new(function_def.params.to_a.map(&:to_s))
+        statements.each do |statement|
+          names.merge(generic_local_writes(statement))
+        end
+        names
+      end
+
+      def generic_local_statement(node, index, local_names)
+        reads = generic_local_reads(node, local_names).uniq
+        writes = generic_local_writes(node).uniq
+        LocalStatement.new(
+          index: index,
+          line: line(node),
+          end_line: span(node)[2],
+          span: span(node),
+          source: normalize_text(node.text),
+          reads: reads.to_set,
+          writes: writes.to_set,
+          dependencies: generic_assignment_dependencies(node, local_names),
+          co_uses: reads.combination(2).map { |left, right| [left, right] }
+        )
+      end
+
+      def generic_local_reads(node, local_names)
+        reads = []
+        generic_walk_local(node) do |child|
+          name = generic_local_identifier_text(child)
+          next unless name
+          next unless local_names.include?(name)
+          next if generic_local_write_node?(child)
+          next if generic_declaration_name?(child)
+          next if generic_member_name?(child)
+          next if generic_call_name?(child)
+
+          reads << name
+        end
+        reads
+      end
+
+      def generic_local_writes(node)
+        writes = []
+        if (name = generic_local_declaration_name(node))
+          writes << name
+        end
+        writes.concat(generic_assignment_lhs_names(node))
+
+        generic_walk_local(node) do |child|
+          next unless generic_identifier?(child)
+          next unless generic_local_write_node?(child)
+
+          writes << child.text.to_s
+        end
+        writes
+      end
+
+      def generic_assignment_dependencies(node, local_names)
+        lhs_names = generic_local_writes(node)
+        return [] if lhs_names.empty?
+
+        reads = generic_local_reads(node, local_names) - lhs_names
+        lhs_names.product(reads).reject { |left, right| left == right }.uniq
+      end
+
+      def generic_structural_boundaries(document, statements)
+        statements.each_cons(2).filter_map do |left, right|
+          boundary = generic_source_boundary(document, left.end_line + 1, right.line - 1)
+          next unless boundary
+
+          LocalBoundary.new(
+            before_index: left.index,
+            after_index: right.index,
+            line: boundary[:line],
+            kind: boundary[:kind],
+            text: boundary[:text]
+          )
+        end
+      end
+
+      def generic_source_boundary(document, first_line, last_line)
+        return nil if first_line > last_line
+
+        blank = nil
+        (first_line..last_line).each do |line_number|
+          text = document.lines[line_number - 1].to_s
+          stripped = text.strip
+          return { line: line_number, kind: :comment, text: stripped } if stripped.start_with?("#", "//", "--")
+
+          blank ||= { line: line_number, kind: :blank, text: stripped } if stripped.empty?
+        end
+        blank
+      end
+
+      def generic_walk_local(node, &block)
+        return unless ts_node?(node)
+
+        stack = [node]
+        until stack.empty?
+          current = stack.pop
+          next unless ts_node?(current)
+          next if current != node && generic_nested_local_scope?(current)
+
+          yield current
+          current.named_children.reverse_each { |child| stack << child }
+        end
+      end
+
+      def generic_nested_local_scope?(node)
+        function_name(node) || owner_name_from_declaration(nil, node)
+      end
+
+      def generic_identifier?(node)
+        ts_node?(node) && %w[identifier simple_identifier field_identifier property_identifier].include?(node.kind)
+      end
+
+      def generic_local_identifier_text(node)
+        return node.text.to_s if generic_identifier?(node)
+        return nil unless ts_node?(node)
+        return nil unless %w[argument pattern directly_assignable_expression value_argument].include?(node.kind)
+        return nil unless node.named_children.empty?
+
+        text = node.text.to_s
+        simple_identifier_text?(text) ? text : nil
+      end
+
+      def generic_assignment_statement?(node)
+        ts_node?(node) &&
+          (%w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(node.kind) ||
+           node.children.any? { |child| !child.named? && %w[= += -= *= /= %=].include?(child.text.to_s) })
+      end
+
+      def generic_local_write_node?(node)
+        return false unless generic_identifier?(node)
+
+        parent = parent_node(node)
+        return false unless parent
+        return false if generic_member_name?(node)
+        return true if generic_declaration_name?(node)
+
+        if %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(parent.kind)
+          lhs = named_field(parent, "left") || parent.named_children.first
+          return lhs == node
+        end
+
+        assignment_lhs?(node)
+      end
+
+      def generic_declaration_name?(node)
+        parent = parent_node(node)
+        return false unless parent
+
+        generic_local_declaration_name_node(parent) == node
+      end
+
+      def generic_local_declaration_name(node)
+        generic_local_declaration_name_node(node)&.text
+      end
+
+      def generic_local_declaration_name_node(node)
+        return nil unless ts_node?(node)
+        return nil unless %w[
+          declaration init_declarator let_declaration lexical_declaration local_variable_declaration
+          property_declaration short_var_declaration variable_declaration variable_declarator
+        ].include?(node.kind)
+
+        if node.kind == "short_var_declaration"
+          left = node.named_children.find { |child| child.kind == "expression_list" }
+          if left
+            identifier = left.named_children.find { |child| generic_identifier?(child) }
+            return identifier if identifier
+          end
+          return left if simple_identifier_text?(left&.text)
+        end
+
+        variable = node.named_children.find { |child| child.kind == "variable_declaration" }
+        return variable if simple_identifier_text?(variable&.text)
+
+        declaration_assignment = node.named_children.find { |child| child.kind == "assignment_statement" }
+        if declaration_assignment
+          lhs = declaration_assignment.named_children.first
+          identifier = lhs&.named_children&.find { |child| generic_identifier?(child) }
+          return identifier if identifier
+          return lhs if simple_identifier_text?(lhs&.text)
+        end
+
+        named_field(node, "pattern") ||
+          named_field(node, "name") ||
+          node.named_children.find { |child| child.kind == "pattern" } ||
+          node.named_children.find { |child| child.kind == "variable_declaration" }&.named_children&.find { |child| generic_identifier?(child) } ||
+          node.named_children.find { |child| child.kind == "expression_list" }&.named_children&.find { |child| generic_identifier?(child) } ||
+          node.named_children.find { |child| generic_identifier?(child) }
+      end
+
+      def generic_assignment_lhs_names(node)
+        return [] unless ts_node?(node)
+        return [] unless %w[assignment assignment_expression assignment_statement augmented_assignment operator_assignment].include?(node.kind)
+
+        lhs = named_field(node, "left") || node.named_children.first
+        return [] unless ts_node?(lhs)
+        return [lhs.text] if generic_identifier?(lhs)
+        return [lhs.text] if simple_identifier_text?(lhs.text)
+
+        lhs.named_children.filter_map { |child| child.text if generic_identifier?(child) }
+      end
+
+      def simple_identifier_text?(text)
+        text.to_s.match?(/\A[A-Za-z_]\w*\z/)
+      end
+
+      def generic_member_name?(node)
+        parent = parent_node(node)
+        if parent&.kind == "navigation_suffix"
+          owner = parent_node(parent)
+          return true if owner && field_like_node?(owner)
+        end
+        return false unless parent && field_like_node?(parent)
+
+        field = named_field(parent, "field") || named_field(parent, "property") ||
+                named_field(parent, "name") || named_field(parent, "suffix") ||
+                parent.named_children.last
+        field == node
+      end
+
+      def generic_call_name?(node)
+        parent = parent_node(node)
+        return false unless parent
+
+        %w[call_expression method_invocation invocation_expression].include?(parent.kind) &&
+          (named_field(parent, "function") == node || parent.named_children.first == node)
+      end
+
+      def generic_path_walk(document, node, function, guards, out)
+        return unless ts_node?(node)
+        return if generic_nested_local_scope?(node)
+
+        if branch_node?(node)
+          condition = generic_branch_condition(node)
+          atoms = generic_path_condition_atoms(condition)
+          generic_branch_body_nodes(node).each do |child|
+            generic_path_walk(document, child, function, guards + atoms, out)
+          end
+          return
+        end
+
+        if guards.size >= 2 && generic_path_action_node?(node)
+          out << PathConditionSite.new(
+            guards: guards.uniq.sort,
+            action: normalize_text(node.text),
+            file: document.file,
+            function: function,
+            line: line(node),
+            span: span(node)
+          )
+          return
+        end
+
+        node.named_children.each { |child| generic_path_walk(document, child, function, guards, out) }
+      end
+
+      def generic_branch_condition(node)
+        named_field(node, "condition") || named_field(node, "value") ||
+          named_field(node, "subject") || node.named_children.first
+      end
+
+      def generic_branch_body_nodes(node)
+        bodies = [
+          named_field(node, "consequence"),
+          named_field(node, "body"),
+          named_field(node, "alternative")
+        ].compact
+        bodies = node.named_children.drop(1) if bodies.empty?
+        bodies.flat_map do |body|
+          children = body.named_children.reject { |child| comment_node?(child) }
+          children.empty? ? [body] : children
+        end
+      end
+
+      def comment_node?(node)
+        node.kind.to_s.include?("comment")
+      end
+
+      def generic_path_condition_atoms(condition)
+        return [] unless ts_node?(condition)
+
+        if boolean_container?(condition) && boolean_and?(condition)
+          flatten_boolean_and(condition).map { |child| decision_member_text(child) }.uniq.sort
+        else
+          [decision_member_text(condition)]
+        end
+      end
+
+      def generic_path_action_node?(node)
+        return false unless ts_node?(node)
+        return false if branch_node?(node)
+
+        generic_assignment_statement?(node) ||
+          %w[call call_expression expression_statement return_statement identifier simple_identifier].include?(node.kind)
+      end
+
+      def comparison_target(node)
+        return nil unless %w[binary binary_expression].include?(node.kind)
+
+        operator = direct_operator(node)
+        return nil unless COMPARISON_OPERATORS.include?(operator)
+
+        { source: normalize_text(node.text), operator: operator }
+      end
 
       def push_owner_context(document, stack, node)
         owner = owner_name_from_declaration(document, node)
@@ -1112,6 +1158,8 @@ module Decomplex
       def control_context(node)
         return :iterates if %w[while until while_statement for for_statement for_in_statement
                                loop_expression do_block].include?(node.kind)
+        return :iterates if node.kind == "expression_statement" && node.text.to_s.lstrip.match?(/\A(?:for|while|loop)\b/)
+        return :iterates if node.kind == "labeled_statement" && node.text.to_s.lstrip.start_with?("for ")
         return :conditional if branch_node?(node)
 
         nil
@@ -1140,9 +1188,10 @@ module Decomplex
             function: current_function(stack),
             line: line(node),
             span: span(node),
-            predicate: decision_predicate(node)
+            predicate: decision_predicate(node),
+            enclosing_span: span(node)
           )
-        when "body_statement", "block_body", "argument_list"
+        when "body_statement", "block", "block_body", "argument_list", "statements"
           return unless hidden_case?(node)
           return if node.named_children.any? { |child| child.kind == "case" }
           return if predicate_less_case?(node)
@@ -1157,7 +1206,8 @@ module Decomplex
             function: current_function(stack),
             line: line(node),
             span: span(node),
-            predicate: decision_predicate(node)
+            predicate: decision_predicate(node),
+            enclosing_span: span(node)
           )
         when "expression_statement"
           return unless hidden_match?(node)
@@ -1172,7 +1222,8 @@ module Decomplex
             function: current_function(stack),
             line: line(node),
             span: span(node),
-            predicate: decision_predicate(node)
+            predicate: decision_predicate(node),
+            enclosing_span: span(node)
           )
         end
       end
@@ -1201,8 +1252,21 @@ module Decomplex
           function: current_function(stack),
           line: conjunction_span(node)[0],
           span: conjunction_span(node),
-          predicate: normalize_text(node.text)
+          predicate: normalize_text(node.text),
+          enclosing_span: decision_enclosing_span(node)
         )
+      end
+
+      def decision_enclosing_span(node)
+        parent = parent_node(node)
+        seen = Set.new
+        while ts_node?(parent) && !seen.include?(node_key(parent))
+          seen << node_key(parent)
+          return span(parent) if branch_node?(parent) || %w[while until].include?(parent.kind)
+
+          parent = parent_node(parent)
+        end
+        span(node)
       end
 
       def record_function_def(document, node, stack, out)
@@ -1243,17 +1307,20 @@ module Decomplex
         target = normalize_target_receiver(target, stack)
         return if noise_call?(target)
 
+        source_node = target[:source_node] || node
         out << CallSite.new(
           receiver: target[:receiver],
           message: target[:message],
           file: document.file,
           function: current_function(stack),
           owner: current_owner(document, stack),
-          line: line(node),
-          span: span(node),
+          line: line(source_node),
+          span: span(source_node),
           conditional: conditional_context?(stack),
           arguments: target[:arguments],
-          control: current_control(stack)
+          control: current_control(stack),
+          safe_navigation: target[:safe_navigation] || false,
+          block: target[:block] || call_has_block?(source_node)
         )
       end
 
@@ -1407,9 +1474,12 @@ module Decomplex
         case node.kind
         when "while", "until", "while_statement", "for", "for_statement"
           record_loop_arm(document, node, stack, out)
-        when "case", "body_statement", "switch_statement", "expression_switch_statement", "switch_expression",
+        when "case", "body_statement", "block", "expression_statement", "statements", "switch_statement", "expression_switch_statement", "switch_expression",
              "match_statement", "match_expression", "when_expression"
           return if node.kind == "body_statement" && !hidden_case?(node)
+          return if node.kind == "block" && !hidden_case?(node)
+          return if node.kind == "statements" && !hidden_case?(node)
+          return if node.kind == "expression_statement" && !hidden_match?(node)
 
           record_case_arms(document, node, stack, out)
         end
@@ -1597,7 +1667,7 @@ module Decomplex
         return normalize_text(modifier_condition(node).text) if hidden_modifier_if?(node) && modifier_condition(node)
 
         target = decision_subject(node)
-        normalize_text(target ? target.text : node.text)
+        strip_enclosing_parentheses(normalize_text(target ? target.text : node.text))
       end
 
       def decision_subject(node)
@@ -1637,7 +1707,7 @@ module Decomplex
 
       def boolean_container?(node)
         return false unless ts_node?(node)
-        return true if %w[binary binary_expression boolean_operator].include?(node.kind)
+        return true if %w[binary binary_expression boolean_operator conjunction_expression disjunction_expression].include?(node.kind)
         return boolean_container?(node.named_children.first) if parenthesized_wrapper?(node)
         return false unless %w[body_statement block_body statement pattern argument_list].include?(node.kind)
         return false unless %w[&& and].include?(direct_operator(node))
@@ -1662,7 +1732,7 @@ module Decomplex
       end
 
       def parenthesized_wrapper?(node)
-        ts_node?(node) && %w[parenthesized_statements parenthesized_expression].include?(node.kind) &&
+        ts_node?(node) && %w[condition_clause parenthesized_statements parenthesized_expression].include?(node.kind) &&
           node.named_children.size == 1
       end
 
@@ -1709,7 +1779,12 @@ module Decomplex
       end
 
       def hidden_if?(node)
-        false
+        return false unless ts_node?(node)
+        return true if node.kind == "expression_statement" && node.text.to_s.lstrip.start_with?("if ")
+        return false unless %w[block body_statement statements statement_list].include?(node.kind)
+
+        first_token = node.children.first
+        first_token && !first_token.named? && %w[if unless].include?(first_token.kind.to_s)
       end
 
       def hidden_modifier_if?(node)
@@ -1721,11 +1796,17 @@ module Decomplex
       end
 
       def hidden_case?(node)
-        false
+        return false unless ts_node?(node)
+        return false unless %w[body_statement block statements statement_list].include?(node.kind)
+
+        first_token = node.children.first
+        first_token && !first_token.named? && %w[case match switch when].include?(first_token.kind.to_s)
       end
 
       def hidden_match?(node)
-        false
+        ts_node?(node) &&
+          node.kind == "expression_statement" &&
+          node.text.to_s.lstrip.start_with?("match ")
       end
 
       def first_token_kind(node)
@@ -2060,14 +2141,33 @@ module Decomplex
       end
 
       def generic_call_target(document, node)
+        if %w[method_invocation invocation_expression].include?(node.kind)
+          adjacent = generic_adjacent_method_invocation_target(node)
+          return adjacent if adjacent
+        end
+
         callee = named_field(node, "function") || named_field(node, "callee") || node.named_children.first
         return nil unless callee
         return nil if callee.kind == "builtin_function" || callee.text.to_s.start_with?("@")
 
-        target = target_from_callee(callee).merge(arguments: [])
+        target = target_from_callee(callee).merge(
+          arguments: call_argument_nodes(node).map { |argument| normalize_text(argument.text) }
+        )
         first_argument_receiver_call_target(document, node, target) || target
       rescue NoMethodError
         nil
+      end
+
+      def generic_adjacent_method_invocation_target(node)
+        names = node.named_children.select { |child| %w[identifier simple_identifier].include?(child.kind) }
+        return nil unless names.size >= 2
+
+        args = node.named_children.find { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
+        {
+          receiver: normalize_text(names.first.text),
+          message: names[1].text,
+          arguments: Array(args&.named_children).map { |child| normalize_text(child.text) }
+        }
       end
 
       def first_argument_receiver_call_target(_document, node, target)
@@ -2087,14 +2187,19 @@ module Decomplex
 
       def call_argument_nodes(node)
         args = named_field(node, "arguments") ||
-               node.named_children.find { |child| child.kind == "argument_list" }
-        Array(args&.named_children)
+               node.named_children.find { |child| %w[argument_list arguments].include?(child.kind) }
+        return Array(args&.named_children) if args
+        return [] unless node.kind == "call_expression"
+
+        callee = named_field(node, "function") || named_field(node, "callee") || node.named_children.first
+        node.named_children.reject { |child| child == callee }
       end
 
       def adjacent_argument_call_target(node)
-        return nil unless next_sibling(node)&.kind == "argument_list"
+        args = next_sibling(node)
+        return nil unless %w[argument_list arguments call_suffix].include?(args&.kind)
 
-        target_from_callee(node).merge(arguments: [])
+        target_from_callee(node).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
       rescue NoMethodError
         nil
       end
@@ -2271,7 +2376,8 @@ module Decomplex
 
           { receiver: normalize_text(receiver.text), field: method.text }
         when "field", "field_access", "selector_expression", "member_expression", "member_access_expression", "attribute",
-             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list"
+             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list",
+             "dot_index_expression", "variable_list"
           return nil if node.kind == "expression_list" && !(named_field(node, "operand") && named_field(node, "field"))
 
           object = named_field(node, "object") || named_field(node, "receiver") ||
@@ -2308,7 +2414,8 @@ module Decomplex
 
           { receiver: normalize_text(receiver.text), field: method.text.sub(/=\z/, "") }
         when "field", "field_access", "selector_expression", "member_expression", "member_access_expression", "attribute",
-             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list"
+             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list",
+             "dot_index_expression", "variable_list"
           if lhs.kind == "expression_list" && !(named_field(lhs, "operand") && named_field(lhs, "field"))
             return generic_state_target(lhs.named_children.first)
           end
@@ -2344,6 +2451,11 @@ module Decomplex
         nil
       end
 
+      def call_has_block?(node)
+        ts_node?(node) &&
+          node.named_children.any? { |child| %w[block do_block lambda].include?(child.kind) }
+      end
+
       def next_sibling(node)
         node.next_sibling
       rescue StandardError
@@ -2377,8 +2489,11 @@ module Decomplex
       end
 
       def field_like_node?(node)
-        %w[field field_access selector_expression member_expression member_access_expression attribute field_expression
-           navigation_expression directly_assignable_expression expression_list scoped_identifier].include?(node.kind)
+        %w[
+          attribute directly_assignable_expression dot_index_expression expression_list field field_access
+          field_expression member_access_expression member_expression navigation_expression scoped_identifier
+          selector_expression variable_list
+        ].include?(node.kind)
       end
 
       def member_field_text(field)
@@ -2449,9 +2564,9 @@ module Decomplex
         return param.text if %w[identifier simple_identifier shorthand_property_identifier_pattern].include?(param.kind)
 
         name = named_field(param, "name") ||
-               param.named_children.find do |child|
+               param.named_children.select do |child|
                  %w[identifier simple_identifier field_identifier property_identifier].include?(child.kind)
-               end
+               end.last
         text = name&.text.to_s
         return nil if text.empty? || text == "_"
 
@@ -2460,6 +2575,8 @@ module Decomplex
 
       def normalize_target_receiver(target, stack)
         receiver = target[:receiver].to_s
+        return target.merge(receiver: "self") if %w[self this].include?(receiver)
+
         current_receiver = current_receiver_name(stack)
         return target unless current_receiver
         return target.merge(receiver: "self") if receiver == current_receiver
@@ -2733,6 +2850,22 @@ module Decomplex
 
       def branch_arms
         @branch_arms ||= adapter.branch_arms(self)
+      end
+
+      def predicate_defs
+        @predicate_defs ||= adapter.predicate_defs(self)
+      end
+
+      def comparison_sites
+        @comparison_sites ||= adapter.comparison_sites(self)
+      end
+
+      def local_methods
+        @local_methods ||= adapter.local_methods(self)
+      end
+
+      def path_condition_sites
+        @path_condition_sites ||= adapter.path_condition_sites(self)
       end
 
       def immutable_struct_readers
@@ -3129,11 +3262,11 @@ module Decomplex
           profile.after_structural_facts(document, out)
           out[:function_defs].uniq! { |fn| [fn.file, fn.owner, fn.name, fn.line] }
           out[:owner_defs].uniq! { |owner| [owner.file, owner.name, owner.kind] }
-          out[:call_sites].uniq! { |call| [call.file, call.owner, call.function, call.line, call.receiver, call.message] }
+          out[:call_sites].uniq! { |call| [call.file, call.owner, call.function, call.span, call.receiver, call.message] }
           out[:state_declarations].uniq! { |decl| [decl.file, decl.owner, decl.field] }
           out[:state_param_origins].uniq! { |origin| [origin.file, origin.owner, origin.function, origin.field, origin.param] }
-          out[:state_reads].uniq! { |read| [read.file, read.owner, read.function, read.line, read.receiver, read.field] }
-          out[:state_writes].uniq! { |write| [write.file, write.owner, write.function, write.line, write.receiver, write.field] }
+          out[:state_reads].uniq! { |read| [read.file, read.owner, read.function, read.span, read.receiver, read.field] }
+          out[:state_writes].uniq! { |write| [write.file, write.owner, write.function, write.span, write.receiver, write.field] }
           out
         end
       end
@@ -3145,6 +3278,28 @@ module Decomplex
           out.concat(profile.branch_arm_facts(document, node, stack))
         end
         out
+      end
+
+      def predicate_defs(document)
+        profile = syntax_profile(document.language)
+        document.function_defs.filter_map { |function_def| profile.predicate_def(document, function_def) }
+      end
+
+      def comparison_sites(document)
+        profile = syntax_profile(document.language)
+        out = []
+        walk(document, profile) do |node, stack|
+          out.concat(profile.comparison_site_facts(document, node, stack))
+        end
+        out
+      end
+
+      def local_methods(document)
+        syntax_profile(document.language).local_methods(document)
+      end
+
+      def path_condition_sites(document)
+        syntax_profile(document.language).path_condition_sites(document)
       end
 
       def immutable_struct_readers(lines)
@@ -3264,3 +3419,7 @@ module Decomplex
 
   end
 end
+
+require_relative "syntax/ruby"
+require_relative "syntax/effects"
+require_relative "syntax/protocols"

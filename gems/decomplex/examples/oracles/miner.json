@@ -1,0 +1,13 @@
+{
+  "detector": "miner",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": {
+    "missing_abstractions": [
+      {
+        "present": true
+      }
+    ]
+  }
+}

@@ -57,4 +57,15 @@ class PredicateAliasTest < Minitest::Test
     assert_equal 1, rm.size
     assert_equal "framey?", rm.first[:predicate]
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      pa = Decomplex::PredicateAlias.scan(files(<<~RB))
+        def first?; true; end
+        def second?; true; end
+      RB
+
+      assert_equal [%w[first? second?]], pa.alias_clusters.map { |cluster| cluster[:names].sort }
+    end
+  end
 end

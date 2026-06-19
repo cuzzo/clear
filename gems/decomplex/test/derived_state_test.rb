@@ -104,4 +104,18 @@ class DerivedStateTest < Minitest::Test
     assert_equal "b", out.first[:derived]
     assert_equal "a", out.first[:source]
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      out = scan(<<~RB)
+        def f(a)
+          b = a + 1
+          a = recompute(a)
+          use(b)
+        end
+      RB
+
+      assert_equal 1, out.size
+    end
+  end
 end

@@ -1,0 +1,11 @@
+{
+  "detector": "false-simplicity",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "kind": "hidden_io"
+    }
+  ]
+}

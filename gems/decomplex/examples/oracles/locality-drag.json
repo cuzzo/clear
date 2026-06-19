@@ -1,0 +1,11 @@
+{
+  "detector": "locality-drag",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "variable": "receipt_id"
+    }
+  ]
+}

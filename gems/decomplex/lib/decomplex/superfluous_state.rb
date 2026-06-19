@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "set"
-require_relative "ast"
 
 module Decomplex
   # SuperfluousState -- fields that could be eliminated entirely.

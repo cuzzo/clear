@@ -233,4 +233,15 @@ class RedundantNilGuardTest < Minitest::Test
   ensure
     f&.unlink
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      assert_equal ["x&.call"], guards(<<~RB)
+        def use(x)
+          return if x.nil?
+          x&.call
+        end
+      RB
+    end
+  end
 end

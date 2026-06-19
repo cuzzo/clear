@@ -197,4 +197,20 @@ class FatUnionTest < Minitest::Test
   ensure
     f
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      fu = scan(<<~RB)
+        def lower(n)
+          case n
+          when AST::Call then n.line; n.ty
+          when AST::Func then n.line; n.ty
+          when AST::Lit  then n.line; n.ty
+          end
+        end
+      RB
+
+      assert_equal 1, fu.size
+    end
+  end
 end

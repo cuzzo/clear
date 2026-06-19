@@ -155,4 +155,17 @@ class DecisionPressureTest < Minitest::Test
   ensure
     f&.unlink
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      r = rank(<<~RB)
+        def a(node)
+          ti = node.full_type
+          return 1 if ti.is_a?(Type)
+        end
+      RB
+
+      assert_equal ".full_type", r.first[:contract]
+    end
+  end
 end

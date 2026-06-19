@@ -1,0 +1,11 @@
+{
+  "detector": "path-condition",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "present": true
+    }
+  ]
+}

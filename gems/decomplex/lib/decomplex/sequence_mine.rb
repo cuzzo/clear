@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # Guarded-pair / protocol mining (Engler "Bugs as Deviant Behavior",
@@ -10,8 +10,8 @@ module Decomplex
   # deviant -- the "similar path, one missing the step" plague that is
   # the literal shape of bugs #1/#2/#9.
   #
-  # Unit = the SET of distinct call message-names in a method (FCALL /
-  # CALL mid). Domain-agnostic (Engler): no name heuristics, mine all
+  # Unit = the SET of distinct semantic call message-names in a method.
+  # Domain-agnostic (Engler): no name heuristics, mine all
   # pairs, rank by support, accept FP. Same proven shape as co_update,
   # over calls instead of assigned attributes.
   class SequenceMine
@@ -45,9 +45,9 @@ module Decomplex
     def self.scan(files)
       calls = []
       files.each do |f|
-        root, lines = Ast.parse(f)
-        e = new(f)
-        e.walk(root, [])
+        document = Syntax.parse(f, parser: "tree_sitter")
+        e = new(f, document)
+        e.collect
         calls.concat(e.calls)
       end
       Report.new(calls)
@@ -55,49 +55,54 @@ module Decomplex
 
     attr_reader :calls
 
-    def initialize(file)
+    def initialize(file, document)
       @file = file
+      @document = document
       @calls = []
     end
 
-    def walk(node, defstack)
-      return unless Ast.node?(node)
-
-      defstack = Ast.def_push(node, defstack)
-      if %i[CALL FCALL VCALL].include?(node.type)
-        mid = node.children[node.type == :CALL ? 1 : 0]
-        if protocol_event?(node, mid.to_s)
-          @calls << Call.new(mid: mid.to_s, file: @file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno,
-                             span: [node.first_lineno, node.first_column,
-                                    node.last_lineno, node.last_column])
+    def collect
+      @document.call_sites.each do |call|
+        mid = call.message.to_s
+        nested_protocol_events(call).each do |nested_mid|
+          @calls << Call.new(mid: nested_mid, file: @file,
+                             defn: call.function || "(top-level)",
+                             line: call.line,
+                             span: call.span)
+        end
+        if protocol_event?(call, mid)
+          @calls << Call.new(mid: mid, file: @file,
+                             defn: call.function || "(top-level)",
+                             line: call.line,
+                             span: call.span)
         end
       end
-      node.children.each { |c| walk(c, defstack) }
     end
 
     private
 
-    def protocol_event?(node, mid)
+    def protocol_event?(call, mid)
       return false if IGNORED_MIDS.include?(mid)
-      return false if passive_reader_call?(node, mid)
+      return false if passive_reader_call?(call, mid)
 
       true
     end
 
-    def passive_reader_call?(node, mid)
+    def passive_reader_call?(call, mid)
       return false if zero_arg_action_name?(mid)
 
-      case node.type
-      when :CALL
-        node.children[2].nil?
-      when :VCALL
-        true
-      when :FCALL
-        node.children[1].nil?
-      else
-        false
+      return false unless call.arguments.to_a.empty?
+
+      true
+    end
+
+    def nested_protocol_events(call)
+      return [] unless IGNORED_MIDS.include?(call.message.to_s)
+
+      candidates = call.arguments.to_a
+      candidates += source_text(call.span).scan(/\b[a-z_]\w*[!?]?\b/)
+      candidates.uniq.select do |candidate|
+        !IGNORED_MIDS.include?(candidate) && zero_arg_action_name?(candidate)
       end
     end
 
@@ -108,6 +113,21 @@ module Decomplex
       ZERO_ARG_ACTION_PREFIXES.any? do |prefix|
         mid == prefix || mid.start_with?("#{prefix}_")
       end
+    end
+
+    def source_text(span)
+      return "" unless span
+
+      first_line, first_column, last_line, last_column = span
+      if first_line == last_line
+        return @document.lines[first_line - 1].to_s[first_column...last_column].to_s
+      end
+
+      parts = []
+      parts << @document.lines[first_line - 1].to_s[first_column..].to_s
+      parts.concat(@document.lines[first_line...(last_line - 1)] || [])
+      parts << @document.lines[last_line - 1].to_s[0...last_column].to_s
+      parts.join
     end
 
     class Report

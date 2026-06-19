@@ -1,0 +1,11 @@
+{
+  "detector": "temporal-ordering-pressure",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "present": true
+    }
+  ]
+}

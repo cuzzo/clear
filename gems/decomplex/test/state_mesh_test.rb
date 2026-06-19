@@ -49,6 +49,28 @@ class StateMeshTest < Minitest::Test
     sm.writes.each { |w| assert_equal "storage", w.norm }
   end
 
+  def test_scan_uses_syntax_facts_for_writes_and_reads
+    f = Tempfile.new(["sm", ".rb"])
+    f.write(<<~RB)
+      def a(x); x.storage = :heap; end
+      def b(x); x.storage = :frame; end
+      def c(x); use(x.storage); end
+    RB
+    f.close
+    @tempfiles << f
+    no_misses = Struct.new(:reification_misses).new([])
+
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      Decomplex::SemanticAlias.stub(:scan, ->(*) { no_misses }) do
+        sm = Decomplex::StateMesh.scan([f.path])
+        sm.run
+
+        assert_equal 2, sm.writes.size
+        assert_equal 1, sm.reads.size
+      end
+    end
+  end
+
   def test_discover_ivar_writes
     sm = scan(<<~RB)
       def a; @storage = :heap; end

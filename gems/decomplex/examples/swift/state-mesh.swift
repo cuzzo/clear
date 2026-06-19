@@ -1,0 +1,1 @@
+class StateMeshExample { var a = 0; var b = 0; func initialize() { self.a = 1; self.b = 2 } func writer() { self.a = 3 } func reader() -> Int { return self.a + self.b } func a_alias() -> Int { return self.a } }

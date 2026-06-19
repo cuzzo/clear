@@ -24,7 +24,7 @@ module Decomplex
 
     IDENTIFIER_KINDS = %w[
       identifier constant type_identifier field_identifier property_identifier
-      shorthand_property_identifier_pattern variable_name
+      shorthand_property_identifier_pattern simple_identifier variable_name
     ].freeze
     LITERAL_KINDS = %w[
       string string_content string_literal interpreted_string_literal raw_string_literal
@@ -34,22 +34,22 @@ module Decomplex
     SKIP_CANDIDATE_KINDS = %w[
       comment identifier constant type_identifier field_identifier property_identifier
       parameters formal_parameters parameter_list argument_list arguments
-      block_parameters method_parameters
+      block_parameters call_suffix function_value_parameters method_parameters value_argument
       scope_resolution
     ].freeze
     CLONE_CANDIDATE_KINDS = %w[
       array assignment assignment_statement block case case_clause class
-      class_definition class_declaration do_block enum_declaration for
-      for_statement hash if if_statement match_expression match_statement
-      method method_definition module operator_assignment singleton_method
+      class_definition class_declaration compound_statement conjunction_expression control_structure_body
+      do_block enum_declaration for for_statement function_body hash if if_statement match_expression
+      match_statement method method_definition module operator_assignment singleton_method statements
       struct_declaration switch_case switch_expression switch_statement
       unless until while while_statement
     ].freeze
     BODY_KINDS = %w[
       body block body_statement declaration_list statement_block compound_statement
-      suite do_block
+      function_body statements suite do_block
     ].freeze
-    CALL_KINDS = %w[call call_expression method_invocation invocation_expression].freeze
+    CALL_KINDS = %w[call call_expression function_call method_call method_invocation invocation_expression].freeze
 
     def self.scan(files, mass: DEFAULT_MASS, fuzzy: DEFAULT_FUZZY)
       new(files, mass: mass, fuzzy: fuzzy).scan
@@ -236,7 +236,7 @@ module Decomplex
     end
 
     def uniq_sites(candidates)
-      candidates.uniq { |candidate| [candidate.file, candidate.line, candidate.node_name] }
+      candidates.uniq { |candidate| [candidate.file, candidate.line, candidate.span, candidate.node_name] }
     end
 
     def fuzzy_signatures(candidate)
@@ -341,12 +341,12 @@ module Decomplex
     end
 
     def call_message(node)
-      return nil unless node.children.any? { |child| %w[argument_list arguments].include?(child.kind) }
+      return nil unless node.children.any? { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
 
       callee = named_field(node, "function") || named_field(node, "callee")
       return callee_message(callee) if callee
 
-      argument_node = node.children.find { |child| %w[argument_list arguments].include?(child.kind) }
+      argument_node = node.children.find { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
       named_before_args = node.named_children.select do |child|
         argument_node.nil? || child.start_byte < argument_node.start_byte
       end
@@ -356,8 +356,15 @@ module Decomplex
     def callee_message(node)
       return nil unless ts_node?(node)
       return node.text if IDENTIFIER_KINDS.include?(node.kind)
+      return navigation_suffix_message(node) if %w[navigation_expression directly_assignable_expression].include?(node.kind)
 
       leaf = node.named_children.reverse.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
+      leaf&.text
+    end
+
+    def navigation_suffix_message(node)
+      suffix = node.named_children.reverse.find { |child| child.kind == "navigation_suffix" }
+      leaf = suffix&.named_children&.reverse&.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
       leaf&.text
     end
 

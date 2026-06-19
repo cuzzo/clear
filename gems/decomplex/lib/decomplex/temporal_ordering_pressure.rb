@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # TemporalOrderingPressure -- classes/modules whose public method
@@ -12,98 +12,54 @@ module Decomplex
                              keyword_init: true)
 
     def self.scan(files)
-      rows = []
-      files.each do |file|
-        root, lines = Ast.parse(file)
-        rows.concat(new(file, lines).scan(root))
+      rows = files.flat_map do |file|
+        document = Syntax.parse(file, parser: "tree_sitter")
+        new(file, document).scan
       end
       rows.sort_by { |h| [-h[:score], -h[:state_methods], h[:file], h[:owner]] }
     end
 
-    def initialize(file, lines)
+    def initialize(file, document)
       @file = file
-      @lines = lines
+      @document = document
     end
 
-    def scan(root)
-      out = []
-      walk_owners(root, [], out)
-      out
-    end
-
-    def walk_owners(node, owners, out)
-      return unless Ast.node?(node)
-
-      if %i[CLASS MODULE].include?(node.type)
-        owner = owner_name(node)
-        methods = owner_methods(node)
-        row = pressure_row(owner, methods)
-        out << row if row
-        node.children.each { |child| walk_owners(child, owners + [owner], out) }
-      else
-        node.children.each { |child| walk_owners(child, owners, out) }
+    def scan
+      temporal_owners.filter_map do |owner|
+        row = pressure_row(owner, owner_methods(owner))
+        row if row
       end
     end
 
-    def owner_name(node)
-      Ast.slice(node.children[0], @lines).to_s.empty? ? "(anonymous)" : Ast.slice(node.children[0], @lines)
+    private
+
+    def temporal_owners
+      (@document.owner_defs.map(&:name) + @document.function_defs.map(&:owner)).compact.uniq
     end
 
-    def owner_methods(owner_node)
-      body = owner_body(owner_node)
-      return [] unless Ast.node?(body)
-
-      stmts = body.type == :BLOCK ? body.children.compact : [body]
-      visibility = :public
-      methods = []
-      stmts.each do |stmt|
-        next unless Ast.node?(stmt)
-
-        if visibility_marker?(stmt)
-          visibility = stmt.children[0].to_sym
-        elsif %i[DEFN DEFS].include?(stmt.type)
-          methods << method_state(stmt, visibility)
-        end
+    def owner_methods(owner)
+      @document.function_defs.select { |function| function.owner == owner }.map do |function|
+        MethodState.new(
+          name: function.name,
+          line: function.line,
+          span: function.span,
+          visibility: function.visibility || :public,
+          reads: state_reads_for(function).uniq.sort,
+          writes: state_writes_for(function).uniq.sort
+        )
       end
-      methods
     end
 
-    def owner_body(owner_node)
-      scope = owner_node.children[2]
-      return nil unless Ast.node?(scope) && scope.type == :SCOPE
-
-      scope.children[2]
+    def state_reads_for(function)
+      @document.state_reads.select do |read|
+        read.owner == function.owner && read.function == function.name
+      end.map(&:field)
     end
 
-    def visibility_marker?(node)
-      node.type == :VCALL && %i[public protected private].include?(node.children[0])
-    end
-
-    def method_state(defn_node, visibility)
-      reads = []
-      writes = []
-      collect_state_access(defn_node, reads, writes)
-      MethodState.new(
-        name: defn_node.children[defn_node.type == :DEFS ? 1 : 0].to_s,
-        line: defn_node.first_lineno,
-        span: [defn_node.first_lineno, defn_node.first_column,
-               defn_node.last_lineno, defn_node.last_column],
-        visibility: visibility,
-        reads: reads.uniq.sort,
-        writes: writes.uniq.sort
-      )
-    end
-
-    def collect_state_access(node, reads, writes)
-      return unless Ast.node?(node)
-
-      case node.type
-      when :IASGN
-        writes << node.children[0].to_s
-      when :IVAR
-        reads << node.children[0].to_s
-      end
-      node.children.each { |child| collect_state_access(child, reads, writes) }
+    def state_writes_for(function)
+      @document.state_writes.select do |write|
+        write.owner == function.owner && write.function == function.name
+      end.map(&:field)
     end
 
     def pressure_row(owner, methods)

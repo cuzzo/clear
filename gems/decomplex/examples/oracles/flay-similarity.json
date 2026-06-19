@@ -1,0 +1,13 @@
+{
+  "detector": "flay-similarity",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "clone_type": "type2",
+      "node": "defn",
+      "site_count": 2
+    }
+  ]
+}

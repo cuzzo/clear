@@ -1,0 +1,11 @@
+{
+  "detector": "fat-union",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "present": true
+    }
+  ]
+}

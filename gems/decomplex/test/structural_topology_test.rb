@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tempfile"
+require_relative "../lib/decomplex/ast"
 require_relative "../lib/decomplex/structural_topology"
 
 class StructuralTopologyTest < Minitest::Test
@@ -88,6 +89,25 @@ class StructuralTopologyTest < Minitest::Test
       assert_equal "prepare", edge.callee_name
       assert_equal :direct_self, edge.kind
       assert_equal :always, edge.type
+    end
+  end
+
+  def test_scan_uses_syntax_facts_not_legacy_ast_parse
+    with_ruby_file(<<~RB) do |path|
+      class Runner
+        def run
+          prepare
+        end
+
+        def prepare; end
+      end
+    RB
+      Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+        graph = Decomplex::StructuralTopology.scan([path])
+
+        assert graph.method_for("Runner", "run")
+        assert_includes graph.edges_for_owner("Runner").map(&:callee_name), "prepare"
+      end
     end
   end
 

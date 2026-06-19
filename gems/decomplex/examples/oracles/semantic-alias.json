@@ -1,0 +1,13 @@
+{
+  "detector": "semantic-alias",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": {
+    "alias_clusters": [
+      {
+        "name_count": 2
+      }
+    ]
+  }
+}

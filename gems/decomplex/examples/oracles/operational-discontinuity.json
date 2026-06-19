@@ -1,0 +1,12 @@
+{
+  "detector": "operational-discontinuity",
+  "engine": "ruby",
+  "options": {
+  },
+  "expected": [
+    {
+      "resets": 1,
+      "confidence": "high"
+    }
+  ]
+}
