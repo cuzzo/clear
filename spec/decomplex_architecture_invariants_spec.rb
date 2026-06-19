@@ -38,6 +38,31 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
       /:\s*TreeSitterLanguageAdapter\.new\(/
   }.freeze
 
+  ADAPTER_LOADER_LANGUAGE_IMPLEMENTATION_PATTERNS = {
+    "language lexicons belong in the language adapter file" =>
+      /^\s*[A-Z_]+_LEXICON\s*=/,
+    "concrete language adapters belong in the language adapter file" =>
+      /^\s*class\s+(?!TreeSitterLanguageAdapter\b)\w+SyntaxAdapter\b/
+  }.freeze
+
+  LANGUAGE_ADAPTER_FILES = {
+    "ruby.rb" => "RubySyntaxAdapter",
+    "python.rb" => "PythonSyntaxAdapter",
+    "javascript.rb" => "JavaScriptSyntaxAdapter",
+    "typescript.rb" => "TypeScriptSyntaxAdapter",
+    "go.rb" => "GoSyntaxAdapter",
+    "rust.rb" => "RustSyntaxAdapter",
+    "zig.rb" => "ZigSyntaxAdapter",
+    "lua.rb" => "LuaSyntaxAdapter",
+    "c.rb" => "CSyntaxAdapter",
+    "cpp.rb" => "CppSyntaxAdapter",
+    "csharp.rb" => "CSharpSyntaxAdapter",
+    "java.rb" => "JavaSyntaxAdapter",
+    "swift.rb" => "SwiftSyntaxAdapter",
+    "kotlin.rb" => "KotlinSyntaxAdapter",
+    "php.rb" => "PhpSyntaxAdapter"
+  }.freeze
+
   def scan_files(files, patterns)
     files.sort.flat_map do |path|
       rel = path.delete_prefix("#{ROOT}/")
@@ -76,5 +101,28 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
 
     expect(offenders).to be_empty,
       format_offenders("Core syntax.rb must not absorb concrete language adapter implementation", offenders)
+  end
+
+  it "keeps one adapter file per supported language" do
+    offenders = LANGUAGE_ADAPTER_FILES.filter_map do |file_name, class_name|
+      path = File.join(DECOMPLEX_LIB, "syntax", file_name)
+      next "#{file_name}: missing file" unless File.file?(path)
+
+      source = File.read(path)
+      next if source.match?(/^\s*class\s+#{Regexp.escape(class_name)}\b/)
+
+      "#{file_name}: missing #{class_name}"
+    end
+
+    expect(offenders).to be_empty,
+      format_offenders("Every supported language must have an explicit adapter file", offenders)
+  end
+
+  it "keeps the adapter loader from absorbing language implementations" do
+    adapters_rb = File.join(DECOMPLEX_LIB, "syntax", "adapters.rb")
+    offenders = scan_files([adapters_rb], ADAPTER_LOADER_LANGUAGE_IMPLEMENTATION_PATTERNS)
+
+    expect(offenders).to be_empty,
+      format_offenders("Adapter loader must only load adapters and shared base helpers", offenders)
   end
 end

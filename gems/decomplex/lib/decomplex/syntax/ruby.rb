@@ -2,7 +2,62 @@
 
 module Decomplex
   module Syntax
+    RUBY_LEXICON = LanguageLexicon.new(
+      nil_literal_patterns: [/\bnil\b/].freeze,
+      type_guard_patterns: [
+        /(?:\A|[^\w!?])(?:nil\?|is_a\?|kind_of\?|instance_of\?|respond_to\?)(?:\s*\(|\b)/,
+        /&\./
+      ].freeze,
+      diagnostic_patterns: [
+        /(?:\A|[^\w!?])(?:raise|fail|abort)[!?]?(?:\s*\(|\b)/
+      ].freeze,
+      trivial_patterns: [
+        /\A(?:nil|true|false|0|1|break|next)\s*;?\z/,
+        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
+      ].freeze
+    ).freeze
+
     class RubySyntaxAdapter < TreeSitterLanguageAdapter
+      FUNCTION_NODE_KINDS = %w[method].freeze
+      CALL_NODE_KINDS = %w[call].freeze
+      CLASS_OWNER_NODE_KINDS = %w[class].freeze
+      MODULE_OWNER_NODE_KINDS = %w[module].freeze
+      PARAMETER_LIST_NODE_KINDS = %w[method_parameters].freeze
+      FUNCTION_BODY_NODE_KINDS = %w[body_statement do_block].freeze
+      NESTED_STATEMENT_WRAPPER_NODE_KINDS = %w[body_statement].freeze
+      IDENTIFIER_NODE_KINDS = %w[identifier constant].freeze
+      FIELD_IDENTIFIER_NODE_KINDS = [].freeze
+      PARAMETER_IDENTIFIER_NODE_KINDS = %w[identifier].freeze
+      LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS = %w[pattern].freeze
+      ASSIGNMENT_NODE_KINDS = %w[assignment operator_assignment].freeze
+      ASSIGNMENT_OPERATOR_TOKENS = %w[= += -= *= /= %= &&= ||=].freeze
+      PATH_ACTION_NODE_KINDS = %w[call return].freeze
+      SIMPLE_ACTION_WRAPPER_NODE_KINDS = %w[body_statement].freeze
+      COMPARISON_NODE_KINDS = %w[binary].freeze
+      BRANCH_NODE_KINDS = %w[if unless if_modifier unless_modifier case while until for].freeze
+      LOOP_NODE_KINDS = %w[while until for do_block].freeze
+      BRANCH_LOOP_NODE_KINDS = LOOP_NODE_KINDS
+      CASE_NODE_KINDS = %w[case].freeze
+      BRANCH_CASE_NODE_KINDS = %w[case body_statement].freeze
+      IF_NODE_KINDS = %w[if unless if_modifier unless_modifier].freeze
+      HIDDEN_IF_WRAPPER_NODE_KINDS = %w[body_statement].freeze
+      HIDDEN_CASE_WRAPPER_NODE_KINDS = %w[body_statement].freeze
+      HIDDEN_IF_TOKEN_KINDS = %w[if unless].freeze
+      HIDDEN_CASE_TOKEN_KINDS = %w[case when].freeze
+      CASE_ARM_NODE_KINDS = %w[when].freeze
+      WHEN_CASE_ARM_NODE_KINDS = %w[when].freeze
+      CASE_PATTERN_NODE_KINDS = %w[pattern].freeze
+      CASE_CONTAINER_STOP_NODE_KINDS = %w[method class module].freeze
+      CASE_SUBJECT_SKIP_NODE_KINDS = %w[when else then comment].freeze
+      DEFAULT_CASE_PATTERNS = %w[_ default else].freeze
+      BOOLEAN_AND_OPERATORS = %w[&& and].freeze
+      BOOLEAN_CONTAINER_NODE_KINDS = %w[binary].freeze
+      BOOLEAN_WRAPPER_NODE_KINDS = %w[body_statement pattern argument_list].freeze
+      PARENTHESIZED_PATTERN_NODE_KINDS = %w[pattern].freeze
+      ACCESSOR_CALL_NODE_KINDS = %w[call].freeze
+      BLOCK_ARGUMENT_NODE_KINDS = %w[block do_block lambda].freeze
+      SELF_RECEIVER_NAMES = %w[self].freeze
+
       def function_name(node)
         case node.kind
         when "body_statement"
@@ -146,6 +201,18 @@ module Decomplex
           end
         end
         out
+      end
+
+      def immutable_struct_readers(document)
+        ruby_immutable_struct_readers(document.lines)
+      end
+
+      def immutable_struct_reader_types(document)
+        ruby_immutable_struct_reader_types(document.lines)
+      end
+
+      def type_aliases(document)
+        ruby_type_aliases(document.lines)
       end
 
       private
@@ -841,6 +908,52 @@ module Decomplex
         return {} unless match
 
         match[1].scan(/([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)/).to_h
+      end
+
+      def ruby_immutable_struct_readers(lines)
+        readers = Hash.new { |h, k| h[k] = Set.new }
+        class_stack = []
+        lines.each do |line|
+          if (match = line.match(/\A\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b/))
+            class_stack << match[1]
+            next
+          end
+          if class_stack.any? && (match = line.match(/\A\s*const\s+:([A-Za-z_]\w*)\b/))
+            readers[class_stack.last].add(match[1].to_sym)
+            next
+          end
+          class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
+        end
+        readers
+      end
+
+      def ruby_immutable_struct_reader_types(lines)
+        reader_types = Hash.new { |h, k| h[k] = {} }
+        class_stack = []
+        lines.each do |line|
+          if (match = line.match(/\A\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b/))
+            class_stack << match[1]
+            next
+          end
+          if class_stack.any? && (match = line.match(/\A\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b/))
+            reader_types[class_stack.last][match[1].to_sym] = match[2]
+            next
+          end
+          class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
+        end
+        reader_types
+      end
+
+      def ruby_type_aliases(lines)
+        aliases = {}
+        lines.each do |line|
+          if (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}/))
+            aliases[match[1]] = match[2]
+          elsif (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+            aliases[match[1]] = match[2]
+          end
+        end
+        aliases
       end
 
       def apply_ruby_visibility!(out)

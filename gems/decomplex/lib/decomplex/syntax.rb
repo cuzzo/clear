@@ -66,218 +66,95 @@ module Decomplex
       end
     end
 
-    RUBY_LEXICON = LanguageLexicon.new(
-      nil_literal_patterns: [/\bnil\b/].freeze,
-      type_guard_patterns: [
-        /(?:\A|[^\w!?])(?:nil\?|is_a\?|kind_of\?|instance_of\?|respond_to\?)(?:\s*\(|\b)/,
-        /&\./
-      ].freeze,
-      diagnostic_patterns: [
-        /(?:\A|[^\w!?])(?:raise|fail|abort)[!?]?(?:\s*\(|\b)/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:nil|true|false|0|1|break|next)\s*;?\z/,
-        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
-      ].freeze
-    ).freeze
-    PYTHON_LEXICON = LanguageLexicon.new(
-      nil_literal_patterns: [/\bNone\b/].freeze,
-      type_guard_patterns: [
-        /\b(?:isinstance|issubclass|hasattr)\s*\(/,
-        /\bis\s+(?:not\s+)?None\b/,
-        /\btype\s*\([^)]*\)\s*(?:==|is)\s*/
-      ].freeze,
-      diagnostic_patterns: [
-        /\braise\b/,
-        /\bassert\b/,
-        /\bsys\.exit\s*\(/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:None|True|False|0|1|break|continue|pass)\s*;?\z/,
-        /\Areturn\s+(?:None|True|False|0|1)\s*;?\z/
-      ].freeze
-    ).freeze
-    JAVASCRIPT_LEXICON = LanguageLexicon.new(
-      nil_literal_patterns: [/\b(?:null|undefined)\b/].freeze,
-      type_guard_patterns: [
-        /\btypeof\b/,
-        /\binstanceof\b/,
-        /(?:\?\.|\b(?:==|!=|===|!==)\s*(?:null|undefined)\b)/
-      ].freeze,
-      diagnostic_patterns: [
-        /\bthrow\b/,
-        /\bprocess\.exit\s*\(/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:null|undefined|true|false|0|1|break|continue)\s*;?\z/,
-        /\Areturn\s+(?:null|undefined|true|false|0|1)\s*;?\z/
-      ].freeze
-    ).freeze
-    GO_LEXICON = LanguageLexicon.new(
-      nil_literal_patterns: [/\bnil\b/].freeze,
-      type_guard_patterns: [
-        /\bnil\b/,
-        /\.\(type\)/,
-        /\.\([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\)/
-      ].freeze,
-      diagnostic_patterns: [
-        /\bpanic\s*\(/,
-        /\breturn\s+error[.\w]*/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:nil|true|false|0|1|break|continue|fallthrough)\s*;?\z/,
-        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
-      ].freeze
-    ).freeze
-    RUST_LEXICON = LanguageLexicon.new(
-      nil_literal_patterns: [/\bNone\b/].freeze,
-      type_guard_patterns: [
-        /\b(?:is_some|is_none)\s*\(/,
-        /\b(?:Some|None)\b/,
-        /\bmatches!\s*\(/
-      ].freeze,
-      diagnostic_patterns: [
-        /\b(?:panic|unreachable|todo|unimplemented)!\s*\(/,
-        /\breturn\s+Err\s*\(/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:None|true|false|0|1|break|continue|unreachable!)\s*;?\z/,
-        /\Areturn\s+(?:None|true|false|0|1)\s*;?\z/
-      ].freeze
-    ).freeze
-	    ZIG_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnull\b/].freeze,
-	      type_guard_patterns: [
-        /\bnull\b/,
-        /@typeInfo\b/,
-        /\bif\s*\([^)]*\)\s*\|/
-      ].freeze,
-      diagnostic_patterns: [
-        /@panic\s*\(/,
-        /\bunreachable\b/,
-        /\breturn\s+error[.\w]*/
-      ].freeze,
-      trivial_patterns: [
-        /\A(?:null|true|false|0|1|break|continue|unreachable)\s*;?\z/,
-	        /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    LUA_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnil\b/].freeze,
-	      type_guard_patterns: [
-	        /\btype\s*\(/,
-	        /\bnil\b/,
-	        /\b(?:pcall|xpcall)\s*\(/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\berror\s*\(/,
-	        /\bassert\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:nil|true|false|0|1|break)\s*;?\z/,
-	        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    C_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bNULL\b/].freeze,
-	      type_guard_patterns: [
-	        /\bNULL\b/,
-	        /\bsizeof\s*\(/,
-	        /\b_Generic\s*\(/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\b(?:assert|abort|exit)\s*\(/,
-	        /\breturn\s+errno\b/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:NULL|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:NULL|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    CPP_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\b(?:nullptr|NULL)\b/].freeze,
-	      type_guard_patterns: [
-	        /\b(?:nullptr|NULL)\b/,
-	        /\b(?:dynamic_cast|typeid)\s*[<(]/,
-	        /\bstd::(?:get_if|holds_alternative)\s*[<(]/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\bthrow\b/,
-	        /\b(?:assert|abort|exit)\s*\(/,
-	        /\bstd::terminate\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:nullptr|NULL|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:nullptr|NULL|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    CSHARP_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnull\b/].freeze,
-	      type_guard_patterns: [
-	        /\bnull\b/,
-	        /(?:\?\.|\?\?)/,
-	        /\b(?:is|as|typeof)\b/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\bthrow\b/,
-	        /\b(?:Debug\.Assert|Trace\.Assert|Environment\.Exit)\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:null|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    JAVA_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnull\b/].freeze,
-	      type_guard_patterns: [
-	        /\bnull\b/,
-	        /\binstanceof\b/,
-	        /\bObjects\.(?:isNull|nonNull|requireNonNull)\s*\(/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\bthrow\b/,
-	        /\bassert\b/,
-	        /\bSystem\.exit\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:null|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    SWIFT_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnil\b/].freeze,
-	      type_guard_patterns: [
-	        /\bnil\b/,
-	        /(?:\?\.|\?\?)/,
-	        /\b(?:if|guard)\s+let\b/,
-	        /\b(?:as\?|is)(?:\s|$)/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\bthrow\b/,
-	        /\b(?:fatalError|preconditionFailure|assertionFailure|assert|precondition)\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:nil|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
-	    KOTLIN_LEXICON = LanguageLexicon.new(
-	      nil_literal_patterns: [/\bnull\b/].freeze,
-	      type_guard_patterns: [
-	        /\bnull\b/,
-	        /(?:\?\.|\?\?)/,
-	        /\b(?:is|as\?)(?:\s|$)/
-	      ].freeze,
-	      diagnostic_patterns: [
-	        /\bthrow\b/,
-	        /\b(?:error|require|check|assert|TODO)\s*\(/
-	      ].freeze,
-	      trivial_patterns: [
-	        /\A(?:null|true|false|0|1|break|continue)\s*;?\z/,
-	        /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
-	      ].freeze
-	    ).freeze
     class TreeSitterLanguageAdapter
+      EMPTY_NODE_KINDS = [].freeze
+      ADAPTER_KIND_METHODS = {
+        function_node_kinds: :FUNCTION_NODE_KINDS,
+        class_owner_node_kinds: :CLASS_OWNER_NODE_KINDS,
+        module_owner_node_kinds: :MODULE_OWNER_NODE_KINDS,
+        generic_owner_node_kinds: :GENERIC_OWNER_NODE_KINDS,
+        impl_owner_node_kinds: :IMPL_OWNER_NODE_KINDS,
+        struct_owner_node_kinds: :STRUCT_OWNER_NODE_KINDS,
+        union_owner_node_kinds: :UNION_OWNER_NODE_KINDS,
+        enum_owner_node_kinds: :ENUM_OWNER_NODE_KINDS,
+        anonymous_owner_node_kinds: :ANONYMOUS_OWNER_NODE_KINDS,
+        call_node_kinds: :CALL_NODE_KINDS,
+        adjacent_call_node_kinds: :ADJACENT_CALL_NODE_KINDS,
+        parameter_list_node_kinds: :PARAMETER_LIST_NODE_KINDS,
+        method_parameter_list_node_kinds: :METHOD_PARAMETER_LIST_NODE_KINDS,
+        inline_parameter_node_kinds: :INLINE_PARAMETER_NODE_KINDS,
+        function_body_node_kinds: :FUNCTION_BODY_NODE_KINDS,
+        nested_statement_wrapper_node_kinds: :NESTED_STATEMENT_WRAPPER_NODE_KINDS,
+        identifier_node_kinds: :IDENTIFIER_NODE_KINDS,
+        local_identifier_wrapper_node_kinds: :LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS,
+        assignment_node_kinds: :ASSIGNMENT_NODE_KINDS,
+        assignment_operator_tokens: :ASSIGNMENT_OPERATOR_TOKENS,
+        local_declaration_node_kinds: :LOCAL_DECLARATION_NODE_KINDS,
+        short_variable_declaration_node_kinds: :SHORT_VARIABLE_DECLARATION_NODE_KINDS,
+        variable_declaration_node_kinds: :VARIABLE_DECLARATION_NODE_KINDS,
+        declaration_assignment_node_kinds: :DECLARATION_ASSIGNMENT_NODE_KINDS,
+        path_action_node_kinds: :PATH_ACTION_NODE_KINDS,
+        simple_action_wrapper_node_kinds: :SIMPLE_ACTION_WRAPPER_NODE_KINDS,
+        comparison_node_kinds: :COMPARISON_NODE_KINDS,
+        branch_node_kinds: :BRANCH_NODE_KINDS,
+        loop_node_kinds: :LOOP_NODE_KINDS,
+        text_loop_node_kinds: :TEXT_LOOP_NODE_KINDS,
+        labeled_loop_node_kinds: :LABELED_LOOP_NODE_KINDS,
+        case_node_kinds: :CASE_NODE_KINDS,
+        hidden_case_wrapper_node_kinds: :HIDDEN_CASE_WRAPPER_NODE_KINDS,
+        hidden_match_node_kinds: :HIDDEN_MATCH_NODE_KINDS,
+        branch_loop_node_kinds: :BRANCH_LOOP_NODE_KINDS,
+        branch_case_node_kinds: :BRANCH_CASE_NODE_KINDS,
+        if_node_kinds: :IF_NODE_KINDS,
+        hidden_if_token_kinds: :HIDDEN_IF_TOKEN_KINDS,
+        hidden_case_token_kinds: :HIDDEN_CASE_TOKEN_KINDS,
+        case_arm_node_kinds: :CASE_ARM_NODE_KINDS,
+        when_case_arm_node_kinds: :WHEN_CASE_ARM_NODE_KINDS,
+        switch_case_arm_node_kinds: :SWITCH_CASE_ARM_NODE_KINDS,
+        case_pattern_node_kinds: :CASE_PATTERN_NODE_KINDS,
+        case_subject_node_kinds: :CASE_SUBJECT_NODE_KINDS,
+        case_container_stop_node_kinds: :CASE_CONTAINER_STOP_NODE_KINDS,
+        case_subject_skip_node_kinds: :CASE_SUBJECT_SKIP_NODE_KINDS,
+        default_case_patterns: :DEFAULT_CASE_PATTERNS,
+        boolean_and_operators: :BOOLEAN_AND_OPERATORS,
+        boolean_container_node_kinds: :BOOLEAN_CONTAINER_NODE_KINDS,
+        boolean_wrapper_node_kinds: :BOOLEAN_WRAPPER_NODE_KINDS,
+        parenthesized_wrapper_node_kinds: :PARENTHESIZED_WRAPPER_NODE_KINDS,
+        parenthesized_pattern_node_kinds: :PARENTHESIZED_PATTERN_NODE_KINDS,
+        hidden_if_wrapper_node_kinds: :HIDDEN_IF_WRAPPER_NODE_KINDS,
+        local_variable_declarator_node_kinds: :LOCAL_VARIABLE_DECLARATOR_NODE_KINDS,
+        field_declaration_node_kinds: :FIELD_DECLARATION_NODE_KINDS,
+        declaration_site_parent_node_kinds: :DECLARATION_SITE_PARENT_NODE_KINDS,
+        receiver_type_node_kinds: :RECEIVER_TYPE_NODE_KINDS,
+        method_receiver_node_kinds: :METHOD_RECEIVER_NODE_KINDS,
+        receiver_parameter_node_kinds: :RECEIVER_PARAMETER_NODE_KINDS,
+        first_argument_receiver_type_node_kinds: :FIRST_ARGUMENT_RECEIVER_TYPE_NODE_KINDS,
+        first_argument_receiver_name_node_kinds: :FIRST_ARGUMENT_RECEIVER_NAME_NODE_KINDS,
+        bound_container_wrapper_node_kinds: :BOUND_CONTAINER_WRAPPER_NODE_KINDS,
+        bound_container_parent_node_kinds: :BOUND_CONTAINER_PARENT_NODE_KINDS,
+        bound_container_name_node_kinds: :BOUND_CONTAINER_NAME_NODE_KINDS,
+        adjacent_method_invocation_node_kinds: :ADJACENT_METHOD_INVOCATION_NODE_KINDS,
+        argument_list_node_kinds: :ARGUMENT_LIST_NODE_KINDS,
+        self_call_identifier_node_kinds: :SELF_CALL_IDENTIFIER_NODE_KINDS,
+        self_receiver_names: :SELF_RECEIVER_NAMES,
+        field_identifier_node_kinds: :FIELD_IDENTIFIER_NODE_KINDS,
+        declarator_node_kinds: :DECLARATOR_NODE_KINDS,
+        assignment_state_declaration_node_kinds: :ASSIGNMENT_STATE_DECLARATION_NODE_KINDS,
+        accessor_call_node_kinds: :ACCESSOR_CALL_NODE_KINDS,
+        expression_list_node_kinds: :EXPRESSION_LIST_NODE_KINDS,
+        navigation_suffix_node_kinds: :NAVIGATION_SUFFIX_NODE_KINDS,
+        literal_field_expression_node_kinds: :LITERAL_FIELD_EXPRESSION_NODE_KINDS,
+        block_argument_node_kinds: :BLOCK_ARGUMENT_NODE_KINDS,
+        parameter_identifier_node_kinds: :PARAMETER_IDENTIFIER_NODE_KINDS,
+        member_access_operator_tokens: :MEMBER_ACCESS_OPERATOR_TOKENS,
+        public_visibility_tokens: :PUBLIC_VISIBILITY_TOKENS,
+        field_like_node_kinds: :FIELD_LIKE_NODE_KINDS
+      }.freeze
+
+      ADAPTER_KIND_METHODS.each do |method_name, constant_name|
+        define_method(method_name) { adapter_node_kinds(constant_name) }
+      end
+
       attr_reader :language, :extensions, :lexicon, :package, :grammar_names,
                   :tree_sitter_language_name
 
@@ -296,17 +173,16 @@ module Decomplex
         @first_argument_receiver
       end
 
+      def adapter_node_kinds(constant_name)
+        self.class.const_defined?(constant_name) ? self.class.const_get(constant_name) : EMPTY_NODE_KINDS
+      end
+
       def function_name(node)
-        case node.kind
-	        when "method", "function_definition", "function_declaration",
-	             "method_definition", "function_item"
-	          named_field(node, "name")&.text ||
-	            declarator_name(named_field(node, "declarator")) ||
-	            first_named_text(node, %w[identifier constant property_identifier])
-        when "method_declaration"
-          named_field(node, "name")&.text ||
-            first_named_text(node, %w[field_identifier identifier])
-        end
+        return nil unless function_node_kinds.include?(node.kind)
+
+        named_field(node, "name")&.text ||
+          declarator_name(named_field(node, "declarator")) ||
+          first_named_text(node, identifier_node_kinds + field_identifier_node_kinds)
       end
 
       def function_kind(_document, node, stack)
@@ -318,16 +194,18 @@ module Decomplex
       end
 
       def owner_name_from_declaration(document, node)
-        case node.kind
-	        when "class", "class_definition", "class_declaration", "class_specifier", "module"
-	          named_field(node, "name")&.text ||
-              first_named_text(node, %w[constant identifier type_identifier])
-        when "impl_item", "impl_block"
-          impl_owner_name(node)
-        when "struct_item", "struct_spec", "struct_specifier", "type_spec", "type_declaration"
+        if (class_owner_node_kinds + module_owner_node_kinds).include?(node.kind)
           named_field(node, "name")&.text ||
-            first_named_text(node, %w[type_identifier identifier])
-        when "struct_declaration", "union_declaration", "enum_declaration"
+            first_named_text(node, identifier_node_kinds + field_identifier_node_kinds)
+        elsif generic_owner_node_kinds.include?(node.kind)
+          named_field(node, "name")&.text ||
+            first_named_text(node, identifier_node_kinds + field_identifier_node_kinds)
+        elsif impl_owner_node_kinds.include?(node.kind)
+          impl_owner_name(node)
+        elsif struct_owner_node_kinds.include?(node.kind)
+          named_field(node, "name")&.text ||
+            first_named_text(node, identifier_node_kinds + field_identifier_node_kinds)
+        elsif anonymous_owner_node_kinds.include?(node.kind)
           bound_container_name(node) ||
             returned_container_owner(document, node) ||
             anonymous_owner_name(document, node)
@@ -335,13 +213,18 @@ module Decomplex
       end
 
       def owner_kind(node)
-        case node.kind
-	        when "class", "class_definition", "class_declaration", "class_specifier" then :class
-        when "module" then :module
-        when "impl_item", "impl_block" then :impl
-        when "struct_declaration", "struct_item", "struct_spec", "struct_specifier" then :struct
-        when "union_declaration" then :union
-        when "enum_declaration" then :enum
+        if class_owner_node_kinds.include?(node.kind)
+          :class
+        elsif module_owner_node_kinds.include?(node.kind)
+          :module
+        elsif impl_owner_node_kinds.include?(node.kind)
+          :impl
+        elsif union_owner_node_kinds.include?(node.kind)
+          :union
+        elsif enum_owner_node_kinds.include?(node.kind)
+          :enum
+        elsif (struct_owner_node_kinds + anonymous_owner_node_kinds).include?(node.kind)
+          :struct
         else :owner
         end
       end
@@ -354,7 +237,7 @@ module Decomplex
 
       def receiver_convention_owner_name(node, **_context)
         return nil unless first_argument_receiver?
-        return nil unless node.kind == "function_definition"
+        return nil unless function_node_kinds.include?(node.kind)
 
         receiver = first_argument_receiver_parameter(node)
         return nil unless receiver
@@ -378,12 +261,9 @@ module Decomplex
       end
 
       def call_target(document, node)
-        case node.kind
-	      when "call_expression", "method_invocation", "invocation_expression", "function_call", "method_call"
+        if call_node_kinds.include?(node.kind)
           generic_call_target(document, node)
-	      when "attribute", "selector_expression", "field", "field_access", "member_expression",
-	           "member_access_expression", "field_expression", "expression_list",
-             "navigation_expression", "dot_index_expression", "variable_list", "identifier", "simple_identifier"
+        elsif adjacent_call_node_kinds.include?(node.kind)
           adjacent_argument_call_target(node)
         end
       end
@@ -402,10 +282,6 @@ module Decomplex
     end
 
     class TreeSitterLanguageAdapter
-      BRANCH_KINDS = %w[if unless if_statement if_modifier unless_modifier if_expression
-                        while until while_statement for for_statement
-                        case switch_statement expression_switch_statement switch_expression
-                        match_statement match_expression when_expression].freeze
       COMPARISON_OPERATORS = %w[== !=].freeze
       NOISE_MESSAGES = %w[! != == === < <= > >= [] []= to_s inspect class].freeze
 
@@ -493,16 +369,16 @@ module Decomplex
       end
 
       def function_params(node)
-        params = if node.kind == "method_declaration"
-                   lists = node.named_children.select { |child| child.kind == "parameter_list" }
+        params = if method_parameter_list_node_kinds.any? && function_node_kinds.include?(node.kind)
+                   lists = node.named_children.select { |child| method_parameter_list_node_kinds.include?(child.kind) }
                    lists.size > 1 ? lists[1] : lists.first
                  else
                    named_field(node, "parameters") ||
                      node.named_children.find do |child|
-                       %w[parameters formal_parameters function_value_parameters parameter_list].include?(child.kind)
+                       parameter_list_node_kinds.include?(child.kind)
                      end
                  end
-        params ||= node.named_children.select { |child| child.kind == "parameter" } if node.kind == "function_declaration"
+        params ||= node.named_children.select { |child| inline_parameter_node_kinds.include?(child.kind) }
         return [] unless params
 
         Array(params.respond_to?(:named_children) ? params.named_children : params).filter_map do |param|
@@ -524,6 +400,18 @@ module Decomplex
       end
 
       def method_param_types(_document)
+        {}
+      end
+
+      def immutable_struct_readers(_document)
+        {}
+      end
+
+      def immutable_struct_reader_types(_document)
+        {}
+      end
+
+      def type_aliases(_document)
         {}
       end
 
@@ -594,7 +482,7 @@ module Decomplex
 
         named_field(node, "body") ||
           node.named_children.reverse.find do |child|
-            %w[block body body_statement function_body statement_block compound_statement declaration_list].include?(child.kind)
+            function_body_node_kinds.include?(child.kind)
           end
       end
 
@@ -603,7 +491,7 @@ module Decomplex
         return [] unless body
 
         named = body.named_children.reject { |child| comment_node?(child) }
-        if named.size == 1 && %w[statements statement_list].include?(named.first.kind)
+        if named.size == 1 && nested_statement_wrapper_node_kinds.include?(named.first.kind)
           return [named.first] if branch_node?(named.first)
 
           named = named.first.named_children.reject { |child| comment_node?(child) }
@@ -728,13 +616,13 @@ module Decomplex
       end
 
       def generic_identifier?(node)
-        ts_node?(node) && %w[identifier simple_identifier field_identifier property_identifier].include?(node.kind)
+        ts_node?(node) && identifier_node_kinds.include?(node.kind)
       end
 
       def generic_local_identifier_text(node)
         return node.text.to_s if generic_identifier?(node)
         return nil unless ts_node?(node)
-        return nil unless %w[argument pattern directly_assignable_expression value_argument].include?(node.kind)
+        return nil unless local_identifier_wrapper_node_kinds.include?(node.kind)
         return nil unless node.named_children.empty?
 
         text = node.text.to_s
@@ -743,8 +631,8 @@ module Decomplex
 
       def generic_assignment_statement?(node)
         ts_node?(node) &&
-          (%w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(node.kind) ||
-           node.children.any? { |child| !child.named? && %w[= += -= *= /= %=].include?(child.text.to_s) })
+          (assignment_node_kinds.include?(node.kind) ||
+           node.children.any? { |child| !child.named? && assignment_operator_tokens.include?(child.text.to_s) })
       end
 
       def generic_local_write_node?(node)
@@ -755,7 +643,7 @@ module Decomplex
         return false if generic_member_name?(node)
         return true if generic_declaration_name?(node)
 
-        if %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(parent.kind)
+        if assignment_node_kinds.include?(parent.kind)
           lhs = named_field(parent, "left") || parent.named_children.first
           return lhs == node
         end
@@ -776,13 +664,10 @@ module Decomplex
 
       def generic_local_declaration_name_node(node)
         return nil unless ts_node?(node)
-        return nil unless %w[
-          declaration init_declarator let_declaration lexical_declaration local_variable_declaration
-          property_declaration short_var_declaration variable_declaration variable_declarator
-        ].include?(node.kind)
+        return nil unless local_declaration_node_kinds.include?(node.kind)
 
-        if node.kind == "short_var_declaration"
-          left = node.named_children.find { |child| child.kind == "expression_list" }
+        if short_variable_declaration_node_kinds.include?(node.kind)
+          left = node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }
           if left
             identifier = left.named_children.find { |child| generic_identifier?(child) }
             return identifier if identifier
@@ -790,10 +675,10 @@ module Decomplex
           return left if simple_identifier_text?(left&.text)
         end
 
-        variable = node.named_children.find { |child| child.kind == "variable_declaration" }
+        variable = node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }
         return variable if simple_identifier_text?(variable&.text)
 
-        declaration_assignment = node.named_children.find { |child| child.kind == "assignment_statement" }
+        declaration_assignment = node.named_children.find { |child| declaration_assignment_node_kinds.include?(child.kind) }
         if declaration_assignment
           lhs = declaration_assignment.named_children.first
           identifier = lhs&.named_children&.find { |child| generic_identifier?(child) }
@@ -803,15 +688,14 @@ module Decomplex
 
         named_field(node, "pattern") ||
           named_field(node, "name") ||
-          node.named_children.find { |child| child.kind == "pattern" } ||
-          node.named_children.find { |child| child.kind == "variable_declaration" }&.named_children&.find { |child| generic_identifier?(child) } ||
-          node.named_children.find { |child| child.kind == "expression_list" }&.named_children&.find { |child| generic_identifier?(child) } ||
+          node.named_children.find { |child| local_identifier_wrapper_node_kinds.include?(child.kind) } ||
+          node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }&.named_children&.find { |child| generic_identifier?(child) } ||
           node.named_children.find { |child| generic_identifier?(child) }
       end
 
       def generic_assignment_lhs_names(node)
         return [] unless ts_node?(node)
-        return [] unless %w[assignment assignment_expression assignment_statement augmented_assignment operator_assignment].include?(node.kind)
+        return [] unless assignment_node_kinds.include?(node.kind)
 
         lhs = named_field(node, "left") || node.named_children.first
         return [] unless ts_node?(lhs)
@@ -831,7 +715,7 @@ module Decomplex
           owner = parent_node(parent)
           return true if owner && field_like_node?(owner)
         end
-        return false if parent&.kind == "expression_list" && !member_expression_list?(parent)
+        return false if parent && expression_list_node_kinds.include?(parent.kind) && !member_expression_list?(parent)
         return false unless parent && field_like_node?(parent)
 
         field = named_field(parent, "field") || named_field(parent, "property") ||
@@ -843,13 +727,14 @@ module Decomplex
       def generic_call_name?(node)
         parent = parent_node(node)
         return false unless parent
+        return false if field_like_node?(parent)
 
-        if %w[method_invocation invocation_expression].include?(parent.kind)
+        if adjacent_method_invocation_node_kinds.include?(parent.kind)
           names = parent.named_children.select { |child| generic_identifier?(child) }
           return names.size >= 2 ? names.last == node : parent.named_children.first == node
         end
 
-        %w[call_expression function_call method_call].include?(parent.kind) &&
+        call_node_kinds.include?(parent.kind) &&
           (named_field(parent, "function") == node || parent.named_children.first == node)
       end
 
@@ -922,17 +807,17 @@ module Decomplex
         return true if simple_action_wrapper?(node)
 
         generic_assignment_statement?(node) ||
-          %w[call call_expression expression_statement return_statement].include?(node.kind)
+          path_action_node_kinds.include?(node.kind)
       end
 
       def simple_action_wrapper?(node)
-        return false unless %w[block statement_list statements control_structure_body].include?(node.kind)
+        return false unless simple_action_wrapper_node_kinds.include?(node.kind)
 
         normalize_text(node.text).match?(/\A[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?\s*\([^{};]*\)\s*;?\z/)
       end
 
       def comparison_target(node)
-        return nil unless %w[binary binary_expression].include?(node.kind)
+        return nil unless comparison_node_kinds.include?(node.kind)
 
         operator = direct_operator(node)
         return nil unless COMPARISON_OPERATORS.include?(operator)
@@ -1001,10 +886,9 @@ module Decomplex
       end
 
       def control_context(node)
-        return :iterates if %w[while until while_statement for for_statement for_in_statement
-                               loop_expression do_block].include?(node.kind)
-        return :iterates if node.kind == "expression_statement" && node.text.to_s.lstrip.match?(/\A(?:for|while|loop)\b/)
-        return :iterates if node.kind == "labeled_statement" && node.text.to_s.lstrip.start_with?("for ")
+        return :iterates if loop_node_kinds.include?(node.kind)
+        return :iterates if text_loop_node_kinds.include?(node.kind) && node.text.to_s.lstrip.match?(/\A(?:for|while|loop)\b/)
+        return :iterates if labeled_loop_node_kinds.include?(node.kind) && node.text.to_s.lstrip.start_with?("for ")
         return :conditional if branch_node?(node)
 
         nil
@@ -1018,9 +902,7 @@ module Decomplex
           return
         end
 
-        case node.kind
-        when "case", "switch_statement", "expression_switch_statement", "switch_expression",
-             "match_statement", "match_expression", "when_expression"
+        if case_node_kinds.include?(node.kind)
           return if predicate_less_case?(node)
 
           patterns = case_patterns(node)
@@ -1036,9 +918,9 @@ module Decomplex
             predicate: decision_predicate(node),
             enclosing_span: span(node)
           )
-        when "body_statement", "block", "block_body", "argument_list", "statements"
+        elsif hidden_case_wrapper_node_kinds.include?(node.kind)
           return unless hidden_case?(node)
-          return if node.named_children.any? { |child| child.kind == "case" }
+          return if node.named_children.any? { |child| case_node_kinds.include?(child.kind) }
           return if predicate_less_case?(node)
 
           patterns = case_patterns(node)
@@ -1054,7 +936,7 @@ module Decomplex
             predicate: decision_predicate(node),
             enclosing_span: span(node)
           )
-        when "expression_statement"
+        elsif hidden_match_node_kinds.include?(node.kind)
           return unless hidden_match?(node)
 
           patterns = case_patterns(node)
@@ -1107,7 +989,7 @@ module Decomplex
         seen = Set.new
         while ts_node?(parent) && !seen.include?(node_key(parent))
           seen << node_key(parent)
-          return span(parent) if branch_node?(parent) || %w[while until].include?(parent.kind)
+          return span(parent) if branch_node?(parent) || loop_node_kinds.include?(parent.kind)
 
           parent = parent_node(parent)
         end
@@ -1187,7 +1069,7 @@ module Decomplex
         return if skip_state_write_node?(node)
 
         lhs =
-          if %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(node.kind)
+          if assignment_node_kinds.include?(node.kind)
             named_field(node, "left") || node.named_children.first
           elsif assignment_lhs?(node)
             node
@@ -1216,7 +1098,7 @@ module Decomplex
         return false unless parent
 
         assignment_lhs?(node) &&
-          %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(parent.kind)
+          assignment_node_kinds.include?(parent.kind)
       end
 
       def skip_state_write_target?(target)
@@ -1246,7 +1128,7 @@ module Decomplex
       def record_state_param_origin(document, node, stack, out)
         lhs = nil
         rhs = nil
-        if %w[assignment assignment_expression augmented_assignment assignment_statement].include?(node.kind)
+        if assignment_node_kinds.include?(node.kind)
           lhs = named_field(node, "left") || node.named_children.first
           rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
         elsif assignment_lhs?(node)
@@ -1320,15 +1202,11 @@ module Decomplex
           return
         end
 
-        case node.kind
-        when "while", "until", "while_statement", "for", "for_statement"
+        if branch_loop_node_kinds.include?(node.kind)
           record_loop_arm(document, node, stack, out)
-        when "case", "body_statement", "block", "expression_statement", "statements", "switch_statement", "expression_switch_statement", "switch_expression",
-             "match_statement", "match_expression", "when_expression"
-          return if node.kind == "body_statement" && !hidden_case?(node)
-          return if node.kind == "block" && !hidden_case?(node)
-          return if node.kind == "statements" && !hidden_case?(node)
-          return if node.kind == "expression_statement" && !hidden_match?(node)
+        elsif branch_case_node_kinds.include?(node.kind)
+          return if hidden_case_wrapper_node_kinds.include?(node.kind) && !hidden_case?(node)
+          return if hidden_match_node_kinds.include?(node.kind) && !hidden_match?(node)
 
           record_case_arms(document, node, stack, out)
         end
@@ -1454,13 +1332,11 @@ module Decomplex
       end
 
       def case_arm_patterns(child)
-        case child.kind
-        when "when", "match_arm"
-          patterns = child.named_children.select { |node| %w[pattern case_pattern match_pattern].include?(node.kind) }
+        if when_case_arm_node_kinds.include?(child.kind)
+          patterns = child.named_children.select { |node| case_pattern_node_kinds.include?(node.kind) }
           patterns = [named_field(child, "pattern") || child.named_children.first].compact if patterns.empty?
           case_pattern_texts(patterns)
-	        when "switch_case", "case_clause", "expression_case", "case_statement", "switch_section",
-	             "switch_block_statement_group", "switch_entry", "when_entry"
+        elsif switch_case_arm_node_kinds.include?(child.kind)
           return [] if child.text.to_s.lstrip.start_with?("else")
 
           value = named_field(child, "value") || named_field(child, "pattern") ||
@@ -1501,11 +1377,9 @@ module Decomplex
           child = stack.shift
           next unless ts_node?(child)
 
-	          if %w[when switch_case case_clause expression_case case_statement switch_section switch_block_statement_group switch_entry when_entry match_arm].include?(child.kind)
+          if case_arm_node_kinds.include?(child.kind)
             arms << child
-          elsif !%w[method function_definition function_declaration method_definition
-                    method_declaration function_item class class_definition
-                    class_declaration].include?(child.kind)
+          elsif !case_container_stop_node_kinds.include?(child.kind)
             stack.concat(child.named_children)
           end
         end
@@ -1521,19 +1395,19 @@ module Decomplex
 
       def decision_subject(node)
         named_field(node, "value") || named_field(node, "subject") ||
-          node.named_children.find { |child| child.kind == "when_subject" } ||
+          node.named_children.find { |child| case_subject_node_kinds.include?(child.kind) } ||
           named_field(node, "condition") ||
           node.named_children.find do |child|
-	            !%w[when switch_case case_clause expression_case case_statement switch_section switch_block_statement_group switch_entry when_entry match_arm else then comment].include?(child.kind)
+            !case_subject_skip_node_kinds.include?(child.kind)
           end
       end
 
       def predicate_less_case?(node)
-        (node.kind == "case" || hidden_case?(node)) && !decision_subject(node)
+        (case_node_kinds.include?(node.kind) || hidden_case?(node)) && !decision_subject(node)
       end
 
       def default_case_pattern?(text)
-        text.nil? || %w[_ default].include?(text)
+        text.nil? || default_case_patterns.include?(text)
       end
 
       def boolean_and?(node)
@@ -1542,7 +1416,7 @@ module Decomplex
           return boolean_and?(child)
         end
 
-        %w[&& and].include?(direct_operator(node))
+        boolean_and_operators.include?(direct_operator(node))
       end
 
       def flatten_boolean_and(node)
@@ -1556,14 +1430,14 @@ module Decomplex
 
       def boolean_container?(node)
         return false unless ts_node?(node)
-        return true if %w[binary binary_expression boolean_operator conjunction_expression disjunction_expression].include?(node.kind)
+        return true if boolean_container_node_kinds.include?(node.kind)
         return boolean_container?(node.named_children.first) if parenthesized_wrapper?(node)
-        return false unless %w[body_statement block_body statement pattern argument_list].include?(node.kind)
-        return false unless %w[&& and].include?(direct_operator(node))
+        return false unless boolean_wrapper_node_kinds.include?(node.kind)
+        return false unless boolean_and_operators.include?(direct_operator(node))
         return false if node.named_children.size < 2
 
         node.children.all? do |child|
-          child.named? || %w[&& and ( )].include?(child.text.to_s)
+          child.named? || (boolean_and_operators + %w[( )]).include?(child.text.to_s)
         end
       end
 
@@ -1573,7 +1447,7 @@ module Decomplex
 
       def conjunction_span(node)
         base = span(node)
-        if node.kind == "pattern" && node.text.to_s.lstrip.start_with?("(")
+        if parenthesized_pattern_node_kinds.include?(node.kind) && node.text.to_s.lstrip.start_with?("(")
           base = base.dup
           base[1] += 1
         end
@@ -1581,7 +1455,7 @@ module Decomplex
       end
 
       def parenthesized_wrapper?(node)
-        ts_node?(node) && %w[condition_clause parenthesized_statements parenthesized_expression].include?(node.kind) &&
+        ts_node?(node) && parenthesized_wrapper_node_kinds.include?(node.kind) &&
           node.named_children.size == 1
       end
 
@@ -1618,22 +1492,22 @@ module Decomplex
       end
 
       def branch_node?(node)
-        BRANCH_KINDS.include?(node.kind) || hidden_match?(node) || hidden_if?(node) ||
+        branch_node_kinds.include?(node.kind) || hidden_match?(node) || hidden_if?(node) ||
           hidden_modifier_if?(node) || hidden_case?(node)
       end
 
       def if_node?(node)
-        %w[if unless if_statement if_expression if_modifier unless_modifier].include?(node.kind) ||
+        if_node_kinds.include?(node.kind) ||
           hidden_if?(node) || hidden_modifier_if?(node)
       end
 
       def hidden_if?(node)
         return false unless ts_node?(node)
-        return true if node.kind == "expression_statement" && node.text.to_s.lstrip.start_with?("if ")
-        return false unless %w[block body_statement statements statement_list].include?(node.kind)
+        return true if hidden_match_node_kinds.include?(node.kind) && node.text.to_s.lstrip.start_with?("if ")
+        return false unless hidden_if_wrapper_node_kinds.include?(node.kind)
 
         first_token = node.children.first
-        first_token && !first_token.named? && %w[if unless].include?(first_token.kind.to_s)
+        first_token && !first_token.named? && hidden_if_token_kinds.include?(first_token.kind.to_s)
       end
 
       def hidden_modifier_if?(node)
@@ -1646,15 +1520,15 @@ module Decomplex
 
       def hidden_case?(node)
         return false unless ts_node?(node)
-        return false unless %w[body_statement block statements statement_list].include?(node.kind)
+        return false unless hidden_case_wrapper_node_kinds.include?(node.kind)
 
         first_token = node.children.first
-        first_token && !first_token.named? && %w[case match switch when].include?(first_token.kind.to_s)
+        first_token && !first_token.named? && hidden_case_token_kinds.include?(first_token.kind.to_s)
       end
 
       def hidden_match?(node)
         ts_node?(node) &&
-          node.kind == "expression_statement" &&
+          hidden_match_node_kinds.include?(node.kind) &&
           node.text.to_s.lstrip.start_with?("match ")
       end
 
@@ -1795,26 +1669,25 @@ module Decomplex
 
       def local_variable_declarator?(node)
         return false unless ts_node?(node)
-        return false unless %w[variable_declarator init_declarator].include?(node.kind)
+        return false unless local_variable_declarator_node_kinds.include?(node.kind)
 
-        !inside_kind?(node, %w[field_declaration property_declaration public_field_definition])
+        !inside_kind?(node, field_declaration_node_kinds)
       end
 
       def local_name_node(node)
         named_field(node, "name") ||
-          node.named_children.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }
+          node.named_children.find { |child| (identifier_node_kinds + field_identifier_node_kinds).include?(child.kind) }
       end
 
       def implicit_state_identifier?(node)
-        ts_node?(node) && %w[identifier field_identifier property_identifier].include?(node.kind)
+        ts_node?(node) && (identifier_node_kinds + field_identifier_node_kinds).include?(node.kind)
       end
 
       def identifier_declaration_site?(node)
         parent = parent_node(node)
         return false unless parent
-        return true if %w[parameter_declaration parameter variable_declarator init_declarator function_declarator
-                          method_declaration function_definition class_specifier class].include?(parent.kind)
-        return true if inside_kind?(node, %w[field_declaration property_declaration public_field_definition])
+        return true if declaration_site_parent_node_kinds.include?(parent.kind)
+        return true if inside_kind?(node, field_declaration_node_kinds)
 
         false
       end
@@ -1832,7 +1705,7 @@ module Decomplex
         parent = parent_node(node)
         return false unless parent
 
-        if %w[assignment_expression assignment assignment_statement augmented_assignment operator_assignment].include?(parent.kind)
+        if assignment_node_kinds.include?(parent.kind)
           lhs = named_field(parent, "left") || parent.named_children.first
           return lhs == node
         end
@@ -1903,7 +1776,7 @@ module Decomplex
         return nil unless declaration
 
         declaration.named_children.reverse.find do |child|
-          %w[pointer_type type_identifier qualified_type generic_type scoped_type_identifier].include?(child.kind)
+          receiver_type_node_kinds.include?(child.kind)
         end
       end
 
@@ -1911,35 +1784,48 @@ module Decomplex
         declaration = method_receiver_declaration(node)
         return nil unless declaration
 
-        declaration.named_children.find { |child| child.kind == "identifier" }
+        declaration.named_children.find { |child| identifier_node_kinds.include?(child.kind) }
       end
 
       def method_receiver_declaration(node)
-        return nil unless ts_node?(node) && node.kind == "method_declaration"
+        return nil unless ts_node?(node) && method_receiver_node_kinds.include?(node.kind)
 
-        receiver_params = node.named_children.find { |child| child.kind == "parameter_list" }
-        receiver_params&.named_children&.find { |child| child.kind == "parameter_declaration" }
+        receiver_params = node.named_children.find { |child| method_parameter_list_node_kinds.include?(child.kind) }
+        receiver_params&.named_children&.find { |child| receiver_parameter_node_kinds.include?(child.kind) }
       end
 
       def first_argument_receiver_parameter(node)
         params = named_field(named_field(node, "declarator"), "parameters") ||
                  named_field(node, "parameters") ||
-                 node.named_children.find { |child| child.kind == "parameter_list" } ||
-                 named_field(node, "declarator")&.named_children&.find { |child| child.kind == "parameter_list" }
-        first = params&.named_children&.find { |child| child.kind == "parameter_declaration" }
+                 node.named_children.find { |child| parameter_list_node_kinds.include?(child.kind) } ||
+                 named_field(node, "declarator")&.named_children&.find { |child| parameter_list_node_kinds.include?(child.kind) }
+        first = params&.named_children&.find { |child| receiver_parameter_node_kinds.include?(child.kind) }
         return nil unless first
 
         type_node = first.named_children.find do |child|
-          %w[type_identifier primitive_type qualified_identifier scoped_type_identifier].include?(child.kind)
+          first_argument_receiver_type_node_kinds.include?(child.kind)
         end
         name_node = first.named_children.reverse.find do |child|
-          %w[identifier field_identifier].include?(child.kind)
+          first_argument_receiver_name_node_kinds.include?(child.kind)
         end
+        name_node ||= nested_receiver_name_node(first)
         name_node ||= declarator_name(first)
         return nil unless type_node && name_node
 
         name = ts_node?(name_node) ? name_node.text : name_node.to_s
         { type: type_node.text, name: name }
+      end
+
+      def nested_receiver_name_node(node)
+        node.named_children.reverse_each do |child|
+          next unless ts_node?(child)
+
+          direct = child.named_children.reverse.find do |grandchild|
+            first_argument_receiver_name_node_kinds.include?(grandchild.kind)
+          end
+          return direct if direct
+        end
+        nil
       end
 
       def snake_case_type_name(type)
@@ -1954,16 +1840,15 @@ module Decomplex
         parent = parent_node(node)
         seen_nodes = Set.new
         while parent && !seen_nodes.include?(node_key(parent)) &&
-              %w[ERROR expression_statement return_expression].include?(parent.kind)
+              bound_container_wrapper_node_kinds.include?(parent.kind)
           seen_nodes << node_key(parent)
           parent = parent_node(parent)
         end
         return nil unless parent
 
-        if %w[variable_declaration const_declaration lexical_declaration public_field_definition
-              field_declaration property_declaration].include?(parent.kind)
+        if bound_container_parent_node_kinds.include?(parent.kind)
           name = named_field(parent, "name") ||
-                 parent.named_children.find { |child| %w[identifier field_identifier property_identifier type_identifier].include?(child.kind) }
+                 parent.named_children.find { |child| bound_container_name_node_kinds.include?(child.kind) }
           return name.text if name
         end
         nil
@@ -1990,7 +1875,7 @@ module Decomplex
       end
 
       def generic_call_target(document, node)
-        if %w[method_invocation invocation_expression].include?(node.kind)
+        if adjacent_method_invocation_node_kinds.include?(node.kind)
           adjacent = generic_adjacent_method_invocation_target(node)
           return adjacent if adjacent
         end
@@ -2008,10 +1893,10 @@ module Decomplex
       end
 
       def generic_adjacent_method_invocation_target(node)
-        names = node.named_children.select { |child| %w[identifier simple_identifier].include?(child.kind) }
+        names = node.named_children.select { |child| identifier_node_kinds.include?(child.kind) }
         return nil unless names.size >= 2
 
-        args = node.named_children.find { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
+        args = node.named_children.find { |child| argument_list_node_kinds.include?(child.kind) }
         {
           receiver: normalize_text(names.first.text),
           message: names[1].text,
@@ -2038,22 +1923,37 @@ module Decomplex
 
       def call_argument_nodes(node)
         args = named_field(node, "arguments") ||
-               node.named_children.find { |child| %w[argument_list arguments].include?(child.kind) }
+               node.named_children.find { |child| argument_list_node_kinds.include?(child.kind) }
         return Array(args&.named_children) if args
-        return [] unless node.kind == "call_expression"
+        return [] unless call_node_kinds.include?(node.kind)
 
         callee = named_field(node, "function") || named_field(node, "callee") || node.named_children.first
         node.named_children.reject { |child| child == callee }
       end
 
       def adjacent_argument_call_target(node)
-        return nil if generic_member_name?(node)
-        return nil if %w[call_expression method_invocation invocation_expression function_call method_call].include?(parent_node(node)&.kind)
+        return nil if generic_member_name?(node) && !member_message_identifier?(node)
+        return nil if call_node_kinds.include?(parent_node(node)&.kind)
 
-        args = next_sibling(node)
-        return nil unless %w[argument_list arguments call_suffix].include?(args&.kind)
+        callee = node
+        args = nil
+        if member_message_identifier?(node)
+          parent = parent_node(node)
+          if parent && field_like_node?(parent)
+            parent_args = next_sibling(parent)
+            if argument_list_node_kinds.include?(parent_args&.kind)
+              callee = parent
+              args = parent_args
+            elsif argument_list_node_kinds.include?(next_sibling(node)&.kind)
+              callee = parent
+              args = next_sibling(node)
+            end
+          end
+        end
+        args ||= next_sibling(callee)
+        return nil unless argument_list_node_kinds.include?(args&.kind)
 
-        target_from_callee(node).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
+        target_from_callee(callee).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
       rescue NoMethodError
         nil
       end
@@ -2066,7 +1966,7 @@ module Decomplex
                    callee.named_children.find { |child| child.kind != "navigation_suffix" }
           field = named_field(callee, "field") || named_field(callee, "property") ||
                   named_field(callee, "suffix") ||
-                  callee.named_children.find { |child| child.kind == "navigation_suffix" } ||
+                  callee.named_children.find { |child| navigation_suffix_node_kinds.include?(child.kind) } ||
                   callee.named_children.last
           field_text = member_field_text(field)
           return nil unless object && field_text
@@ -2075,7 +1975,7 @@ module Decomplex
             receiver: normalize_text(object.text).sub(/\A\*/, ""),
             message: field_text
           }
-        elsif %w[identifier field_identifier property_identifier constant type_identifier].include?(callee.kind)
+        elsif self_call_identifier_node_kinds.include?(callee.kind)
           {
             receiver: "self",
             message: callee.text
@@ -2111,13 +2011,10 @@ module Decomplex
       end
 
       def generic_state_declaration(node)
-        case node.kind
-        when "assignment", "assignment_expression", "assignment_statement"
+        if assignment_state_declaration_node_kinds.include?(node.kind)
           assignment_state_declaration(node)
-        when "property_declaration", "public_field_definition", "field_definition", "field_declaration"
+        elsif field_declaration_node_kinds.include?(node.kind)
           generic_field_declaration(node)
-        else
-          nil
         end
       end
 
@@ -2131,8 +2028,8 @@ module Decomplex
       def field_declaration_name_node(node)
         named_field(node, "name") ||
           variable_declarator_name(node) ||
-          node.named_children.find { |child| %w[field_identifier property_identifier].include?(child.kind) } ||
-          node.named_children.reverse.find { |child| child.kind == "identifier" }
+          node.named_children.find { |child| field_identifier_node_kinds.include?(child.kind) } ||
+          node.named_children.reverse.find { |child| identifier_node_kinds.include?(child.kind) }
       end
 
       def variable_declarator_name(node)
@@ -2145,17 +2042,17 @@ module Decomplex
           next if seen.include?(key)
 
           seen << key
-          if %w[variable_declarator pointer_declarator declarator].include?(current.kind)
+          if declarator_node_kinds.include?(current.kind)
             direct_name = named_field(current, "name") ||
                           current.named_children.find do |child|
-                            %w[identifier field_identifier property_identifier].include?(child.kind)
+                            (identifier_node_kinds + field_identifier_node_kinds).include?(child.kind)
                           end
             return direct_name if direct_name
-            return current if current.kind == "variable_declarator" && current.text.match?(/\A[A-Za-z_]\w*\z/)
-          elsif current.kind == "init_declarator"
+            return current if local_variable_declarator_node_kinds.include?(current.kind) && current.text.match?(/\A[A-Za-z_]\w*\z/)
+          elsif local_variable_declarator_node_kinds.include?(current.kind)
             return named_field(current, "name") ||
                    current.named_children.find do |child|
-                     %w[identifier field_identifier property_identifier].include?(child.kind)
+                     (identifier_node_kinds + field_identifier_node_kinds).include?(child.kind)
                    end
           end
           pending.concat(current.named_children)
@@ -2198,7 +2095,7 @@ module Decomplex
         rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
         target = state_target(lhs)
         return nil unless target
-        return nil unless %w[self this].include?(target[:receiver].to_s)
+        return nil unless self_receiver_names.include?(target[:receiver].to_s)
 
         type = inferred_assignment_type(rhs)
         return nil unless type
@@ -2219,8 +2116,7 @@ module Decomplex
       end
 
       def generic_state_read_target(node)
-        case node.kind
-        when "call"
+        if accessor_call_node_kinds.include?(node.kind)
           receiver = named_field(node, "receiver")
           method = named_field(node, "method")
           return nil unless receiver && method
@@ -2229,10 +2125,8 @@ module Decomplex
           return nil if named_field(node, "arguments")
 
           { receiver: normalize_text(receiver.text), field: method.text }
-        when "field", "field_access", "selector_expression", "member_expression", "member_access_expression", "attribute",
-             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list",
-             "dot_index_expression", "variable_list"
-          return nil if node.kind == "expression_list" && !(named_field(node, "operand") && named_field(node, "field"))
+        elsif field_like_node?(node)
+          return nil if expression_list_node_kinds.include?(node.kind) && !(named_field(node, "operand") && named_field(node, "field"))
 
           object = named_field(node, "object") || named_field(node, "receiver") ||
                    named_field(node, "expression") ||
@@ -2241,10 +2135,10 @@ module Decomplex
                    node.named_children.find { |child| child.kind != "navigation_suffix" }
           field = named_field(node, "field") || named_field(node, "property") ||
                   named_field(node, "name") || named_field(node, "suffix") ||
-                  node.named_children.find { |child| child.kind == "navigation_suffix" } ||
+                  node.named_children.find { |child| navigation_suffix_node_kinds.include?(child.kind) } ||
                   node.named_children.last
-          if node.kind == "field_expression" && node.text.to_s.start_with?(".")
-            field = node.named_children.find { |child| child.kind == "identifier" } || field
+          if literal_field_expression_node_kinds.include?(node.kind) && node.text.to_s.start_with?(".")
+            field = node.named_children.find { |child| identifier_node_kinds.include?(child.kind) } || field
             return { receiver: ".literal", field: field.text } if field
           end
           field_text = member_field_text(field)
@@ -2260,17 +2154,14 @@ module Decomplex
         return nil unless ts_node?(lhs)
         return nil if prev_sibling(lhs)&.text == ":"
 
-        case lhs.kind
-        when "call"
+        if accessor_call_node_kinds.include?(lhs.kind)
           receiver = named_field(lhs, "receiver")
           method = named_field(lhs, "method")
           return nil unless receiver && method
 
           { receiver: normalize_text(receiver.text), field: method.text.sub(/=\z/, "") }
-        when "field", "field_access", "selector_expression", "member_expression", "member_access_expression", "attribute",
-             "field_expression", "navigation_expression", "directly_assignable_expression", "expression_list",
-             "dot_index_expression", "variable_list"
-          if lhs.kind == "expression_list" && !(named_field(lhs, "operand") && named_field(lhs, "field"))
+        elsif field_like_node?(lhs)
+          if expression_list_node_kinds.include?(lhs.kind) && !(named_field(lhs, "operand") && named_field(lhs, "field"))
             return generic_state_target(lhs.named_children.first)
           end
 
@@ -2281,10 +2172,10 @@ module Decomplex
                    lhs.named_children.find { |child| child.kind != "navigation_suffix" }
           field = named_field(lhs, "field") || named_field(lhs, "property") ||
                   named_field(lhs, "name") || named_field(lhs, "suffix") ||
-                  lhs.named_children.find { |child| child.kind == "navigation_suffix" } ||
+                  lhs.named_children.find { |child| navigation_suffix_node_kinds.include?(child.kind) } ||
                   lhs.named_children.last
-          if lhs.kind == "field_expression" && lhs.text.to_s.start_with?(".")
-            field = lhs.named_children.find { |child| child.kind == "identifier" } || field
+          if literal_field_expression_node_kinds.include?(lhs.kind) && lhs.text.to_s.start_with?(".")
+            field = lhs.named_children.find { |child| identifier_node_kinds.include?(child.kind) } || field
             return { receiver: ".literal", field: field.text.sub(/=\z/, "") } if field
           end
           field_text = member_field_text(field)
@@ -2298,7 +2189,7 @@ module Decomplex
         return false if prev_sibling(node)&.text == ":"
 
         sibling = next_sibling(node)
-        sibling && %w[= += -= *= /= %= &&= ||=].include?(sibling.text.to_s)
+        sibling && assignment_operator_tokens.include?(sibling.text.to_s)
       end
 
       def direct_state_ref(_node)
@@ -2307,7 +2198,7 @@ module Decomplex
 
       def call_has_block?(node)
         ts_node?(node) &&
-          node.named_children.any? { |child| %w[block do_block lambda].include?(child.kind) }
+          node.named_children.any? { |child| block_argument_node_kinds.include?(child.kind) }
       end
 
       def next_sibling(node)
@@ -2343,28 +2234,24 @@ module Decomplex
       end
 
       def field_like_node?(node)
-        %w[
-          attribute directly_assignable_expression dot_index_expression expression_list field field_access
-          field_expression member_access_expression member_expression navigation_expression scoped_identifier
-          selector_expression variable_list
-        ].include?(node.kind)
+        field_like_node_kinds.include?(node.kind)
       end
 
       def member_expression_list?(node)
-        return false unless node.kind == "expression_list"
+        return false unless expression_list_node_kinds.include?(node.kind)
         return true if named_field(node, "operand") && named_field(node, "field")
 
         node.children.any? do |child|
-          !child.named? && %w[. -> :].include?(child.text.to_s)
+          !child.named? && member_access_operator_tokens.include?(child.text.to_s)
         end
       end
 
       def member_field_text(field)
         return nil unless ts_node?(field)
 
-        if field.kind == "navigation_suffix"
+        if navigation_suffix_node_kinds.include?(field.kind)
           suffix = named_field(field, "suffix") ||
-                   field.named_children.find { |child| %w[identifier simple_identifier field_identifier property_identifier].include?(child.kind) } ||
+                   field.named_children.find { |child| (identifier_node_kinds + field_identifier_node_kinds).include?(child.kind) } ||
                    field.named_children.last
           text = suffix&.text.to_s
           return nil if text.empty?
@@ -2383,8 +2270,7 @@ module Decomplex
       end
 
       def first_named_text(node, kinds)
-        expanded = kinds.include?("identifier") ? kinds + %w[simple_identifier] : kinds
-        child = node.named_children.find { |c| expanded.include?(c.kind) }
+        child = node.named_children.find { |c| kinds.include?(c.kind) }
         child&.text
       end
 
@@ -2400,7 +2286,7 @@ module Decomplex
           next if seen.include?(key)
 
           seen << key
-          return current.text if %w[identifier simple_identifier field_identifier property_identifier].include?(current.kind)
+          return current.text if (identifier_node_kinds + field_identifier_node_kinds).include?(current.kind)
 
           current.named_children.reverse_each { |child| pending << child }
         end
@@ -2417,18 +2303,18 @@ module Decomplex
       def modifier_visibility(node)
         return :private if node.children.any? { |child| child.text == "private" }
         return :protected if node.children.any? { |child| child.text == "protected" }
-        return :public if node.children.any? { |child| %w[public pub].include?(child.text) }
+        return :public if node.children.any? { |child| public_visibility_tokens.include?(child.text) }
 
         nil
       end
 
       def parameter_name(param)
         return nil unless ts_node?(param)
-        return param.text if %w[identifier simple_identifier shorthand_property_identifier_pattern].include?(param.kind)
+        return param.text if parameter_identifier_node_kinds.include?(param.kind)
 
         name = named_field(param, "name") ||
                param.named_children.select do |child|
-                 %w[identifier simple_identifier field_identifier property_identifier].include?(child.kind)
+                 parameter_identifier_node_kinds.include?(child.kind)
                end.last
         text = name&.text.to_s
         return nil if text.empty? || text == "_"
@@ -2438,7 +2324,7 @@ module Decomplex
 
       def normalize_target_receiver(target, stack)
         receiver = target[:receiver].to_s
-        return target.merge(receiver: "self") if %w[self this].include?(receiver)
+        return target.merge(receiver: "self") if self_receiver_names.include?(receiver)
 
         current_receiver = current_receiver_name(stack)
         return target unless current_receiver
@@ -2485,7 +2371,6 @@ module Decomplex
       end
     end
 
-    require_relative "syntax/ruby"
     require_relative "syntax/adapters"
 
     LanguageProfile = TreeSitterLanguageAdapter
@@ -2509,10 +2394,10 @@ module Decomplex
           lexicon: JAVASCRIPT_LEXICON,
           package: "tree-sitter-javascript"
         ),
-	      typescript: JavaScriptSyntaxAdapter.new(
+	      typescript: TypeScriptSyntaxAdapter.new(
           language: :typescript,
           extensions: %w[.ts .tsx],
-          lexicon: JAVASCRIPT_LEXICON,
+          lexicon: TYPESCRIPT_LEXICON,
           package: "tree-sitter-typescript"
         ),
 	      go: GoSyntaxAdapter.new(
@@ -2577,6 +2462,12 @@ module Decomplex
           extensions: %w[.kt .kts],
           lexicon: KOTLIN_LEXICON,
           package: "tree-sitter-kotlin"
+        ),
+	      php: PhpSyntaxAdapter.new(
+          language: :php,
+          extensions: %w[.php],
+          lexicon: PHP_LEXICON,
+          package: "tree-sitter-php"
         )
 	    }.freeze
 
@@ -2735,65 +2626,15 @@ module Decomplex
       end
 
       def immutable_struct_readers
-        adapter.immutable_struct_readers(lines)
+        adapter.immutable_struct_readers(self)
       end
 
       def immutable_struct_reader_types
-        adapter.immutable_struct_reader_types(lines)
+        adapter.immutable_struct_reader_types(self)
       end
 
       def type_aliases
-        adapter.type_aliases(lines)
-      end
-    end
-
-    module SourceTextHelpers
-      module_function
-
-      def immutable_struct_readers(lines)
-        readers = Hash.new { |h, k| h[k] = Set.new }
-        class_stack = []
-        lines.each do |line|
-          if (match = line.match(/\A\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b/))
-            class_stack << match[1]
-            next
-          end
-          if class_stack.any? && (match = line.match(/\A\s*const\s+:([A-Za-z_]\w*)\b/))
-            readers[class_stack.last].add(match[1].to_sym)
-            next
-          end
-          class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
-        end
-        readers
-      end
-
-      def immutable_struct_reader_types(lines)
-        reader_types = Hash.new { |h, k| h[k] = {} }
-        class_stack = []
-        lines.each do |line|
-          if (match = line.match(/\A\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b/))
-            class_stack << match[1]
-            next
-          end
-          if class_stack.any? && (match = line.match(/\A\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b/))
-            reader_types[class_stack.last][match[1].to_sym] = match[2]
-            next
-          end
-          class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
-        end
-        reader_types
-      end
-
-      def type_aliases(lines)
-        aliases = {}
-        lines.each do |line|
-          if (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}/))
-            aliases[match[1]] = match[2]
-          elsif (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
-            aliases[match[1]] = match[2]
-          end
-        end
-        aliases
+        adapter.type_aliases(self)
       end
     end
 
@@ -3168,16 +3009,16 @@ module Decomplex
         syntax_profile(document.language).path_condition_sites(document)
       end
 
-      def immutable_struct_readers(lines)
-        SourceTextHelpers.immutable_struct_readers(lines)
+      def immutable_struct_readers(document)
+        syntax_profile(document.language).immutable_struct_readers(document)
       end
 
-      def immutable_struct_reader_types(lines)
-        SourceTextHelpers.immutable_struct_reader_types(lines)
+      def immutable_struct_reader_types(document)
+        syntax_profile(document.language).immutable_struct_reader_types(document)
       end
 
-      def type_aliases(lines)
-        SourceTextHelpers.type_aliases(lines)
+      def type_aliases(document)
+        syntax_profile(document.language).type_aliases(document)
       end
 
       private

@@ -1,0 +1,93 @@
+# frozen_string_literal: true
+
+module Decomplex
+  module Syntax
+    GO_LEXICON = LanguageLexicon.new(
+      nil_literal_patterns: [/\bnil\b/].freeze,
+      type_guard_patterns: [
+        /\bnil\b/,
+        /\.\(type\)/,
+        /\.\([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\)/
+      ].freeze,
+      diagnostic_patterns: [
+        /\bpanic\s*\(/,
+        /\breturn\s+error[.\w]*/
+      ].freeze,
+      trivial_patterns: [
+        /\A(?:nil|true|false|0|1|break|continue|fallthrough)\s*;?\z/,
+        /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
+      ].freeze
+    ).freeze
+
+    class GoSyntaxAdapter < TreeSitterLanguageAdapter
+      FUNCTION_NODE_KINDS = %w[function_declaration method_declaration].freeze
+      CALL_NODE_KINDS = %w[call_expression].freeze
+      ADJACENT_CALL_NODE_KINDS = %w[selector_expression identifier field_identifier].freeze
+      GENERIC_OWNER_NODE_KINDS = %w[type_spec].freeze
+      PARAMETER_LIST_NODE_KINDS = %w[parameter_list].freeze
+      METHOD_PARAMETER_LIST_NODE_KINDS = %w[parameter_list].freeze
+      METHOD_RECEIVER_NODE_KINDS = %w[method_declaration].freeze
+      FUNCTION_BODY_NODE_KINDS = %w[block statement_list].freeze
+      NESTED_STATEMENT_WRAPPER_NODE_KINDS = %w[statement_list].freeze
+      IDENTIFIER_NODE_KINDS = %w[identifier].freeze
+      FIELD_IDENTIFIER_NODE_KINDS = %w[field_identifier].freeze
+      PARAMETER_IDENTIFIER_NODE_KINDS = %w[identifier field_identifier].freeze
+      LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS = %w[expression_list].freeze
+      LOCAL_DECLARATION_NODE_KINDS = %w[short_var_declaration variable_declaration].freeze
+      SHORT_VARIABLE_DECLARATION_NODE_KINDS = %w[short_var_declaration].freeze
+      VARIABLE_DECLARATION_NODE_KINDS = %w[expression_list variable_declaration].freeze
+      LOCAL_VARIABLE_DECLARATOR_NODE_KINDS = [].freeze
+      FIELD_DECLARATION_NODE_KINDS = %w[field_declaration].freeze
+      DECLARATION_SITE_PARENT_NODE_KINDS = %w[parameter_declaration function_declaration method_declaration type_spec].freeze
+      RECEIVER_TYPE_NODE_KINDS = %w[pointer_type type_identifier].freeze
+      RECEIVER_PARAMETER_NODE_KINDS = %w[parameter_declaration].freeze
+      FIRST_ARGUMENT_RECEIVER_TYPE_NODE_KINDS = %w[type_identifier pointer_type].freeze
+      FIRST_ARGUMENT_RECEIVER_NAME_NODE_KINDS = %w[identifier field_identifier].freeze
+      ASSIGNMENT_NODE_KINDS = %w[assignment_statement].freeze
+      ASSIGNMENT_STATE_DECLARATION_NODE_KINDS = %w[assignment_statement].freeze
+      ASSIGNMENT_OPERATOR_TOKENS = %w[= += -= *= /= %=].freeze
+      PATH_ACTION_NODE_KINDS = %w[call_expression expression_statement return_statement].freeze
+      SIMPLE_ACTION_WRAPPER_NODE_KINDS = %w[block statement_list].freeze
+      COMPARISON_NODE_KINDS = %w[binary_expression].freeze
+      BRANCH_NODE_KINDS = %w[if_statement for_statement expression_switch_statement].freeze
+      LOOP_NODE_KINDS = %w[for_statement].freeze
+      BRANCH_LOOP_NODE_KINDS = LOOP_NODE_KINDS
+      CASE_NODE_KINDS = %w[expression_switch_statement].freeze
+      BRANCH_CASE_NODE_KINDS = %w[expression_switch_statement].freeze
+      IF_NODE_KINDS = %w[if_statement].freeze
+      HIDDEN_IF_WRAPPER_NODE_KINDS = %w[block statement_list].freeze
+      HIDDEN_IF_TOKEN_KINDS = %w[if].freeze
+      CASE_ARM_NODE_KINDS = %w[expression_case].freeze
+      SWITCH_CASE_ARM_NODE_KINDS = %w[expression_case].freeze
+      CASE_PATTERN_NODE_KINDS = [].freeze
+      CASE_SUBJECT_NODE_KINDS = [].freeze
+      CASE_CONTAINER_STOP_NODE_KINDS = %w[function_declaration method_declaration type_spec].freeze
+      CASE_SUBJECT_SKIP_NODE_KINDS = %w[expression_case else comment].freeze
+      DEFAULT_CASE_PATTERNS = %w[_ default].freeze
+      BOOLEAN_AND_OPERATORS = %w[&& and].freeze
+      BOOLEAN_CONTAINER_NODE_KINDS = %w[binary_expression].freeze
+      BOOLEAN_WRAPPER_NODE_KINDS = %w[expression_list].freeze
+      PARENTHESIZED_WRAPPER_NODE_KINDS = %w[parenthesized_expression].freeze
+      ARGUMENT_LIST_NODE_KINDS = %w[argument_list].freeze
+      SELF_CALL_IDENTIFIER_NODE_KINDS = %w[identifier field_identifier type_identifier].freeze
+      SELF_RECEIVER_NAMES = %w[self].freeze
+      PUBLIC_VISIBILITY_TOKENS = %w[public pub].freeze
+      ACCESSOR_CALL_NODE_KINDS = [].freeze
+      EXPRESSION_LIST_NODE_KINDS = %w[expression_list].freeze
+      FIELD_LIKE_NODE_KINDS = %w[selector_expression expression_list].freeze
+      BLOCK_ARGUMENT_NODE_KINDS = [].freeze
+
+      def visibility(_document, node)
+        exported_name_visibility(function_name(node))
+      end
+
+      private
+
+      def boolean_container?(node)
+        return true if boolean_expression_list?(node, "&&")
+
+        super
+      end
+    end
+  end
+end

@@ -5,6 +5,7 @@
 !/.devcontainer/
 !/.github/
 !/.gitignore
+!/.npmrc
 !/.rspec
 !/.vscode/
 !/CLAUDE.md
@@ -17,6 +18,8 @@
 !/gems/**
 !/LICENSE
 !/ONE-PAGER.md
+!/package-lock.json
+!/package.json
 !/README.md
 !/TODO.md
 !/clear

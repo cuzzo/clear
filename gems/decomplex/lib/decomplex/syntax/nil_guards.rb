@@ -14,7 +14,19 @@ module Decomplex
 
     class Document
       def redundant_nil_guard_findings
-        @redundant_nil_guard_findings ||= NilGuardAnalyzer.new(self).scan
+        @redundant_nil_guard_findings ||= adapter.redundant_nil_guard_findings(self)
+      end
+    end
+
+    class TreeSitterLanguageAdapter
+      def redundant_nil_guard_findings(document)
+        NilGuardAnalyzer.new(document).scan
+      end
+    end
+
+    class TreeSitterAdapter
+      def redundant_nil_guard_findings(document)
+        syntax_profile(document.language).redundant_nil_guard_findings(document)
       end
     end
 
