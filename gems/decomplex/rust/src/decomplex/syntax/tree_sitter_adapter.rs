@@ -28,6 +28,21 @@ trait LanguageProfile {
         false
     }
 
+    fn hidden_case(&self, _node: Node<'_>) -> bool {
+        false
+    }
+
+    fn predicate_less_case(&self, node: Node<'_>) -> bool {
+        node.kind() == "case" && decision_subject(node).is_none()
+    }
+
+    fn case_pattern_texts(&self, patterns: &[Node<'_>], source: &str) -> Vec<String> {
+        patterns
+            .iter()
+            .map(|pattern| normalize_text(node_text(*pattern, source)))
+            .collect()
+    }
+
     fn receiver_convention_owner_name(&self, node: Node<'_>, source: &str) -> Option<String> {
         if !self.first_argument_receiver() || node.kind() != "function_definition" {
             return None;
@@ -59,6 +74,26 @@ trait LanguageProfile {
 
     fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
         generic_state_target(lhs, source)
+    }
+
+    fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
+        generic_assignment_target(node)
+    }
+
+    fn skip_state_write_node(&self, _node: Node<'_>) -> bool {
+        false
+    }
+
+    fn skip_state_write_target(&self, target: &Target) -> bool {
+        target.field == "[]"
+    }
+
+    fn state_write_source_node<'tree>(
+        &self,
+        _node: Node<'tree>,
+        assignment: &AssignmentTarget<'tree>,
+    ) -> Node<'tree> {
+        assignment.source
     }
 }
 
@@ -126,6 +161,48 @@ impl LanguageProfile for RubyProfile {
             return first_named_text(node, source, &["constant", "identifier", "type_identifier"]);
         }
         generic_owner_name_from_declaration(node, source)
+    }
+
+    fn hidden_case(&self, node: Node<'_>) -> bool {
+        matches!(
+            node.kind(),
+            "body_statement" | "block_body" | "argument_list"
+        ) && first_child_kind(node) == Some("case")
+    }
+
+    fn predicate_less_case(&self, node: Node<'_>) -> bool {
+        (node.kind() == "case" || self.hidden_case(node)) && decision_subject(node).is_none()
+    }
+
+    fn case_pattern_texts(&self, patterns: &[Node<'_>], source: &str) -> Vec<String> {
+        ruby_case_pattern_texts(patterns, source)
+    }
+
+    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
+        ruby_state_variable_target(lhs, source).or_else(|| generic_state_target(lhs, source))
+    }
+
+    fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
+        generic_assignment_target(node).or_else(|| match node.kind() {
+            "instance_variable" | "global_variable" if assignment_lhs_node(node) => {
+                Some(AssignmentTarget {
+                    lhs: node,
+                    source: node.parent().unwrap_or(node),
+                })
+            }
+            _ => None,
+        })
+    }
+
+    fn skip_state_write_node(&self, node: Node<'_>) -> bool {
+        node.kind() == "operator_assignment"
+            || (assignment_lhs_node(node)
+                && next_sibling_raw_text(node).as_deref() != Some("=")
+                && node.kind() != "instance_variable")
+    }
+
+    fn skip_state_write_target(&self, target: &Target) -> bool {
+        target.field == "[]" || target.field.starts_with('$')
     }
 }
 
@@ -487,7 +564,8 @@ fn record_decision_site(
     out: &mut Vec<DecisionSite>,
     seen: &mut HashSet<String>,
 ) {
-    if language_profile(language).generated_prelude(node, source) {
+    let profile = language_profile(language);
+    if profile.generated_prelude(node, source) {
         return;
     }
 
@@ -496,12 +574,12 @@ fn record_decision_site(
         return;
     }
 
-    if case_node(node) || hidden_case(node) {
-        let decision_node = case_source_node(node);
-        if ruby_predicate_less_case(decision_node) {
+    if case_node(node) || profile.hidden_case(node) {
+        let decision_node = case_source_node(node, profile);
+        if profile.predicate_less_case(decision_node) {
             return;
         }
-        let patterns = case_patterns(decision_node, source);
+        let patterns = case_patterns(decision_node, source, profile);
         if patterns.len() < 2 {
             return;
         }
@@ -675,25 +753,27 @@ fn record_state_write(
     out: &mut Vec<StateWrite>,
     seen: &mut HashSet<String>,
 ) {
-    if node.kind() == "operator_assignment" || node.kind() == "augmented_assignment" {
+    let profile = language_profile(language);
+    if profile.skip_state_write_node(node) {
         return;
     }
 
-    let Some(assignment) = assignment_target(node) else {
+    let Some(assignment) = profile.assignment_target(node) else {
         return;
     };
-    let Some(target) = language_profile(language).state_target(assignment.lhs, source) else {
+    let Some(target) = profile.state_target(assignment.lhs, source) else {
         return;
     };
     let target = normalize_target_receiver(target, context);
-    if target.field == "[]" || target.field.starts_with('$') {
+    if profile.skip_state_write_target(&target) {
         return;
     }
 
     let file_name = file.to_string_lossy().to_string();
     let owner = context.current_owner();
     let function = context.current_function();
-    let line = line(assignment.source);
+    let source_node = profile.state_write_source_node(node, &assignment);
+    let line = line(source_node);
     let key = format!(
         "{}\0{}\0{}\0{}\0{}\0{}",
         file_name, owner, function, line, target.receiver, target.field
@@ -708,7 +788,7 @@ fn record_state_write(
         file: file_name,
         function,
         line,
-        span: span(assignment.source),
+        span: span(source_node),
         owner,
     });
 }
@@ -725,19 +805,13 @@ struct Target {
     field: String,
 }
 
-fn assignment_target(node: Node<'_>) -> Option<AssignmentTarget<'_>> {
+fn generic_assignment_target(node: Node<'_>) -> Option<AssignmentTarget<'_>> {
     match node.kind() {
         "assignment" | "assignment_expression" | "assignment_statement" => {
             let lhs = node
                 .child_by_field_name("left")
                 .or_else(|| first_named_child(node))?;
             Some(AssignmentTarget { lhs, source: node })
-        }
-        "instance_variable" | "global_variable" if assignment_lhs_node(node) => {
-            Some(AssignmentTarget {
-                lhs: node,
-                source: node.parent().unwrap_or(node),
-            })
         }
         _ => None,
     }
@@ -798,12 +872,15 @@ fn generic_state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
                 field: strip_assignment_suffix(&field_text),
             })
         }
-        "instance_variable" | "global_variable" => Some(Target {
-            receiver: "self".to_string(),
-            field: node_text(lhs, source).to_string(),
-        }),
         _ => None,
     }
+}
+
+fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
+    matches!(node.kind(), "instance_variable" | "global_variable").then(|| Target {
+        receiver: "self".to_string(),
+        field: node_text(node, source).to_string(),
+    })
 }
 
 fn generic_function_name(node: Node<'_>, source: &str) -> Option<String> {
@@ -823,32 +900,10 @@ fn generic_function_name(node: Node<'_>, source: &str) -> Option<String> {
                     &["identifier", "constant", "property_identifier"],
                 )
             }),
-        "singleton_method" => {
-            let name = node
-                .child_by_field_name("name")
-                .map(|name| node_text(name, source).to_string())
-                .or_else(|| {
-                    named_children(node)
-                        .into_iter()
-                        .rev()
-                        .find(|child| {
-                            matches!(
-                                child.kind(),
-                                "identifier" | "field_identifier" | "property_identifier"
-                            )
-                        })
-                        .map(|child| node_text(child, source).to_string())
-                })?;
-            Some(format!("self.{name}"))
-        }
         "method_declaration" => node
             .child_by_field_name("name")
             .map(|name| node_text(name, source).to_string())
             .or_else(|| first_named_text(node, source, &["field_identifier", "identifier"])),
-        "body_statement" if first_child_kind(node) == Some("def") => {
-            hidden_ruby_method_name(node, source)
-        }
-        "argument_list" if first_child_kind(node) == Some("def") => inline_def_name(node, source),
         _ => None,
     }
 }
@@ -1052,15 +1107,8 @@ fn case_node(node: Node<'_>) -> bool {
     )
 }
 
-fn hidden_case(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "body_statement" | "block_body" | "argument_list"
-    ) && first_child_kind(node) == Some("case")
-}
-
-fn case_source_node(node: Node<'_>) -> Node<'_> {
-    if !hidden_case(node) {
+fn case_source_node<'tree>(node: Node<'tree>, profile: &dyn LanguageProfile) -> Node<'tree> {
+    if !profile.hidden_case(node) {
         return node;
     }
     let mut cursor = node.walk();
@@ -1071,14 +1119,10 @@ fn case_source_node(node: Node<'_>) -> Node<'_> {
     result
 }
 
-fn ruby_predicate_less_case(node: Node<'_>) -> bool {
-    (node.kind() == "case" || hidden_case(node)) && decision_subject(node).is_none()
-}
-
-fn case_patterns(node: Node<'_>, source: &str) -> Vec<String> {
+fn case_patterns(node: Node<'_>, source: &str, profile: &dyn LanguageProfile) -> Vec<String> {
     let mut out = case_arms(node)
         .into_iter()
-        .flat_map(|arm| case_arm_patterns(arm, source))
+        .flat_map(|arm| case_arm_patterns(arm, source, profile))
         .filter(|pattern| !default_case_pattern(pattern))
         .collect::<Vec<_>>();
     out.sort();
@@ -1124,7 +1168,7 @@ fn case_arms(node: Node<'_>) -> Vec<Node<'_>> {
     arms
 }
 
-fn case_arm_patterns(child: Node<'_>, source: &str) -> Vec<String> {
+fn case_arm_patterns(child: Node<'_>, source: &str, profile: &dyn LanguageProfile) -> Vec<String> {
     match child.kind() {
         "when" | "match_arm" => {
             let mut patterns = named_children(child)
@@ -1138,7 +1182,7 @@ fn case_arm_patterns(child: Node<'_>, source: &str) -> Vec<String> {
                     .into_iter()
                     .collect();
             }
-            ruby_when_pattern_texts(&patterns, source)
+            profile.case_pattern_texts(&patterns, source)
         }
         "switch_case"
         | "case_clause"
@@ -1174,7 +1218,7 @@ fn case_arm_patterns(child: Node<'_>, source: &str) -> Vec<String> {
     }
 }
 
-fn ruby_when_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {
+fn ruby_case_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {
     if patterns.is_empty() {
         return Vec::new();
     }

@@ -148,14 +148,30 @@ class SyntaxTest < Minitest::Test
     assert_match(/missing Syntax language profile context/, error.message)
   end
 
+  def test_tree_sitter_adapter_delegates_language_normalization_to_profiles
+    adapter_class = Decomplex::Syntax::TreeSitterAdapter
+    profile_class = Decomplex::Syntax::TreeSitterLanguageAdapter
+    ruby_profile_class = Decomplex::Syntax::RubySyntaxAdapter
+
+    refute adapter_class.const_defined?(:BRANCH_KINDS, false)
+    refute adapter_class.const_defined?(:NOISE_MESSAGES, false)
+    refute adapter_class.private_method_defined?(:record_state_write)
+    assert profile_class.private_method_defined?(:record_state_write)
+    assert ruby_profile_class.private_method_defined?(:skip_state_write_node?)
+    assert ruby_profile_class.private_method_defined?(:skip_state_write_target?)
+    assert ruby_profile_class.private_method_defined?(:hidden_case?)
+    assert ruby_profile_class.private_method_defined?(:case_pattern_texts)
+    assert ruby_profile_class.private_method_defined?(:direct_state_ref)
+  end
+
   def test_tree_sitter_document_walks_seed_language_context
     adapter = Decomplex::Syntax::TreeSitterAdapter.new
     document = Struct.new(:root, :file, :language, :lines)
                      .new(Object.new, "/tmp/demo.py", :python, [])
     captured = []
 
-    adapter.define_singleton_method(:walk) do |_root, stack, &_block|
-      captured << stack
+    adapter.define_singleton_method(:walk) do |doc, profile, &_block|
+      captured << profile.initial_stack(doc)
     end
 
     adapter.decision_sites(document)
