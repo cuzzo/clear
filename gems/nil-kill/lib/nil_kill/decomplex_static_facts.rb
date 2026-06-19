@@ -23,11 +23,12 @@ module Decomplex
 
       def build
         state_declarations = normalized_state_declarations
-        known_states = declared_states_by_owner(state_declarations)
+        known_states = known_states_by_owner(state_declarations)
 
         {
           methods: methods,
           fields: fields(state_declarations, known_states),
+          struct_declarations: struct_declarations,
           state_types: state_types(state_declarations),
           state_type_records: state_type_records(state_declarations),
           state_protocols: state_protocols(known_states),
@@ -38,6 +39,11 @@ module Decomplex
           type_definitions: type_definitions(state_declarations),
           hash_shapes: literal_shapes(:hash),
           array_shapes: literal_shapes(:array),
+          tlet_sites: tlet_sites,
+          dead_nil_checks: dead_nil_checks,
+          deterministic_guards: deterministic_guards,
+          return_origins: return_origins,
+          noreturn_methods: noreturn_methods,
         }
       end
 
@@ -58,6 +64,7 @@ module Decomplex
             "language" => @language,
             "signature" => signature,
             "params" => Array(fn.params).map(&:to_s),
+            "untraceable_params" => method_untraceable_params(fn),
             "source" => method_source(signature),
           }
         end
@@ -139,11 +146,14 @@ module Decomplex
 
           out[state_key(call.owner, state)].add(call.message.to_s)
         end
+        ruby_ivar_protocol_records(known_states).each do |record|
+          out[record["key"]].add(record["protocol"].to_s)
+        end
         stringify_set_map(out)
       end
 
       def state_protocol_records(known_states)
-        Array(@facts[:call_sites]).filter_map do |call|
+        records = Array(@facts[:call_sites]).filter_map do |call|
           state = receiver_state_field(call.receiver, known_states[call.owner.to_s])
           next unless state
 
@@ -158,7 +168,8 @@ module Decomplex
             "span" => call.span,
             "key" => state_key(call.owner, state),
           }
-        end.uniq do |record|
+        end
+        (records + ruby_ivar_protocol_records(known_states)).uniq do |record|
           [record["language"], record["path"], record["owner"], record["function"],
             record["field"], record["protocol"], record["line"]]
         end
@@ -239,6 +250,17 @@ module Decomplex
         declarations = Array(@facts[:state_declarations]).dup
         declarations.concat(extra_typed_state_declarations)
         declarations.uniq { |state| [state.file, state.owner, declared_state_field(state.field), state.line, state.type] }
+      end
+
+      def known_states_by_owner(state_declarations)
+        out = declared_states_by_owner(state_declarations)
+        Array(@facts[:state_writes]).each do |write|
+          out[write.owner.to_s].add(canonical_state_field(write.field, receiver: write.receiver))
+        end
+        Array(@facts[:state_param_origins]).each do |origin|
+          out[origin.owner.to_s].add(canonical_state_field(origin.field, receiver: origin.receiver))
+        end
+        out
       end
 
       def extra_typed_state_declarations
@@ -674,6 +696,167 @@ module Decomplex
         }
       end
 
+      def tlet_sites
+        return [] unless @language == "ruby"
+
+        sites = []
+        walk_tree(@document.root) do |node|
+          next unless node.kind.to_s == "call"
+
+          text = node_text(node)
+          match = text.match(/\AT\.let\((.*)\)\z/m)
+          next unless match
+
+          args = NilKill.split_top_level(match[1])
+          sites << {
+            "path" => rel(@document.file),
+            "line" => node_line(node),
+            "tlet" => true,
+            "type" => args[1].to_s.strip,
+          }
+        end
+        sites
+      end
+
+      def struct_declarations
+        return [] unless @language == "ruby"
+
+        ruby_struct_definitions.map do |struct|
+          {
+            "path" => rel(@document.file),
+            "line" => struct.fetch(:line),
+            "class" => struct.fetch(:owner),
+            "fields" => struct.fetch(:fields),
+          }
+        end
+      end
+
+      def dead_nil_checks
+        return [] unless @language == "ruby"
+
+        typed_ruby_methods.flat_map do |fn, context|
+          next [] if context.fetch(:non_nil_params).empty?
+
+          walk_method_calls(fn).filter_map do |node|
+            text = node_text(node)
+            receiver = ruby_nil_check_receiver(text)
+            if receiver && context.fetch(:non_nil_params).include?(receiver)
+              next({
+                "path" => rel(fn.file),
+                "line" => node_line(node),
+                "kind" => "nil_check",
+                "code" => text,
+                "reason" => "#{receiver} is provably non-nil; .nil? is always false",
+              })
+            end
+
+            receiver = ruby_safe_nav_receiver(text)
+            next unless receiver && context.fetch(:non_nil_params).include?(receiver)
+
+            {
+              "path" => rel(fn.file),
+              "line" => node_line(node),
+              "kind" => "safe_nav",
+              "code" => text,
+              "reason" => "#{receiver} is provably non-nil",
+            }
+          end
+        end.uniq { |finding| [finding["path"], finding["line"], finding["kind"], finding["code"]] }
+      end
+
+      def deterministic_guards
+        return [] unless @language == "ruby"
+
+        nil_guards = dead_nil_checks.select { |finding| finding["kind"] == "nil_check" }.map do |finding|
+          {
+            "path" => finding["path"],
+            "line" => finding["line"],
+            "class" => owner_for_line(finding["line"]),
+            "method" => method_for_line(finding["line"]),
+            "code" => finding["code"],
+            "branch_kind" => "if",
+            "truth_value" => false,
+            "taken_branch" => "else",
+            "proof_tier" => "static_proven",
+            "predicate_kind" => "nil_check",
+            "reason" => finding["reason"],
+            "origin_kind" => "param",
+            "origin_name" => ruby_nil_check_receiver(finding["code"]),
+          }
+        end
+
+        static_guards = typed_ruby_methods.flat_map do |fn, context|
+          walk_method_guard_nodes(fn).filter_map do |node|
+            text = node_text(node)
+            result = deterministic_class_guard(text, context.fetch(:param_types)) ||
+              deterministic_literal_comparison(text)
+            next unless result
+
+            branch = branch_context_for(node)
+            truth = result.fetch("truth_value")
+            {
+              "path" => rel(fn.file),
+              "line" => node_line(node),
+              "class" => method_owner(fn),
+              "method" => normalized_method_name(fn.name),
+              "code" => text,
+              "branch_kind" => branch.fetch(:kind),
+              "truth_value" => truth,
+              "taken_branch" => branch.fetch(:inverted) ? (truth ? "else" : "body") : (truth ? "body" : "else"),
+              "proof_tier" => "static_proven",
+              "predicate_kind" => result.fetch("predicate_kind"),
+              "reason" => result.fetch("reason"),
+              "origin_kind" => result["origin_kind"],
+              "origin_name" => result["origin_name"],
+            }
+          end
+        end
+
+        (nil_guards + static_guards).uniq { |guard| [guard["path"], guard["line"], guard["code"], guard["predicate_kind"]] }
+      end
+
+      def noreturn_methods
+        return [] unless @language == "ruby"
+
+        Array(@facts[:function_defs]).filter_map do |fn|
+          signature = method_signature(fn)
+          return_type = NilKill.extract_return_type(signature).to_s
+          reason =
+            if return_type == "T.noreturn"
+              "declared T.noreturn"
+            elsif ruby_always_noreturn_body?(fn.body)
+              "body cannot return normally"
+            end
+          next unless reason
+
+          {
+            "language" => "ruby",
+            "path" => rel(fn.file),
+            "owner" => method_owner(fn),
+            "name" => normalized_method_name(fn.name),
+            "line" => fn.line,
+            "reason" => reason,
+          }
+        end.uniq { |record| [record["path"], record["owner"], record["name"], record["line"]] }
+      end
+
+      def return_origins
+        return [] unless @language == "ruby"
+
+        Array(@facts[:function_defs]).filter_map do |fn|
+          signature = method_signature(fn)
+          next if signature.empty?
+
+          return_type = NilKill.extract_return_type(signature).to_s
+          next unless return_type == "T.untyped"
+
+          origin = ruby_return_origin(fn, signature)
+          next unless origin
+
+          origin
+        end
+      end
+
       def python_signature_types(signature)
         source = signature.to_s.strip
         match = source.match(/\A(?:async\s+)?def\s+\w+\s*\((.*)\)\s*(?:->\s*([^:]+))?:/)
@@ -725,6 +908,289 @@ module Decomplex
         return [nil, nil] if name.empty? || type.empty?
 
         [name, type]
+      end
+
+      def typed_ruby_methods
+        Array(@facts[:function_defs]).filter_map do |fn|
+          signature = method_signature(fn)
+          next if signature.empty?
+
+          param_types = NilKill.extract_param_entries(signature).to_h
+          non_nil = param_types.filter_map do |name, type|
+            next if nullable_or_untyped?(type)
+
+            name.to_s
+          end.to_set
+          [fn, { param_types: param_types, non_nil_params: non_nil }]
+        end
+      end
+
+      def method_untraceable_params(fn)
+        return [] unless @language == "ruby"
+
+        header = method_header_text(fn)
+        header.scan(/(?:\*\*|\*|&)([a-z_]\w*)/).flatten.uniq
+      end
+
+      def nullable_or_untyped?(type)
+        raw = type.to_s.strip
+        raw.empty? || raw == "T.untyped" || raw == "NilClass" || raw.include?("T.nilable")
+      end
+
+      def walk_method_calls(fn)
+        calls = []
+        walk_tree(fn.body) do |node|
+          calls << node if node.kind.to_s == "call"
+        end
+        calls
+      end
+
+      def walk_method_guard_nodes(fn)
+        nodes = []
+        walk_tree(fn.body) do |node|
+          nodes << node if %w[call binary].include?(node.kind.to_s)
+        end
+        nodes
+      end
+
+      def ruby_nil_check_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)\.nil\?\z/, 1]
+      end
+
+      def ruby_safe_nav_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)&\./, 1]
+      end
+
+      def ruby_always_noreturn_body?(node)
+        text = node_text(node)
+        return false if text.match?(/\breturn\b/)
+        return true if text.match?(/\braise\b/)
+        return true if text.match?(/\bfail\b/)
+        return true if text.match?(/\babort\b/)
+        return true if text.match?(/\bT\.absurd\s*\(/)
+
+        false
+      end
+
+      def ruby_return_origin(fn, signature)
+        param_types = NilKill.extract_param_entries(signature).to_h
+        sources = ruby_return_sources(fn, param_types)
+        return nil if sources.empty?
+
+        types = sources.map { |source| source["type"].to_s }.reject(&:empty?)
+        candidate = NilKill.static_sorbet_type(types)
+        blockers = sources.select { |source| source["kind"] == "unknown" }.map do |source|
+          "unknown return expression #{source["code"]} at #{rel(fn.file)}:#{source["line"]}"
+        end
+        {
+          "path" => rel(fn.file),
+          "line" => fn.line,
+          "class" => method_owner(fn),
+          "method" => normalized_method_name(fn.name),
+          "kind" => fn.name.to_s.start_with?("self.") ? "class" : "instance",
+          "candidate_type" => candidate,
+          "confidence" => blockers.empty? && NilKill.useful_type?(candidate) ? "strong" : "blocked",
+          "sources" => sources,
+          "blockers" => blockers,
+          "return_syntax" => ruby_return_syntax(sources),
+          "control_shape" => sources.any? { |source| source["conditional"] } ? "branching" : "branchless",
+        }
+      end
+
+      def ruby_return_sources(fn, param_types)
+        lines = method_body_lines(fn)
+        return [] if lines.empty?
+
+        sources = []
+        lines.each do |line_no, raw|
+          stripped = raw.strip
+          next if stripped.empty? || stripped == "end"
+
+          if (match = stripped.match(/\Areturn\s+(.+?)\s+unless\s+(.+)\z/))
+            sources << ruby_return_source(fn, line_no, match[1], explicit: true, conditional: true, param_types: param_types)
+            next
+          elsif (match = stripped.match(/\Areturn\s+(.+?)\s+if\s+(.+)\z/))
+            sources << ruby_return_source(fn, line_no, match[1], explicit: true, conditional: true, param_types: param_types)
+            next
+          elsif (match = stripped.match(/\Areturn(?:\s+(.+))?\z/))
+            sources << ruby_return_source(fn, line_no, match[1].to_s.empty? ? "nil" : match[1], explicit: true, conditional: false, param_types: param_types)
+            next
+          end
+
+          next if stripped.start_with?("if ", "unless ", "else", "elsif ")
+
+          sources << ruby_return_source(fn, line_no, stripped, explicit: false, conditional: false, param_types: param_types)
+        end
+        sources
+      end
+
+      def ruby_return_source(fn, line_no, expr, explicit:, conditional:, param_types:)
+        code = expr.to_s.strip
+        type, kind, callee, stdlib = ruby_return_expression_type(code, param_types)
+        {
+          "kind" => kind,
+          "type" => type,
+          "line" => line_no,
+          "code" => code,
+          "callee" => callee,
+          "stdlib" => stdlib,
+          "explicit" => explicit,
+          "conditional" => conditional,
+        }.compact
+      end
+
+      def ruby_return_expression_type(code, param_types)
+        return ["NilClass", "nil", nil, false] if code == "nil"
+        return ["String", "static", nil, false] if code.match?(/\A["']/)
+        return ["Symbol", "static", nil, false] if code.start_with?(":")
+        return ["Integer", "static", nil, false] if code.match?(/\A[-+]?\d+\z/)
+        return ["T::Boolean", "static", nil, false] if %w[true false].include?(code)
+        return [param_types[code], "static", nil, false] if param_types[code]
+
+        if (match = code.match(/\A([a-z_]\w*)\.join\b/))
+          receiver_type = param_types[match[1]].to_s
+          return ["String", "typed_call", "join", true] if receiver_type.match?(/\A(?:Array|T::Array)\[String\]/)
+        end
+
+        if code.match?(/\A[a-z_]\w*[!?]?\z/)
+          return [nil, "call_untyped", code, false]
+        end
+
+        [nil, "unknown", nil, false]
+      end
+
+      def ruby_return_syntax(sources)
+        explicit = sources.any? { |source| source["explicit"] }
+        implicit = sources.any? { |source| !source["explicit"] }
+        return "mixed" if explicit && implicit
+        return "explicit" if explicit
+
+        "implicit"
+      end
+
+      def method_body_lines(fn)
+        span = Array(fn.span)
+        first = fn.line.to_i
+        last = span[2].to_i
+        return [] if first <= 0 || last <= first
+
+        ((first + 1)...last).map { |line_no| [line_no, @document.lines[line_no - 1].to_s] }
+      end
+
+      def method_header_text(fn)
+        @document.lines[fn.line.to_i - 1].to_s
+      end
+
+      def deterministic_class_guard(text, param_types)
+        match = text.to_s.strip.match(/\A([a-z_]\w*)\.(is_a\?|kind_of\?|instance_of\?)\(([^)]+)\)\z/)
+        return nil unless match
+
+        receiver, predicate, wanted = match[1], match[2], match[3].to_s.strip
+        receiver_type = param_types[receiver].to_s
+        truth = class_guard_truth(receiver_type, wanted, exact: predicate == "instance_of?")
+        return nil if truth.nil?
+
+        {
+          "truth_value" => truth,
+          "predicate_kind" => "class_guard",
+          "reason" => "#{receiver} has static type #{receiver_type}; #{predicate}(#{wanted}) is always #{truth}",
+          "origin_kind" => "param",
+          "origin_name" => receiver,
+        }
+      end
+
+      def deterministic_literal_comparison(text)
+        match = text.to_s.strip.match(/\A([-+]?\d+(?:\.\d+)?)\s*(==|!=|>=|>|<=|<)\s*([-+]?\d+(?:\.\d+)?)\z/)
+        return nil unless match
+
+        left = numeric_literal(match[1])
+        right = numeric_literal(match[3])
+        truth = left.public_send(match[2], right)
+        {
+          "truth_value" => truth,
+          "predicate_kind" => "literal_comparison",
+          "reason" => "#{match[1]} #{match[2]} #{match[3]} is always #{truth}",
+        }
+      end
+
+      def numeric_literal(text)
+        text.to_s.include?(".") ? text.to_f : text.to_i
+      end
+
+      def branch_context_for(node)
+        parent = parent_node(node)
+        while parent
+          text = node_text(parent)
+          kind = parent.kind.to_s
+          if kind == "unless" || text.start_with?("unless ")
+            return { kind: "unless", inverted: true }
+          end
+          if kind == "if" || text.start_with?("if ")
+            return { kind: "if", inverted: false }
+          end
+          parent = parent_node(parent)
+        end
+        { kind: "if", inverted: false }
+      end
+
+      def class_guard_truth(receiver_type, class_name, exact:)
+        raw = receiver_type.to_s
+        return nil if raw.empty? || raw == "T.untyped" || raw.include?("T.any(") || raw.start_with?("T.nilable(")
+
+        bare = bare_class_name(raw)
+        wanted = bare_class_name(class_name)
+        return false if exact && known_disjoint_guard_classes?(bare, wanted)
+        return nil if exact
+        return true if bare == wanted || known_guard_subclass?(bare, wanted)
+        return false if known_disjoint_guard_classes?(bare, wanted)
+
+        nil
+      end
+
+      def bare_class_name(type)
+        raw = type.to_s.delete_prefix("::")
+        case raw
+        when /\AT::Array\b/, /\AArray\b/ then "Array"
+        when /\AT::Hash\b/, /\AHash\b/ then "Hash"
+        when /\AT::Set\b/, /\ASet\b/ then "Set"
+        when "T::Boolean" then "T::Boolean"
+        else raw.split("::").last
+        end
+      end
+
+      CORE_RUNTIME_GUARD_CLASSES = %w[
+        Array Hash Set String Symbol Integer Float NilClass TrueClass FalseClass Numeric Range Regexp Time
+      ].freeze
+      NUMERIC_GUARD_SUBCLASSES = %w[Integer Float].freeze
+      BOOLEAN_GUARD_SUBCLASSES = %w[TrueClass FalseClass].freeze
+
+      def known_guard_subclass?(bare, wanted)
+        return true if wanted == "Numeric" && NUMERIC_GUARD_SUBCLASSES.include?(bare)
+        return true if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+
+        false
+      end
+
+      def known_disjoint_guard_classes?(bare, wanted)
+        return false if bare == wanted
+        return false if known_guard_subclass?(bare, wanted) || known_guard_subclass?(wanted, bare)
+        return false if bare == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(wanted)
+        return false if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+        return true if bare == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+        return true if wanted == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(bare)
+
+        CORE_RUNTIME_GUARD_CLASSES.include?(bare) && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+      end
+
+      def method_for_line(line)
+        Array(@facts[:function_defs]).select do |fn|
+          span = Array(fn.span)
+          span[0].to_i <= line.to_i && span[2].to_i >= line.to_i
+        end.max_by { |fn| Array(fn.span)[0].to_i }&.name.to_s.sub(/\Aself\./, "")
+      end
+
+      def normalized_method_name(name)
+        name.to_s.sub(/\Aself\./, "")
       end
 
       def extract_parenthesized(source)
@@ -892,10 +1358,12 @@ module Decomplex
         @ruby_struct_definitions ||= begin
           definitions = []
           walk_tree(@document.root) do |node|
+            next unless %w[assignment assignment_expression assignment_statement].include?(node.kind.to_s)
+
             match = node_text(node).match(/\A([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
             next unless match
 
-            parent = owner_for_line(node_line(node), include_struct: false)
+            parent = lexical_owner_for_line(node_line(node)).to_s
             owner = qualified_owner(parent, match[1])
             fields = NilKill.split_top_level(match[2]).filter_map do |arg|
               arg.strip[/\A:([A-Za-z_]\w*)\z/, 1]
@@ -974,6 +1442,43 @@ module Decomplex
           end
           containers.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
         end
+      end
+
+      def ruby_ivar_protocol_records(known_states)
+        return [] unless @language == "ruby"
+
+        records = []
+        walk_tree(@document.root) do |node|
+          next unless %w[body_statement call].include?(node.kind.to_s)
+
+          text = node_text(node)
+          text.scan(/(@[a-z_]\w*)\.([a-z_]\w*[!?=]?)/) do |field, protocol|
+            line = node_line(node)
+            owner = lexical_owner_for_line(line).to_s
+            next if owner.empty?
+            next unless Set.new(Array(known_states[owner]).map { |known| canonical_state_field(known) }).include?(field)
+
+            records << {
+              "language" => @language,
+              "path" => rel(@document.file),
+              "owner" => owner,
+              "function" => method_for_line(line),
+              "field" => field,
+              "protocol" => protocol,
+              "line" => line,
+              "span" => node_span(node),
+              "key" => state_key(owner, field),
+            }
+          end
+        end
+        records
+      end
+
+      def lexical_owner_for_line(line)
+        Array(@facts[:owner_defs]).select do |owner|
+          span = Array(owner.span)
+          span[0].to_i <= line.to_i && span[2].to_i >= line.to_i
+        end.max_by { |owner| Array(owner.span)[0].to_i }&.name
       end
 
       def ruby_t_struct_owner_for_line(line)
@@ -1170,6 +1675,14 @@ module Decomplex
         fields = (node_cache(node)[:fields] ||= {})
         fields.fetch(name) do
           fields[name] = node.child_by_field_name(name)
+        end
+      rescue StandardError
+        nil
+      end
+
+      def parent_node(node)
+        node_cache(node).fetch(:parent) do
+          node_cache(node)[:parent] = node.parent
         end
       rescue StandardError
         nil

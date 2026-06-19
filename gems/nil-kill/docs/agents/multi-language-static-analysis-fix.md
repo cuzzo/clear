@@ -2,9 +2,9 @@
 
 ## Problem
 
-Nil-kill currently has a misleading static-analysis boundary. `StaticEvidence`
-looks language-neutral, but the Ruby provider previously called `SourceIndex`
-from inside `provider.static_evidence`. `SourceIndex` is Ruby/Sorbet-specific:
+Nil-kill had a misleading static-analysis boundary. `StaticEvidence`
+looked language-neutral, but the Ruby provider previously called a legacy
+Ruby source index from inside `provider.static_evidence`. That index was Ruby/Sorbet-specific:
 it parses Ruby through Nil-kill's Ruby syntax facade, knows about RBI/Sorbet
 facts, and contains inference-oriented collectors that are not portable.
 
@@ -15,10 +15,10 @@ as separate capabilities.
 
 ## Decision
 
-`StaticEvidence` must not call `SourceIndex`, directly or indirectly. The static
+`StaticEvidence` must not call the legacy Ruby source index, directly or indirectly. The static
 analysis path should consume Tree-sitter facts from Decomplex and Nil-kill
-language adapters. Ruby inference may continue to use `SourceIndex` until it is
-renamed/split, but that path is not the shared static-analysis path.
+language adapters. Ruby inference must consume the same StaticAnalysis facts
+through a Ruby provider instead of owning another fact-mining path.
 
 Nil-kill-specific static analysis should be implemented by extending
 Decomplex's Tree-sitter normalization/adapters and consuming the normalized
@@ -231,16 +231,16 @@ Initial adapters should be honest about what they support:
    Decomplex normalized facts only.
 2. Extend Decomplex `TreeSitterNormalizer`, `Syntax`, and language adapters for
    array shapes, annotation definitions, owner scopes, and protocol calls.
-3. Port the Ruby-only static facts currently recovered from `SourceIndex` into
+3. Port the Ruby-only static facts previously recovered from the legacy Ruby source index into
    Decomplex Tree-sitter collectors: method signatures, `T::Struct` fields,
    `Struct.new` fields, includes.
 4. Replace line-regex Ruby extractors with Tree-sitter adapter collectors in
    Decomplex.
 5. Add per-language fixture tests that assert exact evidence records and
-   explicitly assert that `StaticEvidence` does not instantiate `SourceIndex`.
+   explicitly assert that `StaticEvidence` does not instantiate a language-local
+   source index.
 6. Change capability metadata so `type_indexing` means a real semantic backend,
    not "we parsed annotations."
-7. Rename or split `SourceIndex` to `RubySourceIndex` for the inference path.
 
 ## Correctness Rules
 
@@ -255,10 +255,10 @@ Initial adapters should be honest about what they support:
 
 ## Immediate Follow-Up
 
-After removing `SourceIndex` from `StaticEvidence`, the next implementation
-step is to add `NilKill::StaticAnalysis::TreeSitterExtractor` and move the
-current `Provider#static_evidence` logic into it. Providers should then become
-adapters/capability descriptors rather than hidden extraction engines.
+After removing the legacy source index from `StaticEvidence`, the next
+implementation step is to keep `NilKill::StaticAnalysis` as the fact assembly
+surface and keep providers as adapters/capability descriptors rather than
+hidden extraction engines.
 
 ## Extension Plan
 
@@ -278,4 +278,4 @@ order:
 5. Add adapters incrementally with exact fixture tests over emitted facts.
 
 The Decomplex walk should run once per file, thread scope in the walk stack, and
-avoid hidden fallbacks to Ruby `SourceIndex`.
+avoid hidden fallbacks to Ruby-local source indexing.

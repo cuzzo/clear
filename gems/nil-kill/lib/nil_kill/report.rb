@@ -1496,7 +1496,7 @@ module NilKill
       return "mutation/setter assignment" if kinds.include?("assignment") || kinds.include?("setter_assignment_unknown")
       return "mixed sources" if sources.any? { |source| ruby_stdlib_source?(source) } && !ruby_stdlib_return_sources?(sources)
       return "Ruby stdlib call" if ruby_stdlib_return_sources?(sources)
-      if kinds.any? { |kind| %w[typed_call call_untyped safe_call].include?(kind) }
+      if kinds.any? { |kind| %w[typed_call typed_call_inferred call_untyped safe_call].include?(kind) }
         return "#{origin["return_syntax"] || "unknown syntax"}/direct forwarded return"
       end
       return "literal/static" if kinds.all? { |kind| %w[static nil].include?(kind) }

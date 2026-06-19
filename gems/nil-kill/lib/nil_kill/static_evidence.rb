@@ -36,6 +36,7 @@ module NilKill
       methods = []
       fields = []
       state_types = {}
+      struct_declarations = []
       state_type_records = []
       state_protocols = Hash.new { |h, k| h[k] = Set.new }
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
@@ -45,6 +46,11 @@ module NilKill
       type_definitions = []
       hash_shapes = []
       array_shapes = []
+      tlet_sites = []
+      dead_nil_checks = []
+      deterministic_guards = []
+      return_origins = []
+      noreturn_methods = []
       files = target_files
 
       files.each do |file|
@@ -52,6 +58,7 @@ module NilKill
         facts = doc.static_facts(root: @root)
         methods.concat(facts.fetch(:methods, []))
         fields.concat(facts.fetch(:fields, []))
+        struct_declarations.concat(facts.fetch(:struct_declarations, []))
         state_types.merge!(facts.fetch(:state_types, {}))
         state_type_records.concat(facts.fetch(:state_type_records, []))
         merge_set_map!(state_protocols, facts.fetch(:state_protocols, {}))
@@ -62,7 +69,13 @@ module NilKill
         type_definitions.concat(facts.fetch(:type_definitions, []))
         hash_shapes.concat(facts.fetch(:hash_shapes, []))
         array_shapes.concat(facts.fetch(:array_shapes, []))
+        tlet_sites.concat(facts.fetch(:tlet_sites, []))
+        dead_nil_checks.concat(facts.fetch(:dead_nil_checks, []))
+        deterministic_guards.concat(facts.fetch(:deterministic_guards, []))
+        return_origins.concat(facts.fetch(:return_origins, []))
+        noreturn_methods.concat(facts.fetch(:noreturn_methods, []))
       end
+      type_definitions.concat(ruby_annotation_type_definitions(files))
 
       state_protocols = stringify_set_map(state_protocols)
       state_param_origins = stringify_set_map(state_param_origins)
@@ -84,12 +97,31 @@ module NilKill
       end
       alias_recommendations = AliasRecommendations.build(type_definitions: type_definitions)
       typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
+      struct_declarations = struct_declarations.uniq do |decl|
+        [decl["path"], decl["class"], Array(decl["fields"])]
+      end
       hash_shapes = hash_shapes.uniq do |shape|
         [shape["path"], shape["line"], Array(shape["keys"]), Array(shape["value_types"])]
       end
       array_shapes = array_shapes.uniq do |shape|
         [shape["path"], shape["line"], Array(shape["tuple_types"]), shape["size"]]
       end
+      tlet_sites = tlet_sites.uniq do |site|
+        [site["path"], site["line"], site["type"]]
+      end
+      dead_nil_checks = dead_nil_checks.uniq do |finding|
+        [finding["path"], finding["line"], finding["kind"], finding["code"]]
+      end
+      deterministic_guards = deterministic_guards.uniq do |finding|
+        [finding["path"], finding["line"], finding["predicate_kind"], finding["code"]]
+      end
+      return_origins = return_origins.uniq do |origin|
+        [origin["path"], origin["line"], origin["class"], origin["method"], origin["kind"]]
+      end
+      noreturn_methods = noreturn_methods.uniq do |method|
+        [method["language"], method["path"], method["owner"], method["name"], method["line"]]
+      end
+      rbi_field_types = rbi_field_type_records(type_definitions)
 
       {
         "version" => 2,
@@ -115,8 +147,15 @@ module NilKill
           "signatures" => Hash[signatures.sort],
           "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
           "alias_recommendations" => alias_recommendations,
+          "struct_declarations" => struct_declarations.sort_by { |decl| [decl["path"].to_s, decl["class"].to_s] },
           "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
           "array_shapes" => array_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
+          "tlet_sites" => tlet_sites.sort_by { |site| [site["path"].to_s, site["line"].to_i] },
+          "dead_nil_checks" => dead_nil_checks.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["kind"].to_s] },
+          "deterministic_guards" => deterministic_guards.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["code"].to_s] },
+          "return_origins" => return_origins.sort_by { |origin| [origin["path"].to_s, origin["line"].to_i, origin["method"].to_s] },
+          "noreturn_methods" => noreturn_methods.sort_by { |method| [method["path"].to_s, method["owner"].to_s, method["name"].to_s] },
+          "rbi_field_types" => rbi_field_types.sort_by { |record| [record["class"].to_s, record["field"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -134,8 +173,15 @@ module NilKill
           "state_param_origin_records" => state_param_origin_records.size,
           "type_definitions" => type_definitions.size,
           "alias_recommendations" => alias_recommendations.size,
+          "struct_declarations" => struct_declarations.size,
           "hash_shapes" => hash_shapes.size,
           "array_shapes" => array_shapes.size,
+          "tlet_sites" => tlet_sites.size,
+          "dead_nil_checks" => dead_nil_checks.size,
+          "deterministic_guards" => deterministic_guards.size,
+          "return_origins" => return_origins.size,
+          "noreturn_methods" => noreturn_methods.size,
+          "rbi_field_types" => rbi_field_types.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },
@@ -229,6 +275,51 @@ module NilKill
 
     def file_language(file)
       @language || Decomplex::Syntax.language_for(file)
+    end
+
+    def ruby_annotation_type_definitions(files)
+      return [] unless ruby_annotation_index?(files)
+
+      ruby_annotation_files.flat_map do |file|
+        Decomplex::Syntax.parse(file, parser: "tree_sitter", language: :ruby)
+                         .static_facts(root: @root)
+                         .fetch(:type_definitions, [])
+      rescue LoadError
+        raise
+      rescue StandardError
+        []
+      end
+    end
+
+    def ruby_annotation_index?(files)
+      return false unless @language.nil? || @language == :ruby
+      return true if files.any? { |file| file_language(file).to_s == "ruby" }
+
+      @targets.empty?
+    end
+
+    def ruby_annotation_files
+      Dir.glob(File.join(@root, "sorbet", "rbi", "**", "*.rbi")).select { |path| File.file?(path) }.sort
+    end
+
+    def rbi_field_type_records(type_definitions)
+      Array(type_definitions).filter_map do |definition|
+        next unless definition["language"].to_s == "ruby"
+        next unless definition["kind"].to_s == "method_signature"
+        next unless definition["path"].to_s.end_with?(".rbi")
+
+        type = definition["return_type"].to_s
+        next if type.empty?
+
+        {
+          "class" => definition["owner"].to_s,
+          "field" => definition["name"].to_s,
+          "type" => type,
+          "path" => definition["path"].to_s,
+          "line" => definition["line"].to_i,
+          "type_system" => definition["type_system"].to_s,
+        }
+      end.uniq { |record| [record["class"], record["field"], record["type"]] }
     end
 
     def normalize_language(language)
