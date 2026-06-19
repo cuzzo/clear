@@ -318,6 +318,10 @@ pub(crate) trait LanguageProfile {
         false
     }
 
+    fn normalize_source_text(&self, text: &str) -> String {
+        normalize_text(text)
+    }
+
     fn hidden_case(&self, _node: Node<'_>) -> bool {
         false
     }

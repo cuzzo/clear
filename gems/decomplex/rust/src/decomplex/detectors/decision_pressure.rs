@@ -5,7 +5,17 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-const GUARD_MIDS: &[&str] = &["is_a?", "kind_of?", "instance_of?", "nil?", "respond_to?"];
+const GUARD_MIDS: &[&str] = &[
+    "is_a?",
+    "kind_of?",
+    "instance_of?",
+    "nil?",
+    "respond_to?",
+    "is_none",
+    "is_some",
+    "is_null",
+    "isNull",
+];
 const TRANSIENT_NOARG_MIDS: &[&str] = &["pop", "shift"];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

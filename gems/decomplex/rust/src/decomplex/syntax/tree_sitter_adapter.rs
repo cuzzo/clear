@@ -214,7 +214,7 @@ fn record_predicate_alias(
     let Some(body) = profile.single_expression_body(node) else {
         return;
     };
-    let text = normalize_text(node_text(body, source));
+    let text = profile.normalize_source_text(node_text(body, source));
     if text.is_empty() || text == "nil" || text.len() > 200 {
         return;
     }
@@ -240,7 +240,7 @@ fn record_comparison_use(
     if !comparison_node(language_profile(_language), node, source) {
         return;
     }
-    let raw = normalize_text(node_text(node, source));
+    let raw = language_profile(_language).normalize_source_text(node_text(node, source));
     out.push(ComparisonUse {
         canon_source: raw.clone(),
         raw,
@@ -303,7 +303,11 @@ fn record_decision_site(
                 function: context.current_function(),
                 line: line(decision_node),
                 span: span(decision_node),
-                predicate: decision_predicate(profile, decision_node, source),
+                predicate: profile.normalize_source_text(&decision_predicate(
+                    profile,
+                    decision_node,
+                    source,
+                )),
             },
         );
     }
@@ -349,7 +353,7 @@ fn record_conjunction_decision(
 
     let mut members = flatten_boolean_and(profile, node, source)
         .into_iter()
-        .map(|child| decision_member_text(child, source))
+        .map(|child| profile.normalize_source_text(&decision_member_text(child, source)))
         .collect::<Vec<_>>();
     members.sort();
     members.dedup();
@@ -367,7 +371,7 @@ fn record_conjunction_decision(
             function: context.current_function(),
             line: conjunction_span(node)[0],
             span: conjunction_span(node),
-            predicate: normalize_text(node_text(node, source)),
+            predicate: profile.normalize_source_text(node_text(node, source)),
         },
     );
 }
@@ -635,7 +639,7 @@ fn case_arm_patterns(child: Node<'_>, source: &str, profile: &dyn LanguageProfil
         .or_else(|| first_named_child(child));
     value
         .filter(|node| !node.kind().contains("statement") && !node.kind().contains("block"))
-        .map(|node| vec![normalize_text(node_text(node, source))])
+        .map(|node| vec![profile.normalize_source_text(node_text(node, source))])
         .unwrap_or_default()
 }
 

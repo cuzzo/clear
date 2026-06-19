@@ -24,6 +24,7 @@ pub enum Language {
     C,
     Cpp,
     CSharp,
+    Php,
 }
 
 impl Language {
@@ -43,6 +44,7 @@ impl Language {
             "c" => Ok(Self::C),
             "cpp" => Ok(Self::Cpp),
             "csharp" => Ok(Self::CSharp),
+            "php" => Ok(Self::Php),
             _ => bail!("unsupported Decomplex native language: {value}"),
         }
     }

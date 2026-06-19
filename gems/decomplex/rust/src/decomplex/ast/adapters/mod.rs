@@ -7,6 +7,7 @@ mod java;
 mod javascript;
 mod kotlin;
 mod lua;
+mod php;
 mod python;
 mod ruby;
 mod rust;
@@ -25,6 +26,7 @@ use java::JavaAstAdapter;
 use javascript::JavaScriptAstAdapter;
 use kotlin::KotlinAstAdapter;
 use lua::LuaAstAdapter;
+use php::PhpAstAdapter;
 use python::PythonAstAdapter;
 use ruby::RubyAstAdapter;
 use rust::RustAstAdapter;
@@ -46,6 +48,7 @@ static KOTLIN: KotlinAstAdapter = KotlinAstAdapter;
 static RUST: RustAstAdapter = RustAstAdapter;
 static SWIFT: SwiftAstAdapter = SwiftAstAdapter;
 static ZIG: ZigAstAdapter = ZigAstAdapter;
+static PHP: PhpAstAdapter = PhpAstAdapter;
 
 pub(crate) fn normalization_adapter(language: Language) -> &'static dyn AstNormalizationAdapter {
     match language {
@@ -63,5 +66,6 @@ pub(crate) fn normalization_adapter(language: Language) -> &'static dyn AstNorma
         Language::Rust => &RUST,
         Language::Swift => &SWIFT,
         Language::Zig => &ZIG,
+        Language::Php => &PHP,
     }
 }

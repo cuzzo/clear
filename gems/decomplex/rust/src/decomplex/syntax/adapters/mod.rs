@@ -8,6 +8,7 @@ mod java;
 mod javascript;
 mod kotlin;
 mod lua;
+mod php;
 mod python;
 mod ruby;
 mod rust;
@@ -26,6 +27,7 @@ use java::JavaProfile;
 use javascript::JavaScriptProfile;
 use kotlin::KotlinProfile;
 use lua::LuaProfile;
+use php::PhpProfile;
 use python::PythonProfile;
 use ruby::RubyProfile;
 use rust::RustProfile;
@@ -47,6 +49,7 @@ static LUA_PROFILE: LuaProfile = LuaProfile;
 static C_PROFILE: CProfile = CProfile;
 static CPP_PROFILE: CppProfile = CppProfile;
 static CSHARP_PROFILE: CSharpProfile = CSharpProfile;
+static PHP_PROFILE: PhpProfile = PhpProfile;
 
 pub(crate) fn language_profile(language: Language) -> &'static dyn LanguageProfile {
     match language {
@@ -64,5 +67,6 @@ pub(crate) fn language_profile(language: Language) -> &'static dyn LanguageProfi
         Language::C => &C_PROFILE,
         Language::Cpp => &CPP_PROFILE,
         Language::CSharp => &CSHARP_PROFILE,
+        Language::Php => &PHP_PROFILE,
     }
 }

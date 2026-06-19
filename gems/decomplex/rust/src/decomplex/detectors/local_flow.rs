@@ -189,7 +189,8 @@ impl LocalFlow {
                 .map(|s| s.as_str())
                 .unwrap_or("");
             let stripped = text.trim();
-            if stripped.starts_with('#') {
+            if stripped.starts_with('#') || stripped.starts_with("//") || stripped.starts_with("--")
+            {
                 return Some(RawBoundary {
                     line: line_number,
                     kind: "comment".to_string(),

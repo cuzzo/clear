@@ -129,6 +129,7 @@ fn ruby_language_name(language: Language) -> &'static str {
         Language::C => "c",
         Language::Cpp => "cpp",
         Language::CSharp => "csharp",
+        Language::Php => "php",
     }
 }
 

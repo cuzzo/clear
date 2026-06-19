@@ -275,6 +275,7 @@ fn language_grammar(language: Language) -> TreeSitterLanguage {
         Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
         Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
     }
 }
 
@@ -832,7 +833,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.leading_loop_statement(node) {
             return self.normalize_leading_loop_statement(node);
         }
-        if let Some(loop_type) = loop_kind(node.kind()) {
+        if let Some(loop_type) = self.loop_node_type(node.kind()) {
             return self.normalize_loop(node, loop_type);
         }
         if self.case_kind(node.kind()) || self.hidden_match(node) {
@@ -920,6 +921,21 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.global_variable(node) {
             return Some(self.normalize_global_variable(node));
         }
+        if self.self_identifier(node) {
+            return Some(self.wrap("SELF", Vec::new(), node));
+        }
+        if let Some(name) = self
+            .normalization_adapter
+            .local_identifier_text(node, self.source)
+        {
+            return Some(self.normalize_identifier_with_name(node, name));
+        }
+        if let Some(name) = self
+            .normalization_adapter
+            .constant_identifier_text(node, self.source)
+        {
+            return Some(self.wrap("CONST", vec![Child::Symbol(name)], node));
+        }
         if self.class_node(node) {
             return self.normalize_class(node);
         }
@@ -963,9 +979,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             "expression_list" if self.single_short_var_lhs(node) => {
                 Some(self.wrap(&kind_type(node.kind()), Vec::new(), node))
             }
-            "call" | "call_expression" | "method_call" | "method_call_expression" => {
-                self.normalize_call(node)
-            }
+            _ if self.call_node(node) => self.normalize_call(node),
             _ if self.member_read_node(node) => self.normalize_member_read(node),
             _ if self.unwrap_node(node) => self
                 .named_children(node)
@@ -1557,9 +1571,18 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_when(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let patterns = self.normalize_patterns(node);
-        let body = self
-            .when_body(node)
-            .and_then(|body| self.normalize_body(body));
+        let body = if let Some(body_nodes) = self
+            .normalization_adapter
+            .case_arm_body_nodes(node, self.source)
+        {
+            body_nodes
+                .first()
+                .copied()
+                .and_then(|source| self.normalize_body_nodes(body_nodes, source))
+        } else {
+            self.when_body(node)
+                .and_then(|body| self.normalize_body(body))
+        };
         Some(self.wrap(
             "WHEN",
             vec![
@@ -1820,7 +1843,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         let children = self.named_children(node);
         if children.len() == 1
-            && self.call_kind(children[0].kind())
+            && self.call_node(children[0])
             && node_text(children[0], self.source) == node_text(node, self.source)
         {
             if let Some(call) = self.normalize_return_value_call(children[0]) {
@@ -1828,7 +1851,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
         }
         if let (Some(function), Some(nested_args)) = (children.first(), children.get(1)) {
-            if self.identifier_kind(function.kind()) && nested_args.kind() == "argument_list" {
+            if let Some(function_name) = self
+                .identifier_text(*function)
+                .filter(|_| nested_args.kind() == "argument_list")
+            {
                 let args = self
                     .named_children(*nested_args)
                     .into_iter()
@@ -1844,10 +1870,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 };
                 return Some(self.wrap(
                     "FCALL",
-                    vec![
-                        Child::Symbol(node_text(*function, self.source).to_string()),
-                        args_child,
-                    ],
+                    vec![Child::Symbol(function_name), args_child],
                     node,
                 ));
             }
@@ -1871,9 +1894,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "function")
             .or_else(|| self.named_field(node, "call"))
             .or_else(|| self.named_children(node).into_iter().next())?;
-        if !self.identifier_kind(function.kind()) {
+        let Some(function_name) = self.identifier_text(function) else {
             return None;
-        }
+        };
 
         let args_node = self
             .named_field(node, "arguments")
@@ -1907,10 +1930,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         Some(self.wrap(
             "FCALL",
-            vec![
-                Child::Symbol(node_text(function, self.source).to_string()),
-                args_child,
-            ],
+            vec![Child::Symbol(function_name), args_child],
             node,
         ))
     }
@@ -2352,7 +2372,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return None;
         }
-        if !self.identifier_kind(left.kind()) {
+        if self.identifier_text(left).is_none() {
             return None;
         }
         let name = self.target_name(left);
@@ -2399,12 +2419,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn assignment_receiver(&mut self, left: TreeSitterNode<'_>) -> Option<Node> {
-        if self.identifier_kind(left.kind()) {
-            return Some(self.wrap(
-                "LVAR",
-                vec![Child::String(node_text(left, self.source).to_string())],
-                left,
-            ));
+        if let Some(name) = self.identifier_text(left) {
+            return Some(self.wrap("LVAR", vec![Child::String(name)], left));
         }
         if self.instance_variable(left) {
             return Some(self.wrap(
@@ -2509,6 +2525,12 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_member_read(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if let Some(field) = self
+            .normalization_adapter
+            .state_field_name(node, self.source)
+        {
+            return Some(self.wrap("IVAR", vec![Child::String(field)], node));
+        }
         let Some((receiver, method)) = self.member_parts(node) else {
             let children = self.normalize_children(node);
             return Some(self.wrap(&kind_type(node.kind()), children, node));
@@ -2734,6 +2756,29 @@ impl<'source> TreeSitterNormalizer<'source> {
         block: Option<TreeSitterNode<'_>>,
     ) -> Option<Node> {
         let call_source = block.map(|block| self.source_before_child(node, block));
+        if let Some(name) = self
+            .normalization_adapter
+            .intrinsic_call_name(node, self.source)
+        {
+            let args = self.call_arguments(node, None);
+            let node_type = if block.is_some() || !args.is_empty() {
+                "FCALL"
+            } else {
+                "VCALL"
+            };
+            let children = vec![
+                Child::Symbol(name.to_string()),
+                if let Some(source) = call_source.as_ref() {
+                    self.list_or_nil_from_source_node(args, source)
+                } else {
+                    list_or_nil(args, node, self)
+                },
+            ];
+            if let Some(source) = call_source.as_ref() {
+                return Some(self.wrap_from_source_node(node_type, children, source));
+            }
+            return Some(self.wrap(node_type, children, node));
+        }
         if self.dotted_call(node) {
             let (receiver, method) = self.dotted_call_parts(node, block)?;
             let args = self.call_arguments(node, None);
@@ -2767,14 +2812,14 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .find(|child| Some(*child) != block)
             })?;
         let args = self.call_arguments(node, Some(function));
-        if self.identifier_kind(function.kind()) {
+        if let Some(function_name) = self.identifier_text(function) {
             let node_type = if block.is_some() || !args.is_empty() {
                 "FCALL"
             } else {
                 "VCALL"
             };
             let children = vec![
-                Child::Symbol(node_text(function, self.source).to_string()),
+                Child::Symbol(function_name),
                 if let Some(source) = call_source.as_ref() {
                     self.list_or_nil_from_source_node(args, source)
                 } else {
@@ -3772,7 +3817,13 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_identifier(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let name = node_text(node, self.source).to_string();
+        let name = self
+            .identifier_text(node)
+            .unwrap_or_else(|| node_text(node, self.source).to_string());
+        self.normalize_identifier_with_name(node, name)
+    }
+
+    fn normalize_identifier_with_name(&mut self, node: TreeSitterNode<'_>, name: String) -> Node {
         if self.ruby_vcall_identifier(node, &name) || self.vcall_identifier(node, &name) {
             self.wrap("VCALL", vec![Child::Symbol(name)], node)
         } else {
@@ -3950,7 +4001,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: node_span[1],
             last_lineno: node_span[2],
             last_column: node_span[3],
-            text: node_text(source, self.source).to_string(),
+            text: self.source_text(node_text(source, self.source)),
         }
     }
 
@@ -3975,7 +4026,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: first_span[1],
             last_lineno: last_span[2],
             last_column: last_span[3],
-            text,
+            text: self.source_text(&text),
         }
     }
 
@@ -3987,7 +4038,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: source.first_column,
             last_lineno: source.last_lineno,
             last_column: source.last_column,
-            text: source.text.clone(),
+            text: self.source_text(&source.text),
         }
     }
 
@@ -4005,7 +4056,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: node_span[1],
             last_lineno: node_span[2],
             last_column: node_span[3],
-            text: text.to_string(),
+            text: self.source_text(text),
         }
     }
 
@@ -4093,12 +4144,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
         locals: &mut BTreeSet<String>,
     ) {
-        if self.identifier_kind(node.kind()) {
-            locals.insert(
-                node_text(node, self.source)
-                    .trim_start_matches('*')
-                    .to_string(),
-            );
+        if let Some(name) = self.identifier_text(node) {
+            locals.insert(name);
             return;
         }
         if matches!(
@@ -4116,18 +4163,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn collect_identifier_names(&self, node: TreeSitterNode<'_>, locals: &mut BTreeSet<String>) {
-        if self.identifier_kind(node.kind()) {
-            locals.insert(
-                node_text(node, self.source)
-                    .trim_start_matches('*')
-                    .to_string(),
-            );
-        }
-        if self
-            .normalization_adapter
-            .identifier_text_node(node, self.source)
-        {
-            locals.insert(node_text(node, self.source).to_string());
+        if let Some(name) = self.identifier_text(node) {
+            locals.insert(name);
         }
         for child in self.raw_named_children(node) {
             self.collect_identifier_names(child, locals);
@@ -4142,13 +4179,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if let Some(name) = self
             .named_children(node)
             .into_iter()
-            .find(|child| self.identifier_kind(child.kind()))
+            .find_map(|child| self.identifier_text(child))
         {
-            locals.insert(
-                node_text(name, self.source)
-                    .trim_start_matches('*')
-                    .to_string(),
-            );
+            locals.insert(name);
         }
     }
 
@@ -5189,7 +5222,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let children = self.named_children(child_source);
 
         children.into_iter().find(|child| {
-            Some(*child) != block && (self.call_kind(child.kind()) || self.member_read_node(*child))
+            Some(*child) != block && (self.call_node(*child) || self.member_read_node(*child))
         })
     }
 
@@ -5293,7 +5326,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .named_children(target)
                 .into_iter()
                 .next()
-                .map(|child| self.identifier_kind(child.kind()))
+                .map(|child| self.identifier_text(child).is_some())
                 .unwrap_or(false)
     }
 
@@ -5308,7 +5341,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         if !node
             .children(&mut node.walk())
-            .any(|child| matches!(node_text(child, self.source), "." | "&."))
+            .any(|child| self.member_access_operator(node_text(child, self.source)))
         {
             return false;
         }
@@ -5362,6 +5395,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             .collect::<Vec<_>>();
         let receiver = *callable.first()?;
         let method = node_text(*callable.get(1)?, self.source)
+            .trim_start_matches("::")
+            .trim_start_matches("->")
+            .trim_start_matches(['.', '?'])
             .trim_end_matches('=')
             .to_string();
         Some((receiver, method))
@@ -5455,6 +5491,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             return suffix
                 .map(|suffix| {
                     node_text(suffix, self.source)
+                        .trim_start_matches("::")
+                        .trim_start_matches("->")
                         .trim_start_matches(['.', '?'])
                         .to_string()
                 })
@@ -5462,6 +5500,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         node_text(node, self.source)
+            .trim_start_matches("::")
+            .trim_start_matches("->")
             .trim_start_matches(['.', '?'])
             .to_string()
     }
@@ -5545,7 +5585,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.normalize_dotted_expression(args).into_iter().collect();
         }
         if children.len() == 1
-            && self.call_kind(children[0].kind())
+            && self.call_node(children[0])
             && self.call_block(children[0]).is_some()
         {
             return self
@@ -5853,6 +5893,16 @@ impl<'source> TreeSitterNormalizer<'source> {
         right: Option<Node>,
         source: TreeSitterNode<'_>,
     ) -> Option<Node> {
+        if let Some(field) = self
+            .normalization_adapter
+            .state_field_name(left, self.source)
+        {
+            return Some(self.wrap(
+                "IASGN",
+                vec![Child::String(field), optional_node(right)],
+                source,
+            ));
+        }
         if self.instance_variable(left) {
             return Some(self.wrap(
                 "IASGN",
@@ -5938,9 +5988,9 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn target_name(&self, node: TreeSitterNode<'_>) -> String {
         let text = node_text(node, self.source);
-        if self.identifier_kind(node.kind())
-            || matches!(node.kind(), "splat" | "splat_parameter" | "rest_assignment")
-        {
+        if let Some(name) = self.identifier_text(node) {
+            name
+        } else if matches!(node.kind(), "splat" | "splat_parameter" | "rest_assignment") {
             text.trim_start_matches('*').to_string()
         } else {
             text.to_string()
@@ -5956,10 +6006,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             self.named_field(node, "name")
                 .or_else(|| {
                     self.named_children(node).into_iter().find(|child| {
-                        self.identifier_kind(child.kind()) || child.kind() == "constant"
+                        self.identifier_text(*child).is_some() || child.kind() == "constant"
                     })
                 })
-                .map(|name| node_text(name, self.source).to_string())
+                .map(|name| {
+                    self.identifier_text(name)
+                        .unwrap_or_else(|| node_text(name, self.source).to_string())
+                })
                 .unwrap_or_default(),
         )
     }
@@ -5978,7 +6031,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .iter()
                 .rev()
                 .copied()
-                .find(|child| self.identifier_kind(child.kind()))
+                .find(|child| self.identifier_text(*child).is_some())
         });
         let parameters = self.named_field(node, "parameters");
         let body = self
@@ -6004,7 +6057,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 self.named_children(node)
                     .into_iter()
                     .rev()
-                    .find(|child| self.identifier_kind(child.kind()))
+                    .find(|child| self.identifier_text(*child).is_some())
             })
             .map(|name| node_text(name, self.source).to_string())
             .unwrap_or_default()
@@ -6163,7 +6216,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: first_span[1],
             last_lineno,
             last_column,
-            text,
+            text: self.source_text(&text),
         }
     }
 
@@ -6222,7 +6275,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             first_column: first_node.first_column,
             last_lineno: last_node.last_lineno,
             last_column: last_node.last_column,
-            text,
+            text: self.source_text(&text),
         }
     }
 
@@ -6298,6 +6351,41 @@ impl<'source> TreeSitterNormalizer<'source> {
         identifier_kind_name(kind)
     }
 
+    fn identifier_text(&self, node: TreeSitterNode<'_>) -> Option<String> {
+        if self.identifier_kind(node.kind()) {
+            return Some(
+                node_text(node, self.source)
+                    .trim_start_matches('*')
+                    .to_string(),
+            );
+        }
+        self.normalization_adapter
+            .local_identifier_text(node, self.source)
+    }
+
+    fn self_identifier(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .self_identifier(node, self.source)
+    }
+
+    fn call_node(&self, node: TreeSitterNode<'_>) -> bool {
+        self.call_kind(node.kind()) || self.normalization_adapter.call_node(node, self.source)
+    }
+
+    fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
+        self.normalization_adapter
+            .loop_node_type(kind)
+            .or_else(|| loop_kind(kind))
+    }
+
+    fn member_access_operator(&self, text: &str) -> bool {
+        self.normalization_adapter.member_access_operator(text)
+    }
+
+    fn source_text(&self, text: &str) -> String {
+        self.normalization_adapter.source_text(text)
+    }
+
     fn const_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
@@ -6313,21 +6401,22 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn block_kind(&self, kind: &str) -> bool {
-        matches!(
-            kind,
-            "block"
-                | "body_statement"
-                | "statement_block"
-                | "statement_list"
-                | "class_body"
-                | "switch_body"
-                | "match_block"
-                | "then"
-                | "block_body"
-                | "control_structure_body"
-                | "function_body"
-                | "statements"
-        )
+        self.normalization_adapter.block_node_kind(kind)
+            || matches!(
+                kind,
+                "block"
+                    | "body_statement"
+                    | "statement_block"
+                    | "statement_list"
+                    | "class_body"
+                    | "switch_body"
+                    | "match_block"
+                    | "then"
+                    | "block_body"
+                    | "control_structure_body"
+                    | "function_body"
+                    | "statements"
+            )
     }
 
     fn case_kind(&self, kind: &str) -> bool {
@@ -6375,7 +6464,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
         for child in self.named_children(node) {
-            if self.call_kind(child.kind()) && self.dotted_call(child) {
+            if self.call_node(child) && self.dotted_call(child) {
                 return Some(child);
             }
             if let Some(found) = self.first_dotted_call_descendant(child) {

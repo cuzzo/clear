@@ -72,6 +72,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         CASE_ARGUMENT_WHEN_KINDS.contains(&node.kind()) && !self.case_else_arm(node, source)
     }
 
+    fn case_arm_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
     fn case_else_node<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -700,6 +708,50 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn identifier_text_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
+    }
+
+    fn local_identifier_text(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
+    fn constant_identifier_text(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
+    fn self_identifier(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn call_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn intrinsic_call_name(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> Option<&'static str> {
+        None
+    }
+
+    fn block_node_kind(&self, _kind: &str) -> bool {
+        false
+    }
+
+    fn loop_node_type(&self, _kind: &str) -> Option<&'static str> {
+        None
+    }
+
+    fn member_access_operator(&self, text: &str) -> bool {
+        matches!(text, "." | "&.")
+    }
+
+    fn source_text(&self, text: &str) -> String {
+        text.to_string()
+    }
+
+    fn state_field_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
     }
 
     fn member_assignment_target(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {

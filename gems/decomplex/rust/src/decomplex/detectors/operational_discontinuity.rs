@@ -164,7 +164,8 @@ impl OperationalDiscontinuity {
 
     fn phase_marker(&self, reset: &ResetPoint) -> bool {
         let re =
-            regex::Regex::new(r"(?i)^\#\s*(?:\d+[a-z]?\s*[.)]|(?:phase|step|stage)\b)").unwrap();
+            regex::Regex::new(r"(?i)^(?:#|//|--)\s*(?:\d+[a-z]?\s*[.)]|(?:phase|step|stage)\b)")
+                .unwrap();
         re.is_match(&reset.text)
     }
 

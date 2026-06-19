@@ -17,6 +17,7 @@ fn every_supported_language_has_a_syntax_adapter_file() {
         "javascript.rs",
         "kotlin.rs",
         "lua.rs",
+        "php.rs",
         "python.rs",
         "ruby.rs",
         "rust.rs",
@@ -46,6 +47,7 @@ fn every_supported_language_has_an_ast_adapter_file() {
         "javascript.rs",
         "kotlin.rs",
         "lua.rs",
+        "php.rs",
         "python.rs",
         "ruby.rs",
         "rust.rs",
@@ -83,6 +85,7 @@ fn tree_sitter_adapter_does_not_define_concrete_language_profiles() {
         "struct CProfile",
         "struct CppProfile",
         "struct CSharpProfile",
+        "struct PhpProfile",
     ];
 
     for pattern in forbidden {
@@ -242,6 +245,7 @@ fn ast_normalizer_does_not_branch_on_language_after_parser_setup() {
         "Language::C",
         "Language::Cpp",
         "Language::CSharp",
+        "Language::Php",
         "Self::Ruby",
         "Self::Python",
         "Self::Lua",

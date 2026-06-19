@@ -140,18 +140,21 @@ impl SemanticAlias {
 
     fn record_pred(&mut self, node: &Node) {
         if let Some(Child::Symbol(name)) = node.children.first() {
-            if !name.ends_with('?') {
-                return;
-            }
-
             let stmts = ast::body_stmts(node);
             if stmts.len() != 1 {
+                return;
+            }
+            let Some(body) = self.predicate_body(stmts[0]) else {
+                return;
+            };
+            let body_source = ast::slice(body, &self.lines);
+            if !self.semantic_predicate_definition(name, &body_source) {
                 return;
             }
 
             self.preds.push(Pred {
                 name: name.clone(),
-                canon: self.canon(&ast::slice(stmts[0], &self.lines)),
+                canon: self.canon(&body_source),
                 file: self.file.clone(),
                 line: node.first_lineno,
                 span: [
@@ -162,6 +165,24 @@ impl SemanticAlias {
                 ],
             });
         }
+    }
+
+    fn predicate_body<'a>(&self, node: &'a Node) -> Option<&'a Node> {
+        if node.r#type == "RETURN" {
+            node.children.iter().filter_map(ast::node).next()
+        } else {
+            Some(node)
+        }
+    }
+
+    fn semantic_predicate_definition(&self, name: &str, body: &str) -> bool {
+        name.ends_with('?')
+            || body.contains("==")
+            || body.contains("!=")
+            || body.contains("&&")
+            || body.contains("||")
+            || body.contains(" and ")
+            || body.contains(" or ")
     }
 }
 
@@ -230,7 +251,7 @@ impl Report {
                 if ps.is_empty() {
                     continue;
                 }
-                if u.defn.ends_with('?') && ps.iter().any(|p| p.name == u.defn) {
+                if ps.iter().any(|p| p.name == u.defn) {
                     continue;
                 }
 

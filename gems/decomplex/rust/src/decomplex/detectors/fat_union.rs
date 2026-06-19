@@ -14,6 +14,10 @@ pub struct FatUnionReport {
 pub struct FatUnionRow {
     pub name: String,
     pub common: Vec<String>,
+    pub variant: Vec<String>,
+    pub degenerate: bool,
+    pub support: usize,
+    pub scatter: usize,
     pub variant_set: Vec<String>,
     pub at: String,
     pub spans: BTreeMap<String, Span>,
@@ -111,13 +115,17 @@ impl FatUnion {
             current_when = when_node.children.get(2).and_then(ast::node);
         }
 
-        if variants.len() < 2 {
+        if variants.len() < 3 {
             return;
         }
 
         let mut common = None;
+        let mut member_counts: BTreeMap<String, usize> = BTreeMap::new();
         for v in variants.values() {
             let names: BTreeSet<_> = v.reads.iter().map(|r| r.name.clone()).collect();
+            for name in &names {
+                *member_counts.entry(name.clone()).or_insert(0) += 1;
+            }
             match common {
                 None => common = Some(names),
                 Some(ref mut c) => {
@@ -127,7 +135,17 @@ impl FatUnion {
         }
 
         let common = common.unwrap_or_default();
-        if common.is_empty() {
+        if common.len() < 2 {
+            return;
+        }
+        let variant: BTreeSet<_> = member_counts
+            .iter()
+            .filter_map(|(name, count)| {
+                (*count == 1 && !common.contains(name)).then(|| name.clone())
+            })
+            .collect();
+        let total = common.len() + variant.len();
+        if total == 0 || (common.len() as f64 / total as f64) < 0.6 {
             return;
         }
 
@@ -150,10 +168,16 @@ impl FatUnion {
         variant_set.sort();
         let mut common_vec: Vec<_> = common.into_iter().collect();
         common_vec.sort();
+        let mut variant_vec: Vec<_> = variant.into_iter().collect();
+        variant_vec.sort();
 
         self.reports.push(FatUnionRow {
             name: subject_name,
             common: common_vec,
+            variant: variant_vec.clone(),
+            degenerate: variant_vec.is_empty(),
+            support: 1,
+            scatter: 1,
             variant_set,
             at,
             spans,
@@ -167,7 +191,9 @@ impl FatUnion {
             node
         };
         match n.r#type.as_str() {
-            "CONSTANT" | "SCOPE_RESOLUTION" => Some(ast::slice(n, &self.lines)),
+            "CONST" | "CONSTANT" | "COLON2" | "COLON3" | "SCOPE_RESOLUTION" => {
+                Some(ast::slice(n, &self.lines))
+            }
             _ => None,
         }
     }

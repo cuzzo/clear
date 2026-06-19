@@ -87,6 +87,11 @@ const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("UUID", &["randomUUID"]),
     ("Random", &["nextInt", "nextLong", "nextDouble"]),
 ];
+const PHP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("DateTime", &["createFromFormat"]),
+    ("DateTimeImmutable", &["createFromFormat"]),
+    ("random_int", &["call"]),
+];
 
 const RUBY_CALLBACK_SET: &[&str] = &[
     "transaction",
@@ -667,6 +672,42 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: KOTLIN_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: KOTLIN_CALLBACK_SET,
+            core_consts: EMPTY,
+        },
+        Language::Php => FalseSimplicityLexicon {
+            dispatch_mids: &[
+                "call_user_func",
+                "call_user_func_array",
+                "__call",
+                "__callStatic",
+            ],
+            meta_mids: &[
+                "eval",
+                "ReflectionClass",
+                "ReflectionMethod",
+                "ReflectionFunction",
+                "class_alias",
+            ],
+            method_obj_mids: &["Closure", "fromCallable"],
+            io_consts: &["FilesystemIterator", "DirectoryIterator", "PDO", "mysqli"],
+            io_bare: &[
+                "print",
+                "printf",
+                "fopen",
+                "file_get_contents",
+                "file_put_contents",
+                "exec",
+                "shell_exec",
+                "system",
+                "passthru",
+                "die",
+                "exit",
+                "trigger_error",
+            ],
+            dir_context: &["getcwd", "getenv"],
+            context_pairs: PHP_CONTEXT_PAIRS,
+            context_bare: &["time", "microtime", "random_int", "rand", "mt_rand"],
+            callback_set: COMMON_CALLBACK_SET,
             core_consts: EMPTY,
         },
     }

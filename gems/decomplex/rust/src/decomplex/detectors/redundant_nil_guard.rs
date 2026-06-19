@@ -60,6 +60,8 @@ impl Finding {
 }
 
 const TERMINATING_CALLS: &[&str] = &["raise", "fail", "abort", "exit", "exit!"];
+const NIL_PREDICATE_MIDS: &[&str] = &["nil?", "isNull", "is_null", "nil", "is_none"];
+const NON_NIL_PREDICATE_MIDS: &[&str] = &["isSome", "is_some", "present"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<RedundantNilGuardRow>> {
     let mut findings = Vec::new();
@@ -285,11 +287,22 @@ impl RedundantNilGuard {
                     _ => return None,
                 };
                 let args = node.children.get(2);
-                if mid == "nil?" && (args.is_none() || matches!(args, Some(Child::Nil))) {
+                if NIL_PREDICATE_MIDS.contains(&mid.as_str())
+                    && (args.is_none() || matches!(args, Some(Child::Nil)))
+                {
                     let subject = self.subject_key(recv)?;
                     return Some(NilFact {
                         local: subject,
                         non_nil_when_true: false,
+                    });
+                }
+                if NON_NIL_PREDICATE_MIDS.contains(&mid.as_str())
+                    && (args.is_none() || matches!(args, Some(Child::Nil)))
+                {
+                    let subject = self.subject_key(recv)?;
+                    return Some(NilFact {
+                        local: subject,
+                        non_nil_when_true: true,
                     });
                 }
                 None

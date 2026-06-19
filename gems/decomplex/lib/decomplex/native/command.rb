@@ -54,6 +54,7 @@ module Decomplex
         when ".c", ".h" then "c"
         when ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx" then "cpp"
         when ".cs" then "csharp"
+        when ".php" then "php"
         else "ruby"
         end
       end
