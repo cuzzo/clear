@@ -1,127 +1,11 @@
-use crate::decomplex::ast::{normalize_text, RawNode, Span};
-use crate::decomplex::syntax::{self, Document, FunctionDef, Language, SimilarityFinding};
+use crate::decomplex::ast::Span;
+use crate::decomplex::syntax::adapters::language_profile;
+use crate::decomplex::syntax::{self, CloneCandidate, Document, Language, SimilarityFinding};
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 const MAX_FUZZY_CHILDREN: usize = 14;
-const IDENTIFIER_KINDS: &[&str] = &[
-    "identifier",
-    "constant",
-    "type_identifier",
-    "field_identifier",
-    "property_identifier",
-    "shorthand_property_identifier_pattern",
-    "variable_name",
-];
-const LITERAL_KINDS: &[&str] = &[
-    "string",
-    "string_content",
-    "string_literal",
-    "interpreted_string_literal",
-    "raw_string_literal",
-    "integer",
-    "float",
-    "int",
-    "number",
-    "rational",
-    "imaginary",
-    "character",
-    "char_literal",
-    "symbol",
-    "simple_symbol",
-    "true",
-    "false",
-    "nil",
-    "none",
-    "null",
-];
-const SKIP_CANDIDATE_KINDS: &[&str] = &[
-    "comment",
-    "identifier",
-    "constant",
-    "type_identifier",
-    "field_identifier",
-    "property_identifier",
-    "parameters",
-    "formal_parameters",
-    "parameter_list",
-    "argument_list",
-    "arguments",
-    "block_parameters",
-    "method_parameters",
-    "scope_resolution",
-];
-const CLONE_CANDIDATE_KINDS: &[&str] = &[
-    "array",
-    "assignment",
-    "assignment_statement",
-    "block",
-    "case",
-    "case_clause",
-    "class",
-    "class_definition",
-    "class_declaration",
-    "do_block",
-    "enum_declaration",
-    "for",
-    "for_statement",
-    "hash",
-    "if",
-    "if_statement",
-    "match_expression",
-    "match_statement",
-    "method",
-    "method_definition",
-    "module",
-    "operator_assignment",
-    "singleton_method",
-    "struct_declaration",
-    "switch_case",
-    "switch_expression",
-    "switch_statement",
-    "unless",
-    "until",
-    "while",
-    "while_statement",
-];
-const BODY_KINDS: &[&str] = &[
-    "body",
-    "block",
-    "body_statement",
-    "declaration_list",
-    "statement_block",
-    "compound_statement",
-    "suite",
-    "do_block",
-];
-const CALL_KINDS: &[&str] = &[
-    "call",
-    "call_expression",
-    "method_invocation",
-    "invocation_expression",
-];
-
-#[derive(Clone, Debug)]
-struct MethodSpan {
-    name: String,
-    first_line: usize,
-    last_line: usize,
-}
-
-#[derive(Clone, Debug)]
-struct Candidate {
-    file: String,
-    line: usize,
-    span: Span,
-    method_name: String,
-    node_name: String,
-    mass: usize,
-    fingerprint: String,
-    raw: String,
-    child_fingerprints: Vec<String>,
-    child_masses: Vec<usize>,
-}
 
 pub fn scan_files(
     files: &[PathBuf],
@@ -141,18 +25,11 @@ pub fn scan_documents(documents: &[Document], mass: usize, fuzzy: usize) -> Vec<
 struct Scanner {
     mass: usize,
     fuzzy: usize,
-    method_spans: HashMap<String, Vec<MethodSpan>>,
-    source_lines: HashMap<String, Vec<String>>,
 }
 
 impl Scanner {
     fn new(mass: usize, fuzzy: usize) -> Self {
-        Self {
-            mass,
-            fuzzy,
-            method_spans: HashMap::new(),
-            source_lines: HashMap::new(),
-        }
+        Self { mass, fuzzy }
     }
 
     fn scan(&mut self, documents: &[Document]) -> Vec<SimilarityFinding> {
@@ -179,44 +56,22 @@ impl Scanner {
         self.prune_nested_findings(findings)
     }
 
-    fn candidates_for_document(&mut self, document: &Document) -> Vec<Candidate> {
-        self.source_lines
-            .insert(document.file.clone(), document.lines.clone());
-        self.method_spans.insert(
-            document.file.clone(),
-            collect_method_spans(&document.function_defs),
-        );
-
+    fn candidates_for_document(&mut self, document: &Document) -> Vec<CloneCandidate> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
-        for function in &document.function_defs {
-            if let Some(candidate) =
-                self.candidate_for(&document.file, &function.body, Some("defn"))
-            {
-                self.add_candidate(&mut out, &mut seen, candidate);
-            }
-        }
-
-        let mut nodes = Vec::new();
-        document.root.walk(&mut nodes);
-        for node in nodes {
-            if candidate_node(node) {
-                if let Some(candidate) = self.candidate_for(&document.file, node, None) {
-                    self.add_candidate(&mut out, &mut seen, candidate);
-                }
-            }
+        for candidate in language_profile(document.language).clone_candidates(document) {
+            self.add_candidate(&mut out, &mut seen, candidate);
         }
         out
     }
 
     fn add_candidate(
         &self,
-        out: &mut Vec<Candidate>,
+        out: &mut Vec<CloneCandidate>,
         seen: &mut HashSet<String>,
-        candidate: Candidate,
+        candidate: CloneCandidate,
     ) {
-        if candidate.mass < self.effective_mass_floor() || typed_struct_schema_text(&candidate.raw)
-        {
+        if candidate.mass < self.effective_mass_floor() {
             return;
         }
         let key = format!(
@@ -232,47 +87,8 @@ impl Scanner {
         }
     }
 
-    fn candidate_for(
-        &self,
-        file: &str,
-        node: &RawNode,
-        node_name: Option<&str>,
-    ) -> Option<Candidate> {
-        let (node_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
-        if node_fingerprint.is_empty() {
-            return None;
-        }
-        let line = node.line();
-        let method = self.method_span_for(file, line);
-        let children = fuzzy_children_for(node);
-        let mut child_fingerprints = Vec::new();
-        let mut child_masses = Vec::new();
-        for child in children {
-            let (child_fp, child_mass) = fingerprint(child, &mut HashSet::new());
-            if !child_fp.is_empty() && child_mass > 0 {
-                child_fingerprints.push(child_fp);
-                child_masses.push(child_mass);
-            }
-        }
-        let candidate = Candidate {
-            file: file.to_string(),
-            line,
-            span: node.span,
-            method_name: method.name,
-            node_name: node_name
-                .map(ToString::to_string)
-                .unwrap_or_else(|| flay_node_name(node).to_string()),
-            mass,
-            fingerprint: node_fingerprint,
-            raw: normalize_text(&node.text),
-            child_fingerprints,
-            child_masses,
-        };
-        Some(candidate)
-    }
-
-    fn type2_findings(&self, candidates: &[Candidate]) -> Vec<SimilarityFinding> {
-        let mut groups: HashMap<&str, Vec<Candidate>> = HashMap::new();
+    fn type2_findings(&self, candidates: &[CloneCandidate]) -> Vec<SimilarityFinding> {
+        let mut groups: HashMap<&str, Vec<CloneCandidate>> = HashMap::new();
         for candidate in candidates {
             groups
                 .entry(candidate.fingerprint.as_str())
@@ -290,7 +106,7 @@ impl Scanner {
                 .map(|candidate| candidate.raw.as_str())
                 .collect::<HashSet<_>>()
                 .len();
-            if raw_count < 2 || self.typed_struct_schema_cluster(&cluster) {
+            if raw_count < 2 {
                 continue;
             }
             let mass = cluster
@@ -303,11 +119,11 @@ impl Scanner {
         out
     }
 
-    fn type3_findings(&self, candidates: &[Candidate]) -> Vec<SimilarityFinding> {
+    fn type3_findings(&self, candidates: &[CloneCandidate]) -> Vec<SimilarityFinding> {
         if self.fuzzy == 0 {
             return Vec::new();
         }
-        let mut groups: HashMap<String, Vec<(Candidate, usize)>> = HashMap::new();
+        let mut groups: HashMap<String, Vec<(CloneCandidate, usize)>> = HashMap::new();
         for candidate in candidates {
             for (signature, signature_mass) in self.fuzzy_signatures(candidate) {
                 if signature_mass >= self.effective_mass_floor() {
@@ -335,7 +151,7 @@ impl Scanner {
                 .map(|candidate| candidate.fingerprint.as_str())
                 .collect::<HashSet<_>>()
                 .len();
-            if fingerprint_count < 2 || self.typed_struct_schema_cluster(&cluster) {
+            if fingerprint_count < 2 {
                 continue;
             }
             let mut key = cluster
@@ -364,7 +180,7 @@ impl Scanner {
 
     fn finding_for(
         &self,
-        cluster: &[Candidate],
+        cluster: &[CloneCandidate],
         clone_type: &str,
         mass: usize,
     ) -> SimilarityFinding {
@@ -388,12 +204,11 @@ impl Scanner {
         }
     }
 
-    fn spans_for(&self, cluster: &[Candidate]) -> BTreeMap<String, Span> {
+    fn spans_for(&self, cluster: &[CloneCandidate]) -> BTreeMap<String, Span> {
         let mut spans = BTreeMap::new();
         for candidate in cluster {
             let value = if candidate.node_name == "defn" {
-                let method = self.method_span_for(&candidate.file, candidate.line);
-                [method.first_line, 0, method.last_line, 1]
+                [candidate.span[0], 0, candidate.span[2], 1]
             } else {
                 candidate.span
             };
@@ -403,8 +218,18 @@ impl Scanner {
     }
 
     fn prune_nested_findings(&self, findings: Vec<SimilarityFinding>) -> Vec<SimilarityFinding> {
+        let defn_site_sets = findings
+            .iter()
+            .filter(|finding| finding.node == "defn")
+            .map(|finding| (finding.clone_type.clone(), site_identities(finding)))
+            .collect::<Vec<_>>();
         let mut kept = Vec::new();
         for finding in findings {
+            if finding.node != "defn"
+                && defn_site_sets.contains(&(finding.clone_type.clone(), site_identities(&finding)))
+            {
+                continue;
+            }
             if kept.iter().any(|larger| nested_finding(&finding, larger)) {
                 continue;
             }
@@ -413,7 +238,7 @@ impl Scanner {
         kept
     }
 
-    fn fuzzy_signatures(&self, candidate: &Candidate) -> Vec<(String, usize)> {
+    fn fuzzy_signatures(&self, candidate: &CloneCandidate) -> Vec<(String, usize)> {
         let children = &candidate.child_fingerprints;
         if children.len() < 2 || children.len() > MAX_FUZZY_CHILDREN {
             return Vec::new();
@@ -438,275 +263,19 @@ impl Scanner {
         signatures
     }
 
-    fn typed_struct_schema_cluster(&self, cluster: &[Candidate]) -> bool {
-        cluster.iter().all(|candidate| {
-            self.typed_struct_schema_line(&candidate.file, candidate.line)
-                || typed_struct_schema_text(&candidate.raw)
-        })
-    }
-
-    fn typed_struct_schema_line(&self, file: &str, line_no: usize) -> bool {
-        self.source_lines
-            .get(file)
-            .and_then(|lines| lines.get(line_no.saturating_sub(1)))
-            .map(|line| {
-                let stripped = line.trim_start();
-                stripped.starts_with("const :") || stripped.starts_with("prop :")
-            })
-            .unwrap_or(false)
-    }
-
-    fn method_span_for(&self, file: &str, line_no: usize) -> MethodSpan {
-        self.method_spans
-            .get(file)
-            .and_then(|spans| {
-                spans
-                    .iter()
-                    .find(|span| span.first_line <= line_no && line_no <= span.last_line)
-            })
-            .cloned()
-            .unwrap_or_else(|| MethodSpan {
-                name: "(top-level)".to_string(),
-                first_line: line_no,
-                last_line: line_no,
-            })
-    }
-
     fn effective_mass_floor(&self) -> usize {
         self.mass
             .max(((self.mass as f64) * 23.0 / 8.0).ceil() as usize)
     }
 }
 
-fn collect_method_spans(functions: &[FunctionDef]) -> Vec<MethodSpan> {
-    let mut spans = functions
-        .iter()
-        .map(|function| MethodSpan {
-            name: function.name.clone(),
-            first_line: function.span[0],
-            last_line: function.span[2],
-        })
-        .collect::<Vec<_>>();
-    spans.sort_by_key(|method| (method.first_line, std::cmp::Reverse(method.last_line)));
-    spans
-}
-
-fn candidate_node(node: &RawNode) -> bool {
-    node.named
-        && !SKIP_CANDIDATE_KINDS.contains(&node.kind.as_str())
-        && CLONE_CANDIDATE_KINDS.contains(&node.kind.as_str())
-        && !typed_struct_schema_text(&node.text)
-        && !node.named_children().is_empty()
-}
-
-fn fuzzy_children_for(node: &RawNode) -> Vec<&RawNode> {
-    let source_node = body_node(node).unwrap_or(node);
-    let mut children = source_node.named_children();
-    if children.is_empty() {
-        children = node.named_children();
-    }
-    children
-        .into_iter()
-        .filter(|child| {
-            !SKIP_CANDIDATE_KINDS.contains(&child.kind.as_str())
-                && !typed_struct_schema_text(&child.text)
-        })
-        .collect()
-}
-
-fn body_node(node: &RawNode) -> Option<&RawNode> {
-    node.children
-        .iter()
-        .find(|child| BODY_KINDS.contains(&child.kind.as_str()))
-}
-
-fn fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, usize) {
-    let key = node_key(node);
-    if active.contains(&key) || node.kind == "comment" {
-        return (String::new(), 0);
-    }
-    active.insert(key.clone());
-    let out = if matches!(
-        node.kind.as_str(),
-        "predefined_type" | "abstract_pointer_declarator" | "storage_class_specifier" | "ERROR"
-    ) {
-        let token = terminal_token(node);
-        if token.is_empty() {
-            (String::new(), 0)
-        } else {
-            (token, 1)
-        }
-    } else if CALL_KINDS.contains(&node.kind.as_str()) && call_message(node).is_some() {
-        fingerprint_call(node, active)
-    } else if node.children.is_empty() {
-        let token = terminal_token(node);
-        if token.is_empty() {
-            (String::new(), 0)
-        } else {
-            (token, 1)
-        }
-    } else {
-        let mut child_parts = Vec::new();
-        let mut mass = 1;
-        for child in &node.children {
-            let (child_fp, child_mass) = fingerprint(child, active);
-            if child_fp.is_empty() {
-                continue;
-            }
-            child_parts.push(child_fp);
-            mass += child_mass;
-        }
-        if child_parts.is_empty() {
-            (terminal_token(node), 1)
-        } else {
-            (format!("{}({})", node.kind, child_parts.join(" ")), mass)
-        }
-    };
-    active.remove(&key);
-    out
-}
-
-fn fingerprint_call(node: &RawNode, active: &mut HashSet<String>) -> (String, usize) {
-    let message = call_message(node).unwrap_or_default();
-    let mut child_parts = Vec::new();
-    let mut mass = 1;
-    for child in &node.children {
-        let (child_fp, child_mass) = fingerprint(child, active);
-        if child_fp.is_empty() {
-            continue;
-        }
-        child_parts.push(child_fp);
-        mass += child_mass;
-    }
-    (
-        format!("{}<{}>({})", node.kind, message, child_parts.join(" ")),
-        mass,
-    )
-}
-
-fn call_message(node: &RawNode) -> Option<String> {
-    if !node
-        .children
-        .iter()
-        .any(|child| matches!(child.kind.as_str(), "argument_list" | "arguments"))
-    {
-        return None;
-    }
-    let argument_start = node
-        .children
-        .iter()
-        .find(|child| matches!(child.kind.as_str(), "argument_list" | "arguments"))
-        .map(|child| (child.span[0], child.span[1]));
-    let named_before_args = node
-        .named_children()
-        .into_iter()
-        .filter(|child| {
-            argument_start
-                .map(|start| (child.span[0], child.span[1]) < start)
-                .unwrap_or(true)
-        })
-        .collect::<Vec<_>>();
-    named_before_args
-        .last()
-        .and_then(|callee| callee_message(callee))
-}
-
-fn callee_message(node: &RawNode) -> Option<String> {
-    if IDENTIFIER_KINDS.contains(&node.kind.as_str()) {
-        return Some(node.text.clone());
-    }
-    node.named_children()
-        .into_iter()
-        .rev()
-        .find(|child| IDENTIFIER_KINDS.contains(&child.kind.as_str()))
-        .map(|child| child.text.clone())
-}
-
-fn terminal_token(node: &RawNode) -> String {
-    let kind = node.kind.as_str();
-    if IDENTIFIER_KINDS.contains(&kind) {
-        return "id".to_string();
-    }
-    if LITERAL_KINDS.contains(&kind) {
-        return literal_token(kind).to_string();
-    }
-    let text = normalize_text(&node.text);
-    if text.is_empty() {
-        return String::new();
-    }
-    if identifier_text(&text) {
-        return "id".to_string();
-    }
-    if literal_text(&text) {
-        return "lit".to_string();
-    }
-    format!("{kind}:{text}")
-}
-
-fn literal_token(kind: &str) -> &str {
-    match kind {
-        "true" | "false" => "bool",
-        "nil" | "none" | "null" => "nil",
-        _ => "lit",
-    }
-}
-
-fn identifier_text(text: &str) -> bool {
-    let mut chars = text.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|char| {
-            char == '_' || char == '!' || char == '?' || char == '=' || char.is_ascii_alphanumeric()
-        })
-}
-
-fn literal_text(text: &str) -> bool {
-    if symbol_literal_text(text)
-        || quoted_literal_text(text, '"')
-        || quoted_literal_text(text, '\'')
-    {
-        return true;
-    }
-    text.parse::<f64>().is_ok()
-}
-
-fn symbol_literal_text(text: &str) -> bool {
-    let mut chars = text.chars();
-    if chars.next() != Some(':') {
-        return false;
-    }
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|char| char == '_' || char.is_ascii_alphanumeric())
-}
-
-fn quoted_literal_text(text: &str, quote: char) -> bool {
-    text.len() >= 2 && text.starts_with(quote) && text.ends_with(quote)
-}
-
-fn flay_node_name(node: &RawNode) -> &str {
-    match node.kind.as_str() {
-        "method"
-        | "function_definition"
-        | "function_declaration"
-        | "method_definition"
-        | "function_item" => "defn",
-        "singleton_method" => "defs",
-        other => other,
-    }
-}
-
-fn uniq_sites(candidates: Vec<Candidate>) -> Vec<Candidate> {
+fn uniq_sites(candidates: Vec<CloneCandidate>) -> Vec<CloneCandidate> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for candidate in candidates {
         let key = format!(
-            "{}\0{}\0{}",
-            candidate.file, candidate.line, candidate.node_name
+            "{}\0{}\0{:?}\0{}",
+            candidate.file, candidate.line, candidate.span, candidate.node_name
         );
         if seen.insert(key) {
             out.push(candidate);
@@ -715,7 +284,7 @@ fn uniq_sites(candidates: Vec<Candidate>) -> Vec<Candidate> {
     out
 }
 
-fn most_common_node(cluster: &[Candidate]) -> String {
+fn most_common_node(cluster: &[CloneCandidate]) -> String {
     let mut order = Vec::new();
     let mut tally: HashMap<&str, usize> = HashMap::new();
     for candidate in cluster {
@@ -736,7 +305,7 @@ fn most_common_node(cluster: &[Candidate]) -> String {
     best.to_string()
 }
 
-fn site_for(candidate: &Candidate) -> String {
+fn site_for(candidate: &CloneCandidate) -> String {
     format!(
         "{}:{}:{}",
         candidate.file, candidate.method_name, candidate.line
@@ -771,13 +340,27 @@ fn site_file(site: &str) -> String {
     parts.join(":")
 }
 
-fn typed_struct_schema_text(text: &str) -> bool {
-    text.contains("< T::Struct")
-        || text.contains("<T::Struct")
-        || text.lines().all(|line| {
-            let stripped = line.trim();
-            stripped.is_empty() || stripped.starts_with("const :") || stripped.starts_with("prop :")
+fn site_identities(finding: &SimilarityFinding) -> Vec<(String, String)> {
+    let mut identities = finding
+        .sites
+        .iter()
+        .map(|site| {
+            let parts = site.split(':').collect::<Vec<_>>();
+            let file = if parts.len() >= 2 {
+                parts[..parts.len() - 2].join(":")
+            } else {
+                String::new()
+            };
+            let method = parts
+                .get(parts.len().saturating_sub(2))
+                .copied()
+                .unwrap_or_default()
+                .to_string();
+            (file, method)
         })
+        .collect::<Vec<_>>();
+    identities.sort();
+    identities
 }
 
 fn clone_type_rank(clone_type: &str) -> usize {
@@ -786,18 +369,6 @@ fn clone_type_rank(clone_type: &str) -> usize {
     } else {
         1
     }
-}
-
-fn node_key(node: &RawNode) -> String {
-    format!(
-        "{}\0{}\0{}\0{}\0{}\0{}",
-        node.kind,
-        node.span[0],
-        node.span[1],
-        node.span[2],
-        node.span[3],
-        node.text.len()
-    )
 }
 
 fn combinations(size: usize, count: usize) -> Vec<Vec<usize>> {
@@ -906,7 +477,8 @@ end
 "#,
         );
         let function = doc.function_defs.first().expect("function");
-        let (_fingerprint, mass) = fingerprint(&function.body, &mut HashSet::new());
+        let (_fingerprint, mass) =
+            language_profile(Language::Ruby).clone_fingerprint(&function.body);
         assert_eq!(mass, 128);
     }
 
@@ -934,7 +506,7 @@ end
             .into_iter()
             .find(|node| node.kind == "unless" && node.named)
             .expect("unless");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 126);
     }
 
@@ -966,7 +538,7 @@ end
             .into_iter()
             .find(|node| node.kind == "assignment" && node.named)
             .expect("assignment");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 178);
     }
 
@@ -998,7 +570,8 @@ end
             .iter()
             .find(|function| function.name == "body_slots")
             .expect("body_slots");
-        let (_fingerprint, mass) = fingerprint(&function.body, &mut HashSet::new());
+        let (_fingerprint, mass) =
+            language_profile(Language::Ruby).clone_fingerprint(&function.body);
         assert_eq!(mass, 110);
     }
 
@@ -1029,7 +602,7 @@ end
             .into_iter()
             .find(|node| node.kind == "do_block" && node.named)
             .expect("do_block");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 110);
     }
 
@@ -1053,7 +626,8 @@ end
 "#,
         );
         let function = doc.function_defs.first().expect("function");
-        let (_fingerprint, mass) = fingerprint(&function.body, &mut HashSet::new());
+        let (_fingerprint, mass) =
+            language_profile(Language::Ruby).clone_fingerprint(&function.body);
         assert_eq!(mass, 96);
     }
 
@@ -1086,7 +660,7 @@ end
             .into_iter()
             .find(|node| node.kind == "case" && node.named)
             .expect("case");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 136);
     }
 
@@ -1118,7 +692,7 @@ end
             .into_iter()
             .find(|node| node.kind == "case" && node.named)
             .expect("case");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 96);
     }
 
@@ -1139,7 +713,8 @@ end
 "##,
         );
         let function = doc.function_defs.first().expect("function");
-        let (_fingerprint, mass) = fingerprint(&function.body, &mut HashSet::new());
+        let (_fingerprint, mass) =
+            language_profile(Language::Ruby).clone_fingerprint(&function.body);
         assert_eq!(mass, 175);
     }
 
@@ -1175,7 +750,7 @@ end
             .into_iter()
             .find(|node| node.kind == "module" && node.named)
             .expect("module");
-        let (_fingerprint, mass) = fingerprint(node, &mut HashSet::new());
+        let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
         assert_eq!(mass, 150);
     }
 
@@ -1194,7 +769,8 @@ end
 "##,
         );
         let function = doc.function_defs.first().expect("function");
-        let (_fingerprint, mass) = fingerprint(&function.body, &mut HashSet::new());
+        let (_fingerprint, mass) =
+            language_profile(Language::Ruby).clone_fingerprint(&function.body);
         assert_eq!(mass, 132);
     }
 }

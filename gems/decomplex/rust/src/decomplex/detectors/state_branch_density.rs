@@ -1,7 +1,7 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::syntax::adapters::language_profile;
 use crate::decomplex::syntax::Language;
 use anyhow::Result;
-use regex::Regex;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -35,6 +35,7 @@ const NOISE_MIDS: &[&str] = &[
 ];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBranchDensityRow>> {
+    let profile = language_profile(language);
     let mut parsed = Vec::new();
     let mut global_immutable_readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> =
@@ -43,33 +44,34 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBran
 
     for file in files {
         let (root, lines) = ast::parse_with_language(file, language)?;
-        let scanner = StateBranchDensity::new(None, lines.clone(), None, None, None);
 
-        for (name, readers) in scanner.immutable_struct_readers(&lines) {
+        for (name, readers) in profile.immutable_struct_readers(&lines) {
             global_immutable_readers
                 .entry(name)
                 .or_default()
                 .extend(readers);
         }
-        for (name, reader_types) in scanner.immutable_struct_reader_types(&lines) {
+        for (name, reader_types) in profile.immutable_struct_reader_types(&lines) {
             global_immutable_reader_types
                 .entry(name)
                 .or_default()
                 .extend(reader_types);
         }
-        global_type_aliases.extend(scanner.type_aliases(&lines));
+        global_type_aliases.extend(profile.type_aliases(&lines));
 
         parsed.push((file.to_string_lossy().to_string(), root, lines));
     }
 
     let mut all_decisions = Vec::new();
     for (file, root, lines) in parsed {
+        let method_param_types = profile.method_param_types(&lines);
         let mut scanner = StateBranchDensity::new(
             Some(file),
             lines,
             Some(global_immutable_readers.clone()),
             Some(global_immutable_reader_types.clone()),
             Some(global_type_aliases.clone()),
+            Some(method_param_types),
         );
         scanner.walk(&root, &Vec::new());
         all_decisions.extend(scanner.decisions);
@@ -95,68 +97,20 @@ impl StateBranchDensity {
         immutable_readers: Option<BTreeMap<String, BTreeSet<String>>>,
         immutable_reader_types: Option<BTreeMap<String, BTreeMap<String, String>>>,
         type_aliases: Option<BTreeMap<String, String>>,
+        method_param_types: Option<BTreeMap<String, BTreeMap<String, String>>>,
     ) -> Self {
-        let ir = immutable_readers.unwrap_or_else(|| BTreeMap::new()); // Simplified
+        let ir = immutable_readers.unwrap_or_else(BTreeMap::new);
         let irt = immutable_reader_types.unwrap_or_else(|| BTreeMap::new());
         let ta = type_aliases.unwrap_or_else(|| BTreeMap::new());
-
-        // Re-extract if not provided (matches Ruby's initialize)
-        let ir = if ir.is_empty() {
-            let s = Self {
-                file: file.clone().unwrap_or_default(),
-                lines: lines.clone(),
-                decisions: Vec::new(),
-                immutable_readers: BTreeMap::new(),
-                immutable_reader_types: BTreeMap::new(),
-                type_aliases: BTreeMap::new(),
-                method_param_types: BTreeMap::new(),
-            };
-            s.immutable_struct_readers(&lines)
-        } else {
-            ir
-        };
-
-        let irt = if irt.is_empty() {
-            let s = Self {
-                file: file.clone().unwrap_or_default(),
-                lines: lines.clone(),
-                decisions: Vec::new(),
-                immutable_readers: BTreeMap::new(),
-                immutable_reader_types: BTreeMap::new(),
-                type_aliases: BTreeMap::new(),
-                method_param_types: BTreeMap::new(),
-            };
-            s.immutable_struct_reader_types(&lines)
-        } else {
-            irt
-        };
-
-        let ta = if ta.is_empty() {
-            let s = Self {
-                file: file.clone().unwrap_or_default(),
-                lines: lines.clone(),
-                decisions: Vec::new(),
-                immutable_readers: BTreeMap::new(),
-                immutable_reader_types: BTreeMap::new(),
-                type_aliases: BTreeMap::new(),
-                method_param_types: BTreeMap::new(),
-            };
-            s.type_aliases(&lines)
-        } else {
-            ta
-        };
-
-        let mut s = Self {
+        Self {
             file: file.unwrap_or_default(),
             lines: lines.clone(),
             decisions: Vec::new(),
             immutable_readers: ir,
             immutable_reader_types: irt,
             type_aliases: ta,
-            method_param_types: BTreeMap::new(),
-        };
-        s.method_param_types = s.extract_method_param_types(&lines);
-        s
+            method_param_types: method_param_types.unwrap_or_else(BTreeMap::new),
+        }
     }
 
     fn walk(&mut self, node: &Node, defstack: &[String]) {
@@ -322,87 +276,6 @@ impl StateBranchDensity {
         }
     }
 
-    fn immutable_struct_readers(&self, lines: &[String]) -> BTreeMap<String, BTreeSet<String>> {
-        let mut readers = BTreeMap::new();
-        let mut class_stack = Vec::new();
-        let class_struct_re =
-            Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
-        let const_re = Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\b").unwrap();
-        let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
-
-        for line in lines {
-            if let Some(caps) = class_struct_re.captures(line) {
-                class_stack.push(caps[1].to_string());
-                continue;
-            }
-            if !class_stack.is_empty() {
-                if let Some(caps) = const_re.captures(line) {
-                    readers
-                        .entry(class_stack.last().unwrap().clone())
-                        .or_insert_with(BTreeSet::new)
-                        .insert(caps[1].to_string());
-                    continue;
-                }
-            }
-            if end_re.is_match(line) {
-                class_stack.pop();
-            }
-        }
-        readers
-    }
-
-    fn immutable_struct_reader_types(
-        &self,
-        lines: &[String],
-    ) -> BTreeMap<String, BTreeMap<String, String>> {
-        let mut reader_types = BTreeMap::new();
-        let mut class_stack = Vec::new();
-        let class_struct_re =
-            Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
-        let const_type_re =
-            Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
-                .unwrap();
-        let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
-
-        for line in lines {
-            if let Some(caps) = class_struct_re.captures(line) {
-                class_stack.push(caps[1].to_string());
-                continue;
-            }
-            if !class_stack.is_empty() {
-                if let Some(caps) = const_type_re.captures(line) {
-                    reader_types
-                        .entry(class_stack.last().unwrap().clone())
-                        .or_insert_with(BTreeMap::new)
-                        .insert(caps[1].to_string(), caps[2].to_string());
-                    continue;
-                }
-            }
-            if end_re.is_match(line) {
-                class_stack.pop();
-            }
-        }
-        reader_types
-    }
-
-    fn type_aliases(&self, lines: &[String]) -> BTreeMap<String, String> {
-        let mut aliases = BTreeMap::new();
-        let type_alias_re =
-            Regex::new(r"^\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}")
-                .unwrap();
-        let const_alias_re =
-            Regex::new(r"^\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b").unwrap();
-
-        for line in lines {
-            if let Some(caps) = type_alias_re.captures(line) {
-                aliases.insert(caps[1].to_string(), caps[2].to_string());
-            } else if let Some(caps) = const_alias_re.captures(line) {
-                aliases.insert(caps[1].to_string(), caps[2].to_string());
-            }
-        }
-        aliases
-    }
-
     fn resolve_type_alias(&self, type_name: &str) -> String {
         let mut seen = BTreeSet::new();
         let mut current = type_name.to_string();
@@ -422,43 +295,6 @@ impl StateBranchDensity {
                 None => return current,
             }
         }
-    }
-
-    fn extract_method_param_types(
-        &self,
-        lines: &[String],
-    ) -> BTreeMap<String, BTreeMap<String, String>> {
-        let mut types_by_method = BTreeMap::new();
-        let mut pending_sig = String::new();
-        let def_re = Regex::new(r"^\s*def\s+([A-Za-z_]\w*[!?=]?)(?:\s|\(|$)").unwrap();
-
-        for line in lines {
-            if self.pending_sig_active(line, &pending_sig) {
-                pending_sig.push_str(line);
-            }
-            if let Some(caps) = def_re.captures(line) {
-                types_by_method.insert(caps[1].to_string(), self.sig_param_types(&pending_sig));
-                pending_sig.clear();
-            }
-        }
-        types_by_method
-    }
-
-    fn pending_sig_active(&self, line: &str, pending_sig: &str) -> bool {
-        !pending_sig.is_empty() || line.trim().starts_with("sig")
-    }
-
-    fn sig_param_types(&self, sig_source: &str) -> BTreeMap<String, String> {
-        let params_re = Regex::new(r"params\s*\((.*?)\)").unwrap();
-        let param_pair_re =
-            Regex::new(r"([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)").unwrap();
-        let mut params = BTreeMap::new();
-        if let Some(p_caps) = params_re.captures(sig_source) {
-            for pair in param_pair_re.captures_iter(&p_caps[1]) {
-                params.insert(pair[1].to_string(), pair[2].to_string());
-            }
-        }
-        params
     }
 }
 

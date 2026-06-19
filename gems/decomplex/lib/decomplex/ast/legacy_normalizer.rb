@@ -8,6 +8,7 @@ require_relative "adapters/ruby"
 require_relative "adapters/python"
 require_relative "adapters/lua"
 require_relative "adapters/typescript"
+require_relative "adapters/rust"
 
 module Decomplex
   module Ast

@@ -95,6 +95,7 @@ module Decomplex
           when :python then PythonTreeSitterNormalizationAdapter.new(document)
           when :lua then LuaTreeSitterNormalizationAdapter.new(document)
           when :typescript, :javascript then TypeScriptTreeSitterNormalizationAdapter.new(document)
+          when :rust then RustTreeSitterNormalizationAdapter.new(document)
           else
             raise UnsupportedLanguageError,
                   "unsupported AST normalization language #{document&.language.inspect}"

@@ -400,7 +400,8 @@ class AstTest < Minitest::Test
       python: Decomplex::Ast::PythonTreeSitterNormalizationAdapter,
       lua: Decomplex::Ast::LuaTreeSitterNormalizationAdapter,
       typescript: Decomplex::Ast::TypeScriptTreeSitterNormalizationAdapter,
-      javascript: Decomplex::Ast::TypeScriptTreeSitterNormalizationAdapter
+      javascript: Decomplex::Ast::TypeScriptTreeSitterNormalizationAdapter,
+      rust: Decomplex::Ast::RustTreeSitterNormalizationAdapter
     }.each do |language, adapter_class|
       assert_instance_of adapter_class, Decomplex::Ast::TreeSitterNormalizationAdapter.for(fake_document(language))
     end

@@ -1,3 +1,4 @@
+pub(crate) mod adapters;
 pub mod tree_sitter_adapter;
 
 use crate::decomplex::ast::{RawNode, Span};
@@ -111,6 +112,20 @@ pub struct ComparisonUse {
     pub function: String,
     pub line: usize,
     pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CloneCandidate {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) span: Span,
+    pub(crate) method_name: String,
+    pub(crate) node_name: String,
+    pub(crate) mass: usize,
+    pub(crate) fingerprint: String,
+    pub(crate) raw: String,
+    pub(crate) child_fingerprints: Vec<String>,
+    pub(crate) child_masses: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

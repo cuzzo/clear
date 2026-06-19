@@ -6,6 +6,9 @@ use std::fs;
 use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node as TreeSitterNode, Parser};
 
+mod adapters;
+use adapters::{normalization_adapter, AstNormalizationAdapter, NamedChildrenAction};
+
 pub type Span = [usize; 4];
 const COMPARISON_OPERATORS: &[&str] = &["==", "!=", "===", "!==", "<", "<=", ">", ">="];
 const OPERATOR_CALL_OPERATORS: &[&str] = &[
@@ -330,15 +333,6 @@ pub fn flatten_and(node: &Node) -> Vec<&Node> {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TreeSitterNormalizationAdapter {
-    Default,
-    Ruby,
-    Python,
-    Lua,
-    TypeScript,
-}
-
 const QUESTION_COLON_TERNARY_KINDS: &[&str] = &[
     "body_statement",
     "block_body",
@@ -371,9 +365,6 @@ const CASE_DEFAULT_PATTERN_KINDS: &[&str] = &["case_pattern", "match_pattern", "
 const LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["body_statement", "statement"];
 const PYTHON_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
 const LUA_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
-const RUBY_LEADING_FUNCTION_TARGET_KINDS: &[&str] = &["method", "singleton_method"];
-const PYTHON_LEADING_FUNCTION_TARGET_KINDS: &[&str] = &["function_definition"];
-const LUA_LEADING_FUNCTION_TARGET_KINDS: &[&str] = &["function_declaration"];
 const OWNER_STATEMENT_NESTED_KINDS: &[&str] =
     &["class", "class_definition", "class_declaration", "module"];
 const LEADING_OWNER_WRAPPER_KINDS: &[&str] = &["body_statement", "statement"];
@@ -475,1327 +466,10 @@ const PYTHON_CONCATENATED_STRING_WRAPPER_KINDS: &[&str] = &[
 ];
 const CONCATENATED_STRING_NODE_KINDS: &[&str] = &["chained_string", "concatenated_string"];
 
-struct TernaryParts<'tree> {
-    condition: TreeSitterNode<'tree>,
-    positive: Vec<TreeSitterNode<'tree>>,
-    negative: Vec<TreeSitterNode<'tree>>,
-}
-
-impl TreeSitterNormalizationAdapter {
-    fn for_language(language: Language) -> Self {
-        match language {
-            Language::Ruby => Self::Ruby,
-            Language::Python => Self::Python,
-            Language::Lua => Self::Lua,
-            Language::TypeScript | Language::JavaScript => Self::TypeScript,
-            _ => Self::Default,
-        }
-    }
-
-    fn ruby(self) -> bool {
-        self == Self::Ruby
-    }
-
-    fn yield_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let allowed = match self {
-            Self::Python => matches!(
-                node.kind(),
-                "body_statement" | "block" | "block_body" | "expression_statement" | "statement"
-            ),
-            _ => matches!(
-                node.kind(),
-                "body_statement" | "block" | "block_body" | "statement"
-            ),
-        };
-        if !allowed {
-            return false;
-        }
-        let named_children = node
-            .children(&mut node.walk())
-            .filter(|child| child.is_named())
-            .collect::<Vec<_>>();
-        named_children.len() == 1
-            && named_children[0].kind() == "yield"
-            && node_text(named_children[0], source) == node_text(node, source)
-    }
-
-    fn super_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Ruby {
-            return false;
-        }
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block" | "block_body" | "call" | "statement"
-        ) {
-            return false;
-        }
-        if node_text(node, source).trim() == "super" {
-            return true;
-        }
-        let raw = raw_named_children(node);
-        let named = if raw.len() == 1 && raw[0].kind() == "call" {
-            raw_named_children(raw[0])
-        } else {
-            raw
-        };
-        named
-            .first()
-            .map(|child| child.kind() == "super")
-            .unwrap_or(false)
-            && named
-                .iter()
-                .skip(1)
-                .all(|child| child.kind() == "argument_list")
-    }
-
-    fn safe_navigation_call(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let ruby_safe_navigation = node
-            .children(&mut node.walk())
-            .any(|child| !child.is_named() && node_text(child, source) == "&.");
-        if self != Self::TypeScript {
-            return ruby_safe_navigation;
-        }
-
-        ruby_safe_navigation
-            || node
-                .children(&mut node.walk())
-                .any(|child| child.kind() == "optional_chain" && node_text(child, source) == "?.")
-            || (node.kind() == "call_expression"
-                && named_children(node)
-                    .into_iter()
-                    .any(|child| self.safe_navigation_call(child, source)))
-    }
-
-    fn ternary_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.ternary_parts(node, source).is_some()
-    }
-
-    fn ternary_parts<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TernaryParts<'tree>> {
-        match self {
-            Self::Python => {
-                if node.kind() != "conditional_expression" {
-                    return None;
-                }
-                let named = named_children(node);
-                Some(TernaryParts {
-                    condition: *named.get(1)?,
-                    positive: vec![*named.first()?],
-                    negative: vec![*named.get(2)?],
-                })
-            }
-            Self::Lua => None,
-            Self::TypeScript => {
-                question_colon_ternary_parts(node, source, TYPESCRIPT_TERNARY_KINDS)
-            }
-            Self::Default | Self::Ruby => {
-                question_colon_ternary_parts(node, source, QUESTION_COLON_TERNARY_KINDS)
-            }
-        }
-    }
-
-    fn case_argument_list(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Ruby || node.kind() != "argument_list" {
-            return false;
-        }
-        let raw_named = named_children(node);
-        let target = if raw_named.len() == 1
-            && raw_named[0].kind() == "case"
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            raw_named[0]
-        } else {
-            node
-        };
-        let has_case_keyword = target
-            .children(&mut target.walk())
-            .any(|child| !child.is_named() && child.kind() == "case");
-        has_case_keyword
-            && named_children(target)
-                .iter()
-                .any(|child| CASE_ARGUMENT_WHEN_KINDS.contains(&child.kind()))
-    }
-
-    fn case_arm(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        CASE_ARGUMENT_WHEN_KINDS.contains(&node.kind()) && !self.case_else_arm(node, source)
-    }
-
-    fn case_else_node<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let mut stack = named_children(node);
-        while !stack.is_empty() {
-            let child = stack.remove(0);
-            if self.case_else_node_kind(child, source) {
-                return Some(child);
-            }
-            if CASE_ARGUMENT_WHEN_KINDS.contains(&child.kind()) {
-                continue;
-            }
-            if !function_kind(child.kind()) {
-                stack.extend(named_children(child));
-            }
-        }
-        None
-    }
-
-    fn case_else_node_kind(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        CASE_ELSE_KINDS.contains(&node.kind()) || self.case_else_arm(node, source)
-    }
-
-    fn case_else_arm(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Python || node.kind() != "case_clause" {
-            return false;
-        }
-
-        named_children(node)
-            .into_iter()
-            .find(|child| CASE_DEFAULT_PATTERN_KINDS.contains(&child.kind()))
-            .map(|pattern| node_text(pattern, source).trim() == "_")
-            .unwrap_or(false)
-    }
-
-    fn leading_function_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let Some(target) = self.leading_function_target(node, source) else {
-            return false;
-        };
-        let expected_keyword = match self {
-            Self::Lua => "function",
-            _ => "def",
-        };
-        target
-            .children(&mut target.walk())
-            .next()
-            .map(|child| child.kind() == expected_keyword)
-            .unwrap_or(false)
-            && named_children(target)
-                .iter()
-                .any(|child| identifier_kind_name(child.kind()))
-    }
-
-    fn leading_function_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let (wrapper_kinds, target_kinds) = match self {
-            Self::Ruby | Self::Default => (
-                LEADING_FUNCTION_WRAPPER_KINDS,
-                RUBY_LEADING_FUNCTION_TARGET_KINDS,
-            ),
-            Self::Python => (
-                PYTHON_LEADING_FUNCTION_WRAPPER_KINDS,
-                PYTHON_LEADING_FUNCTION_TARGET_KINDS,
-            ),
-            Self::Lua => (
-                LUA_LEADING_FUNCTION_WRAPPER_KINDS,
-                LUA_LEADING_FUNCTION_TARGET_KINDS,
-            ),
-            Self::TypeScript => return None,
-        };
-        if !wrapper_kinds.contains(&node.kind()) {
-            return None;
-        }
-        if node
-            .children(&mut node.walk())
-            .next()
-            .map(|child| matches!(child.kind(), "def" | "function"))
-            .unwrap_or(false)
-        {
-            return Some(node);
-        }
-        let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && target_kinds.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
-        }
-        None
-    }
-
-    fn leading_owner_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let Some(target) = self.leading_owner_target(node, source) else {
-            return false;
-        };
-        target
-            .children(&mut target.walk())
-            .next()
-            .map(|child| matches!(child.kind(), "class" | "module"))
-            .unwrap_or(false)
-            && named_children(target).len() >= 2
-            && named_children(target)
-                .first()
-                .map(|child| !OWNER_STATEMENT_NESTED_KINDS.contains(&child.kind()))
-                .unwrap_or(false)
-    }
-
-    fn leading_owner_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let wrapper_kinds = match self {
-            Self::Python => PYTHON_LEADING_OWNER_WRAPPER_KINDS,
-            Self::Ruby | Self::Default => LEADING_OWNER_WRAPPER_KINDS,
-            Self::Lua | Self::TypeScript => LEADING_OWNER_WRAPPER_KINDS,
-        };
-        if !wrapper_kinds.contains(&node.kind()) {
-            return None;
-        }
-        let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && OWNER_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
-        }
-        Some(node)
-    }
-
-    fn leading_if_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let Some(target) = self.leading_if_target(node, source) else {
-            return false;
-        };
-        target
-            .children(&mut target.walk())
-            .next()
-            .map(|child| matches!(child.kind(), "if" | "unless"))
-            .unwrap_or(false)
-            && named_children(target).len() >= 2
-            && named_children(target)
-                .first()
-                .map(|child| !IF_NODE_KINDS.contains(&child.kind()))
-                .unwrap_or(false)
-    }
-
-    fn leading_if_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let wrapper_kinds = match self {
-            Self::Python => PYTHON_LEADING_IF_WRAPPER_KINDS,
-            Self::Lua => LUA_LEADING_IF_WRAPPER_KINDS,
-            Self::Ruby | Self::TypeScript | Self::Default => LEADING_IF_WRAPPER_KINDS,
-        };
-        if !wrapper_kinds.contains(&node.kind()) {
-            return None;
-        }
-        if matches!(self, Self::Python | Self::Lua) {
-            let raw_named = named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "if_statement"
-                && node_text(raw_named[0], source) == node_text(node, source)
-            {
-                return Some(raw_named[0]);
-            }
-        }
-        let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && IF_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
-        }
-        Some(node)
-    }
-
-    fn leading_case_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let Some(target) = self.leading_case_target(node, source) else {
-            return false;
-        };
-        target
-            .children(&mut target.walk())
-            .next()
-            .map(|child| matches!(child.kind(), "case" | "match" | "switch"))
-            .unwrap_or(false)
-            && case_arm_descendant(target)
-    }
-
-    fn leading_case_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if !LEADING_CASE_WRAPPER_KINDS.contains(&node.kind()) {
-            return None;
-        }
-        let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && CASE_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
-        }
-        Some(node)
-    }
-
-    fn leading_loop_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        let Some(target) = self.leading_loop_target(node, source) else {
-            return false;
-        };
-        target
-            .children(&mut target.walk())
-            .next()
-            .map(|child| !child.is_named() && matches!(child.kind(), "while" | "until"))
-            .unwrap_or(false)
-            && named_children(target).len() >= 2
-    }
-
-    fn leading_loop_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if !LEADING_LOOP_WRAPPER_KINDS.contains(&node.kind()) {
-            return None;
-        }
-        let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && LOOP_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
-        }
-        Some(node)
-    }
-
-    fn rescue_body_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        !self.rescue_clauses(node, source).is_empty()
-    }
-
-    fn rescue_body_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => {
-                if node.kind() == "try_statement" {
-                    return Some(node);
-                }
-                if node.kind() == "block" {
-                    let raw_named = named_children(node);
-                    if raw_named.len() == 1
-                        && raw_named[0].kind() == "try_statement"
-                        && node_text(raw_named[0], source) == node_text(node, source)
-                    {
-                        return Some(raw_named[0]);
-                    }
-                }
-            }
-            Self::TypeScript => {
-                if node.kind() == "try_statement" {
-                    return Some(node);
-                }
-                if node.kind() == "statement_block" {
-                    let raw_named = named_children(node);
-                    if raw_named.len() == 1
-                        && raw_named[0].kind() == "try_statement"
-                        && node_text(raw_named[0], source) == node_text(node, source)
-                    {
-                        return Some(raw_named[0]);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        if RESCUE_BODY_WRAPPER_KINDS.contains(&node.kind()) {
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn rescue_body_nodes<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let Some(target) = self.rescue_body_target(node, source) else {
-            return Vec::new();
-        };
-        let named = named_children(target);
-        match self {
-            Self::Python => {
-                if target.kind() == "try_statement" {
-                    return named
-                        .into_iter()
-                        .take_while(|child| {
-                            !matches!(child.kind(), "except_clause" | "finally_clause")
-                        })
-                        .collect();
-                }
-            }
-            Self::TypeScript => {
-                if target.kind() == "try_statement" {
-                    return named
-                        .into_iter()
-                        .take_while(|child| {
-                            !matches!(child.kind(), "catch_clause" | "finally_clause")
-                        })
-                        .collect();
-                }
-            }
-            _ => {}
-        }
-
-        let Some(index) = named.iter().position(|child| self.rescue_clause(*child)) else {
-            return Vec::new();
-        };
-        named[..index].to_vec()
-    }
-
-    fn rescue_clauses<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let Some(target) = self.rescue_body_target(node, source) else {
-            return Vec::new();
-        };
-        let clause_kind = match self {
-            Self::Python => "except_clause",
-            Self::TypeScript => "catch_clause",
-            _ => "rescue",
-        };
-        named_children(target)
-            .into_iter()
-            .filter(|child| child.kind() == clause_kind)
-            .collect()
-    }
-
-    fn rescue_clause_exceptions<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => {
-                let Some(pattern) = named_children(node)
-                    .into_iter()
-                    .find(|child| !matches!(child.kind(), "block" | "comment"))
-                else {
-                    return Vec::new();
-                };
-                if pattern.kind() != "as_pattern" {
-                    return vec![pattern];
-                }
-                named_children(pattern)
-                    .into_iter()
-                    .find(|child| child.kind() != "as_pattern_target")
-                    .into_iter()
-                    .collect()
-            }
-            Self::TypeScript => Vec::new(),
-            _ => {
-                let Some(exceptions) = named_children(node)
-                    .into_iter()
-                    .find(|child| child.kind() == "exceptions")
-                else {
-                    return Vec::new();
-                };
-                let text = node_text(exceptions, source).trim();
-                if ruby_exception_constant_text(text)
-                    || (named_children(exceptions).is_empty() && !text.is_empty())
-                {
-                    return vec![exceptions];
-                }
-                named_children(exceptions)
-            }
-        }
-    }
-
-    fn rescue_clause_exceptions_source<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => self
-                .rescue_clause_exceptions(node, source)
-                .into_iter()
-                .next(),
-            Self::TypeScript => None,
-            _ => named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "exceptions"),
-        }
-    }
-
-    fn rescue_clause_exception_variable_name<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "as_pattern")
-                .and_then(|pattern| descendant(pattern, &["as_pattern_target"])),
-            Self::TypeScript => named_children(node)
-                .into_iter()
-                .find(|child| identifier_kind_name(child.kind())),
-            _ => named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "exception_variable")
-                .and_then(|variable| {
-                    named_children(variable)
-                        .into_iter()
-                        .find(|child| identifier_kind_name(child.kind()))
-                }),
-        }
-    }
-
-    fn rescue_clause_exception_variable_source<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python | Self::TypeScript => self.rescue_clause_exception_variable_name(node),
-            _ => named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "exception_variable"),
-        }
-    }
-
-    fn rescue_clause_handler<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => named_children(node)
-                .into_iter()
-                .rev()
-                .find(|child| child.kind() == "block"),
-            Self::TypeScript => named_children(node)
-                .into_iter()
-                .rev()
-                .find(|child| child.kind() == "statement_block"),
-            _ => named_children(node).into_iter().rev().find(|child| {
-                !matches!(
-                    child.kind(),
-                    "exceptions" | "exception_variable" | "comment"
-                )
-            }),
-        }
-    }
-
-    fn rescue_clause(self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "rescue"
-    }
-
-    fn ensure_body_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.ensure_clause(node, source).is_some()
-    }
-
-    fn ensure_body_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => {
-                if node.kind() == "try_statement" {
-                    return Some(node);
-                }
-                if node.kind() == "block" {
-                    let raw_named = named_children(node);
-                    if raw_named.len() == 1
-                        && raw_named[0].kind() == "try_statement"
-                        && node_text(raw_named[0], source) == node_text(node, source)
-                    {
-                        return Some(raw_named[0]);
-                    }
-                }
-            }
-            Self::TypeScript => {
-                if node.kind() == "try_statement" {
-                    return Some(node);
-                }
-                if node.kind() == "statement_block" {
-                    let raw_named = named_children(node);
-                    if raw_named.len() == 1
-                        && raw_named[0].kind() == "try_statement"
-                        && node_text(raw_named[0], source) == node_text(node, source)
-                    {
-                        return Some(raw_named[0]);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        if ENSURE_BODY_WRAPPER_KINDS.contains(&node.kind()) {
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn ensure_body_nodes<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let Some(target) = self.ensure_body_target(node, source) else {
-            return Vec::new();
-        };
-        let named = named_children(target);
-        let ensure_kind = match self {
-            Self::Python | Self::TypeScript => "finally_clause",
-            _ => "ensure",
-        };
-        let Some(index) = named.iter().position(|child| child.kind() == ensure_kind) else {
-            return Vec::new();
-        };
-        named[..index].to_vec()
-    }
-
-    fn ensure_clause<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let target = self.ensure_body_target(node, source)?;
-        let ensure_kind = match self {
-            Self::Python | Self::TypeScript => "finally_clause",
-            _ => "ensure",
-        };
-        named_children(target)
-            .into_iter()
-            .find(|child| child.kind() == ensure_kind)
-    }
-
-    fn ensure_clause_body<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
-        match self {
-            Self::Python => named_children(node)
-                .into_iter()
-                .rev()
-                .find(|child| child.kind() == "block"),
-            Self::TypeScript => named_children(node)
-                .into_iter()
-                .rev()
-                .find(|child| child.kind() == "statement_block"),
-            _ => None,
-        }
-    }
-
-    fn array_literal_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.array_literal_target(node, source).is_some()
-    }
-
-    fn array_literal_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if self == Self::Lua {
-            if let Some(target) = lua_positional_table_target(node, source) {
-                return Some(target);
-            }
-        }
-
-        if ARRAY_LITERAL_NODE_KINDS.contains(&node.kind()) {
-            return Some(node);
-        }
-        if !ARRAY_LITERAL_WRAPPER_KINDS.contains(&node.kind()) {
-            return None;
-        }
-        if bracketed(node, source, "[", "]") {
-            return Some(node);
-        }
-
-        let named = named_children(node);
-        let child = *named.first()?;
-        if named.len() == 1 {
-            if ARRAY_LITERAL_NODE_KINDS.contains(&child.kind()) {
-                return Some(child);
-            }
-
-            if matches!(child.kind(), "expression_statement" | "statement")
-                && node_text(child, source).trim() == node_text(node, source).trim()
-            {
-                return self.array_literal_target(child, source);
-            }
-
-            let stripped = node_text(node, source).trim();
-            if stripped == node_text(child, source)
-                || stripped == format!("{};", node_text(child, source))
-            {
-                if ARRAY_LITERAL_NODE_KINDS.contains(&child.kind()) {
-                    return Some(child);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn array_literal_values<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let target = self.array_literal_target(node, source).unwrap_or(node);
-        if self == Self::Lua {
-            if target.kind() == "arguments" {
-                if let Some(table) = named_children(target)
-                    .into_iter()
-                    .find(|child| child.kind() == "table_constructor")
-                {
-                    if node_text(target, source).trim() == node_text(table, source).trim() {
-                        return named_children(table);
-                    }
-                }
-            }
-            if target.kind() == "table_constructor" {
-                return named_children(target);
-            }
-        }
-
-        named_children(target)
-    }
-
-    fn element_reference_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.element_reference_target(node, source).is_some()
-    }
-
-    fn element_reference_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if ELEMENT_REFERENCE_NODE_KINDS.contains(&node.kind()) {
-            return Some(node);
-        }
-        if !ELEMENT_REFERENCE_WRAPPER_KINDS.contains(&node.kind()) {
-            return None;
-        }
-
-        let named = named_children(node);
-        if named.len() == 1
-            && ELEMENT_REFERENCE_WRAPPER_KINDS.contains(&named[0].kind())
-            && node_text(named[0], source).trim() == node_text(node, source).trim()
-        {
-            return self.element_reference_target(named[0], source);
-        }
-        if named.len() == 1 && ELEMENT_REFERENCE_NODE_KINDS.contains(&named[0].kind()) {
-            let stripped = node_text(node, source).trim();
-            let child_text = node_text(named[0], source);
-            if stripped == child_text || stripped == format!("{child_text};") {
-                return Some(named[0]);
-            }
-        }
-
-        if element_reference_shape(node, source) {
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn element_reference_receiver<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let target = self.element_reference_target(node, source).unwrap_or(node);
-        named_children(target).first().copied()
-    }
-
-    fn element_reference_arguments<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let target = self.element_reference_target(node, source).unwrap_or(node);
-        named_children(target).into_iter().skip(1).collect()
-    }
-
-    fn hash_literal_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.hash_literal_target(node, source).is_some()
-    }
-
-    fn hash_literal_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if self == Self::Lua {
-            if let Some(target) = lua_keyed_table_target(node, source) {
-                return Some(target);
-            }
-        }
-
-        if HASH_LITERAL_NODE_KINDS.contains(&node.kind()) {
-            return Some(node);
-        }
-        if !HASH_LITERAL_WRAPPER_KINDS.contains(&node.kind()) {
-            return None;
-        }
-        if statement_block_wrapper(node) {
-            return None;
-        }
-        if bracketed(node, source, "{", "}") {
-            return Some(node);
-        }
-
-        let named = named_children(node);
-        if named.len() != 1 {
-            return None;
-        }
-
-        let child = named[0];
-        if node.kind() == "parenthesized_expression" {
-            return self.hash_literal_target(child, source);
-        }
-
-        let stripped = node_text(node, source).trim();
-        let child_text = node_text(child, source);
-        if stripped == child_text || stripped == format!("{child_text};") {
-            if HASH_LITERAL_NODE_KINDS.contains(&child.kind()) {
-                return Some(child);
-            }
-            if HASH_LITERAL_WRAPPER_KINDS.contains(&child.kind()) {
-                return self.hash_literal_target(child, source);
-            }
-        }
-
-        None
-    }
-
-    fn hash_literal_values<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Vec<TreeSitterNode<'tree>> {
-        let target = self.hash_literal_target(node, source).unwrap_or(node);
-        if self == Self::Lua {
-            if target.kind() == "arguments" {
-                if let Some(table) = named_children(target)
-                    .into_iter()
-                    .find(|child| child.kind() == "table_constructor")
-                {
-                    return named_children(table);
-                }
-                return named_children(target);
-            }
-            if target.kind() == "table_constructor" {
-                return named_children(target);
-            }
-        }
-
-        named_children(target)
-    }
-
-    fn empty_body_statement(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if EMPTY_BODY_WRAPPER_KINDS.contains(&node.kind())
-            && named_children(node).is_empty()
-            && node_text(node, source).trim().is_empty()
-        {
-            return true;
-        }
-
-        match self {
-            Self::Python => {
-                if node.kind() == "pass_statement" {
-                    return true;
-                }
-                if node.kind() == "block" && node_text(node, source).trim() == "pass" {
-                    let named = named_children(node);
-                    return named.is_empty()
-                        || named.iter().all(|child| child.kind() == "pass_statement");
-                }
-                false
-            }
-            Self::TypeScript => {
-                node.kind() == "statement_block"
-                    && named_children(node).is_empty()
-                    && node_text(node, source).trim() == "{}"
-            }
-            _ => false,
-        }
-    }
-
-    fn heredoc_body_statement(self, node: TreeSitterNode<'_>) -> bool {
-        self == Self::Ruby
-            && HEREDOC_BODY_WRAPPER_KINDS.contains(&node.kind())
-            && named_children(node)
-                .iter()
-                .any(|child| child.kind() == "heredoc_body")
-    }
-
-    fn heredoc_call_for_body(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Ruby {
-            return false;
-        }
-        if node.kind() == "heredoc_beginning" {
-            return true;
-        }
-        if matches!(node.kind(), "call" | "argument_list")
-            && heredoc_marker_text(node_text(node, source))
-        {
-            return true;
-        }
-
-        named_children(node).into_iter().any(|child| {
-            if named_children(child)
-                .into_iter()
-                .any(|grandchild| grandchild.kind() == "heredoc_body")
-            {
-                return false;
-            }
-
-            self.heredoc_call_for_body(child, source)
-        })
-    }
-
-    fn interpolated_statement(
-        self,
-        node: TreeSitterNode<'_>,
-        children: &[TreeSitterNode<'_>],
-    ) -> bool {
-        INTERPOLATED_STATEMENT_WRAPPER_KINDS.contains(&node.kind())
-            && children.iter().any(|child| child.kind() == "interpolation")
-    }
-
-    fn concatenated_string_statement(
-        self,
-        node: TreeSitterNode<'_>,
-        children: &[TreeSitterNode<'_>],
-    ) -> bool {
-        if concatenated_string_node(node).is_some() {
-            return true;
-        }
-        let wrapper_kinds = match self {
-            Self::Python => PYTHON_CONCATENATED_STRING_WRAPPER_KINDS,
-            _ => CONCATENATED_STRING_WRAPPER_KINDS,
-        };
-        if !wrapper_kinds.contains(&node.kind()) {
-            return false;
-        }
-        if children.len() > 1 && children.iter().all(|child| child.kind() == "string") {
-            return true;
-        }
-        children.len() == 1 && concatenated_string_target(children[0]).is_some()
-    }
-
-    fn zero_child_identifier_call(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Ruby
-            || node.kind() != "call"
-            || !ruby_variable_name_text(node_text(node, source))
-        {
-            return false;
-        }
-        let named = named_children(node);
-        named.is_empty()
-            || (named.len() == 1
-                && identifier_kind_name(named[0].kind())
-                && node_text(named[0], source) == node_text(node, source))
-    }
-
-    fn boolean_expression_kind(self, node: TreeSitterNode<'_>) -> bool {
-        BOOLEAN_EXPRESSION_KINDS.contains(&node.kind())
-            || (self == Self::Lua && node.kind() == "expression_list")
-    }
-
-    fn comparison_expression_kind(self, node: TreeSitterNode<'_>) -> bool {
-        COMPARISON_EXPRESSION_KINDS.contains(&node.kind())
-            || (self == Self::Lua && node.kind() == "expression_list")
-    }
-
-    fn dotted_expression_wrapper(self, node: TreeSitterNode<'_>) -> bool {
-        let kinds = match self {
-            Self::Python => PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS,
-            _ => DOTTED_EXPRESSION_WRAPPER_KINDS,
-        };
-        kinds.contains(&node.kind())
-    }
-
-    fn unary_not_expression(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        matches!(node.kind(), "unary" | "unary_expression")
-            && node_text(node, source).trim_start().starts_with('!')
-    }
-
-    fn unary_minus_expression(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        match self {
-            Self::Python => {
-                matches!(node.kind(), "unary" | "unary_expression" | "unary_operator")
-                    && node_text(node, source).trim_start().starts_with('-')
-            }
-            Self::Lua => {
-                (matches!(node.kind(), "unary" | "unary_expression")
-                    && node_text(node, source).trim_start().starts_with('-'))
-                    || (node.kind() == "expression_list"
-                        && node
-                            .children(&mut node.walk())
-                            .next()
-                            .map(|child| node_text(child, source) == "-")
-                            .unwrap_or(false)
-                        && named_children(node).len() == 1)
-            }
-            _ => {
-                matches!(node.kind(), "unary" | "unary_expression")
-                    && node_text(node, source).trim_start().starts_with('-')
-            }
-        }
-    }
-
-    fn binary_operator(self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
-        if let Some(operator) = direct_binary_operator(node, source) {
-            return Some(operator.to_string());
-        }
-
-        let raw_named = raw_named_children(node);
-        if raw_named.len() == 1
-            && BINARY_WRAPPER_KINDS.contains(&raw_named[0].kind())
-            && node_text(node, source) == node_text(raw_named[0], source)
-        {
-            return self.binary_operator(raw_named[0], source);
-        }
-
-        None
-    }
-
-    fn class_node(self, node: TreeSitterNode<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "class" | "class_definition" | "class_declaration" | "class_specifier"
-        )
-    }
-
-    fn identifier_text_node(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self == Self::Lua
-            && matches!(node.kind(), "variable_list" | "expression_list")
-            && bare_identifier_text(node_text(node, source))
-    }
-
-    fn member_assignment_target(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if self != Self::Lua || node.kind() != "variable_list" {
-            return false;
-        }
-
-        let raw_named = raw_named_children(node);
-        let target = if raw_named.len() == 1
-            && raw_named[0].kind() == "dot_index_expression"
-            && node_text(node, source) == node_text(raw_named[0], source)
-        {
-            raw_named[0]
-        } else {
-            node
-        };
-
-        raw_named_children(target).len() == 2
-            && target
-                .children(&mut target.walk())
-                .any(|child| !child.is_named() && node_text(child, source) == ".")
-    }
-
-    fn instance_variable(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if node.kind() == "instance_variable" {
-            return true;
-        }
-
-        self == Self::Ruby
-            && node_text(node, source)
-                .strip_prefix('@')
-                .map(ruby_variable_name_text)
-                .unwrap_or(false)
-    }
-
-    fn global_variable(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if node.kind() == "global_variable" {
-            return true;
-        }
-
-        self == Self::Ruby
-            && node_text(node, source)
-                .strip_prefix('$')
-                .map(ruby_variable_name_text)
-                .unwrap_or(false)
-    }
-
-    fn assignment_operator(self, text: &str) -> bool {
-        match self {
-            Self::Ruby => matches!(
-                text,
-                "=" | "+="
-                    | "-="
-                    | "*="
-                    | "/="
-                    | "%="
-                    | "**="
-                    | "&&="
-                    | "||="
-                    | "&="
-                    | "|="
-                    | "^="
-                    | "<<="
-                    | ">>="
-            ),
-            Self::Python => matches!(
-                text,
-                "=" | "+="
-                    | "-="
-                    | "*="
-                    | "/="
-                    | "%="
-                    | "//="
-                    | "**="
-                    | "@="
-                    | "&="
-                    | "|="
-                    | "^="
-                    | "<<="
-                    | ">>="
-                    | ":="
-            ),
-            Self::Lua => text == "=",
-            Self::TypeScript => matches!(
-                text,
-                "=" | "+="
-                    | "-="
-                    | "*="
-                    | "/="
-                    | "%="
-                    | "**="
-                    | "<<="
-                    | ">>="
-                    | ">>>="
-                    | "&="
-                    | "|="
-                    | "^="
-                    | "&&="
-                    | "||="
-                    | "??="
-            ),
-            Self::Default => matches!(text, "=" | "+=" | "-=" | "*=" | "/=" | "%="),
-        }
-    }
-
-    fn unwrap_node(self, node: TreeSitterNode<'_>, source: &str, named_child_count: usize) -> bool {
-        if matches!(
-            node.kind(),
-            "parenthesized_expression"
-                | "parenthesized_statements"
-                | "expression_statement"
-                | "statement"
-                | "case_pattern"
-                | "match_pattern"
-                | "pattern"
-        ) && named_child_count == 1
-        {
-            return true;
-        }
-
-        if self != Self::Lua || node.kind() != "expression_list" || named_child_count != 1 {
-            return false;
-        }
-
-        let raw_named = raw_named_children(node);
-        if raw_named.len() == 1
-            && raw_named[0].kind() == "parenthesized_expression"
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return true;
-        }
-
-        let mut cursor = node.walk();
-        let raw_children = node.children(&mut cursor).collect::<Vec<_>>();
-        raw_children
-            .first()
-            .map(|child| node_text(*child, source) == "(")
-            .unwrap_or(false)
-            && raw_children
-                .last()
-                .map(|child| node_text(*child, source) == ")")
-                .unwrap_or(false)
-    }
-
-    fn interpolated_string(
-        self,
-        node: TreeSitterNode<'_>,
-        children: &[TreeSitterNode<'_>],
-    ) -> bool {
-        if node.kind() == "string" && children.iter().any(|child| child.kind() == "interpolation") {
-            return true;
-        }
-
-        self == Self::TypeScript
-            && node.kind() == "template_string"
-            && children
-                .iter()
-                .any(|child| child.kind() == "template_substitution")
-    }
-
-    fn lambda_expression(self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        self.lambda_target(node, source).is_some()
-    }
-
-    fn lambda_target<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-        source: &str,
-    ) -> Option<TreeSitterNode<'tree>> {
-        if node.kind() == "lambda" {
-            return Some(node);
-        }
-
-        if self == Self::TypeScript
-            && matches!(node.kind(), "arrow_function" | "function_expression")
-        {
-            return Some(node);
-        }
-
-        if self == Self::Lua {
-            if node.kind() == "function_definition" {
-                return Some(node);
-            }
-
-            if node.kind() == "expression_list" {
-                let named = named_children(node);
-                if named.len() == 1
-                    && named[0].kind() == "function_definition"
-                    && node_text(named[0], source) == node_text(node, source)
-                {
-                    return Some(named[0]);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn interpolation_node(self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "interpolation"
-            || (self == Self::TypeScript && node.kind() == "template_substitution")
-    }
-
-    fn explicit_alternative<'tree>(
-        self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
-        let alternatives: &[&str] = match self {
-            Self::Ruby => &["elsif", "else"],
-            Self::Python => &["elif_clause", "else", "else_clause"],
-            Self::Lua => &["elseif_statement", "else", "else_statement"],
-            Self::TypeScript => &["else", "else_clause"],
-            Self::Default => &["else", "else_clause", "else_statement"],
-        };
-        named_children(node)
-            .into_iter()
-            .find(|child| alternatives.contains(&child.kind()))
-    }
+pub(crate) struct TernaryParts<'tree> {
+    pub(crate) condition: TreeSitterNode<'tree>,
+    pub(crate) positive: Vec<TreeSitterNode<'tree>>,
+    pub(crate) negative: Vec<TreeSitterNode<'tree>>,
 }
 
 fn direct_binary_operator<'source>(
@@ -2090,7 +764,7 @@ fn lua_keyed_table_target<'tree>(
 struct TreeSitterNormalizer<'source> {
     source: &'source str,
     language: Language,
-    normalization_adapter: TreeSitterNormalizationAdapter,
+    normalization_adapter: &'static dyn AstNormalizationAdapter,
     local_stack: Vec<BTreeSet<String>>,
     root_span: Option<Span>,
     current_heredoc_body_span: Option<Span>,
@@ -2101,7 +775,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         Self {
             source,
             language,
-            normalization_adapter: TreeSitterNormalizationAdapter::for_language(language),
+            normalization_adapter: normalization_adapter(language),
             local_stack: Vec::new(),
             root_span: None,
             current_heredoc_body_span: None,
@@ -2332,7 +1006,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             | "raw_string_literal" => {
                 if self.interpolated_string(node) {
                     Some(self.normalize_interpolated_string(node))
-                } else if let Some(content) = self.lua_no_paren_string_argument_content(node) {
+                } else if let Some(content) = self.no_paren_string_argument_content(node) {
                     Some(self.wrap(
                         "STR",
                         vec![Child::String(node_text(content, self.source).to_string())],
@@ -2485,7 +1159,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         ))
     }
 
-    fn normalize_python_nested_class_as_iter(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+    fn normalize_nested_class_as_iter(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let name_node = self
             .named_field(node, "name")
             .or_else(|| self.first_named(node))?;
@@ -2618,17 +1292,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_body(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        if self.language == Language::Python && node.kind() == "block" {
-            let raw_children = self.raw_named_children(node);
-            if raw_children.len() == 1
-                && raw_children[0].kind() == "class_definition"
-                && node
-                    .parent()
-                    .map(|parent| parent.kind() == "class_definition")
-                    .unwrap_or(false)
-            {
-                return self.normalize_python_nested_class_as_iter(raw_children[0]);
-            }
+        if let Some(child) = self
+            .normalization_adapter
+            .nested_class_body_child(node, self.source)
+        {
+            return self.normalize_nested_class_as_iter(child);
         }
         if self.leading_function_statement(node) {
             return self.normalize_leading_function_statement(node);
@@ -2828,19 +1496,13 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_else_or_branch(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        if self.language == Language::Python && node.kind() == "else_clause" {
-            if let Some(block) = self
-                .raw_named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "block")
-            {
-                if let Some(normalized) = self.normalize_python_else_if_block(block) {
-                    return Some(self.wrap(
-                        "ELSE_CLAUSE",
-                        vec![Child::Node(Box::new(normalized))],
-                        node,
-                    ));
-                }
+        if let Some(block) = self.normalization_adapter.else_if_block(node, self.source) {
+            if let Some(normalized) = self.normalize_else_if_block_child(block) {
+                return Some(self.wrap(
+                    "ELSE_CLAUSE",
+                    vec![Child::Node(Box::new(normalized))],
+                    node,
+                ));
             }
         }
         if node.kind() != "else" {
@@ -2859,7 +1521,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalize_body_nodes(self.named_children(node), node)
     }
 
-    fn normalize_python_else_if_block(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+    fn normalize_else_if_block_child(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let statements = self
             .raw_named_children(node)
             .into_iter()
@@ -3684,7 +2346,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         right: Option<Node>,
         source: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if self.language != Language::Ruby || !matches!(operator, "||" | "&&") {
+        if !self
+            .normalization_adapter
+            .logical_operator_assignment(operator)
+        {
             return None;
         }
         if !self.identifier_kind(left.kind()) {
@@ -3858,21 +2523,10 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_call_with_block(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let block = self.call_block(node);
-        let call_source = if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
-        {
-            let raw_named = self.raw_named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "call"
-                && node_text(node, self.source) == node_text(raw_named[0], self.source)
-            {
-                raw_named[0]
-            } else {
-                node
-            }
-        } else {
-            node
-        };
+        let call_source = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
+            .unwrap_or(node);
         let call = self.normalize_call_without_block(call_source, block)?;
         let args = self.normalize_block_parameters(block);
         let body = block.and_then(|block| {
@@ -4132,7 +2786,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
             return Some(self.wrap(node_type, children, node));
         }
-        if self.language == Language::Ruby && self.const_kind(function.kind()) {
+        if self
+            .normalization_adapter
+            .bare_const_call_function(function)
+        {
             let children = vec![
                 Child::Symbol(node_text(function, self.source).to_string()),
                 if let Some(source) = call_source.as_ref() {
@@ -5124,7 +3781,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_parameters(&mut self, node: Option<TreeSitterNode<'_>>) -> Option<Node> {
-        if self.language != Language::Ruby {
+        if !self.normalization_adapter.normalize_default_parameters() {
             return None;
         }
         let node = node?;
@@ -5154,7 +3811,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_block_parameters(&mut self, block: Option<TreeSitterNode<'_>>) -> Option<Node> {
-        if self.language != Language::Ruby {
+        if !self.normalization_adapter.normalize_block_parameters() {
             return None;
         }
         let block = block?;
@@ -5648,7 +4305,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn assignment_lhs(&self, node: TreeSitterNode<'_>) -> bool {
-        if self.lua_single_assignment_block_child(node) {
+        if self.single_assignment_block_child(node) {
             return false;
         }
         if node
@@ -5667,37 +4324,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn literal_fragment_assignment_context(&self, node: TreeSitterNode<'_>) -> bool {
-        let Some(parent) = node.parent() else {
-            return false;
-        };
-        if matches!(
-            parent.kind(),
-            "string" | "delimited_symbol" | "regex" | "regex_literal"
-        ) {
-            return true;
-        }
-        if self.language == Language::Lua
-            && matches!(
-                node.kind(),
-                "string_content" | "escape_sequence" | "interpolation" | "string_fragment"
-            )
-            && parent.kind() == "expression_list"
-        {
-            return true;
-        }
-
-        matches!(
-            node.kind(),
-            "string_content" | "escape_sequence" | "interpolation" | "string_fragment"
-        ) && parent
-            .parent()
-            .map(|grandparent| {
-                matches!(
-                    grandparent.kind(),
-                    "string" | "delimited_symbol" | "regex" | "regex_literal"
-                )
-            })
-            .unwrap_or(false)
+        self.normalization_adapter
+            .literal_fragment_assignment_context(node, self.source)
     }
 
     fn literal_fragment_expression_list(&self, node: TreeSitterNode<'_>) -> bool {
@@ -5710,7 +4338,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn assignment_rhs(&self, node: TreeSitterNode<'_>) -> bool {
-        if self.lua_single_assignment_block_child(node) {
+        if self.single_assignment_block_child(node) {
             return false;
         }
         if self.literal_fragment_assignment_context(node) {
@@ -5721,34 +4349,14 @@ impl<'source> TreeSitterNormalizer<'source> {
             .unwrap_or(false)
     }
 
-    fn lua_single_assignment_block_child(&self, node: TreeSitterNode<'_>) -> bool {
-        if self.language != Language::Lua {
-            return false;
-        }
-        let Some(parent) = node.parent() else {
-            return false;
-        };
-        if parent.kind() != "assignment_statement" {
-            return false;
-        }
-        let Some(grandparent) = parent.parent() else {
-            return false;
-        };
-        grandparent.kind() == "block"
-            && node_text(grandparent, self.source) == node_text(parent, self.source)
-            && self.raw_named_children(grandparent).len() == 1
+    fn single_assignment_block_child(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .single_assignment_block_child(node, self.source)
     }
 
-    fn lua_single_assignment_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        if self.language != Language::Lua || node.kind() != "assignment_statement" {
-            return false;
-        }
-        let Some(parent) = node.parent() else {
-            return false;
-        };
-        parent.kind() == "block"
-            && node_text(parent, self.source) == node_text(node, self.source)
-            && self.raw_named_children(parent).len() == 1
+    fn single_assignment_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .single_assignment_statement(node, self.source)
     }
 
     fn has_assignment_operator_child(&self, node: TreeSitterNode<'_>) -> bool {
@@ -6057,15 +4665,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
         function: TreeSitterNode<'_>,
     ) -> bool {
-        let function_text = if self.language == Language::Ruby && function.kind() == "call" {
-            self.named_children(function)
-                .into_iter()
-                .next()
-                .map(|child| node_text(child, self.source))
-                .unwrap_or_else(|| node_text(function, self.source))
-        } else {
-            node_text(function, self.source)
-        };
+        let function_text_source = self
+            .normalization_adapter
+            .inline_def_function_text_source(function, self.source);
+        let function_text = node_text(function_text_source, self.source);
         inline_def_wrapper_mid(function_text) && node_text(node, self.source).contains("def ")
     }
 
@@ -6077,21 +4680,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn inline_def_from_statement(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        let target = if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
-        {
-            let raw_named = self.raw_named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "call"
-                && node_text(raw_named[0], self.source) == node_text(node, self.source)
-            {
-                raw_named[0]
-            } else {
-                node
-            }
-        } else {
-            node
-        };
+        let target = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
+            .unwrap_or(node);
         let source = self
             .named_children(target)
             .into_iter()
@@ -6314,10 +4906,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        let body_kind = match self.normalization_adapter {
-            TreeSitterNormalizationAdapter::Python | TreeSitterNormalizationAdapter::Lua => "block",
-            _ => "body_statement",
-        };
+        let body_kind = self.normalization_adapter.leading_function_body_kind();
         self.named_children(node)
             .into_iter()
             .rev()
@@ -6342,18 +4931,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             return false;
         }
         let named = self.named_children(node);
-        let target = if self.language == Language::Ruby
-            && named.len() == 1
-            && matches!(
-                named[0].kind(),
-                "binary" | "binary_expression" | "binary_operator" | "boolean_operator"
-            )
-            && node_text(node, self.source) == node_text(named[0], self.source)
-        {
-            named[0]
-        } else {
-            node
-        };
+        let target = self
+            .normalization_adapter
+            .boolean_statement_target(node, self.source, &named);
         if !matches!(
             self.binary_operator(target).as_deref(),
             Some("&&" | "||" | "and" | "or")
@@ -6373,19 +4953,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn operator_call_expression(&self, node: TreeSitterNode<'_>) -> bool {
-        let operator_call_kind = match self.language {
-            Language::Python => matches!(
-                node.kind(),
-                "binary" | "binary_expression" | "binary_operator"
-            ),
-            Language::Lua => matches!(
-                node.kind(),
-                "binary" | "binary_expression" | "expression_list"
-            ),
-            _ => matches!(node.kind(), "binary" | "binary_expression"),
-        };
-
-        operator_call_kind
+        self.normalization_adapter
+            .operator_call_expression_kind(node)
             && self.named_children(node).len() >= 2
             && self
                 .binary_operator(node)
@@ -6613,21 +5182,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         let block = self.call_block(node);
-        let children = if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
-        {
-            let raw_named = self.raw_named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "call"
-                && node_text(node, self.source) == node_text(raw_named[0], self.source)
-            {
-                self.named_children(raw_named[0])
-            } else {
-                self.named_children(node)
-            }
-        } else {
-            self.named_children(node)
-        };
+        let child_source = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
+            .unwrap_or(node);
+        let children = self.named_children(child_source);
 
         children.into_iter().find(|child| {
             Some(*child) != block && (self.call_kind(child.kind()) || self.member_read_node(*child))
@@ -6724,19 +5283,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             return false;
         }
 
-        let target = if self.language == Language::Ruby {
-            let raw_named = self.raw_named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "call"
-                && node_text(node, self.source) == node_text(raw_named[0], self.source)
-            {
-                raw_named[0]
-            } else {
-                node
-            }
-        } else {
-            node
-        };
+        let target = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
+            .unwrap_or(node);
 
         self.call_block(target).is_some()
             && self
@@ -6818,7 +5368,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn member_read_node(&self, node: TreeSitterNode<'_>) -> bool {
-        if self.language == Language::Lua && node.kind() == "field" {
+        if self.normalization_adapter.member_read_excluded(node) {
             return false;
         }
         matches!(
@@ -7482,16 +6032,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn call_block<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
-        if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
+        if let Some(target) = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
         {
-            let raw_named = self.raw_named_children(node);
-            if raw_named.len() == 1
-                && raw_named[0].kind() == "call"
-                && node_text(node, self.source) == node_text(raw_named[0], self.source)
-            {
-                return self.call_block(raw_named[0]);
-            }
+            return self.call_block(target);
         }
 
         self.named_children(node)
@@ -7504,29 +6049,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'tree>,
         name: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        if self.language == Language::Python
-            && matches!(name, "body" | "consequence")
-            && matches!(
-                node.kind(),
-                "elif_clause"
-                    | "else_clause"
-                    | "for_statement"
-                    | "function_definition"
-                    | "if_statement"
-                    | "try_statement"
-                    | "while_statement"
-                    | "with_statement"
-            )
-        {
-            if let Some(block) = self
-                .raw_named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "block")
-            {
-                return Some(block);
-            }
-        }
-        node.child_by_field_name(name)
+        self.normalization_adapter.named_field(node, name)
     }
 
     fn parent_node<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
@@ -7552,333 +6075,20 @@ impl<'source> TreeSitterNormalizer<'source> {
         if node.kind() == "dotted_name" && !node_text(node, self.source).contains('.') {
             return Vec::new();
         }
-        if self.language == Language::Python
-            && node.kind() == "with_clause"
-            && bare_identifier_text(node_text(node, self.source))
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "variable_list"
-            && self.raw_named_children(node).len() == 1
-            && self
-                .raw_named_children(node)
-                .first()
-                .map(|child| self.identifier_kind(child.kind()))
-                .unwrap_or(false)
-            && self.lua_single_assignment_block_child(node)
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "variable_list"
-            && self.raw_named_children(node).len() == 1
-            && node
-                .parent()
-                .map(|parent| parent.kind() == "for_generic_clause")
-                .unwrap_or(false)
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "variable_list"
-            && self.raw_named_children(node).len() == 1
-            && node
-                .parent()
-                .map(|parent| {
-                    parent.kind() == "variable_declaration"
-                        && self.raw_named_children(parent).len() == 1
-                })
-                .unwrap_or(false)
-        {
-            return Vec::new();
-        }
 
         let children = self.raw_named_children(node);
-        if self.language == Language::Lua
-            && node.kind() == "variable_list"
-            && children.len() == 1
-            && children[0].kind() == "dot_index_expression"
-            && node_text(node, self.source) == node_text(children[0], self.source)
+        match self
+            .normalization_adapter
+            .named_children_action(node, self.source, &children)
         {
-            return self.named_children(children[0]);
+            NamedChildrenAction::Default => {}
+            NamedChildrenAction::Drop => return Vec::new(),
+            NamedChildrenAction::Recurse(child) => return self.named_children(child),
+            NamedChildrenAction::Replace(children) => return children,
         }
-        if self.language == Language::Ruby
-            && INTERPOLATED_STATEMENT_WRAPPER_KINDS.contains(&node.kind())
-            && children.len() == 1
-            && children[0].kind() == "string"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            let string_children = self.raw_named_children(children[0]);
-            if string_children
-                .iter()
-                .any(|child| child.kind() == "interpolation")
-            {
-                return string_children;
-            }
-        }
-        if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
-            && children.len() == 1
-            && matches!(
-                children[0].kind(),
-                "if_modifier" | "unless_modifier" | "while_modifier" | "until_modifier"
-            )
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Ruby
-            && matches!(node.kind(), "body_statement" | "block_body" | "statement")
-            && children.len() == 1
-            && children[0].kind() == "yield"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Lua
-            && node.kind() == "expression_list"
-            && children.len() == 1
-            && self.identifier_kind(children[0].kind())
-            && node
-                .parent()
-                .map(|parent| matches!(parent.kind(), "assignment_statement" | "return_statement"))
-                .unwrap_or(false)
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "expression_list"
-            && children.len() == 1
-            && matches!(
-                children[0].kind(),
-                "true" | "false" | "nil" | "number" | "integer" | "float"
-            )
-            && node
-                .parent()
-                .map(|parent| matches!(parent.kind(), "assignment_statement" | "return_statement"))
-                .unwrap_or(false)
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "expression_list"
-            && children.len() == 1
-            && matches!(
-                children[0].kind(),
-                "binary_expression"
-                    | "function_call"
-                    | "dot_index_expression"
-                    | "function_definition"
-                    | "string"
-            )
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Lua
-            && node.kind() == "expression_list"
-            && children.len() == 1
-            && children[0].kind() == "table_constructor"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Lua
-            && node.kind() == "field"
-            && children.len() == 1
-            && self.identifier_kind(children[0].kind())
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Lua
-            && node.kind() == "field"
-            && children.len() == 1
-            && children[0].kind() == "string"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Lua
-            && node.kind() == "field"
-            && children.len() == 1
-            && children[0].kind() == "function_call"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Lua
-            && node.kind() == "block"
-            && children.len() == 1
-            && matches!(
-                children[0].kind(),
-                "function_call" | "return_statement" | "variable_declaration"
-            )
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "relative_import"
-            && children.len() == 1
-            && children[0].kind() == "import_prefix"
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Python && node.kind() == "block" && children.len() == 1 {
-            if children[0].kind() == "function_definition" {
-                return self.named_children(children[0]);
-            }
-            if children[0].kind() == "decorated_definition" {
-                return self.named_children(children[0]);
-            }
-            if children[0].kind() == "pass_statement"
-                && node_text(node, self.source).trim() == "pass"
-            {
-                return Vec::new();
-            }
-            if matches!(children[0].kind(), "break_statement" | "continue_statement")
-                && bare_identifier_text(node_text(node, self.source).trim())
-            {
-                return Vec::new();
-            }
-            if children[0].kind() == "return_statement"
-                && node_text(node, self.source) == node_text(children[0], self.source)
-            {
-                if self.raw_named_children(children[0]).is_empty() {
-                    return Vec::new();
-                }
-                return self.named_children(children[0]);
-            }
-            if children[0].kind() == "delete_statement" {
-                return self.named_children(children[0]);
-            }
-            if children[0].kind() == "if_statement" {
-                return self.named_children(children[0]);
-            }
-            if matches!(
-                children[0].kind(),
-                "assert_statement"
-                    | "for_statement"
-                    | "import_from_statement"
-                    | "import_statement"
-                    | "raise_statement"
-                    | "try_statement"
-                    | "while_statement"
-                    | "with_statement"
-            ) {
-                return self.named_children(children[0]);
-            }
-            if children[0].kind() != "expression_statement" {
-                return children;
-            }
-            let statement_children = self.raw_named_children(children[0]);
-            if statement_children.len() == 1
-                && statement_children[0].kind() == "identifier"
-                && node_text(node, self.source) == node_text(children[0], self.source)
-            {
-                return Vec::new();
-            }
-            if statement_children.len() == 1 && statement_children[0].kind() == "ellipsis" {
-                return Vec::new();
-            }
-            if statement_children.len() == 1
-                && matches!(
-                    statement_children[0].kind(),
-                    "assignment"
-                        | "augmented_assignment"
-                        | "binary_operator"
-                        | "call"
-                        | "string"
-                        | "subscript"
-                )
-            {
-                return self.named_children(statement_children[0]);
-            }
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "yield"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "identifier"
-        {
-            return Vec::new();
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "binary_operator"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "comparison_operator"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "call"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "attribute"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "expression_statement"
-            && children.len() == 1
-            && children[0].kind() == "string"
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python && node.kind() == "as_pattern_target" {
-            return Vec::new();
-        }
-        if self.language == Language::Python
-            && matches!(node.kind(), "with_clause" | "with_item")
-            && children.len() == 1
-            && matches!(children[0].kind(), "with_item" | "as_pattern")
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "with_item"
-            && children.len() == 1
-            && children[0].kind() == "call"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
-        if self.language == Language::Python
-            && node.kind() == "with_item"
-            && children.len() == 1
-            && children[0].kind() == "attribute"
-            && node_text(node, self.source) == node_text(children[0], self.source)
-        {
-            return self.named_children(children[0]);
-        }
+
         if node.kind() == "type" && children.len() == 1 {
             if children[0].kind() == "union_type" {
-                return self.named_children(children[0]);
-            }
-            if self.language == Language::Python && children[0].kind() == "binary_operator" {
                 return self.named_children(children[0]);
             }
             if children[0].kind() == "generic_type" {
@@ -7919,22 +6129,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             .collect()
     }
 
-    fn lua_no_paren_string_argument_content<'tree>(
+    fn no_paren_string_argument_content<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        if self.language != Language::Lua || node.kind() != "string" {
-            return None;
-        }
-        let parent = node.parent()?;
-        if parent.kind() != "arguments"
-            || node_text(parent, self.source) != node_text(node, self.source)
-        {
-            return None;
-        }
-        self.raw_named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "string_content")
+        self.normalization_adapter
+            .no_paren_string_argument_content(node, self.source)
     }
 
     fn source_before_child(&self, node: TreeSitterNode<'_>, child: TreeSitterNode<'_>) -> Node {
@@ -8186,7 +6386,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn elide_tail_returns(&self, node: Option<Node>) -> Option<Node> {
-        if self.language != Language::Ruby {
+        if !self.normalization_adapter.elides_tail_returns() {
             return node;
         }
         let mut node = node?;
@@ -8279,7 +6479,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn elide_implicit_nil_body(&self, node: Option<Node>) -> Option<Node> {
-        if self.language != Language::Ruby {
+        if !self.normalization_adapter.elides_implicit_nil_body() {
             return node;
         }
         let node = self.drop_trailing_nil_statement(node);

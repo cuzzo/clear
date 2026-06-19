@@ -1,4 +1,5 @@
 use super::{
+    adapters::{language_profile, LanguageProfile},
     ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, span, RawNode};
@@ -6,295 +7,7 @@ use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tree_sitter::{Language as TreeSitterLanguage, Node, Parser};
-
-trait LanguageProfile {
-    fn language(&self) -> Language;
-    fn grammar(&self) -> TreeSitterLanguage;
-
-    fn first_argument_receiver(&self) -> bool {
-        false
-    }
-
-    fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
-        generic_function_name(node, source)
-    }
-
-    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
-        generic_owner_name_from_declaration(node, source)
-    }
-
-    fn generated_prelude(&self, _node: Node<'_>, _source: &str) -> bool {
-        false
-    }
-
-    fn hidden_case(&self, _node: Node<'_>) -> bool {
-        false
-    }
-
-    fn predicate_less_case(&self, node: Node<'_>) -> bool {
-        node.kind() == "case" && decision_subject(node).is_none()
-    }
-
-    fn case_pattern_texts(&self, patterns: &[Node<'_>], source: &str) -> Vec<String> {
-        patterns
-            .iter()
-            .map(|pattern| normalize_text(node_text(*pattern, source)))
-            .collect()
-    }
-
-    fn receiver_convention_owner_name(&self, node: Node<'_>, source: &str) -> Option<String> {
-        if !self.first_argument_receiver() || node.kind() != "function_definition" {
-            return None;
-        }
-
-        let (type_name, _) = first_argument_receiver_parameter(node, source)?;
-        let type_name = normalize_type_owner(&type_name);
-        let name = self.function_name(node, source)?;
-
-        if name.starts_with(&snake_case_type_name(&type_name)) {
-            Some(type_name)
-        } else if type_name.ends_with("_t")
-            && name.starts_with(type_name.strip_suffix("_t").unwrap())
-        {
-            Some(type_name)
-        } else {
-            None
-        }
-    }
-
-    fn function_receiver_name(&self, node: Node<'_>, source: &str) -> Option<String> {
-        if self.first_argument_receiver() && node.kind() == "function_definition" {
-            if let Some((_, name)) = first_argument_receiver_parameter(node, source) {
-                return Some(name);
-            }
-        }
-        None
-    }
-
-    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
-        generic_state_target(lhs, source)
-    }
-
-    fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
-        generic_assignment_target(node)
-    }
-
-    fn skip_state_write_node(&self, _node: Node<'_>) -> bool {
-        false
-    }
-
-    fn skip_state_write_target(&self, target: &Target) -> bool {
-        target.field == "[]"
-    }
-
-    fn state_write_source_node<'tree>(
-        &self,
-        _node: Node<'tree>,
-        assignment: &AssignmentTarget<'tree>,
-    ) -> Node<'tree> {
-        assignment.source
-    }
-}
-
-macro_rules! default_profile {
-    ($name:ident, $language:ident, $grammar:expr) => {
-        struct $name;
-
-        impl LanguageProfile for $name {
-            fn language(&self) -> Language {
-                Language::$language
-            }
-
-            fn grammar(&self) -> TreeSitterLanguage {
-                $grammar.into()
-            }
-        }
-    };
-}
-
-struct RubyProfile;
-
-impl LanguageProfile for RubyProfile {
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
-
-    fn grammar(&self) -> TreeSitterLanguage {
-        tree_sitter_ruby::LANGUAGE.into()
-    }
-
-    fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
-        match node.kind() {
-            "singleton_method" => {
-                let name = node
-                    .child_by_field_name("name")
-                    .map(|name| node_text(name, source).to_string())
-                    .or_else(|| {
-                        named_children(node)
-                            .into_iter()
-                            .rev()
-                            .find(|child| {
-                                matches!(
-                                    child.kind(),
-                                    "identifier" | "field_identifier" | "property_identifier"
-                                )
-                            })
-                            .map(|child| node_text(child, source).to_string())
-                    })?;
-                Some(format!("self.{name}"))
-            }
-            "body_statement" if first_child_kind(node) == Some("def") => {
-                hidden_ruby_method_name(node, source)
-            }
-            "argument_list" if first_child_kind(node) == Some("def") => {
-                inline_def_name(node, source)
-            }
-            _ => generic_function_name(node, source),
-        }
-    }
-
-    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
-        if node.kind() == "body_statement"
-            && matches!(first_child_kind(node), Some("class" | "module"))
-        {
-            return first_named_text(node, source, &["constant", "identifier", "type_identifier"]);
-        }
-        generic_owner_name_from_declaration(node, source)
-    }
-
-    fn hidden_case(&self, node: Node<'_>) -> bool {
-        matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "argument_list"
-        ) && first_child_kind(node) == Some("case")
-    }
-
-    fn predicate_less_case(&self, node: Node<'_>) -> bool {
-        (node.kind() == "case" || self.hidden_case(node)) && decision_subject(node).is_none()
-    }
-
-    fn case_pattern_texts(&self, patterns: &[Node<'_>], source: &str) -> Vec<String> {
-        ruby_case_pattern_texts(patterns, source)
-    }
-
-    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
-        ruby_state_variable_target(lhs, source).or_else(|| generic_state_target(lhs, source))
-    }
-
-    fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
-        generic_assignment_target(node).or_else(|| match node.kind() {
-            "instance_variable" | "global_variable" if assignment_lhs_node(node) => {
-                Some(AssignmentTarget {
-                    lhs: node,
-                    source: node.parent().unwrap_or(node),
-                })
-            }
-            _ => None,
-        })
-    }
-
-    fn skip_state_write_node(&self, node: Node<'_>) -> bool {
-        node.kind() == "operator_assignment"
-            || (assignment_lhs_node(node)
-                && next_sibling_raw_text(node).as_deref() != Some("=")
-                && node.kind() != "instance_variable")
-    }
-
-    fn skip_state_write_target(&self, target: &Target) -> bool {
-        target.field == "[]" || target.field.starts_with('$')
-    }
-}
-
-struct CProfile;
-
-impl LanguageProfile for CProfile {
-    fn language(&self) -> Language {
-        Language::C
-    }
-
-    fn grammar(&self) -> TreeSitterLanguage {
-        tree_sitter_c::LANGUAGE.into()
-    }
-
-    fn first_argument_receiver(&self) -> bool {
-        true
-    }
-}
-
-struct LuaProfile;
-
-impl LanguageProfile for LuaProfile {
-    fn language(&self) -> Language {
-        Language::Lua
-    }
-
-    fn grammar(&self) -> TreeSitterLanguage {
-        tree_sitter_lua::LANGUAGE.into()
-    }
-
-    fn generated_prelude(&self, node: Node<'_>, source: &str) -> bool {
-        if line(node) != 1 {
-            return false;
-        }
-        let first_line = source.lines().next().unwrap_or("");
-        first_line.contains("_tl_compat") && first_line.contains("compat53.module")
-    }
-}
-
-default_profile!(PythonProfile, Python, tree_sitter_python::LANGUAGE);
-default_profile!(
-    JavaScriptProfile,
-    JavaScript,
-    tree_sitter_javascript::LANGUAGE
-);
-default_profile!(JavaProfile, Java, tree_sitter_java::LANGUAGE);
-default_profile!(
-    TypeScriptProfile,
-    TypeScript,
-    tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-);
-default_profile!(SwiftProfile, Swift, tree_sitter_swift::LANGUAGE);
-default_profile!(KotlinProfile, Kotlin, tree_sitter_kotlin_ng::LANGUAGE);
-default_profile!(GoProfile, Go, tree_sitter_go::LANGUAGE);
-default_profile!(RustProfile, Rust, tree_sitter_rust::LANGUAGE);
-default_profile!(ZigProfile, Zig, tree_sitter_zig::LANGUAGE);
-default_profile!(CppProfile, Cpp, tree_sitter_cpp::LANGUAGE);
-default_profile!(CSharpProfile, CSharp, tree_sitter_c_sharp::LANGUAGE);
-
-static RUBY_PROFILE: RubyProfile = RubyProfile;
-static PYTHON_PROFILE: PythonProfile = PythonProfile;
-static JAVASCRIPT_PROFILE: JavaScriptProfile = JavaScriptProfile;
-static JAVA_PROFILE: JavaProfile = JavaProfile;
-static TYPESCRIPT_PROFILE: TypeScriptProfile = TypeScriptProfile;
-static SWIFT_PROFILE: SwiftProfile = SwiftProfile;
-static KOTLIN_PROFILE: KotlinProfile = KotlinProfile;
-static GO_PROFILE: GoProfile = GoProfile;
-static RUST_PROFILE: RustProfile = RustProfile;
-static ZIG_PROFILE: ZigProfile = ZigProfile;
-static LUA_PROFILE: LuaProfile = LuaProfile;
-static C_PROFILE: CProfile = CProfile;
-static CPP_PROFILE: CppProfile = CppProfile;
-static CSHARP_PROFILE: CSharpProfile = CSharpProfile;
-
-fn language_profile(language: Language) -> &'static dyn LanguageProfile {
-    match language {
-        Language::Ruby => &RUBY_PROFILE,
-        Language::Python => &PYTHON_PROFILE,
-        Language::JavaScript => &JAVASCRIPT_PROFILE,
-        Language::Java => &JAVA_PROFILE,
-        Language::TypeScript => &TYPESCRIPT_PROFILE,
-        Language::Swift => &SWIFT_PROFILE,
-        Language::Kotlin => &KOTLIN_PROFILE,
-        Language::Go => &GO_PROFILE,
-        Language::Rust => &RUST_PROFILE,
-        Language::Zig => &ZIG_PROFILE,
-        Language::Lua => &LUA_PROFILE,
-        Language::C => &C_PROFILE,
-        Language::Cpp => &CPP_PROFILE,
-        Language::CSharp => &CSHARP_PROFILE,
-    }
-}
+use tree_sitter::{Node, Parser};
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let parsed = ParsedDocument::parse(file, language)?;
@@ -494,13 +207,11 @@ fn record_predicate_alias(
     language: Language,
     out: &mut Vec<PredicateAlias>,
 ) {
-    if !matches!(node.kind(), "method" | "function_definition") {
-        return;
-    }
-    let Some(name) = language_profile(language).function_name(node, source) else {
+    let profile = language_profile(language);
+    let Some(name) = profile.function_name(node, source) else {
         return;
     };
-    let Some(body) = method_single_expression_body(node) else {
+    let Some(body) = profile.single_expression_body(node) else {
         return;
     };
     let text = normalize_text(node_text(body, source));
@@ -526,7 +237,7 @@ fn record_comparison_use(
     context: &ContextState,
     out: &mut Vec<ComparisonUse>,
 ) {
-    if !comparison_node(node, source) {
+    if !comparison_node(language_profile(_language), node, source) {
         return;
     }
     let raw = normalize_text(node_text(node, source));
@@ -540,14 +251,13 @@ fn record_comparison_use(
     });
 }
 
-fn comparison_node(node: Node<'_>, source: &str) -> bool {
-    if matches!(node.kind(), "binary" | "binary_expression") {
-        return matches!(
-            direct_operator_from_source(node, source).as_str(),
-            "==" | "!="
-        );
+fn comparison_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
+    if profile.comparison_node_kinds().contains(&node.kind()) {
+        return profile
+            .comparison_operators()
+            .contains(&direct_operator_from_source(node, source).as_str());
     }
-    if node.kind() != "call" {
+    if !profile.call_node_kinds().contains(&node.kind()) {
         return false;
     }
     node.child_by_field_name("method")
@@ -569,13 +279,13 @@ fn record_decision_site(
         return;
     }
 
-    if boolean_container(node) && boolean_and(node, source) {
-        record_conjunction_decision(node, source, file, context, out, seen);
+    if profile.boolean_container(node) && boolean_and(profile, node, source) {
+        record_conjunction_decision(profile, node, source, file, context, out, seen);
         return;
     }
 
-    if case_node(node) || profile.hidden_case(node) {
-        let decision_node = case_source_node(node, profile);
+    if case_node(profile, node) || profile.hidden_case(node) {
+        let decision_node = profile.case_source_node(node);
         if profile.predicate_less_case(decision_node) {
             return;
         }
@@ -593,13 +303,14 @@ fn record_decision_site(
                 function: context.current_function(),
                 line: line(decision_node),
                 span: span(decision_node),
-                predicate: decision_predicate(decision_node, source),
+                predicate: decision_predicate(profile, decision_node, source),
             },
         );
     }
 }
 
 fn record_conjunction_decision(
+    profile: &dyn LanguageProfile,
     mut node: Node<'_>,
     source: &str,
     file: &Path,
@@ -607,11 +318,11 @@ fn record_conjunction_decision(
     out: &mut Vec<DecisionSite>,
     seen: &mut HashSet<String>,
 ) {
-    let from_wrapper = parenthesized_wrapper(node);
+    let from_wrapper = profile.parenthesized_wrapper(node);
     if from_wrapper
         && node
             .parent()
-            .map(|parent| boolean_container(parent) && boolean_and(parent, source))
+            .map(|parent| profile.boolean_container(parent) && boolean_and(profile, parent, source))
             .unwrap_or(false)
     {
         return;
@@ -627,8 +338,8 @@ fn record_conjunction_decision(
         && node
             .parent()
             .map(|parent| {
-                boolean_container(parent)
-                    && boolean_and(parent, source)
+                profile.boolean_container(parent)
+                    && boolean_and(profile, parent, source)
                     && span(parent) != span(node)
             })
             .unwrap_or(false)
@@ -636,7 +347,7 @@ fn record_conjunction_decision(
         return;
     }
 
-    let mut members = flatten_boolean_and(node, source)
+    let mut members = flatten_boolean_and(profile, node, source)
         .into_iter()
         .map(|child| decision_member_text(child, source))
         .collect::<Vec<_>>();
@@ -673,29 +384,6 @@ fn push_decision_site(out: &mut Vec<DecisionSite>, seen: &mut HashSet<String>, s
     );
     if seen.insert(key) {
         out.push(site);
-    }
-}
-
-fn method_single_expression_body(node: Node<'_>) -> Option<Node<'_>> {
-    let mut cursor = node.walk();
-    if node.children(&mut cursor).any(|child| child.kind() == "=") {
-        let named = named_children(node);
-        return named.last().copied();
-    }
-
-    let body = node.child_by_field_name("body").or_else(|| {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "body_statement")
-    })?;
-    let statements: Vec<Node<'_>> = named_children(body)
-        .into_iter()
-        .filter(|child| !matches!(child.kind(), "comment" | "heredoc_body"))
-        .collect();
-    if statements.len() == 1 {
-        statements.first().copied()
-    } else {
-        None
     }
 }
 
@@ -794,169 +482,18 @@ fn record_state_write(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AssignmentTarget<'tree> {
-    lhs: Node<'tree>,
-    source: Node<'tree>,
+pub(crate) struct AssignmentTarget<'tree> {
+    pub(crate) lhs: Node<'tree>,
+    pub(crate) source: Node<'tree>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Target {
-    receiver: String,
-    field: String,
+pub(crate) struct Target {
+    pub(crate) receiver: String,
+    pub(crate) field: String,
 }
 
-fn generic_assignment_target(node: Node<'_>) -> Option<AssignmentTarget<'_>> {
-    match node.kind() {
-        "assignment" | "assignment_expression" | "assignment_statement" => {
-            let lhs = node
-                .child_by_field_name("left")
-                .or_else(|| first_named_child(node))?;
-            Some(AssignmentTarget { lhs, source: node })
-        }
-        _ => None,
-    }
-}
-
-fn assignment_lhs_node(node: Node<'_>) -> bool {
-    if previous_sibling_raw_text(node).as_deref() == Some(":") {
-        return false;
-    }
-    matches!(
-        next_sibling_raw_text(node).as_deref(),
-        Some("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&&=" | "||=")
-    )
-}
-
-fn generic_state_target(lhs: Node<'_>, source: &str) -> Option<Target> {
-    if previous_sibling_text(lhs, source).as_deref() == Some(":") {
-        return None;
-    }
-
-    match lhs.kind() {
-        "call" => {
-            let receiver = lhs.child_by_field_name("receiver")?;
-            let method = lhs.child_by_field_name("method")?;
-            Some(Target {
-                receiver: normalize_text(node_text(receiver, source)),
-                field: strip_assignment_suffix(node_text(method, source)),
-            })
-        }
-        "field"
-        | "field_access"
-        | "selector_expression"
-        | "member_expression"
-        | "member_access_expression"
-        | "attribute"
-        | "field_expression"
-        | "navigation_expression"
-        | "directly_assignable_expression"
-        | "expression_list" => {
-            let object = lhs
-                .child_by_field_name("object")
-                .or_else(|| lhs.child_by_field_name("receiver"))
-                .or_else(|| lhs.child_by_field_name("expression"))
-                .or_else(|| lhs.child_by_field_name("operand"))
-                .or_else(|| lhs.child_by_field_name("value"))
-                .or_else(|| lhs.child_by_field_name("argument"))
-                .or_else(|| first_named_child_except(lhs, "navigation_suffix"))?;
-            let field = lhs
-                .child_by_field_name("field")
-                .or_else(|| lhs.child_by_field_name("property"))
-                .or_else(|| lhs.child_by_field_name("name"))
-                .or_else(|| lhs.child_by_field_name("suffix"))
-                .or_else(|| first_named_child_with_kind(lhs, "navigation_suffix"))
-                .or_else(|| last_named_child(lhs))?;
-            let field_text = member_field_text(field, source)?;
-            Some(Target {
-                receiver: normalize_text(node_text(object, source)),
-                field: strip_assignment_suffix(&field_text),
-            })
-        }
-        _ => None,
-    }
-}
-
-fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
-    matches!(node.kind(), "instance_variable" | "global_variable").then(|| Target {
-        receiver: "self".to_string(),
-        field: node_text(node, source).to_string(),
-    })
-}
-
-fn generic_function_name(node: Node<'_>, source: &str) -> Option<String> {
-    match node.kind() {
-        "method"
-        | "function_definition"
-        | "function_declaration"
-        | "method_definition"
-        | "function_item" => node
-            .child_by_field_name("name")
-            .map(|name| node_text(name, source).to_string())
-            .or_else(|| declarator_name(node.child_by_field_name("declarator"), source))
-            .or_else(|| {
-                first_named_text(
-                    node,
-                    source,
-                    &["identifier", "constant", "property_identifier"],
-                )
-            }),
-        "method_declaration" => node
-            .child_by_field_name("name")
-            .map(|name| node_text(name, source).to_string())
-            .or_else(|| first_named_text(node, source, &["field_identifier", "identifier"])),
-        _ => None,
-    }
-}
-
-fn declarator_name(node: Option<Node<'_>>, source: &str) -> Option<String> {
-    let mut pending = vec![node?];
-    let mut seen = HashSet::new();
-    while let Some(current) = pending.pop() {
-        let key = format!("{:?}\0{}", span(current), current.kind());
-        if !seen.insert(key) {
-            continue;
-        }
-        if matches!(
-            current.kind(),
-            "identifier" | "simple_identifier" | "field_identifier" | "property_identifier"
-        ) {
-            return Some(node_text(current, source).to_string());
-        }
-        let mut children = named_children(current);
-        children.reverse();
-        pending.extend(children);
-    }
-    None
-}
-
-fn generic_owner_name_from_declaration(node: Node<'_>, source: &str) -> Option<String> {
-    match node.kind() {
-        "class" | "module" | "class_definition" | "class_declaration" | "class_specifier" => node
-            .child_by_field_name("name")
-            .map(|name| node_text(name, source).to_string())
-            .or_else(|| {
-                first_named_text(node, source, &["constant", "identifier", "type_identifier"])
-            }),
-        "impl_item" | "impl_block" => impl_owner_name(node, source),
-        "struct_item" | "struct_spec" | "struct_specifier" | "type_spec" | "type_declaration" => {
-            node.child_by_field_name("name")
-                .map(|name| node_text(name, source).to_string())
-                .or_else(|| first_named_text(node, source, &["type_identifier", "identifier"]))
-        }
-        _ => None,
-    }
-}
-
-fn impl_owner_name(node: Node<'_>, source: &str) -> Option<String> {
-    let r#type = node.child_by_field_name("type").or_else(|| {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind().contains("type") || child.kind().contains("identifier"))
-    })?;
-    Some(normalize_type_owner(node_text(r#type, source)))
-}
-
-fn normalize_type_owner(text: &str) -> String {
+pub(crate) fn normalize_type_owner(text: &str) -> String {
     let value = text.trim();
     let value = value.trim_start_matches(['&', '*']);
     let value = value
@@ -968,36 +505,6 @@ fn normalize_type_owner(text: &str) -> String {
     value.split('.').last().unwrap_or("").to_string()
 }
 
-fn hidden_ruby_method_name(node: Node<'_>, source: &str) -> Option<String> {
-    let children = named_children(node);
-    let receiver_index = children
-        .iter()
-        .position(|child| matches!(child.kind(), "self" | "constant"));
-    let search: Vec<Node<'_>> = if let Some(index) = receiver_index {
-        children.into_iter().skip(index + 1).collect()
-    } else {
-        children
-    };
-    let name = search
-        .into_iter()
-        .find(|child| {
-            matches!(
-                child.kind(),
-                "identifier" | "field_identifier" | "property_identifier"
-            )
-        })
-        .map(|child| node_text(child, source).to_string())?;
-    if receiver_index.is_some() {
-        Some(format!("self.{name}"))
-    } else {
-        Some(name)
-    }
-}
-
-fn inline_def_name(node: Node<'_>, source: &str) -> Option<String> {
-    hidden_ruby_method_name(node, source)
-}
-
 fn file_owner(file: &Path) -> String {
     file.file_stem()
         .and_then(|stem| stem.to_str())
@@ -1006,161 +513,92 @@ fn file_owner(file: &Path) -> String {
         .to_string()
 }
 
-fn first_named_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
+pub(crate) fn first_named_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
     named_children(node)
         .into_iter()
         .find(|child| kinds.iter().any(|kind| *kind == child.kind()))
         .map(|child| node_text(child, source).to_string())
 }
 
-fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
+pub(crate) fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = node.walk();
     let child = node.named_children(&mut cursor).next();
     child
 }
 
-fn last_named_child(node: Node<'_>) -> Option<Node<'_>> {
-    named_children(node).into_iter().last()
-}
-
-fn first_named_child_except<'tree>(node: Node<'tree>, excluded_kind: &str) -> Option<Node<'tree>> {
+pub(crate) fn first_named_child_except<'tree>(
+    node: Node<'tree>,
+    excluded_kind: &str,
+) -> Option<Node<'tree>> {
     named_children(node)
         .into_iter()
         .find(|child| child.kind() != excluded_kind)
 }
 
-fn first_named_child_with_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+pub(crate) fn first_named_child_with_kind<'tree>(
+    node: Node<'tree>,
+    kind: &str,
+) -> Option<Node<'tree>> {
     named_children(node)
         .into_iter()
         .find(|child| child.kind() == kind)
 }
 
-fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+pub(crate) fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor).collect()
 }
 
-fn first_child_kind(node: Node<'_>) -> Option<&str> {
+pub(crate) fn first_child_kind(node: Node<'_>) -> Option<&str> {
     let mut cursor = node.walk();
     let kind = node.children(&mut cursor).next().map(|child| child.kind());
     kind
 }
 
-fn previous_sibling_text(node: Node<'_>, source: &str) -> Option<String> {
+pub(crate) fn previous_sibling_text(node: Node<'_>, source: &str) -> Option<String> {
     node.prev_sibling()
         .map(|sibling| node_text(sibling, source).to_string())
 }
 
-fn previous_sibling_raw_text(node: Node<'_>) -> Option<String> {
+pub(crate) fn previous_sibling_raw_text(node: Node<'_>) -> Option<String> {
     node.prev_sibling()
         .map(|sibling| sibling.kind().to_string())
 }
 
-fn next_sibling_raw_text(node: Node<'_>) -> Option<String> {
+pub(crate) fn next_sibling_raw_text(node: Node<'_>) -> Option<String> {
     node.next_sibling()
         .map(|sibling| sibling.kind().to_string())
 }
 
-fn member_field_text(field: Node<'_>, source: &str) -> Option<String> {
-    if field.kind() == "navigation_suffix" {
-        let suffix = field
-            .child_by_field_name("suffix")
-            .or_else(|| {
-                named_children(field).into_iter().find(|child| {
-                    matches!(
-                        child.kind(),
-                        "identifier"
-                            | "simple_identifier"
-                            | "field_identifier"
-                            | "property_identifier"
-                    )
-                })
-            })
-            .or_else(|| last_named_child(field))?;
-        let text = node_text(suffix, source)
-            .trim_start_matches(['.', '?'])
-            .trim_start_matches("->");
-        return (!text.is_empty()).then(|| text.to_string());
-    }
-
-    Some(
-        node_text(field, source)
-            .trim_start_matches(['.', '?'])
-            .trim_start_matches("->")
-            .to_string(),
-    )
-}
-
-fn strip_assignment_suffix(text: &str) -> String {
+pub(crate) fn strip_assignment_suffix(text: &str) -> String {
     text.strip_suffix('=').unwrap_or(text).to_string()
 }
 
-fn case_node(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "case"
-            | "when_expression"
-            | "switch_statement"
-            | "switch_expression"
-            | "match_statement"
-            | "match_expression"
-    )
-}
-
-fn case_source_node<'tree>(node: Node<'tree>, profile: &dyn LanguageProfile) -> Node<'tree> {
-    if !profile.hidden_case(node) {
-        return node;
-    }
-    let mut cursor = node.walk();
-    let result = node
-        .children(&mut cursor)
-        .find(|child| child.kind() == "case")
-        .unwrap_or(node);
-    result
+fn case_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.case_node_kinds().contains(&node.kind())
 }
 
 fn case_patterns(node: Node<'_>, source: &str, profile: &dyn LanguageProfile) -> Vec<String> {
-    let mut out = case_arms(node)
+    let mut out = case_arms(profile, node)
         .into_iter()
         .flat_map(|arm| case_arm_patterns(arm, source, profile))
-        .filter(|pattern| !default_case_pattern(pattern))
+        .filter(|pattern| !default_case_pattern(profile, pattern))
         .collect::<Vec<_>>();
     out.sort();
     out.dedup();
     out
 }
 
-fn case_arms(node: Node<'_>) -> Vec<Node<'_>> {
+fn case_arms<'tree>(profile: &dyn LanguageProfile, node: Node<'tree>) -> Vec<Node<'tree>> {
     let mut arms = Vec::new();
     let mut stack = named_children(node);
     while let Some(child) = stack.pop() {
-        if matches!(
-            child.kind(),
-            "when"
-                | "switch_case"
-                | "case_clause"
-                | "expression_case"
-                | "case_statement"
-                | "switch_section"
-                | "switch_block_statement_group"
-                | "switch_entry"
-                | "when_entry"
-                | "match_arm"
-        ) {
+        if profile.case_arm_node_kinds().contains(&child.kind()) {
             arms.push(child);
-        } else if !matches!(
-            child.kind(),
-            "method"
-                | "function_definition"
-                | "function_declaration"
-                | "method_definition"
-                | "method_declaration"
-                | "function_item"
-                | "class"
-                | "module"
-                | "class_definition"
-                | "class_declaration"
-        ) {
+        } else if !profile
+            .case_container_stop_node_kinds()
+            .contains(&child.kind())
+        {
             stack.extend(named_children(child));
         }
     }
@@ -1169,96 +607,44 @@ fn case_arms(node: Node<'_>) -> Vec<Node<'_>> {
 }
 
 fn case_arm_patterns(child: Node<'_>, source: &str, profile: &dyn LanguageProfile) -> Vec<String> {
-    match child.kind() {
-        "when" | "match_arm" => {
-            let mut patterns = named_children(child)
-                .into_iter()
-                .filter(|node| matches!(node.kind(), "pattern" | "case_pattern" | "match_pattern"))
-                .collect::<Vec<_>>();
-            if patterns.is_empty() {
-                patterns = child
-                    .child_by_field_name("pattern")
-                    .or_else(|| first_named_child(child))
-                    .into_iter()
-                    .collect();
-            }
-            profile.case_pattern_texts(&patterns, source)
-        }
-        "switch_case"
-        | "case_clause"
-        | "expression_case"
-        | "case_statement"
-        | "switch_section"
-        | "switch_block_statement_group"
-        | "switch_entry"
-        | "when_entry" => {
-            if node_text(child, source).trim_start().starts_with("else") {
-                return Vec::new();
-            }
-            let value = child
-                .child_by_field_name("value")
-                .or_else(|| child.child_by_field_name("pattern"))
-                .or_else(|| {
-                    named_children(child)
-                        .into_iter()
-                        .find(|candidate| candidate.kind() == "when_condition")
-                })
-                .or_else(|| {
-                    named_children(child)
-                        .into_iter()
-                        .find(|candidate| candidate.kind() == "switch_pattern")
-                })
-                .or_else(|| first_named_child(child));
-            value
-                .filter(|node| !node.kind().contains("statement") && !node.kind().contains("block"))
-                .map(|node| vec![normalize_text(node_text(node, source))])
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn ruby_case_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {
-    if patterns.is_empty() {
+    if !profile.case_arm_node_kinds().contains(&child.kind()) {
         return Vec::new();
     }
-    let texts = patterns
-        .iter()
-        .map(|pattern| normalize_text(node_text(*pattern, source)))
+    if node_text(child, source).trim_start().starts_with("else") {
+        return Vec::new();
+    }
+
+    let patterns = named_children(child)
+        .into_iter()
+        .filter(|node| profile.case_pattern_node_kinds().contains(&node.kind()))
         .collect::<Vec<_>>();
-    if !texts.iter().any(|text| text.starts_with('*')) {
-        return texts;
+    if !patterns.is_empty() {
+        return profile.case_pattern_texts(&patterns, source);
     }
 
-    let mut out = Vec::new();
-    let mut pending_plain = Vec::new();
-    for (index, text) in texts.iter().enumerate() {
-        if text.starts_with('*') {
-            if !pending_plain.is_empty() {
-                out.push(pending_plain.join(", "));
-                pending_plain.clear();
-            }
-            if texts.len() == 1 || index > 0 {
-                out.push(text.trim_start_matches('*').to_string());
-            } else {
-                out.push(text.clone());
-            }
-        } else {
-            pending_plain.push(text.clone());
-        }
-    }
-    if !pending_plain.is_empty() {
-        out.push(pending_plain.join(", "));
-    }
-    out
+    let value = child
+        .child_by_field_name("value")
+        .or_else(|| child.child_by_field_name("pattern"))
+        .or_else(|| {
+            named_children(child).into_iter().find(|candidate| {
+                profile
+                    .case_pattern_node_kinds()
+                    .contains(&candidate.kind())
+            })
+        })
+        .or_else(|| first_named_child(child));
+    value
+        .filter(|node| !node.kind().contains("statement") && !node.kind().contains("block"))
+        .map(|node| vec![normalize_text(node_text(node, source))])
+        .unwrap_or_default()
 }
 
-fn default_case_pattern(text: &str) -> bool {
-    matches!(text, "" | "_" | "default")
+fn default_case_pattern(profile: &dyn LanguageProfile, text: &str) -> bool {
+    text.is_empty() || profile.default_case_patterns().contains(&text)
 }
 
-fn decision_predicate(node: Node<'_>, source: &str) -> String {
-    let target = decision_subject(node);
+fn decision_predicate(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> String {
+    let target = profile.decision_subject(node);
     normalize_text(
         target
             .map(|child| node_text(child, source))
@@ -1266,100 +652,34 @@ fn decision_predicate(node: Node<'_>, source: &str) -> String {
     )
 }
 
-fn decision_subject(node: Node<'_>) -> Option<Node<'_>> {
-    node.child_by_field_name("value")
-        .or_else(|| node.child_by_field_name("subject"))
-        .or_else(|| {
-            named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "when_subject")
-        })
-        .or_else(|| node.child_by_field_name("condition"))
-        .or_else(|| {
-            named_children(node).into_iter().find(|child| {
-                !matches!(
-                    child.kind(),
-                    "when"
-                        | "switch_case"
-                        | "case_clause"
-                        | "expression_case"
-                        | "case_statement"
-                        | "switch_section"
-                        | "switch_block_statement_group"
-                        | "switch_entry"
-                        | "when_entry"
-                        | "match_arm"
-                        | "else"
-                        | "then"
-                        | "comment"
-                )
-            })
-        })
-}
-
-fn boolean_container(node: Node<'_>) -> bool {
-    if matches!(
-        node.kind(),
-        "binary" | "binary_expression" | "boolean_operator"
-    ) {
-        return true;
-    }
-    if parenthesized_wrapper(node) {
+fn boolean_and(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
+    if profile.parenthesized_wrapper(node) {
         return first_named_child(node)
-            .map(boolean_container)
+            .map(|child| boolean_and(profile, child, source))
             .unwrap_or(false);
     }
-    if !matches!(
-        node.kind(),
-        "body_statement" | "block_body" | "statement" | "pattern" | "argument_list"
-    ) {
-        return false;
-    }
-    if !matches!(direct_operator(node).as_str(), "&&" | "and") {
-        return false;
-    }
-    if named_children(node).len() < 2 {
-        return false;
-    }
-    let mut cursor = node.walk();
-    let result = node
-        .children(&mut cursor)
-        .all(|child| child.is_named() || matches!(child.kind(), "&&" | "and" | "(" | ")"));
-    result
+    profile
+        .boolean_and_operators()
+        .contains(&direct_operator_from_source(node, source).as_str())
 }
 
-fn boolean_and(node: Node<'_>, source: &str) -> bool {
-    if parenthesized_wrapper(node) {
-        return first_named_child(node)
-            .map(|child| boolean_and(child, source))
-            .unwrap_or(false);
-    }
-    matches!(
-        direct_operator_from_source(node, source).as_str(),
-        "&&" | "and"
-    )
-}
-
-fn flatten_boolean_and<'tree>(node: Node<'tree>, source: &str) -> Vec<Node<'tree>> {
-    if !(boolean_container(node) && boolean_and(node, source)) {
+fn flatten_boolean_and<'tree>(
+    profile: &dyn LanguageProfile,
+    node: Node<'tree>,
+    source: &str,
+) -> Vec<Node<'tree>> {
+    if !(profile.boolean_container(node) && boolean_and(profile, node, source)) {
         return vec![node];
     }
-    if parenthesized_wrapper(node) {
+    if profile.parenthesized_wrapper(node) {
         return first_named_child(node)
-            .map(|child| flatten_boolean_and(child, source))
+            .map(|child| flatten_boolean_and(profile, child, source))
             .unwrap_or_else(|| vec![node]);
     }
     named_children(node)
         .into_iter()
-        .flat_map(|child| flatten_boolean_and(child, source))
+        .flat_map(|child| flatten_boolean_and(profile, child, source))
         .collect()
-}
-
-fn parenthesized_wrapper(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "parenthesized_statements" | "parenthesized_expression"
-    ) && named_children(node).len() == 1
 }
 
 fn conjunction_span(node: Node<'_>) -> [usize; 4] {
@@ -1405,7 +725,7 @@ fn enclosing_parentheses_wrap_all(text: &str) -> bool {
     depth == 0
 }
 
-fn direct_operator(node: Node<'_>) -> String {
+pub(crate) fn direct_operator(node: Node<'_>) -> String {
     let mut cursor = node.walk();
     let result = node
         .children(&mut cursor)
@@ -1537,54 +857,13 @@ mod c_tests {
     #[test]
     fn test_c_assignment() {
         let mut file = NamedTempFile::new().unwrap();
-        file.write_all(b"typedef struct Node { int storage; } Node; void node_set(Node* node) { node->storage = 1; }")
+        file.write_all(b"typedef struct Node { int storage; } Node; void node_set(Node* self) { self->storage = 1; }")
             .unwrap();
         let doc = parse_file(file.path().to_path_buf(), Language::C).unwrap();
         assert_eq!(doc.function_defs[0].owner, "Node");
         assert_eq!(doc.state_writes[0].receiver, "self");
         assert_eq!(doc.state_writes[0].field, "storage");
     }
-}
-
-fn first_argument_receiver_parameter(node: Node<'_>, source: &str) -> Option<(String, String)> {
-    let params = node
-        .child_by_field_name("declarator")
-        .and_then(|d| d.child_by_field_name("parameters"))
-        .or_else(|| node.child_by_field_name("parameters"))
-        .or_else(|| first_named_child_with_kind(node, "parameter_list"))
-        .or_else(|| {
-            node.child_by_field_name("declarator")
-                .and_then(|d| first_named_child_with_kind(d, "parameter_list"))
-        })?;
-
-    let first = first_named_child_with_kind(params, "parameter_declaration")?;
-
-    let type_node = named_children(first).into_iter().find(|child| {
-        matches!(
-            child.kind(),
-            "type_identifier"
-                | "primitive_type"
-                | "qualified_identifier"
-                | "scoped_type_identifier"
-        )
-    })?;
-
-    let name = named_children(first)
-        .into_iter()
-        .rev()
-        .find(|child| matches!(child.kind(), "identifier" | "field_identifier"))
-        .map(|child| node_text(child, source).to_string())
-        .or_else(|| declarator_name(Some(first), source))?;
-
-    Some((node_text(type_node, source).to_string(), name))
-}
-
-fn snake_case_type_name(type_str: &str) -> String {
-    let mut parts = type_str.split("::");
-    let mut last = parts.last().unwrap_or(type_str).to_string();
-    // Simplified snake casing logic
-    last.make_ascii_lowercase();
-    last
 }
 
 fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Target {
