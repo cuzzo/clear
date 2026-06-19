@@ -105,7 +105,7 @@ module NilKill
 
     def non_ruby_target?(target)
       path = File.expand_path(target, NilKill::ROOT)
-      exts = Decomplex::Syntax.supported_exts(parser: "tree_sitter") - [".rb"]
+      exts = FactMine::Syntax.supported_exts(parser: "tree_sitter") - [".rb"]
       if File.directory?(path)
         Dir.glob(File.join(path, "**", "*")).any? { |file| File.file?(file) && exts.include?(File.extname(file).downcase) }
       else

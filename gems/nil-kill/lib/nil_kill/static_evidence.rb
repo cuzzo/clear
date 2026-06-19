@@ -3,23 +3,26 @@
 
 require "open3"
 
-sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
-if File.file?("#{sibling_decomplex}/source_filter.rb") && File.file?("#{sibling_decomplex}/syntax.rb")
-  require "#{sibling_decomplex}/ast"
-  require "#{sibling_decomplex}/source_filter"
-  require "#{sibling_decomplex}/syntax"
+sibling_fact_mine = File.expand_path("../../../fact-mine/lib/fact_mine", __dir__)
+if File.file?("#{sibling_fact_mine}/syntax.rb")
+  require "#{sibling_fact_mine}/syntax"
 else
-  require "decomplex/ast"
+  require "fact_mine/syntax"
+end
+
+sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
+if File.file?("#{sibling_decomplex}/source_filter.rb")
+  require "#{sibling_decomplex}/source_filter"
+else
   require "decomplex/source_filter"
-  require "decomplex/syntax"
 end
 require_relative "alias_recommendations"
-require_relative "decomplex_static_facts"
+require_relative "fact_mine_static_facts"
 
 module NilKill
   # Static, language-neutral evidence for Espalier. This intentionally avoids
   # Nil-Kill's Ruby runtime/Sorbet inference path and consumes the shared
-  # Tree-sitter facts exposed by Decomplex.
+  # Tree-sitter facts mined by FactMine.
   class StaticEvidence
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil)
       new(targets, root: root, language: language, vcs: vcs).build
@@ -54,8 +57,8 @@ module NilKill
       files = target_files
 
       files.each do |file|
-        doc = Decomplex::Syntax.parse(file, parser: "tree_sitter", language: @language)
-        facts = doc.static_facts(root: @root)
+        doc = FactMine::Syntax.parse(file, parser: "tree_sitter", language: @language)
+        facts = static_facts_for(doc)
         methods.concat(facts.fetch(:methods, []))
         fields.concat(facts.fetch(:fields, []))
         struct_declarations.concat(facts.fetch(:struct_declarations, []))
@@ -200,7 +203,7 @@ module NilKill
     end
 
     def target_files
-      exts = Decomplex::Syntax.supported_exts(parser: "tree_sitter")
+      exts = FactMine::Syntax.supported_exts(parser: "tree_sitter")
       return git_tracked_target_files(exts) if @vcs == :git
 
       target_dirs.flat_map do |target|
@@ -274,16 +277,15 @@ module NilKill
     end
 
     def file_language(file)
-      @language || Decomplex::Syntax.language_for(file)
+      @language || FactMine::Syntax.language_for(file)
     end
 
     def ruby_annotation_type_definitions(files)
       return [] unless ruby_annotation_index?(files)
 
       ruby_annotation_files.flat_map do |file|
-        Decomplex::Syntax.parse(file, parser: "tree_sitter", language: :ruby)
-                         .static_facts(root: @root)
-                         .fetch(:type_definitions, [])
+        static_facts_for(FactMine::Syntax.parse(file, parser: "tree_sitter", language: :ruby))
+          .fetch(:type_definitions, [])
       rescue LoadError
         raise
       rescue StandardError
@@ -345,6 +347,32 @@ module NilKill
       return :git if text == "git"
 
       raise ArgumentError, "unsupported --vcs=#{vcs}; supported values: git"
+    end
+
+    def static_facts_for(document)
+      FactMineStaticFacts.build(document, structural_facts_for(document), root: @root)
+    end
+
+    def structural_facts_for(document)
+      facts =
+        if document.respond_to?(:adapter) && document.adapter
+          document.adapter.structural_facts(document)
+        else
+          {
+            function_defs: document.function_defs,
+            owner_defs: document.owner_defs,
+            call_sites: document.call_sites,
+            state_declarations: document.state_declarations,
+            state_writes: document.state_writes,
+            state_reads: document.state_reads,
+            state_param_origins: document.state_param_origins,
+            local_methods: document.local_methods,
+          }
+        end
+
+      facts[:comparison_sites] = document.comparison_sites if document.respond_to?(:comparison_sites)
+      facts[:redundant_nil_guard_findings] = document.redundant_nil_guard_findings if document.respond_to?(:redundant_nil_guard_findings)
+      facts
     end
 
     def merge_set_map!(target, source)

@@ -33,7 +33,7 @@ module FactMine
       VARIABLE_DECLARATION_NODE_KINDS = %w[variable_declaration].freeze
       LOCAL_VARIABLE_DECLARATOR_NODE_KINDS = %w[variable_declarator].freeze
       DECLARATOR_NODE_KINDS = %w[variable_declaration variable_declarator].freeze
-      FIELD_DECLARATION_NODE_KINDS = %w[field_declaration].freeze
+      FIELD_DECLARATION_NODE_KINDS = %w[field_declaration property_declaration].freeze
       DECLARATION_SITE_PARENT_NODE_KINDS = %w[parameter variable_declarator method_declaration class_declaration].freeze
       ASSIGNMENT_NODE_KINDS = %w[assignment_expression].freeze
       ASSIGNMENT_STATE_DECLARATION_NODE_KINDS = %w[assignment_expression].freeze
@@ -73,6 +73,11 @@ module FactMine
       end
 
       def field_declaration_name_node(node)
+        if node.kind == "property_declaration"
+          name = node.named_children.find { |child| child.kind == "identifier" }
+          return name if name
+        end
+
         declaration = node.named_children.find { |child| child.kind == "variable_declaration" }
         declarator = declaration&.named_children&.find { |child| child.kind == "variable_declarator" }
         return named_field(declarator, "name") || declarator if declarator
@@ -90,6 +95,14 @@ module FactMine
           return nil if NOISE_MESSAGES.include?(field_text)
 
           return { receiver: normalize_text(object.text), field: field_text }
+        end
+
+        super
+      end
+
+      def declared_type_text(node, name_node)
+        if node.kind == "property_declaration"
+          return declared_type_before_name(node.text.to_s, node, name_node)
         end
 
         super

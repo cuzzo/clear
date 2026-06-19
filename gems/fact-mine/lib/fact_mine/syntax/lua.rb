@@ -81,6 +81,10 @@ module FactMine
         target
       end
 
+      def state_target(lhs)
+        lua_indexed_state_target(lhs) || super
+      end
+
       def generated_prelude?(document, node)
         return false unless line(node) == 1
 
@@ -180,9 +184,20 @@ module FactMine
         parent = parent_node(node)
         return nil unless parent && field_like_node?(parent)
 
+        if parent.kind == "method_index_expression"
+          return lua_method_target(parent, args)
+        end
+
         target_from_callee(parent).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
       rescue StandardError
         nil
+      end
+
+      def lua_indexed_state_target(lhs)
+        return nil unless lhs.kind == "variable_list"
+
+        target = lhs.named_children.find { |child| child.kind == "dot_index_expression" }
+        target && generic_state_target(target)
       end
 
       def lua_single_return_member_target(node)

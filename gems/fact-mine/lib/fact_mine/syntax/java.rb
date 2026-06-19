@@ -71,6 +71,15 @@ module FactMine
 
         params.named_children.filter_map { |param| parameter_name(param) }.uniq
       end
+
+      def field_declaration_name_node(node)
+        if node.kind == "field_declaration"
+          declarator = node.named_children.find { |child| child.kind == "variable_declarator" }
+          return declarator if declarator&.text.to_s.match?(/\A[A-Za-z_]\w*\z/)
+        end
+
+        super
+      end
     end
 
     class JavaSyntaxAdapter

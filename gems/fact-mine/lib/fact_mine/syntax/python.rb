@@ -104,6 +104,10 @@ module FactMine
         python_adjacent_call_target(node) || super
       end
 
+      def state_declaration(node)
+        python_typed_assignment_declaration(node) || super
+      end
+
       def state_read_target(node)
         return nil if python_hidden_assignment_parts(node) || python_annotation_lhs?(node)
 
@@ -297,10 +301,20 @@ module FactMine
 
           equal = next_sibling(type_node)
           rhs = next_sibling(equal)
-          return { lhs: node, rhs: rhs } if equal&.text.to_s == "=" && rhs
+          return { lhs: node, rhs: rhs, type: type_node } if equal&.text.to_s == "=" && rhs
         end
 
         nil
+      end
+
+      def python_typed_assignment_declaration(node)
+        parts = python_hidden_assignment_parts(node)
+        return nil unless parts && parts[:type]
+
+        target = state_target(parts.fetch(:lhs))
+        return nil unless target && self_receiver_names.include?(target[:receiver].to_s)
+
+        { field: target[:field], type: normalize_text(parts.fetch(:type).text) }
       end
 
       def python_annotation_lhs?(node)

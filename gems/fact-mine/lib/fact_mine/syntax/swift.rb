@@ -69,6 +69,30 @@ module FactMine
       NAVIGATION_SUFFIX_NODE_KINDS = %w[navigation_suffix].freeze
       FIELD_LIKE_NODE_KINDS = %w[navigation_expression directly_assignable_expression].freeze
       BLOCK_ARGUMENT_NODE_KINDS = [].freeze
+
+      private
+
+      def record_state_param_origin(document, node, stack, out)
+        return super unless node.kind == "assignment"
+
+        lhs, rhs = node.named_children
+        target = lhs && state_target(lhs)
+        return unless target && rhs
+        target = normalize_target_receiver(target, stack)
+
+        (current_params(stack) & [rhs.text.to_s]).each do |param|
+          out << StateParamOrigin.new(
+            field: target[:field],
+            receiver: target[:receiver],
+            owner: current_owner(document, stack),
+            param: param,
+            file: document.file,
+            function: current_function(stack),
+            line: line(node),
+            span: span(node)
+          )
+        end
+      end
     end
   end
 end

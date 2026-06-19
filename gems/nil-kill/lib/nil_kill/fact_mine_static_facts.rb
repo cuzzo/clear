@@ -4,8 +4,15 @@
 require "set"
 require "pathname"
 
-module Decomplex
-  module NilKillStaticFacts
+begin
+  require "fact_mine/syntax"
+rescue LoadError
+  $LOAD_PATH.unshift(File.expand_path("../../../fact-mine/lib", __dir__))
+  require "fact_mine/syntax"
+end
+
+module NilKill
+  module FactMineStaticFacts
     module_function
 
     def build(document, structural_facts, root: NilKill::ROOT)
@@ -49,15 +56,56 @@ module Decomplex
 
       private
 
+      def fact_document?
+        !@document.respond_to?(:adapter) || @document.adapter.nil?
+      end
+
+      def local_methods
+        Array(@facts[:local_methods])
+      end
+
+      def call_sites_for_method(fn)
+        Array(@facts[:call_sites]).select do |call|
+          call.function.to_s == fn.name.to_s && call.owner.to_s == method_owner(fn).to_s
+        end
+      end
+
+      def comparisons_for_method(fn)
+        Array(@facts[:comparison_sites]).select do |comparison|
+          comparison.function.to_s == fn.name.to_s && span_contains_line?(fn.span, comparison.line)
+        end
+      end
+
+      def statement_for_line(line)
+        statements_by_line[line.to_i]
+      end
+
+      def statement_source_for_line(line)
+        statement_for_line(line)&.source.to_s
+      end
+
+      def assignment_name_for_line(line)
+        statement_source_for_line(line).strip[/\A(@?[A-Za-z_]\w*)\s*=/, 1]
+      end
+
+      def statements_by_line
+        @statements_by_line ||= local_methods.each_with_object({}) do |method, index|
+          Array(method.statements).each do |statement|
+            (statement.line.to_i..statement.end_line.to_i).each { |line| index[line] ||= statement }
+          end
+        end
+      end
+
       def methods
         Array(@facts[:function_defs]).map do |fn|
           signature = method_signature(fn)
           owner = method_owner(fn)
+          kind = method_kind(fn, owner)
           {
-            "key" => [owner, fn.name.to_s, fn.kind.to_s],
+            "key" => [owner, fn.name.to_s, kind],
             "owner" => owner,
             "name" => fn.name.to_s,
-            "kind" => fn.kind.to_s,
+            "kind" => kind,
             "path" => rel(fn.file),
             "line" => fn.line,
             "span" => fn.span,
@@ -175,9 +223,52 @@ module Decomplex
         end
       end
 
+      def all_state_param_origins
+        @all_state_param_origins ||= begin
+          records = Array(@facts[:state_param_origins]) + derived_state_param_origins
+          records.uniq do |origin|
+            [origin.file.to_s, origin.owner.to_s, origin.function.to_s,
+              origin.field.to_s, origin.receiver.to_s, origin.param.to_s, origin.line.to_i]
+          end
+        end
+      end
+
+      def derived_state_param_origins
+        params_by_method = Array(@facts[:function_defs]).each_with_object({}) do |fn, index|
+          index[[method_owner(fn), fn.name.to_s]] = Array(fn.params).map(&:to_s).to_set
+        end
+
+        Array(@facts[:local_methods]).flat_map do |method|
+          params = params_by_method.fetch([method.owner.to_s, method.name.to_s], Set.new)
+          next [] if params.empty?
+
+          Array(method.statements).filter_map do |statement|
+            source = statement.source.to_s.strip
+            match = source.match(/\A(?:(@[A-Za-z_]\w*)|(?:self|this)\.([A-Za-z_]\w*))\s*=\s*(.+)\z/)
+            next unless match
+
+            rhs = match[3].to_s.strip
+            param = rhs[/\AT\.let\(\s*([A-Za-z_]\w*)\s*,/m, 1]
+            param ||= rhs if rhs.match?(/\A[A-Za-z_]\w*\z/)
+            next unless param && params.include?(param)
+
+            FactMine::Syntax::StateParamOrigin.new(
+              field: match[1] || match[2],
+              receiver: "self",
+              owner: method.owner.to_s,
+              param: param,
+              file: method.file,
+              function: method.name.to_s,
+              line: statement.line,
+              span: statement.span
+            )
+          end
+        end
+      end
+
       def state_param_origins(known_states)
         out = Hash.new { |hash, key| hash[key] = Set.new }
-        Array(@facts[:state_param_origins]).each do |origin|
+        all_state_param_origins.each do |origin|
           next unless owned_state?(origin, known_states[origin.owner.to_s])
           next if self_receiver_names.include?(origin.param.to_s)
 
@@ -188,7 +279,7 @@ module Decomplex
       end
 
       def state_param_origin_records(known_states)
-        Array(@facts[:state_param_origins]).filter_map do |origin|
+        all_state_param_origins.filter_map do |origin|
           next unless owned_state?(origin, known_states[origin.owner.to_s])
           next if self_receiver_names.include?(origin.param.to_s)
 
@@ -257,7 +348,10 @@ module Decomplex
         Array(@facts[:state_writes]).each do |write|
           out[write.owner.to_s].add(canonical_state_field(write.field, receiver: write.receiver))
         end
-        Array(@facts[:state_param_origins]).each do |origin|
+        Array(@facts[:state_reads]).each do |read|
+          out[read.owner.to_s].add(canonical_state_field(read.field, receiver: read.receiver))
+        end
+        all_state_param_origins.each do |origin|
           out[origin.owner.to_s].add(canonical_state_field(origin.field, receiver: origin.receiver))
         end
         out
@@ -275,7 +369,7 @@ module Decomplex
           type = declared_type_text(node, lhs)
           next if type.to_s.empty?
 
-          out << Decomplex::Syntax::StateDeclaration.new(
+          out << FactMine::Syntax::StateDeclaration.new(
             field: target.fetch(:field),
             owner: owner_for_line(node_line(node)),
             type: type,
@@ -284,8 +378,34 @@ module Decomplex
             span: node_span(node)
           )
         end
+        out.concat(tlet_state_declarations)
         out.concat(ruby_t_struct_state_declarations)
         out
+      end
+
+      def tlet_state_declarations
+        return [] unless @language == "ruby"
+
+        local_methods.flat_map do |method|
+          Array(method.statements).filter_map do |statement|
+            source = statement.source.to_s.strip
+            match = source.match(/\A(?:(@[A-Za-z_]\w*)|(?:self|this)\.([A-Za-z_]\w*))\s*=\s*T\.let\((.*)\)\z/m)
+            next unless match
+
+            args = NilKill.split_top_level(match[3])
+            type = args[1].to_s.strip
+            next if type.empty?
+
+            FactMine::Syntax::StateDeclaration.new(
+              field: match[1] || match[2],
+              owner: method.owner.to_s,
+              type: normalize_text(type),
+              file: method.file,
+              line: statement.line,
+              span: statement.span
+            )
+          end
+        end
       end
 
       def declared_states_by_owner(state_declarations)
@@ -295,10 +415,28 @@ module Decomplex
       end
 
       def method_signature(fn)
-        signature = fn.signature.to_s
+        signature = fn.respond_to?(:signature) ? fn.signature.to_s : ""
         return signature if @language != "ruby"
 
+        signature = ruby_signature_before_line(fn.line) if signature.empty?
         signature.strip.start_with?("sig ") ? signature : ""
+      end
+
+      def ruby_signature_before_line(line)
+        idx = line.to_i - 2
+        idx -= 1 while idx >= 0 && @document.lines[idx].to_s.strip.empty?
+        return "" if idx.negative?
+
+        start = idx
+        until start.zero? || @document.lines[start].to_s.strip.start_with?("sig")
+          text = @document.lines[start].to_s.strip
+          return "" if text.start_with?("def ", "class ", "module ")
+
+          start -= 1
+        end
+        return "" unless @document.lines[start].to_s.strip.start_with?("sig")
+
+        @document.lines[start..idx].join(" ").split.join(" ")
       end
 
       def method_source(signature)
@@ -699,6 +837,21 @@ module Decomplex
       def tlet_sites
         return [] unless @language == "ruby"
 
+        if fact_document?
+          return Array(@facts[:call_sites]).filter_map do |call|
+            next unless call.receiver.to_s == "T" && call.message.to_s == "let"
+
+            {
+              "path" => rel(call.file),
+              "line" => call.line,
+              "span" => call.span,
+              "name" => assignment_name_for_line(call.line),
+              "tlet" => true,
+              "type" => Array(call.arguments)[1].to_s.strip,
+            }
+          end
+        end
+
         sites = []
         walk_tree(@document.root) do |node|
           next unless node.kind.to_s == "call"
@@ -824,7 +977,7 @@ module Decomplex
           reason =
             if return_type == "T.noreturn"
               "declared T.noreturn"
-            elsif ruby_always_noreturn_body?(fn.body)
+            elsif ruby_always_noreturn_body?(fn.respond_to?(:body) ? fn.body : fn)
               "body cannot return normally"
             end
           next unless reason
@@ -938,6 +1091,8 @@ module Decomplex
       end
 
       def walk_method_calls(fn)
+        return call_sites_for_method(fn) if fact_document?
+
         calls = []
         walk_tree(fn.body) do |node|
           calls << node if node.kind.to_s == "call"
@@ -946,6 +1101,8 @@ module Decomplex
       end
 
       def walk_method_guard_nodes(fn)
+        return call_sites_for_method(fn) + comparisons_for_method(fn) if fact_document?
+
         nodes = []
         walk_tree(fn.body) do |node|
           nodes << node if %w[call binary].include?(node.kind.to_s)
@@ -1118,14 +1275,23 @@ module Decomplex
       end
 
       def branch_context_for(node)
+        source = statement_source_for_line(node_line(node)).strip
+        text = node_text(node)
+        if source.start_with?("unless ") || source.include?(" unless #{text}")
+          return { kind: "unless", inverted: true }
+        end
+        if source.start_with?("if ") || source.include?(" if #{text}")
+          return { kind: "if", inverted: false }
+        end
+
         parent = parent_node(node)
         while parent
-          text = node_text(parent)
+          parent_text = node_text(parent)
           kind = parent.kind.to_s
-          if kind == "unless" || text.start_with?("unless ")
+          if kind == "unless" || parent_text.start_with?("unless ")
             return { kind: "unless", inverted: true }
           end
-          if kind == "if" || text.start_with?("if ")
+          if kind == "if" || parent_text.start_with?("if ")
             return { kind: "if", inverted: false }
           end
           parent = parent_node(parent)
@@ -1264,7 +1430,7 @@ module Decomplex
       def self_receiver_names
         case @language
         when "python" then %w[self cls]
-        when "typescript", "javascript" then %w[this]
+        when "typescript", "javascript" then %w[self this]
         else %w[self this]
         end
       end
@@ -1354,31 +1520,63 @@ module Decomplex
         ruby_struct_owner_for_line(fn.line) || fn.owner.to_s
       end
 
+      def method_kind(fn, owner = method_owner(fn))
+        raw = fn.respond_to?(:kind) ? fn.kind.to_s : ""
+        return raw unless raw.empty?
+
+        owner.to_s.empty? || owner.to_s == "(top-level)" ? "function" : "method"
+      end
+
       def ruby_struct_definitions
         @ruby_struct_definitions ||= begin
-          definitions = []
-          walk_tree(@document.root) do |node|
-            next unless %w[assignment assignment_expression assignment_statement].include?(node.kind.to_s)
+          if fact_document?
+            ruby_struct_definitions_from_facts
+          else
+            definitions = []
+            walk_tree(@document.root) do |node|
+              next unless %w[assignment assignment_expression assignment_statement].include?(node.kind.to_s)
 
-            match = node_text(node).match(/\A([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
-            next unless match
+              match = node_text(node).match(/\A([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
+              next unless match
 
-            parent = lexical_owner_for_line(node_line(node)).to_s
-            owner = qualified_owner(parent, match[1])
-            fields = NilKill.split_top_level(match[2]).filter_map do |arg|
-              arg.strip[/\A:([A-Za-z_]\w*)\z/, 1]
+              parent = lexical_owner_for_line(node_line(node)).to_s
+              owner = qualified_owner(parent, match[1])
+              fields = NilKill.split_top_level(match[2]).filter_map do |arg|
+                arg.strip[/\A:([A-Za-z_]\w*)\z/, 1]
+              end
+              next if fields.empty?
+
+              definitions << {
+                owner: owner,
+                line: node_line(node),
+                span: node_span(node),
+                fields: fields,
+              }
             end
-            next if fields.empty?
-
-            definitions << {
-              owner: owner,
-              line: node_line(node),
-              span: node_span(node),
-              fields: fields,
-            }
+            definitions.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line), entry.fetch(:fields)] }
           end
-          definitions.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line), entry.fetch(:fields)] }
         end
+      end
+
+      def ruby_struct_definitions_from_facts
+        Array(@facts[:call_sites]).filter_map do |call|
+          next unless call.receiver.to_s == "Struct" && call.message.to_s == "new"
+
+          line = @document.lines[call.line.to_i - 1].to_s
+          match = line.match(/([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
+          next unless match
+
+          fields = Array(call.arguments).filter_map { |arg| arg.to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1] }
+          next if fields.empty?
+
+          parent = lexical_owner_for_line(call.line).to_s
+          {
+            owner: qualified_owner(parent, match[1]),
+            line: call.line,
+            span: call.span,
+            fields: fields,
+          }
+        end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line), entry.fetch(:fields)] }
       end
 
       def ruby_struct_owner_for_line(line)
@@ -1387,7 +1585,7 @@ module Decomplex
 
       def ruby_t_struct_state_declarations
         ruby_t_struct_fields.map do |field|
-          Decomplex::Syntax::StateDeclaration.new(
+          FactMine::Syntax::StateDeclaration.new(
             field: field.fetch(:name),
             owner: field.fetch(:owner),
             type: field.fetch(:type),
@@ -1402,25 +1600,47 @@ module Decomplex
         return [] unless @language == "ruby"
 
         @ruby_t_struct_fields ||= begin
-          fields = []
-          walk_tree(@document.root) do |node|
-            next unless node.kind.to_s == "call"
+          if fact_document?
+            Array(@facts[:call_sites]).filter_map do |call|
+              next unless %w[const prop].include?(call.message.to_s)
+              next unless call.receiver.to_s == "self"
 
-            match = node_text(node).match(/\A(?:const|prop)\s+:([A-Za-z_]\w*)\s*,\s*(.+?)\s*(?:do\b.*)?\z/m)
-            next unless match
+              name = Array(call.arguments)[0].to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1]
+              type = Array(call.arguments)[1].to_s.strip
+              next if name.to_s.empty? || type.empty?
 
-            owner = ruby_t_struct_owner_for_line(node_line(node))
-            next if owner.to_s.empty?
+              owner = ruby_t_struct_owner_for_line(call.line)
+              next if owner.to_s.empty?
 
-            fields << {
-              owner: owner,
-              name: match[1],
-              type: normalize_text(match[2]),
-              line: node_line(node),
-              span: node_span(node),
-            }
+              {
+                owner: owner,
+                name: name,
+                type: normalize_text(type),
+                line: call.line,
+                span: call.span,
+              }
+            end.uniq { |field| [field.fetch(:owner), field.fetch(:name), field.fetch(:line)] }
+          else
+            fields = []
+            walk_tree(@document.root) do |node|
+              next unless node.kind.to_s == "call"
+
+              match = node_text(node).match(/\A(?:const|prop)\s+:([A-Za-z_]\w*)\s*,\s*(.+?)\s*(?:do\b.*)?\z/m)
+              next unless match
+
+              owner = ruby_t_struct_owner_for_line(node_line(node))
+              next if owner.to_s.empty?
+
+              fields << {
+                owner: owner,
+                name: match[1],
+                type: normalize_text(match[2]),
+                line: node_line(node),
+                span: node_span(node),
+              }
+            end
+            fields.uniq { |field| [field.fetch(:owner), field.fetch(:name), field.fetch(:line)] }
           end
-          fields.uniq { |field| [field.fetch(:owner), field.fetch(:name), field.fetch(:line)] }
         end
       end
 
@@ -1428,19 +1648,32 @@ module Decomplex
         return [] unless @language == "ruby"
 
         @ruby_t_struct_containers ||= begin
-          containers = []
-          walk_tree(@document.root) do |node|
-            match = node_text(node).match(/\Aclass\s+([A-Z]\w*(?:::[A-Z]\w*)*)\s*<\s*T::Struct\b/m)
-            next unless match
+          if fact_document?
+            Array(@facts[:owner_defs]).filter_map do |owner|
+              line = @document.lines[owner.line.to_i - 1].to_s
+              next unless line.match?(/<\s*T::Struct\b/)
 
-            owner = declaration_owner_for_line(match[1], node_line(node))
-            containers << {
-              owner: owner,
-              line: node_line(node),
-              span: node_span(node),
-            }
+              {
+                owner: owner.name.to_s,
+                line: owner.line,
+                span: owner.span,
+              }
+            end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
+          else
+            containers = []
+            walk_tree(@document.root) do |node|
+              match = node_text(node).match(/\Aclass\s+([A-Z]\w*(?:::[A-Z]\w*)*)\s*<\s*T::Struct\b/m)
+              next unless match
+
+              owner = declaration_owner_for_line(match[1], node_line(node))
+              containers << {
+                owner: owner,
+                line: node_line(node),
+                span: node_span(node),
+              }
+            end
+            containers.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
           end
-          containers.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
         end
       end
 
@@ -1689,6 +1922,8 @@ module Decomplex
       end
 
       def node_line(node)
+        return node.line.to_i if node.respond_to?(:line)
+
         node_cache(node).fetch(:line) do
           node_cache(node)[:line] = node.start_point.row + 1
         end
@@ -1697,6 +1932,8 @@ module Decomplex
       end
 
       def node_span(node)
+        return node.span if node.respond_to?(:span)
+
         node_cache(node).fetch(:span) do
           node_cache(node)[:span] = [node.start_point.row + 1, node.start_point.column, node.end_point.row + 1, node.end_point.column]
         end
@@ -1705,11 +1942,32 @@ module Decomplex
       end
 
       def node_text(node)
+        return "" unless node
+        return node.source.to_s.strip if node.respond_to?(:source) && !node.source.to_s.empty?
+        return node.canon_source.to_s.strip if node.respond_to?(:canon_source) && !node.canon_source.to_s.empty?
+        return fact_call_text(node) if node.respond_to?(:message) && node.respond_to?(:receiver)
+        return method_body_text(node) if node.respond_to?(:name) && node.respond_to?(:span) && !node.respond_to?(:text)
+        return node.text.to_s.strip if node.respond_to?(:text)
+        return node.raw.to_s.strip if node.respond_to?(:raw) && !node.raw.to_s.empty?
+
         node_cache(node).fetch(:text) do
           node_cache(node)[:text] = node&.text.to_s.strip
         end
       rescue StandardError
         ""
+      end
+
+      def fact_call_text(call)
+        receiver = call.receiver.to_s
+        message = call.message.to_s
+        sep = call.respond_to?(:safe_navigation) && call.safe_navigation ? "&." : "."
+        args = Array(call.arguments).map(&:to_s)
+        suffix = args.empty? ? "" : "(#{args.join(", ")})"
+        receiver.empty? || receiver == "self" ? "#{message}#{suffix}" : "#{receiver}#{sep}#{message}#{suffix}"
+      end
+
+      def method_body_text(fn)
+        method_body_lines(fn).map { |_line_no, raw| raw }.join("\n")
       end
 
       def normalize_text(text)
@@ -1722,26 +1980,4 @@ module Decomplex
     end
   end
 
-  module Ast
-    class TreeSitterNormalizer
-      def nil_kill_static_facts(structural_facts, root: NilKill::ROOT)
-        Decomplex::NilKillStaticFacts.build(@document, structural_facts, root: root)
-      end
-    end
-  end
-
-  module Syntax
-    class Document
-      def static_facts(root: NilKill::ROOT)
-        @static_facts ||= {}
-        @static_facts[root] ||= adapter.static_facts(self, root: root)
-      end
-    end
-
-    class TreeSitterAdapter
-      def static_facts(document, root: NilKill::ROOT)
-        Decomplex::Ast::TreeSitterNormalizer.new(document).nil_kill_static_facts(structural_facts(document), root: root)
-      end
-    end
-  end
 end

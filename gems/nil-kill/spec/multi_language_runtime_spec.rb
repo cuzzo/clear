@@ -4,7 +4,7 @@ require_relative "spec_helper"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
   def require_tree_sitter_language!(language)
-    Decomplex::Syntax::TreeSitterAdapter.new.send(:parser_for, language)
+    FactMine::Syntax::TreeSitterAdapter.new.send(:parser_for, language)
   end
 
   it "publishes language provider capabilities for Ruby, Python, TypeScript, Lua, Go, Rust, Zig, C, C++, C#, Java, Kotlin, and Swift" do
@@ -83,7 +83,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "uses the Decomplex extension for Python Tree-sitter static evidence" do
+  it "uses the FactMine extension for Python Tree-sitter static evidence" do
     require_tree_sitter_language!(:python)
 
     Dir.mktmpdir("nil-kill-python-static", NilKill::ROOT) do |dir|
@@ -169,7 +169,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(maybe_findings.map { |finding| finding["kind"] }).to include("nullable_signature")
   end
 
-  it "uses the Decomplex extension for TypeScript Tree-sitter static evidence" do
+  it "uses the FactMine extension for TypeScript Tree-sitter static evidence" do
     require_tree_sitter_language!(:typescript)
 
     Dir.mktmpdir("nil-kill-typescript-static", NilKill::ROOT) do |dir|
@@ -326,7 +326,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "uses the Decomplex extension for Lua Tree-sitter static evidence" do
+  it "uses the FactMine extension for Lua Tree-sitter static evidence" do
     require_tree_sitter_language!(:lua)
 
     Dir.mktmpdir("nil-kill-lua-static", NilKill::ROOT) do |dir|

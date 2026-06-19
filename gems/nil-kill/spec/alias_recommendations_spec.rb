@@ -70,10 +70,10 @@ RSpec.describe NilKill::AliasRecommendations do
   end
 end
 
-RSpec.describe Decomplex::NilKillStaticFacts do
+RSpec.describe NilKill::FactMineStaticFacts do
   FakeDocument = Struct.new(:language, :file, :lines, :root, keyword_init: true)
 
-  it "extracts Sorbet type aliases through the Decomplex extension" do
+  it "extracts Sorbet type aliases through the Nil-kill FactMine fact provider" do
     document = FakeDocument.new(lines: [
       "module Demo\n",
       "  RawBody = T.type_alias { T::Array[AST::Node] }\n",
