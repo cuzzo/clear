@@ -46,6 +46,83 @@ module Decomplex
       BINARY_WRAPPER_KINDS = %w[
         binary binary_expression binary_operator boolean_operator comparison_operator
       ].freeze
+      CLASS_KINDS = %w[class class_definition class_declaration class_specifier].freeze
+      COMMON_ASSIGNMENT_OPERATORS = %w[= += -= *= /= %=].freeze
+      RUBY_ASSIGNMENT_OPERATORS = (COMMON_ASSIGNMENT_OPERATORS + %w[**= &&= ||= &= |= ^= <<= >>=]).freeze
+      PYTHON_ASSIGNMENT_OPERATORS = (COMMON_ASSIGNMENT_OPERATORS + %w[//= **= @= &= |= ^= <<= >>= :=]).freeze
+      LUA_ASSIGNMENT_OPERATORS = %w[=].freeze
+      TYPESCRIPT_ASSIGNMENT_OPERATORS = (
+        COMMON_ASSIGNMENT_OPERATORS + %w[**= <<= >>= >>>= &= |= ^= &&= ||= ??=]
+      ).freeze
+      OPERATOR_CALL_OPERATORS = %w[+ - * / % ** | & ^ << >> =~ !~].freeze
+      BOOLEAN_EXPRESSION_KINDS = %w[binary binary_expression boolean_operator].freeze
+      COMPARISON_EXPRESSION_KINDS = %w[binary binary_expression comparison_operator].freeze
+      DOTTED_EXPRESSION_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
+      PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS = (DOTTED_EXPRESSION_WRAPPER_KINDS + %w[expression_statement]).freeze
+      LITERAL_CONTAINER_KINDS = %w[string delimited_symbol regex regex_literal].freeze
+      LITERAL_FRAGMENT_KINDS = %w[string_content escape_sequence interpolation string_fragment].freeze
+      CASE_ARGUMENT_WHEN_KINDS = %w[
+        when switch_case case_clause expression_case case_statement switch_section
+        switch_block_statement_group switch_entry when_entry match_arm
+      ].freeze
+      CASE_ELSE_KINDS = %w[else switch_default].freeze
+      CASE_DEFAULT_PATTERN_KINDS = %w[case_pattern match_pattern pattern].freeze
+      ADAPTER_FUNCTION_KINDS = %w[
+        method function_definition function_declaration method_definition
+        method_declaration function_item singleton_method
+      ].freeze
+      STATEMENT_BLOCK_PARENT_KINDS = %w[
+        method_declaration constructor_declaration function_declaration function_body
+        if_statement while_statement for_statement enhanced_for_statement try_statement
+        catch_clause finally_clause do_statement lambda_expression
+      ].freeze
+      IDENTIFIER_KINDS = %w[
+        identifier simple_identifier property_identifier field_identifier shorthand_property_identifier
+      ].freeze
+      LEADING_FUNCTION_WRAPPER_KINDS = %w[body_statement statement].freeze
+      PYTHON_LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
+      LUA_LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
+      OWNER_STATEMENT_NESTED_KIND = %w[class class_definition class_declaration module].freeze
+      LEADING_OWNER_WRAPPER_KINDS = %w[body_statement statement].freeze
+      PYTHON_LEADING_OWNER_WRAPPER_KINDS = %w[block].freeze
+      IF_NODE_KINDS = %w[if if_statement if_modifier unless unless_modifier if_expression conditional].freeze
+      LEADING_IF_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
+      PYTHON_LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+      LUA_LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+      LEADING_CASE_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
+      LEADING_LOOP_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
+      RESCUE_BODY_WRAPPER_KINDS = %w[body_statement block_body statement].freeze
+      ENSURE_BODY_WRAPPER_KINDS = %w[body_statement block_body statement].freeze
+      ARRAY_LITERAL_WRAPPER_KINDS = %w[
+        body_statement block block_body statement argument_list expression_statement
+      ].freeze
+      ARRAY_LITERAL_NODE_KINDS = %w[array list].freeze
+      ELEMENT_REFERENCE_WRAPPER_KINDS = %w[
+        body_statement block block_body statement expression_statement expression_list
+      ].freeze
+      ELEMENT_REFERENCE_NODE_KINDS = %w[
+        element_reference subscript subscript_expression bracket_index_expression
+      ].freeze
+      HASH_LITERAL_WRAPPER_KINDS = %w[
+        body_statement block block_body statement argument_list expression_statement parenthesized_expression
+      ].freeze
+      HASH_LITERAL_NODE_KINDS = %w[hash dictionary object table_constructor].freeze
+      EMPTY_BODY_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
+      HEREDOC_BODY_WRAPPER_KINDS = %w[body_statement block_body statement then].freeze
+      INTERPOLATED_STATEMENT_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
+      CONCATENATED_STRING_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
+      PYTHON_CONCATENATED_STRING_WRAPPER_KINDS = (CONCATENATED_STRING_WRAPPER_KINDS + %w[block expression_statement]).freeze
+      CONCATENATED_STRING_NODE_KINDS = %w[chained_string concatenated_string].freeze
+      UNWRAP_KINDS = %w[
+        parenthesized_expression parenthesized_statements expression_statement statement
+        case_pattern match_pattern pattern
+      ].freeze
+      PYTHON_BODY_FIELD_KINDS = %w[
+        elif_clause else_clause for_statement function_definition if_statement
+        try_statement while_statement with_statement
+      ].freeze
+      QUESTION_COLON_TERNARY_KINDS = %w[body_statement block_body statement argument_list conditional].freeze
+      TYPESCRIPT_TERNARY_KINDS = (QUESTION_COLON_TERNARY_KINDS + %w[ternary_expression]).freeze
 
       class << self
         def for(document)
@@ -98,12 +175,560 @@ module Decomplex
         direct_binary_operator(node).to_s
       end
 
+      def class_node?(node)
+        CLASS_KINDS.include?(node.kind)
+      end
+
+      def unwrap_node?(node)
+        UNWRAP_KINDS.include?(node.kind) && node.named_children.size == 1
+      end
+
+      def interpolated_string?(node)
+        node.kind == "string" && node.named_children.any? { |child| child.kind == "interpolation" }
+      end
+
+      def lambda_expression?(node)
+        !lambda_target(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def lambda_target(node)
+        return node if node.kind == "lambda"
+
+        nil
+      rescue StandardError
+        nil
+      end
+
+      def interpolation_node?(node)
+        node.kind == "interpolation"
+      rescue StandardError
+        false
+      end
+
+      def instance_variable?(node)
+        node.kind == "instance_variable"
+      rescue StandardError
+        false
+      end
+
+      def global_variable?(node)
+        node.kind == "global_variable"
+      rescue StandardError
+        false
+      end
+
+      def member_assignment_target?(_node)
+        false
+      end
+
+      def identifier_text_node?(_node)
+        false
+      end
+
+      def literal_fragment_assignment_context?(node)
+        parent = node.parent
+        return false unless parent.respond_to?(:kind)
+        return true if literal_container_kind?(parent)
+
+        literal_fragment_kind?(node) &&
+          parent.parent.respond_to?(:kind) &&
+          literal_container_kind?(parent.parent)
+      rescue StandardError
+        false
+      end
+
+      def assignment_operator?(text)
+        assignment_operators.include?(text.to_s)
+      end
+
+      def named_field(node, name)
+        node.child_by_field_name(name)
+      rescue StandardError
+        nil
+      end
+
+      def safe_navigation_call?(node)
+        node.children.any? { |child| !child.named? && child.text == "&." }
+      rescue StandardError
+        false
+      end
+
+      def ternary_statement?(node)
+        !ternary_parts(node).nil?
+      end
+
+      def ternary_parts(node)
+        question_colon_ternary_parts(node, QUESTION_COLON_TERNARY_KINDS)
+      end
+
+      def case_argument_list?(_node)
+        false
+      end
+
+      def case_arm?(node)
+        case_arm_kind?(node) && !case_else_arm?(node)
+      rescue StandardError
+        false
+      end
+
+      def case_else_node(node)
+        stack = node.named_children.dup
+        until stack.empty?
+          child = stack.shift
+          next unless child.respond_to?(:kind)
+
+          return child if case_else_node?(child)
+          next if case_arm_kind?(child)
+
+          stack.concat(child.named_children) unless adapter_function_kind?(child)
+        end
+
+        nil
+      rescue StandardError
+        nil
+      end
+
+      def case_else_arm?(_node)
+        false
+      end
+
+      def case_else_node?(node)
+        CASE_ELSE_KINDS.include?(node&.kind) || case_else_arm?(node)
+      rescue StandardError
+        false
+      end
+
+      def leading_function_statement?(node)
+        leading_function_statement_with_keyword?(node, "def", LEADING_FUNCTION_WRAPPER_KINDS)
+      end
+
+      def leading_function_name(node)
+        node.named_children.find { |child| identifier_kind?(child) }&.text
+      rescue StandardError
+        nil
+      end
+
+      def leading_function_body(node)
+        node.named_children.reverse.find { |child| child.kind == "body_statement" }
+      rescue StandardError
+        nil
+      end
+
+      def leading_owner_statement?(node)
+        target = leading_owner_target(node)
+        return false unless target
+
+        %w[class module].include?(target.children.first&.kind.to_s) &&
+          target.named_children.size >= 2 &&
+          !OWNER_STATEMENT_NESTED_KIND.include?(target.named_children.first.kind)
+      rescue StandardError
+        false
+      end
+
+      def leading_owner_target(node)
+        node if LEADING_OWNER_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def leading_if_statement?(node)
+        target = leading_if_target(node)
+        return false unless target
+
+        !!(
+          %w[if unless].include?(target.children.first&.kind.to_s) &&
+          target.named_children.size >= 2 &&
+          !IF_NODE_KINDS.include?(target.named_children.first.kind)
+        )
+      rescue StandardError
+        false
+      end
+
+      def leading_if_target(node)
+        node if LEADING_IF_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def leading_case_statement?(node)
+        target = leading_case_target(node)
+        return false unless target
+
+        %w[case match switch].include?(target.children.first&.kind.to_s) && case_arm_descendant?(target)
+      rescue StandardError
+        false
+      end
+
+      def leading_case_target(node)
+        node if LEADING_CASE_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def leading_loop_statement?(node)
+        target = leading_loop_target(node)
+        return false unless target
+
+        !target.children.first&.named? &&
+          %w[while until].include?(target.children.first&.kind.to_s) &&
+          target.named_children.size >= 2
+      rescue StandardError
+        false
+      end
+
+      def leading_loop_target(node)
+        node if LEADING_LOOP_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def rescue_body_statement?(node)
+        rescue_clauses(node).any?
+      rescue StandardError
+        false
+      end
+
+      def rescue_body_target(node)
+        node if RESCUE_BODY_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def rescue_body_nodes(node)
+        target = rescue_body_target(node) || node
+        named = target.named_children
+        rescue_index = named.index { |child| rescue_clause?(child) }
+        return [] unless rescue_index
+
+        named[0...rescue_index]
+      rescue StandardError
+        []
+      end
+
+      def rescue_clauses(node)
+        target = rescue_body_target(node)
+        return [] unless target
+
+        target.named_children.select { |child| rescue_clause?(child) }
+      rescue StandardError
+        []
+      end
+
+      def rescue_clause_exceptions(node)
+        exceptions = node.named_children.find { |child| child.kind == "exceptions" }
+        return [] unless exceptions
+        return [exceptions] if exceptions.text.to_s.match?(/\A[A-Z]\w*(?:::\w+)*\z/)
+        return [exceptions] if exceptions.named_children.empty? && !exceptions.text.to_s.strip.empty?
+
+        exceptions.named_children
+      rescue StandardError
+        []
+      end
+
+      def rescue_clause_exceptions_source(node)
+        node.named_children.find { |child| child.kind == "exceptions" }
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_exception_variable_name(node)
+        var = node.named_children.find { |child| child.kind == "exception_variable" }
+        var&.named_children&.find { |child| identifier_kind?(child) }
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_exception_variable_source(node)
+        node.named_children.find { |child| child.kind == "exception_variable" }
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_handler(node)
+        node.named_children.reverse.find do |child|
+          !%w[exceptions exception_variable comment].include?(child.kind)
+        end
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_statement?(node)
+        !ensure_clause(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def ensure_body_target(node)
+        node if ENSURE_BODY_WRAPPER_KINDS.include?(node.kind)
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_nodes(node)
+        target = ensure_body_target(node) || node
+        named = target.named_children
+        ensure_index = named.index { |child| ensure_clause?(child) }
+        return [] unless ensure_index
+
+        named[0...ensure_index]
+      rescue StandardError
+        []
+      end
+
+      def ensure_clause(node)
+        target = ensure_body_target(node)
+        return nil unless target
+
+        target.named_children.find { |child| ensure_clause?(child) }
+      rescue StandardError
+        nil
+      end
+
+      def ensure_clause_body(_node)
+        nil
+      end
+
+      def array_literal_statement?(node)
+        !array_literal_target(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def array_literal_target(node)
+        return node if ARRAY_LITERAL_NODE_KINDS.include?(node.kind)
+        return nil unless ARRAY_LITERAL_WRAPPER_KINDS.include?(node.kind)
+        return node if bracketed?(node, "[", "]")
+
+        child = exact_single_named_child(node, kinds: ARRAY_LITERAL_NODE_KINDS)
+        return child if child
+
+        named = node.named_children
+        return nil unless named.size == 1 && ARRAY_LITERAL_NODE_KINDS.include?(named.first.kind)
+
+        child = named.first
+        stripped = node.text.to_s.strip
+        child if stripped == child.text.to_s || stripped == "#{child.text};"
+      rescue StandardError
+        nil
+      end
+
+      def array_literal_values(node)
+        target = array_literal_target(node) || node
+        target.named_children
+      rescue StandardError
+        []
+      end
+
+      def element_reference_statement?(node)
+        !element_reference_target(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def element_reference_target(node)
+        return node if ELEMENT_REFERENCE_NODE_KINDS.include?(node.kind)
+        return nil unless ELEMENT_REFERENCE_WRAPPER_KINDS.include?(node.kind)
+
+        named = node.named_children
+        if named.size == 1 && ELEMENT_REFERENCE_NODE_KINDS.include?(named.first.kind)
+          stripped = node.text.to_s.strip
+          child = named.first
+          return child if stripped == child.text.to_s || stripped == "#{child.text};"
+        end
+
+        node if element_reference_shape?(node)
+      rescue StandardError
+        nil
+      end
+
+      def element_reference_receiver(node)
+        target = element_reference_target(node) || node
+        target.named_children.first
+      rescue StandardError
+        nil
+      end
+
+      def element_reference_arguments(node)
+        target = element_reference_target(node) || node
+        target.named_children.drop(1)
+      rescue StandardError
+        []
+      end
+
+      def hash_literal_statement?(node)
+        !hash_literal_target(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def hash_literal_target(node)
+        return node if HASH_LITERAL_NODE_KINDS.include?(node.kind)
+        return nil unless HASH_LITERAL_WRAPPER_KINDS.include?(node.kind)
+        return nil if statement_block_wrapper?(node)
+        return node if bracketed?(node, "{", "}")
+
+        named = node.named_children
+        return nil unless named.size == 1
+
+        child = named.first
+        return hash_literal_target(child) if node.kind == "parenthesized_expression"
+
+        stripped = node.text.to_s.strip
+        if stripped == child.text.to_s || stripped == "#{child.text};"
+          return child if HASH_LITERAL_NODE_KINDS.include?(child.kind)
+          return hash_literal_target(child) if HASH_LITERAL_WRAPPER_KINDS.include?(child.kind)
+        end
+
+        nil
+      rescue StandardError
+        nil
+      end
+
+      def hash_literal_values(node)
+        target = hash_literal_target(node) || node
+        target.named_children
+      rescue StandardError
+        []
+      end
+
+      def empty_body_statement?(node)
+        EMPTY_BODY_WRAPPER_KINDS.include?(node.kind) &&
+          node.named_children.empty? &&
+          node.text.to_s.strip.empty?
+      rescue StandardError
+        false
+      end
+
+      def heredoc_body_statement?(node)
+        ruby? &&
+          HEREDOC_BODY_WRAPPER_KINDS.include?(node.kind) &&
+          node.named_children.any? { |child| child.kind == "heredoc_body" }
+      rescue StandardError
+        false
+      end
+
+      def heredoc_call_for_body?(_node)
+        false
+      end
+
+      def interpolated_statement?(node)
+        INTERPOLATED_STATEMENT_WRAPPER_KINDS.include?(node.kind) &&
+          node.named_children.any? { |child| child.kind == "interpolation" }
+      rescue StandardError
+        false
+      end
+
+      def concatenated_string_statement?(node)
+        !concatenated_string_target(node).nil?
+      rescue StandardError
+        false
+      end
+
+      def concatenated_string_target(node)
+        return node if concatenated_string_node?(node)
+        return nil unless concatenated_string_wrapper_kinds.include?(node.kind)
+
+        named = node.named_children
+        return node if named.size > 1 && named.all? { |child| child.kind == "string" }
+        return named.first if named.size == 1 && concatenated_string_node?(named.first)
+
+        nil
+      rescue StandardError
+        nil
+      end
+
+      def zero_child_identifier_call?(_node)
+        false
+      end
+
+      def operator_call_expression?(node)
+        operator_call_expression_kinds.include?(node.kind) &&
+          OPERATOR_CALL_OPERATORS.include?(binary_operator(node))
+      rescue StandardError
+        false
+      end
+
+      def boolean_expression_kind?(node)
+        boolean_expression_kinds.include?(node.kind)
+      rescue StandardError
+        false
+      end
+
+      def comparison_expression_kind?(node)
+        comparison_expression_kinds.include?(node.kind)
+      rescue StandardError
+        false
+      end
+
+      def dotted_expression_wrapper?(node)
+        dotted_expression_wrapper_kinds.include?(node.kind)
+      rescue StandardError
+        false
+      end
+
       private
+
+      def assignment_operators
+        COMMON_ASSIGNMENT_OPERATORS
+      end
+
+      def operator_call_expression_kinds
+        %w[binary binary_expression]
+      end
+
+      def boolean_expression_kinds
+        BOOLEAN_EXPRESSION_KINDS
+      end
+
+      def comparison_expression_kinds
+        COMPARISON_EXPRESSION_KINDS
+      end
+
+      def dotted_expression_wrapper_kinds
+        DOTTED_EXPRESSION_WRAPPER_KINDS
+      end
+
+      def concatenated_string_wrapper_kinds
+        CONCATENATED_STRING_WRAPPER_KINDS
+      end
+
+      def concatenated_string_node?(node)
+        CONCATENATED_STRING_NODE_KINDS.include?(node&.kind) &&
+          node.named_children.size > 1 &&
+          node.named_children.all? { |child| child.kind == "string" }
+      end
 
       def direct_binary_operator(node)
         node.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text
       rescue StandardError
         nil
+      end
+
+      def question_colon_ternary_parts(node, kinds)
+        return nil unless kinds.include?(node.kind)
+        return nil unless node.children.any? { |child| !child.named? && child.text == "?" }
+        return nil unless node.children.any? { |child| !child.named? && child.text == ":" }
+
+        children = node.named_children
+        return nil unless children.size >= 3
+
+        children.first(3)
+      rescue StandardError
+        nil
+      end
+
+      def leading_function_statement_with_keyword?(node, keyword, wrapper_kinds)
+        wrapper_kinds.include?(node.kind) &&
+          node.children.first&.kind.to_s == keyword &&
+          node.named_children.any? { |child| identifier_kind?(child) }
+      rescue StandardError
+        false
+      end
+
+      def identifier_kind?(node)
+        IDENTIFIER_KINDS.include?(node&.kind)
       end
 
       def exact_single_named_child(node, kinds:)
@@ -116,6 +741,95 @@ module Decomplex
 
         child
       rescue StandardError
+        nil
+      end
+
+      def case_arm_kind?(node)
+        CASE_ARGUMENT_WHEN_KINDS.include?(node&.kind)
+      end
+
+      def default_case_pattern?(node)
+        pattern = node.named_children.find { |child| CASE_DEFAULT_PATTERN_KINDS.include?(child.kind) }
+        pattern&.text.to_s.strip == "_"
+      rescue StandardError
+        false
+      end
+
+      def adapter_function_kind?(node)
+        ADAPTER_FUNCTION_KINDS.include?(node&.kind)
+      end
+
+      def statement_block_wrapper?(node)
+        node.kind == "block" && STATEMENT_BLOCK_PARENT_KINDS.include?(node.parent&.kind)
+      rescue StandardError
+        false
+      end
+
+      def case_arm_descendant?(node)
+        stack = node.named_children.dup
+        until stack.empty?
+          child = stack.shift
+          next unless child.respond_to?(:kind)
+          return true if CASE_ARGUMENT_WHEN_KINDS.include?(child.kind)
+
+          stack.concat(child.named_children)
+        end
+
+        false
+      rescue StandardError
+        false
+      end
+
+      def ruby_instance_variable_text?(text)
+        text.to_s.match?(/\A@[A-Za-z_]\w*[!?=]?\z/)
+      end
+
+      def ruby_global_variable_text?(text)
+        text.to_s.match?(/\A\$[A-Za-z_]\w*[!?=]?\z/)
+      end
+
+      def literal_container_kind?(node)
+        LITERAL_CONTAINER_KINDS.include?(node&.kind)
+      end
+
+      def literal_fragment_kind?(node)
+        LITERAL_FRAGMENT_KINDS.include?(node&.kind)
+      end
+
+      def rescue_clause?(node)
+        node&.kind == "rescue"
+      end
+
+      def ensure_clause?(node)
+        node&.kind == "ensure"
+      end
+
+      def bracketed?(node, opening, closing)
+        node.children.first&.text == opening && node.children.last&.text == closing
+      rescue StandardError
+        false
+      end
+
+      def element_reference_shape?(node)
+        node.children.first&.text != "[" &&
+          node.children.any? { |child| !child.named? && child.text == "[" } &&
+          node.children.any? { |child| !child.named? && child.text == "]" } &&
+          node.named_children.size >= 2 &&
+          node.named_children.none? { |child| %w[block do_block].include?(child.kind) }
+      rescue StandardError
+        false
+      end
+
+      def descendant(node, kinds:)
+        stack = node&.named_children.to_a
+        until stack.empty?
+          child = stack.shift
+          next unless child.respond_to?(:kind)
+          return child if kinds.include?(child.kind)
+
+          stack.concat(child.named_children)
+        end
+
         nil
       end
     end
@@ -139,6 +853,53 @@ module Decomplex
       rescue StandardError
         nil
       end
+
+      def instance_variable?(node)
+        node.kind == "instance_variable" || ruby_instance_variable_text?(node.text)
+      rescue StandardError
+        false
+      end
+
+      def global_variable?(node)
+        node.kind == "global_variable" || ruby_global_variable_text?(node.text)
+      rescue StandardError
+        false
+      end
+
+      def case_argument_list?(node)
+        node.kind == "argument_list" &&
+          node.children.any? { |child| !child.named? && child.kind == "case" } &&
+          node.named_children.any? { |child| CASE_ARGUMENT_WHEN_KINDS.include?(child.kind) }
+      rescue StandardError
+        false
+      end
+
+      def zero_child_identifier_call?(node)
+        node.kind == "call" && node.named_children.empty? &&
+          node.text.to_s.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
+      rescue StandardError
+        false
+      end
+
+      def heredoc_call_for_body?(node)
+        return true if node.kind == "heredoc_beginning"
+        return true if %w[call argument_list].include?(node.kind) &&
+                       node.text.to_s.match?(/(?:\A|[\s(,])<<[-~]?[A-Za-z_]\w*/)
+
+        node.named_children.any? do |child|
+          next false if child.named_children.any? { |grandchild| grandchild.kind == "heredoc_body" }
+
+          heredoc_call_for_body?(child)
+        end
+      rescue StandardError
+        false
+      end
+
+      private
+
+      def assignment_operators
+        RUBY_ASSIGNMENT_OPERATORS
+      end
     end
 
     class PythonTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
@@ -155,8 +916,205 @@ module Decomplex
         nil
       end
 
+      def case_else_arm?(node)
+        node.kind == "case_clause" && default_case_pattern?(node)
+      rescue StandardError
+        false
+      end
+
+      def named_field(node, name)
+        super || python_body_field(node, name)
+      end
+
+      def leading_function_statement?(node)
+        leading_function_statement_with_keyword?(node, "def", PYTHON_LEADING_FUNCTION_WRAPPER_KINDS)
+      end
+
+      def leading_function_body(node)
+        node.named_children.reverse.find { |child| child.kind == "block" }
+      rescue StandardError
+        nil
+      end
+
+      def leading_owner_target(node)
+        return node if PYTHON_LEADING_OWNER_WRAPPER_KINDS.include?(node.kind)
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def leading_if_target(node)
+        if PYTHON_LEADING_IF_WRAPPER_KINDS.include?(node.kind)
+          child = exact_single_named_child(node, kinds: %w[if_statement])
+          return child if child
+        end
+
+        super
+      end
+
+      def rescue_body_target(node)
+        return node if node.kind == "try_statement"
+        return node if flattened_try_block?(node, clauses: %w[except_clause])
+
+        if node.kind == "block"
+          child = exact_single_named_child(node, kinds: %w[try_statement])
+          return child if child
+        end
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def rescue_body_nodes(node)
+        target = rescue_body_target(node) || node
+        return super unless target.kind == "try_statement" || flattened_try_block?(target, clauses: %w[except_clause])
+
+        target.named_children.take_while { |child| !%w[except_clause finally_clause].include?(child.kind) }
+      rescue StandardError
+        []
+      end
+
+      def rescue_clauses(node)
+        target = rescue_body_target(node)
+        return [] unless target
+
+        target.named_children.select { |child| child.kind == "except_clause" }
+      rescue StandardError
+        []
+      end
+
+      def rescue_clause_exceptions(node)
+        pattern = node.named_children.find { |child| !%w[block comment].include?(child.kind) }
+        return [] unless pattern
+        return [pattern] unless pattern.kind == "as_pattern"
+
+        exception = pattern.named_children.find { |child| child.kind != "as_pattern_target" }
+        exception ? [exception] : []
+      rescue StandardError
+        []
+      end
+
+      def rescue_clause_exceptions_source(node)
+        rescue_clause_exceptions(node).first
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_exception_variable_name(node)
+        pattern = node.named_children.find { |child| child.kind == "as_pattern" }
+        descendant(pattern, kinds: %w[as_pattern_target])
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_exception_variable_source(node)
+        rescue_clause_exception_variable_name(node)
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_handler(node)
+        node.named_children.reverse.find { |child| child.kind == "block" }
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_target(node)
+        return node if node.kind == "try_statement"
+        return node if flattened_try_block?(node, clauses: %w[finally_clause])
+
+        if node.kind == "block"
+          child = exact_single_named_child(node, kinds: %w[try_statement])
+          return child if child
+        end
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_nodes(node)
+        target = ensure_body_target(node) || node
+        return super unless target.kind == "try_statement" || flattened_try_block?(target, clauses: %w[finally_clause])
+
+        target.named_children.take_while { |child| child.kind != "finally_clause" }
+      rescue StandardError
+        []
+      end
+
+      def ensure_clause(node)
+        target = ensure_body_target(node)
+        return nil unless target
+
+        target.named_children.find { |child| child.kind == "finally_clause" }
+      rescue StandardError
+        nil
+      end
+
+      def ensure_clause_body(node)
+        node.named_children.reverse.find { |child| child.kind == "block" }
+      rescue StandardError
+        nil
+      end
+
+      def ternary_parts(node)
+        return nil unless node.kind == "conditional_expression"
+
+        children = node.named_children
+        return nil unless children.size >= 3
+
+        [children[1], children[0], children[2]]
+      rescue StandardError
+        nil
+      end
+
       def unary_minus_expression?(node)
         (%w[unary unary_expression unary_operator].include?(node.kind) && node.text.to_s.lstrip.start_with?("-"))
+      end
+
+      def empty_body_statement?(node)
+        super ||
+          (node.kind == "block" && node.named_children.empty? && node.text.to_s.strip == "pass") ||
+          node.kind == "pass_statement"
+      rescue StandardError
+        false
+      end
+
+      private
+
+      def flattened_try_block?(node, clauses:)
+        node.kind == "block" &&
+          node.children.first&.text == "try" &&
+          node.named_children.any? { |child| clauses.include?(child.kind) }
+      rescue StandardError
+        false
+      end
+
+      def python_body_field(node, name)
+        return nil unless %w[body consequence].include?(name.to_s)
+        return nil unless PYTHON_BODY_FIELD_KINDS.include?(node.kind)
+
+        node.named_children.find { |child| child.kind == "block" }
+      rescue StandardError
+        nil
+      end
+
+      def assignment_operators
+        PYTHON_ASSIGNMENT_OPERATORS
+      end
+
+      def operator_call_expression_kinds
+        super + %w[binary_operator]
+      end
+
+      def concatenated_string_wrapper_kinds
+        PYTHON_CONCATENATED_STRING_WRAPPER_KINDS
+      end
+
+      def dotted_expression_wrapper_kinds
+        PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS
       end
     end
 
@@ -181,6 +1139,159 @@ module Decomplex
         child = exact_single_named_child(node, kinds: BINARY_WRAPPER_KINDS)
         child ? binary_operator(child) : ""
       end
+
+      def unwrap_node?(node)
+        super ||
+          (node.kind == "expression_list" &&
+            node.named_children.size == 1 &&
+            node.children.first&.text == "(" &&
+            node.children.last&.text == ")")
+      rescue StandardError
+        false
+      end
+
+      def leading_function_statement?(node)
+        leading_function_statement_with_keyword?(node, "function", LUA_LEADING_FUNCTION_WRAPPER_KINDS)
+      end
+
+      def leading_function_body(node)
+        node.named_children.reverse.find { |child| child.kind == "block" }
+      rescue StandardError
+        nil
+      end
+
+      def leading_if_target(node)
+        if LUA_LEADING_IF_WRAPPER_KINDS.include?(node.kind)
+          child = exact_single_named_child(node, kinds: %w[if_statement])
+          return child if child
+        end
+
+        super
+      end
+
+      def array_literal_target(node)
+        if node.kind == "block"
+          named = node.named_children
+          if named.size == 2 && named.first.kind == "identifier" && named.first.text.to_s.empty?
+            target = lua_positional_table_arguments(named[1])
+            return target if target
+          end
+        end
+
+        target = lua_positional_table_arguments(node)
+        return target if target
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def hash_literal_target(node)
+        target = lua_keyed_table_arguments(node)
+        return target if target
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def hash_literal_values(node)
+        target = hash_literal_target(node) || node
+        return target.named_children if target.kind == "arguments"
+
+        super
+      rescue StandardError
+        []
+      end
+
+      def identifier_text_node?(node)
+        %w[variable_list expression_list].include?(node.kind) &&
+          node.text.to_s.match?(/\A[A-Za-z_]\w*\z/)
+      rescue StandardError
+        false
+      end
+
+      def member_assignment_target?(node)
+        return false unless node.kind == "variable_list"
+
+        node.named_children.size == 2 &&
+          node.children.any? { |child| !child.named? && child.text == "." }
+      rescue StandardError
+        false
+      end
+
+      def literal_fragment_assignment_context?(node)
+        return true if super
+
+        literal_fragment_kind?(node) && node.parent&.kind == "expression_list"
+      rescue StandardError
+        false
+      end
+
+      def lambda_target(node)
+        return node if node.kind == "function_definition"
+
+        if node.kind == "expression_list"
+          return node if node.children.first&.kind == "function" &&
+            node.named_children.any? { |child| child.kind == "block" }
+
+          named = node.named_children
+          return named.first if named.size == 1 && named.first.kind == "function_definition"
+        end
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      private
+
+      def lua_positional_table_arguments(node)
+        return nil unless node&.kind == "arguments"
+        return nil unless bracketed?(node, "{", "}")
+
+        fields = node.named_children
+        return nil if fields.empty?
+        return nil unless fields.all? { |field| field.kind == "field" && field.named_children.size <= 1 }
+
+        node
+      end
+
+      def lua_keyed_table_arguments(node)
+        if node&.kind == "block"
+          named = node.named_children
+          if named.size == 2 && named.first.kind == "identifier" && named.first.text.to_s.empty?
+            return lua_keyed_table_arguments(named[1])
+          end
+        end
+
+        return nil unless node&.kind == "arguments"
+        return nil unless bracketed?(node, "{", "}")
+
+        fields = node.named_children
+        return node if fields.empty?
+        return nil if fields.all? { |field| field.kind == "field" && field.named_children.size <= 1 }
+
+        node
+      end
+
+      private
+
+      def assignment_operators
+        LUA_ASSIGNMENT_OPERATORS
+      end
+
+      def operator_call_expression_kinds
+        super + %w[expression_list]
+      end
+
+      def boolean_expression_kinds
+        super + %w[expression_list]
+      end
+
+      def comparison_expression_kinds
+        super + %w[expression_list]
+      end
     end
 
     class TypeScriptTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
@@ -188,6 +1299,137 @@ module Decomplex
         node.named_children.find { |child| %w[else else_clause].include?(child.kind) }
       rescue StandardError
         nil
+      end
+
+      def safe_navigation_call?(node)
+        super ||
+          node.children.any? { |child| child.kind == "optional_chain" && child.text.to_s == "?." } ||
+          (node.kind == "call_expression" && node.named_children.any? { |child| safe_navigation_call?(child) })
+      rescue StandardError
+        false
+      end
+
+      def ternary_parts(node)
+        question_colon_ternary_parts(node, TYPESCRIPT_TERNARY_KINDS)
+      end
+
+      def interpolated_string?(node)
+        super ||
+          (node.kind == "template_string" &&
+            node.named_children.any? { |child| child.kind == "template_substitution" })
+      end
+
+      def lambda_target(node)
+        return node if %w[arrow_function function_expression].include?(node.kind)
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def interpolation_node?(node)
+        super || node.kind == "template_substitution"
+      rescue StandardError
+        false
+      end
+
+      def rescue_body_target(node)
+        return node if node.kind == "try_statement"
+
+        if node.kind == "statement_block"
+          child = exact_single_named_child(node, kinds: %w[try_statement])
+          return child if child
+        end
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def rescue_body_nodes(node)
+        target = rescue_body_target(node) || node
+        return super unless target.kind == "try_statement"
+
+        target.named_children.take_while { |child| !%w[catch_clause finally_clause].include?(child.kind) }
+      rescue StandardError
+        []
+      end
+
+      def rescue_clauses(node)
+        target = rescue_body_target(node)
+        return [] unless target
+
+        target.named_children.select { |child| child.kind == "catch_clause" }
+      rescue StandardError
+        []
+      end
+
+      def rescue_clause_exception_variable_name(node)
+        node.named_children.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_exception_variable_source(node)
+        rescue_clause_exception_variable_name(node)
+      rescue StandardError
+        nil
+      end
+
+      def rescue_clause_handler(node)
+        node.named_children.reverse.find { |child| child.kind == "statement_block" }
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_target(node)
+        return node if node.kind == "try_statement"
+
+        if node.kind == "statement_block"
+          child = exact_single_named_child(node, kinds: %w[try_statement])
+          return child if child
+        end
+
+        super
+      rescue StandardError
+        nil
+      end
+
+      def ensure_body_nodes(node)
+        target = ensure_body_target(node) || node
+        return super unless target.kind == "try_statement"
+
+        target.named_children.take_while { |child| child.kind != "finally_clause" }
+      rescue StandardError
+        []
+      end
+
+      def ensure_clause(node)
+        target = ensure_body_target(node)
+        return nil unless target
+
+        target.named_children.find { |child| child.kind == "finally_clause" }
+      rescue StandardError
+        nil
+      end
+
+      def ensure_clause_body(node)
+        node.named_children.reverse.find { |child| child.kind == "statement_block" }
+      rescue StandardError
+        nil
+      end
+
+      def empty_body_statement?(node)
+        super ||
+          (node.kind == "statement_block" && node.named_children.empty? && node.text.to_s.strip == "{}")
+      rescue StandardError
+        false
+      end
+
+      private
+
+      def assignment_operators
+        TYPESCRIPT_ASSIGNMENT_OPERATORS
       end
     end
 
@@ -254,7 +1496,7 @@ module Decomplex
         "continue_statement" => :NEXT
       }.freeze
       COMPARISON_OPERATORS = %w[== != === !== < <= > >=].freeze
-      OPERATOR_CALL_OPERATORS = %w[+ - * / % ** | & ^ << >> =~ !~].freeze
+      OPERATOR_CALL_OPERATORS = TreeSitterNormalizationAdapter::OPERATOR_CALL_OPERATORS
       INFIX_STATEMENT_OPERATORS = (OPERATOR_CALL_OPERATORS + COMPARISON_OPERATORS).freeze
       INLINE_DEF_WRAPPER_MIDS = %w[
         public protected private private_class_method module_function
@@ -291,11 +1533,16 @@ module Decomplex
           return normalize_infix_statement(node) if infix_statement?(node)
           return normalize_dotted_expression(node) if dotted_expression?(node)
           return normalize_unary_not_statement(node) if unary_not_statement?(node)
+          return normalize_wrapped_return_statement(node) if wrapped_return_statement?(node)
 
           if leading_function_statement?(node)
             normalize_leading_function_statement(node)
           elsif leading_if_statement?(node)
             normalize_leading_if_statement(node)
+          elsif ensure_body_statement?(node)
+            normalize_ensure_body_statement(node)
+          elsif rescue_body_statement?(node)
+            normalize_rescue_body_statement(node)
           elsif modifier_statement?(node)
             normalize_modifier_statement(node)
           elsif ternary_statement?(node)
@@ -304,6 +1551,8 @@ module Decomplex
             normalize_statement_call_with_block(node)
           elsif command_call_statement?(node)
             normalize_command_call_statement(node)
+          elsif lambda_expression?(node)
+            normalize_lambda(node)
           elsif FUNCTION_KINDS.include?(node.kind)
             normalize_function(node)
           elsif class_node?(node)
@@ -320,6 +1569,12 @@ module Decomplex
             normalize_loop(node)
           elsif CASE_KINDS.include?(node.kind) || hidden_match?(node)
             normalize_case(node)
+          elsif hash_literal_statement?(node)
+            normalize_hash_literal_statement(node)
+          elsif array_literal_statement?(node)
+            normalize_array_literal_statement(node)
+          elsif element_reference_statement?(node)
+            normalize_element_reference_statement(node)
           elsif node.kind == "element_reference"
             normalize_element_reference(node)
           elsif node.kind == "rescue_modifier"
@@ -340,8 +1595,6 @@ module Decomplex
             normalize_pair(node)
           elsif node.kind == "singleton_class"
             normalize_singleton_class(node)
-          elsif node.kind == "lambda"
-            normalize_lambda(node)
           elsif node.kind == "yield"
             normalize_yield(node)
           elsif yield_statement?(node)
@@ -352,7 +1605,7 @@ module Decomplex
             normalize_heredoc_beginning(node)
           elsif node.kind == "chained_string"
             normalize_chained_string(node)
-          elsif node.kind == "interpolation"
+          elsif interpolation_node?(node)
             normalize_interpolation(node)
           elsif unary_minus_expression?(node)
             normalize_unary_minus(node)
@@ -421,7 +1674,7 @@ module Decomplex
             )
           )
         end
-        wrap(:DEFN, children: [name, scope(body, args: args)], source: node)
+        wrap(:DEFN, children: [name, scope(body, args: args, source: node)], source: node)
       end
 
       def normalize_singleton_function(node)
@@ -436,19 +1689,19 @@ module Decomplex
             )
           )
         end
-        wrap(:DEFS, children: [normalize_node(receiver), name, scope(body, args: args)], source: node)
+        wrap(:DEFS, children: [normalize_node(receiver), name, scope(body, args: args, source: node)], source: node)
       end
 
       def normalize_class(node)
         name = const_for(named_field(node, "name") || first_named(node))
         body = normalize_body(named_field(node, "body") || block_child(node))
-        wrap(:CLASS, children: [name, nil, scope(body)], source: node)
+        wrap(:CLASS, children: [name, nil, scope(body, source: node)], source: node)
       end
 
       def normalize_module(node)
         name = const_for(named_field(node, "name") || first_named(node))
         body = normalize_body(named_field(node, "body") || block_child(node))
-        wrap(:MODULE, children: [name, scope(body)], source: node)
+        wrap(:MODULE, children: [name, scope(body, source: node)], source: node)
       end
 
       def normalize_impl(node)
@@ -458,7 +1711,7 @@ module Decomplex
                     end
         name = const_for(type_node || node)
         body = normalize_body(named_field(node, "body") || block_child(node) || node)
-        wrap(:CLASS, children: [name, nil, scope(body)], source: node)
+        wrap(:CLASS, children: [name, nil, scope(body, source: node)], source: node)
       end
 
       def normalize_if(node)
@@ -675,15 +1928,16 @@ module Decomplex
       def normalize_singleton_class(node)
         recv = normalize_node(node.named_children.first)
         body = normalize_body(node.named_children[1])
-        wrap(:SCLASS, children: [recv, scope(body)], source: node)
+        wrap(:SCLASS, children: [recv, scope(body, source: node)], source: node)
       end
 
       def normalize_lambda(node)
-        body_node = named_field(node, "body") || block_child(node) || node.named_children.last
-        body = with_ruby_scope(node) do
+        target = lambda_target(node) || node
+        body_node = named_field(target, "body") || block_child(target) || target.named_children.last
+        body = with_ruby_scope(target) do
           dynamic_scope(normalize_body(body_node))
         end
-        wrap(:LAMBDA, children: [scope(body)], source: node)
+        wrap(:LAMBDA, children: [scope(body, source: target)], source: target)
       end
 
       def normalize_yield(node)
@@ -782,27 +2036,36 @@ module Decomplex
         body = with_ruby_scope(block) do
           dynamic_scope(normalize_body(named_field(block, "body") || block_child(block) || block))
         end
-        wrap(:ITER, children: [call, scope(body, args: args)], source: node)
+        wrap(:ITER, children: [call, scope(body, args: args, source: node)], source: node)
       end
 
       def normalize_dotted_call_expression(node, source: node)
-        recv, mid = dotted_call_parts(node)
-        args = call_arguments(node, nil)
-        type = safe_navigation_call?(node) ? :QCALL : :CALL
+        target = dotted_call_target(node) || node
+        recv, mid = dotted_call_parts(target)
+        args = call_arguments(target, nil)
+        type = safe_navigation_call?(target) ? :QCALL : :CALL
         wrap(type, children: [normalize_node(recv), mid.to_sym, list(args, source: source)], source: source)
       end
 
       def normalize_argument_list_call_with_block(node)
+        return nil unless ruby? && ts_node?(node) && node.kind == "argument_list"
+
         block = call_block(node)
+        return nil unless block
+
         call = normalize_argument_list_call(node)
+        return nil unless call
+
         args = normalize_block_parameters(block)
         body = with_ruby_scope(block) do
           dynamic_scope(normalize_body(named_field(block, "body") || block_child(block) || block))
         end
-        wrap(:ITER, children: [call, scope(body, args: args)], source: node)
+        wrap(:ITER, children: [call, scope(body, args: args, source: node)], source: node)
       end
 
       def normalize_argument_list_call(node)
+        return nil unless ruby? && ts_node?(node) && node.kind == "argument_list"
+
         function = node.named_children.first
         args_node = node.named_children.find { |child| child.kind == "argument_list" }
         args = args_node ? args_node.named_children.map { |child| normalize_node(child) }.compact : []
@@ -844,6 +2107,21 @@ module Decomplex
 
       def normalize_return(node)
         normalize_return_node(node, elide_symbol: false)
+      end
+
+      def wrapped_return_statement?(node)
+        return false unless ts_node?(node)
+        return false unless %w[body_statement block_body statement block].include?(node.kind)
+        return false if node.text.to_s.include?("\n")
+
+        keyword = node.children.first
+        keyword && !keyword.named? && RETURN_KINDS.key?(keyword.kind)
+      end
+
+      def normalize_wrapped_return_statement(node)
+        keyword = node.children.first
+        children = node.named_children.map { |child| normalize_return_value(child) }.compact
+        wrap(RETURN_KINDS.fetch(keyword.kind), children: children, source: node)
       end
 
       def normalize_return_node(node, elide_symbol:)
@@ -888,6 +2166,8 @@ module Decomplex
       end
 
       def normalize_argument_list_element_reference(node)
+        return nil unless ruby? && ts_node?(node) && argument_list_element_reference?(node)
+
         recv = node.named_children.first
         args = node.named_children.drop(1).map { |child| normalize_node(child) }.compact
         wrap(:CALL, children: [normalize_node(recv), :[], list(args, source: node)], source: node)
@@ -900,7 +2180,7 @@ module Decomplex
         body = with_ruby_scope(block) do
           dynamic_scope(normalize_body(named_field(block, "body") || block_child(block) || block))
         end
-        wrap(:ITER, children: [call, scope(body, args: args)], source: node)
+        wrap(:ITER, children: [call, scope(body, args: args, source: node)], source: node)
       end
 
       def normalize_call_without_block(node, block)
@@ -989,7 +2269,7 @@ module Decomplex
         body = with_ruby_scope(block) do
           dynamic_scope(normalize_body(named_field(block, "body") || block_child(block) || block))
         end
-        wrap(:ITER, children: [call, scope(body, args: block_args)], source: node)
+        wrap(:ITER, children: [call, scope(body, args: block_args, source: node)], source: node)
       end
 
       def dynamic_scope(node)
@@ -1026,6 +2306,7 @@ module Decomplex
 
       def normalize_children(node)
         node.named_children.filter_map do |child|
+          next if child.kind == "heredoc_body"
           next if assignment_rhs?(child)
 
           normalize_node(child)
@@ -1043,6 +2324,7 @@ module Decomplex
         return normalize_leading_loop_statement(node) if leading_loop_statement?(node)
         return normalize_leading_if_statement(node) if leading_if_statement?(node)
         return normalize_elsif(node) if node.kind == "elsif"
+        return normalize_wrapped_return_statement(node) if wrapped_return_statement?(node)
         return normalize_yield_statement(node) if yield_statement?(node)
         return normalize_super_statement(node) if super_statement?(node)
         return normalize_unary_not_statement(node) if unary_not_statement?(node)
@@ -1092,10 +2374,21 @@ module Decomplex
         patterns = [node.named_children.find { |child| !BLOCK_KINDS.include?(child.kind) && !statement_node?(child) }].compact if patterns.empty?
 
         patterns.flat_map do |pattern|
-          if pattern.text.to_s.include?("::")
-            [wrap(:CONST, children: [pattern.text.to_s.to_sym], source: pattern)]
+          pattern_text = pattern.text.to_s
+          pattern_children = pattern.named_children
+          if pattern_text.include?("::")
+            [wrap(:CONST, children: [pattern_text.to_sym], source: pattern)]
+          elsif %w[pattern case_pattern match_pattern switch_pattern when_condition expression_list].include?(pattern.kind) &&
+                pattern_children.empty? && pattern_text.match?(/\A-?\d+\z/)
+            [wrap(:INTEGER, children: [], source: pattern)]
+          elsif ruby? && %w[pattern case_pattern match_pattern switch_pattern when_condition expression_list].include?(pattern.kind) &&
+                pattern_children.empty? && pattern_text.match?(/\A[A-Z]\w*\z/)
+            [wrap(:CONST, children: [pattern_text.to_sym], source: pattern)]
+          elsif ruby? && %w[pattern case_pattern match_pattern switch_pattern when_condition expression_list].include?(pattern.kind) &&
+                pattern_children.empty? && pattern_text.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
+            [local_or_call_for_name(pattern_text, pattern)]
           elsif %w[pattern case_pattern match_pattern switch_pattern when_condition expression_list].include?(pattern.kind)
-            pattern.named_children.map { |child| normalize_node(child) }.compact
+            pattern_children.map { |child| normalize_node(child) }.compact
           else
             [normalize_node(pattern)].compact
           end
@@ -1121,7 +2414,7 @@ module Decomplex
                                source: source)
         end
 
-        if member_read_node?(left)
+        if member_read_node?(left) || normalization_adapter.member_assignment_target?(left)
           recv, mid = member_parts(left)
           writer = left.text.to_s.include?("&.") ? mid.to_sym : "#{mid}=".to_sym
           return wrap(:ATTRASGN, children: [normalize_node(recv), writer, list([right], source: left)],
@@ -1137,7 +2430,7 @@ module Decomplex
         right = normalize_node(next_named_sibling(node))
         source = parent_node(node) || node
         assignment_target(node, right, source: source) ||
-          wrap(:LASGN, children: [target_name(node), right], source: node)
+          wrap(:LASGN, children: [target_name(node), right], source: source)
       end
 
       def target_name(left)
@@ -1163,8 +2456,10 @@ module Decomplex
           child = stack.shift
           next unless ts_node?(child)
 
-          if WHEN_KINDS.include?(child.kind)
+          if normalization_adapter.case_arm?(child)
             arms << child
+          elsif normalization_adapter.case_else_node?(child)
+            next
           else
             stack.concat(child.named_children) unless FUNCTION_KINDS.include?(child.kind)
           end
@@ -1186,7 +2481,14 @@ module Decomplex
       end
 
       def case_else_body(node)
-        else_node = node.named_children.find { |child| child.kind == "else" }
+        else_node = normalization_adapter.case_else_node(node)
+        return nil unless else_node
+
+        if normalization_adapter.case_else_arm?(else_node) || else_node.kind == "switch_default"
+          body = when_body(else_node)
+          return normalize_body(body) if body
+        end
+
         normalize_else_or_branch(else_node)
       end
 
@@ -1205,7 +2507,7 @@ module Decomplex
       end
 
       def boolean_expression?(node)
-        (%w[binary binary_expression boolean_operator].include?(node.kind) || boolean_statement?(node)) &&
+        (normalization_adapter.boolean_expression_kind?(node) || boolean_statement?(node)) &&
           %w[and or].include?(boolean_operator(node))
       end
 
@@ -1220,8 +2522,7 @@ module Decomplex
       end
 
       def operator_call_expression?(node)
-        %w[binary binary_expression].include?(node.kind) &&
-          OPERATOR_CALL_OPERATORS.include?(binary_operator(node))
+        normalization_adapter.operator_call_expression?(node)
       end
 
       def infix_statement?(node)
@@ -1230,7 +2531,7 @@ module Decomplex
       end
 
       def dotted_expression?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) && dotted_call?(node)
+        normalization_adapter.dotted_expression_wrapper?(node) && dotted_call?(node)
       end
 
       def argument_list_call_with_block?(node)
@@ -1281,12 +2582,16 @@ module Decomplex
       end
 
       def normalize_argument_list_unary_not(node)
+        return nil unless ruby? && ts_node?(node) && argument_list_unary_not?(node)
+
         operand = node.named_children.first
         wrap(:OPCALL, children: [normalize_node(operand), :!, nil], source: node)
       end
 
       def comparison_expression?(node)
-        %w[binary binary_expression comparison_operator].include?(node.kind) &&
+        return false if literal_fragment_expression_list?(node)
+
+        normalization_adapter.comparison_expression_kind?(node) &&
           COMPARISON_OPERATORS.include?(comparison_operator(node))
       end
 
@@ -1316,7 +2621,10 @@ module Decomplex
       end
 
       def comparison_operator(node)
-        binary_operator(node) || spaced_text(node)[/(===|!==|==|!=|<=|>=|<|>)/, 1]
+        direct = binary_operator(node)
+        return direct if COMPARISON_OPERATORS.include?(direct)
+
+        spaced_text(node)[/(===|!==|==|!=|<=|>=|<|>)/, 1]
       end
 
       def binary_operator(node)
@@ -1328,7 +2636,7 @@ module Decomplex
       end
 
       def class_node?(node)
-        CLASS_KINDS.include?(node.kind)
+        normalization_adapter.class_node?(node)
       end
 
       def module_node?(node)
@@ -1336,10 +2644,7 @@ module Decomplex
       end
 
       def unwrap_node?(node)
-        %w[
-          parenthesized_expression parenthesized_statements expression_statement statement
-          case_pattern match_pattern pattern
-        ].include?(node.kind) && node.named_children.size == 1
+        normalization_adapter.unwrap_node?(node)
       end
 
       def statement_node?(node)
@@ -1389,7 +2694,19 @@ module Decomplex
       end
 
       def interpolated_string?(node)
-        node.kind == "string" && node.named_children.any? { |child| child.kind == "interpolation" }
+        normalization_adapter.interpolated_string?(node)
+      end
+
+      def lambda_expression?(node)
+        normalization_adapter.lambda_expression?(node)
+      end
+
+      def lambda_target(node)
+        normalization_adapter.lambda_target(node)
+      end
+
+      def interpolation_node?(node)
+        normalization_adapter.interpolation_node?(node)
       end
 
       def normalize_interpolated_string(node)
@@ -1404,6 +2721,7 @@ module Decomplex
         return false unless ts_node?(parent)
         return false if %w[method method_parameters parameter_list argument_list arguments].include?(parent.kind)
         return false if member_read_node?(parent)
+        return false if dotted_expression?(parent)
         return false if assignment_lhs?(node) || assignment_rhs?(node)
 
         return true if %w[body_statement block_body then].include?(parent.kind) && parent_named_child?(parent, node)
@@ -1421,11 +2739,11 @@ module Decomplex
       end
 
       def instance_variable?(node)
-        node.kind == "instance_variable" || node.text.to_s.match?(/\A@[A-Za-z_]\w*[!?=]?\z/)
+        normalization_adapter.instance_variable?(node)
       end
 
       def global_variable?(node)
-        node.kind == "global_variable" || node.text.to_s.match?(/\A\$[A-Za-z_]\w*[!?=]?\z/)
+        normalization_adapter.global_variable?(node)
       end
 
       def member_read_node?(node)
@@ -1448,17 +2766,20 @@ module Decomplex
       end
 
       def literal_fragment_assignment_context?(node)
-        parent = parent_node(node)
-        return false unless ts_node?(parent)
-        return true if %w[string delimited_symbol regex regex_literal].include?(parent.kind)
+        normalization_adapter.literal_fragment_assignment_context?(node)
+      end
 
-        %w[string_content escape_sequence interpolation].include?(node.kind) &&
-          ts_node?(parent_node(parent)) &&
-          %w[string delimited_symbol regex regex_literal].include?(parent_node(parent).kind)
+      def literal_fragment_expression_list?(node)
+        return false unless ts_node?(node) && node.kind == "expression_list"
+
+        named = node.named_children
+        named.size == 1 && literal_fragment_assignment_context?(named.first)
+      rescue StandardError
+        false
       end
 
       def assignment_operator?(text)
-        %w[= += -= *= /= %= &&= ||=].include?(text.to_s)
+        normalization_adapter.assignment_operator?(text)
       end
 
       def operator_assignment_operator(node)
@@ -1490,6 +2811,7 @@ module Decomplex
         return nil unless ts_node?(left)
         return wrap(:LVAR, children: [left.text.to_s], source: left) if IDENTIFIER_KINDS.include?(left.kind)
         return wrap(:IVAR, children: [left.text.to_s], source: left) if instance_variable?(left)
+        return normalize_global_variable(left) if global_variable?(left)
         return normalize_const(left) if const_node?(left)
 
         normalize_node(left)
@@ -1551,7 +2873,7 @@ module Decomplex
         return true if %w[assignment operator_assignment].include?(node.kind)
         return true if node.kind == "pattern" && node.children.any? { |child| !child.named? && child.text == "=" }
 
-        %w[body_statement statement].include?(node.kind) &&
+        %w[body_statement block_body statement].include?(node.kind) &&
           node.children.any? { |child| !child.named? && assignment_operator?(child.text) }
       end
 
@@ -1572,7 +2894,8 @@ module Decomplex
         return unless ts_node?(node)
 
         locals.add(node.text.to_s.sub(/\A\*/, "")) if IDENTIFIER_KINDS.include?(node.kind)
-        node.named_children.each { |child| collect_identifier_names(child, locals) }
+        locals.add(node.text.to_s) if normalization_adapter.identifier_text_node?(node)
+        node.children.select(&:named?).each { |child| collect_identifier_names(child, locals) }
       end
 
       def ruby_scope_boundary?(node)
@@ -1655,9 +2978,18 @@ module Decomplex
       end
 
       def singleton_receiver(node)
-        named_field(node, "receiver") ||
-          node.named_children.find { |child| child.kind != "identifier" } ||
-          node.named_children.first
+        receiver = named_field(node, "receiver")
+        return receiver if receiver
+
+        name = named_field(node, "name") ||
+               node.named_children.reverse.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
+        parameters = named_field(node, "parameters")
+        body = named_field(node, "body") || block_child(node)
+        node.named_children.find do |child|
+          !same_ts_node?(child, name) &&
+            !same_ts_node?(child, parameters) &&
+            !same_ts_node?(child, body)
+        end
       end
 
       def singleton_name(node)
@@ -1742,8 +3074,8 @@ module Decomplex
         node.named_children.each { |child| collect_destructured_parameter_targets(child, targets) }
       end
 
-      def scope(body, args: nil)
-        wrap(:SCOPE, children: [nil, args, body], source: body || args || @document.root)
+      def scope(body, args: nil, source: nil)
+        wrap(:SCOPE, children: [nil, args, body], source: body || args || source || @document.root)
       end
 
       def list(children, source:)
@@ -1839,9 +3171,7 @@ module Decomplex
       end
 
       def named_field(node, name)
-        node.child_by_field_name(name)
-      rescue StandardError
-        nil
+        normalization_adapter.named_field(node, name)
       end
 
       def parent_node(node)
@@ -1875,42 +3205,29 @@ module Decomplex
       end
 
       def ternary_statement?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) &&
-          node.named_children.size >= 3 &&
-          node.children.any? { |child| !child.named? && child.text == "?" } &&
-          node.children.any? { |child| !child.named? && child.text == ":" }
-      rescue StandardError
-        false
+        normalization_adapter.ternary_statement?(node)
       end
 
       def normalize_ternary_statement(node)
-        cond, positive, negative = node.named_children
+        cond, positive, negative = normalization_adapter.ternary_parts(node)
         wrap(:IF, children: [normalize_node(cond), normalize_node(positive), normalize_node(negative)], source: node)
       end
 
       def case_argument_list?(node)
-        node.kind == "argument_list" &&
-          node.children.any? { |child| !child.named? && child.kind == "case" } &&
-          node.named_children.any? { |child| WHEN_KINDS.include?(child.kind) }
-      rescue StandardError
-        false
+        normalization_adapter.case_argument_list?(node)
       end
 
       def leading_function_statement?(node)
-        %w[body_statement statement].include?(node.kind) &&
-          node.children.first&.kind.to_s == "def" &&
-          node.named_children.any? { |child| IDENTIFIER_KINDS.include?(child.kind) }
-      rescue StandardError
-        false
+        normalization_adapter.leading_function_statement?(node)
       end
 
       def normalize_leading_function_statement(node)
-        name = node.named_children.find { |child| IDENTIFIER_KINDS.include?(child.kind) }&.text.to_s.to_sym
-        body = node.named_children.reverse.find { |child| child.kind == "body_statement" }
+        name = normalization_adapter.leading_function_name(node).to_s.to_sym
+        body = normalization_adapter.leading_function_body(node)
         normalized_body = with_ruby_scope(node, reset: true) do
           elide_tail_returns(normalize_body(body))
         end
-        wrap(:DEFN, children: [name, scope(normalized_body)], source: node)
+        wrap(:DEFN, children: [name, scope(normalized_body, source: node)], source: node)
       end
 
       def command_call_statement?(node)
@@ -1923,107 +3240,118 @@ module Decomplex
       end
 
       def zero_child_identifier_call?(node)
-        node.kind == "call" && node.named_children.empty? &&
-          node.text.to_s.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
+        normalization_adapter.zero_child_identifier_call?(node)
       end
 
       def dotted_call?(node)
         return false unless ts_node?(node)
+        target = dotted_call_target(node)
+        return true if target && dotted_call_node?(target)
+
+        dotted_call_node?(node)
+      end
+
+      def dotted_call_node?(node)
+        return false unless ts_node?(node)
         return false unless node.children.any? { |child| child.text == "." || child.text == "&." }
 
-        callable = node.named_children.reject { |child| %w[block do_block argument_list arguments].include?(child.kind) }
+        callable = dotted_callable_children(node)
         return false if callable.any? { |child| %w[string_content interpolation].include?(child.kind) }
 
         callable.size >= 2
       end
 
+      def dotted_call_target(node)
+        return nil unless ts_node?(node)
+
+        named = node.named_children
+        return nil unless named.size == 1
+
+        child = named.first
+        dotted_call_node?(child) ? child : nil
+      rescue StandardError
+        nil
+      end
+
+      def dotted_callable_children(node)
+        node.named_children.reject { |child| %w[block do_block argument_list arguments].include?(child.kind) }
+      end
+
       def safe_navigation_call?(node)
-        ts_node?(node) && node.children.any? { |child| !child.named? && child.text == "&." }
+        ts_node?(node) && normalization_adapter.safe_navigation_call?(node)
       end
 
       def dotted_call_parts(node)
-        callable = node.named_children.reject { |child| %w[block do_block argument_list arguments].include?(child.kind) }
+        target = dotted_call_target(node) || node
+        callable = dotted_callable_children(target)
         [callable.first, callable[1].text.to_s.sub(/=\z/, "")]
       end
 
       def leading_if_statement?(node)
-        %w[body_statement block block_body statement].include?(node.kind) &&
-          %w[if unless].include?(node.children.first&.kind.to_s) &&
-          node.named_children.size >= 2 &&
-          !IF_KINDS.include?(node.named_children.first.kind)
-      rescue StandardError
-        false
+        normalization_adapter.leading_if_statement?(node)
       end
 
       def leading_case_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          node.children.first&.kind.to_s == "case" &&
-          node.named_children.any? { |child| WHEN_KINDS.include?(child.kind) }
-      rescue StandardError
-        false
+        normalization_adapter.leading_case_statement?(node)
       end
 
       def normalize_leading_case_statement(node)
-        value = normalize_node(case_value(node))
-        whens = case_arms(node).map { |arm| normalize_when(arm) }.compact
-        wrap(:CASE, children: [value, link_when_chain(whens, case_else_body(node))], source: node)
+        target = normalization_adapter.leading_case_target(node) || node
+        value = normalize_node(case_value(target))
+        whens = case_arms(target).map { |arm| normalize_when(arm) }.compact
+        wrap(:CASE, children: [value, link_when_chain(whens, case_else_body(target))], source: target)
       end
 
       def leading_loop_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          !node.children.first&.named? &&
-          %w[while until].include?(node.children.first&.kind.to_s) &&
-          node.named_children.size >= 2
-      rescue StandardError
-        false
+        normalization_adapter.leading_loop_statement?(node)
       end
 
       def rescue_body_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          node.named_children.any? { |child| child.kind == "rescue" }
-      rescue StandardError
-        false
+        normalization_adapter.rescue_body_statement?(node)
       end
 
       def normalize_rescue_body_statement(node)
-        named = node.named_children
-        rescue_index = named.index { |child| child.kind == "rescue" }
-        body = normalize_body_nodes(named[0...rescue_index], source: node)
-        rescue_nodes = named[rescue_index..].select { |child| child.kind == "rescue" }
+        target = normalization_adapter.rescue_body_target(node) || node
+        body_nodes = normalization_adapter.rescue_body_nodes(target)
+        body = normalize_body_nodes(body_nodes, source: target)
+        rescue_nodes = normalization_adapter.rescue_clauses(target)
         resbodies = rescue_nodes.map { |child| normalize_rescue_clause(child) }
-        source = source_from_nodes(named.first || node, rescue_source_end(rescue_nodes.last) || rescue_nodes.last || node)
+        source = source_from_nodes(body_nodes.first || target, rescue_source_end(rescue_nodes.last) || rescue_nodes.last || target)
         wrap(:RESCUE, children: [body, link_rescue_chain(resbodies), nil], source: source)
       end
 
       def normalize_rescue_clause(node)
-        exceptions = node.named_children.find { |child| child.kind == "exceptions" }
-        exception_nodes = exceptions ? exceptions.named_children.map { |child| normalize_node(child) }.compact : []
+        exceptions = normalization_adapter.rescue_clause_exceptions(node)
+        exception_nodes = exceptions.map do |child|
+          if child.kind == "exceptions" && child.text.to_s.match?(/\A[A-Z]\w*(?:::\w+)*\z/)
+            normalize_const(child)
+          else
+            normalize_node(child)
+          end
+        end.compact
+        exception_source = normalization_adapter.rescue_clause_exceptions_source(node)
         exception_variable = rescue_exception_variable(node)
-        handler = node.named_children.reverse.find do |child|
-          !%w[exceptions exception_variable comment].include?(child.kind)
-        end
+        handler = normalization_adapter.rescue_clause_handler(node)
         body = prepend_rescue_exception_assignment(normalize_body(handler), exception_variable)
-        wrap(:RESBODY, children: [list(exception_nodes, source: exceptions || node), body, nil],
+        wrap(:RESBODY, children: [list(exception_nodes, source: exception_source || node), body, nil],
                        source: node)
       end
 
       def rescue_source_end(node)
         return nil unless ts_node?(node)
 
-        handler = node.named_children.reverse.find do |child|
-          !%w[exceptions exception_variable comment].include?(child.kind)
-        end
+        handler = normalization_adapter.rescue_clause_handler(node)
         return handler.named_children.last || handler if ts_node?(handler)
 
         node.named_children.reverse.find { |child| !%w[comment].include?(child.kind) } || node
       end
 
       def rescue_exception_variable(node)
-        var = node.named_children.find { |child| child.kind == "exception_variable" }
-        name = var&.named_children&.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
+        name = normalization_adapter.rescue_clause_exception_variable_name(node)
         return nil unless name
 
-        wrap(:LASGN, children: [name.text.to_s, wrap(:ERRINFO, children: [], source: var)], source: var)
+        source = normalization_adapter.rescue_clause_exception_variable_source(node) || name
+        wrap(:LASGN, children: [name.text.to_s, wrap(:ERRINFO, children: [], source: source)], source: source)
       end
 
       def prepend_rescue_exception_assignment(body, assignment)
@@ -2039,74 +3367,92 @@ module Decomplex
       end
 
       def ensure_body_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          node.named_children.any? { |child| child.kind == "ensure" }
-      rescue StandardError
-        false
+        normalization_adapter.ensure_body_statement?(node)
       end
 
       def normalize_ensure_body_statement(node)
-        named = node.named_children
-        ensure_index = named.index { |child| child.kind == "ensure" }
-        body = normalize_body_nodes(named[0...ensure_index], source: node)
-        ensure_body = normalize_body(named[ensure_index])
+        target = normalization_adapter.ensure_body_target(node) || node
+        body = if rescue_body_statement?(target)
+                 normalize_rescue_body_statement(target)
+               else
+                 normalize_body_nodes(normalization_adapter.ensure_body_nodes(target), source: target)
+               end
+        ensure_node = normalization_adapter.ensure_clause(target)
+        ensure_body = normalize_body(normalization_adapter.ensure_clause_body(ensure_node) || ensure_node)
         wrap(:ENSURE, children: [body, ensure_body], source: body || node)
       end
 
       def array_literal_statement?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) &&
-          node.children.first&.text == "[" &&
-          node.children.last&.text == "]"
-      rescue StandardError
-        false
+        normalization_adapter.array_literal_statement?(node)
       end
 
       def element_reference_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          node.children.first&.text != "[" &&
-          node.children.any? { |child| !child.named? && child.text == "[" } &&
-          node.children.any? { |child| !child.named? && child.text == "]" } &&
-          node.named_children.size >= 2
-      rescue StandardError
-        false
+        normalization_adapter.element_reference_statement?(node)
       end
 
       def normalize_element_reference_statement(node)
-        recv = node.named_children.first
-        args = node.named_children.drop(1).map { |child| normalize_node(child) }.compact
-        wrap(:CALL, children: [normalize_node(recv), :[], list(args, source: node)], source: node)
+        target = normalization_adapter.element_reference_target(node) || node
+        recv = normalization_adapter.element_reference_receiver(target)
+        args = normalization_adapter.element_reference_arguments(target).map { |child| normalize_node(child) }.compact
+        if ruby? && self_node?(recv)
+          return wrap(:FCALL, children: [:[], list(args, source: target)], source: target)
+        end
+
+        wrap(:CALL, children: [normalize_node(recv), :[], list(args, source: target)], source: target)
       end
 
       def hash_literal_statement?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) &&
-          node.children.first&.text == "{" &&
-          node.children.last&.text == "}"
-      rescue StandardError
-        false
+        normalization_adapter.hash_literal_statement?(node)
       end
 
       def normalize_hash_literal_statement(node)
-        wrap(:HASH, children: normalize_children(node), source: node)
+        target = normalization_adapter.hash_literal_target(node) || node
+        children = normalization_adapter.hash_literal_values(target).map do |child|
+          normalize_hash_literal_value(child)
+        end.compact
+        wrap(:HASH, children: children, source: target)
+      end
+
+      def normalize_hash_literal_value(node)
+        if node.kind == "field"
+          named = node.named_children
+          if named.size >= 2
+            key = named.first
+            value = named[1]
+            key_lit = wrap(:LIT, children: [key.text.to_s.to_sym], source: key || node)
+            return wrap(:HASH, children: [key_lit, normalize_node(value)].compact, source: node)
+          end
+        end
+
+        normalize_node(node)
       end
 
       def normalize_array_literal_statement(node)
-        values = node.named_children.map { |child| normalize_node(child) }.compact
-        return wrap(:ZLIST, children: [], source: node) if values.empty?
+        target = normalization_adapter.array_literal_target(node) || node
+        values = normalization_adapter.array_literal_values(target).map do |child|
+          normalize_array_literal_value(child)
+        end.compact
+        return wrap(:ZLIST, children: [], source: target) if values.empty?
 
-        list(values, source: node)
+        list(values, source: target)
+      end
+
+      def normalize_array_literal_value(node)
+        if node.kind == "field"
+          named = node.named_children
+          return normalize_node(named.first) if named.size == 1
+          return normalize_terminal_statement(node) if named.empty?
+        end
+
+        normalize_node(node)
       end
 
       def empty_body_statement?(node)
-        %w[body_statement block_body statement].include?(node.kind) &&
-          node.named_children.empty? &&
-          node.text.to_s.strip.empty?
+        normalization_adapter.empty_body_statement?(node)
       end
 
       def heredoc_body_statement?(node)
-        %w[body_statement block_body statement then].include?(node.kind) &&
-          node.named_children.any? { |child| child.kind == "heredoc_body" }
-      rescue StandardError
-        false
+        normalization_adapter.heredoc_body_statement?(node)
       end
 
       def normalize_heredoc_body_statement(node)
@@ -2128,13 +3474,8 @@ module Decomplex
 
       def heredoc_call_for_body?(node)
         return false unless ts_node?(node)
-        return true if node.kind == "heredoc_beginning"
 
-        node.named_children.any? do |child|
-          next false if child.named_children.any? { |grandchild| grandchild.kind == "heredoc_body" }
-
-          heredoc_call_for_body?(child)
-        end
+        normalization_adapter.heredoc_call_for_body?(node)
       end
 
       def with_current_heredoc_body(body)
@@ -2146,7 +3487,8 @@ module Decomplex
       end
 
       def normalize_heredoc_beginning(node)
-        body = @current_heredoc_body
+        body = @current_heredoc_body ||
+          parent_node(parent_node(node))&.named_children&.find { |child| child.kind == "heredoc_body" }
         children = body ? normalize_heredoc_children(body) : []
         wrap(:DSTR, children: children, source: node)
       end
@@ -2172,10 +3514,7 @@ module Decomplex
       end
 
       def interpolated_statement?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) &&
-          node.named_children.any? { |child| child.kind == "interpolation" }
-      rescue StandardError
-        false
+        normalization_adapter.interpolated_statement?(node)
       end
 
       def normalize_interpolated_statement(node)
@@ -2183,11 +3522,7 @@ module Decomplex
       end
 
       def concatenated_string_statement?(node)
-        %w[body_statement block_body statement argument_list].include?(node.kind) &&
-          node.named_children.size > 1 &&
-          node.named_children.all? { |child| child.kind == "string" }
-      rescue StandardError
-        false
+        normalization_adapter.concatenated_string_statement?(node)
       end
 
       def normalize_concatenated_string_statement(node)
@@ -2248,10 +3583,13 @@ module Decomplex
       end
 
       def normalize_leading_loop_statement(node)
-        keyword = node.children.first.kind
-        cond = normalize_node(node.named_children.first)
-        body = normalize_body(node.named_children[1])
-        wrap(keyword == "until" ? :UNTIL : :WHILE, children: [cond, body], source: node)
+        target = normalization_adapter.leading_loop_target(node) || node
+        return normalize_loop(target) unless same_ts_node?(target, node)
+
+        keyword = target.children.first.kind
+        cond = normalize_node(target.named_children.first)
+        body = normalize_body(target.named_children[1])
+        wrap(keyword == "until" ? :UNTIL : :WHILE, children: [cond, body], source: target)
       end
 
       def operator_assignment_statement?(node)
@@ -2309,38 +3647,35 @@ module Decomplex
       end
 
       def leading_owner_statement?(node)
-        %w[body_statement statement].include?(node.kind) &&
-          %w[class module].include?(node.children.first&.kind.to_s) &&
-          node.named_children.size >= 2 &&
-          !OWNER_STATEMENT_NESTED_KIND.include?(node.named_children.first.kind)
-      rescue StandardError
-        false
+        normalization_adapter.leading_owner_statement?(node)
       end
 
-      OWNER_STATEMENT_NESTED_KIND = %w[class class_definition class_declaration module].freeze
-
       def normalize_leading_owner_statement(node)
-        keyword = node.children.first.kind
-        name = const_for(node.named_children.first)
-        body_node = named_field(node, "body") ||
-                    node.named_children.reverse.find { |child| BLOCK_KINDS.include?(child.kind) }
+        target = normalization_adapter.leading_owner_target(node) || node
+        keyword = target.children.first.kind
+        name = const_for(target.named_children.first)
+        body_node = named_field(target, "body") ||
+                    target.named_children.reverse.find { |child| BLOCK_KINDS.include?(child.kind) }
         body = normalize_body(body_node)
         if keyword == "module"
-          wrap(:MODULE, children: [name, scope(body)], source: node)
+          wrap(:MODULE, children: [name, scope(body, source: target)], source: target)
         else
-          wrap(:CLASS, children: [name, nil, scope(body)], source: node)
+          wrap(:CLASS, children: [name, nil, scope(body, source: target)], source: target)
         end
       end
 
       def normalize_leading_if_statement(node)
-        keyword = node.children.first.kind
-        cond = node.named_children.find { |child| !%w[comment then elsif else].include?(child.kind) }
-        consequence = node.named_children.find { |child| child.kind == "then" } ||
-                      branch_child(node, cond, 0)
-        alternative = explicit_alternative(node)
+        target = normalization_adapter.leading_if_target(node) || node
+        return normalize_if(target) unless same_ts_node?(target, node)
+
+        keyword = target.children.first.kind
+        cond = target.named_children.find { |child| !%w[comment then elsif else].include?(child.kind) }
+        consequence = target.named_children.find { |child| child.kind == "then" } ||
+                      branch_child(target, cond, 0)
+        alternative = explicit_alternative(target)
         type = keyword == "unless" ? :UNLESS : :IF
         wrap(type, children: [normalize_node(cond), normalize_body(consequence), normalize_else_or_branch(alternative)],
-                   source: node)
+                   source: target)
       end
 
       def modifier_keyword(node)
@@ -2370,6 +3705,7 @@ module Decomplex
 
       def statement_block_call(node)
         return node if dotted_call?(node)
+        return node if member_read_node?(node)
 
         block = call_block(node)
         node.named_children.find do |child|
@@ -2384,7 +3720,7 @@ module Decomplex
         body = with_ruby_scope(block) do
           dynamic_scope(normalize_body(named_field(block, "body") || block_child(block) || block))
         end
-        wrap(:ITER, children: [call, scope(body, args: args)], source: node)
+        wrap(:ITER, children: [call, scope(body, args: args, source: node)], source: node)
       end
 
       def visibility_inline_def_call?(node)
@@ -2402,7 +3738,7 @@ module Decomplex
       end
 
       def inline_def_from_argument_list(args)
-        return nil unless ts_node?(args)
+        return nil unless ruby? && ts_node?(args)
 
         inline_def_from_source(args)
       end
@@ -2413,6 +3749,8 @@ module Decomplex
       end
 
       def inline_def_from_source(source)
+        return nil unless ruby? && ts_node?(source)
+
         body = inline_def_body(source)
         receiver = inline_def_receiver(source)
         normalized_body = with_ruby_scope(source, reset: true) do
@@ -2422,14 +3760,14 @@ module Decomplex
           name = inline_def_name_after_receiver(source, receiver)
           return nil if name.to_s.empty?
 
-          return wrap(:DEFS, children: [normalize_node(receiver), name.to_sym, scope(normalized_body)],
+          return wrap(:DEFS, children: [normalize_node(receiver), name.to_sym, scope(normalized_body, source: source)],
                              source: source)
         end
 
         name = source.named_children.find { |child| IDENTIFIER_KINDS.include?(child.kind) }&.text.to_s
         return nil if name.to_s.empty?
 
-        wrap(:DEFN, children: [name.to_sym, scope(normalized_body)], source: source)
+        wrap(:DEFN, children: [name.to_sym, scope(normalized_body, source: source)], source: source)
       end
 
       def inline_def_receiver(source)
@@ -2455,7 +3793,10 @@ module Decomplex
       end
 
       def literal_arguments_from_text(args)
-        args.text.to_s.scan(/:([A-Za-z_]\w*[!?=]?)/).map do |name|
+        text = args.text.to_s
+        return [normalize_heredoc_beginning(args)] if text.match?(/\A\s*<<[-~]?[A-Za-z_]\w*/)
+
+        text.scan(/:([A-Za-z_]\w*[!?=]?)/).map do |name|
           wrap(:LIT, children: [name.first.to_sym], source: args)
         end
       end
