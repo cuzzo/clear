@@ -1,7 +1,7 @@
 const Worker = struct {
     pub fn run(self: *Worker, items: Items) void {
         self.prepare();
-        if (true) {
+        if (self.ready()) {
             self.validate();
         }
         for (items) |item| {

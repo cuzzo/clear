@@ -7,7 +7,10 @@ require_relative "../lib/decomplex"
 class FlaySimilarityTest < Minitest::Test
   def grammar_available?(language)
     env = "DECOMPLEX_TS_#{language.to_s.upcase}_PATH"
-    ENV[env] && File.file?(ENV[env])
+    return true if ENV[env] && File.file?(ENV[env])
+
+    adapter = Decomplex::Syntax::TreeSitterAdapter.new
+    adapter.send(:grammar_candidates, language).any? { |path| File.file?(path) }
   end
 
   def scan(source, ext: ".rb", mass: 8, fuzzy: 1)

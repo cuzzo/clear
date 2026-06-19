@@ -5,8 +5,7 @@ Result mixed(int price, int tax, Logger logger) {
 
   auto timestamp = now();
   auto buffer = Buffer.init();
-  auto stamp = timestamp;
-  buffer.push(stamp);
+  buffer.push(timestamp);
   logger.info(buffer);
 
   return Result.init(rounded, buffer);

@@ -5,8 +5,7 @@ func mixed(price: Int, tax: Int, logger: Logger) -> Result {
 
   let timestamp = now()
   let buffer = Buffer.init()
-  let stamp = timestamp
-  buffer.push(stamp)
+  buffer.push(timestamp)
   logger.info(buffer)
 
   return Result.init(rounded, buffer)

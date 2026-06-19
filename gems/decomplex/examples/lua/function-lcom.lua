@@ -5,8 +5,7 @@ function mixed(price, tax, logger)
 
   local timestamp = now()
   local buffer = Buffer.init()
-  local stamp = timestamp
-  buffer.push(stamp)
+  buffer.push(timestamp)
   logger.info(buffer)
 
   return Result.init(rounded, buffer)

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "set"
-require_relative "local_flow"
+require_relative "syntax"
 require_relative "structural_topology"
 
 module Decomplex
@@ -9,7 +9,8 @@ module Decomplex
   # same-owner bare/self helper calls. This catches "small" orchestration
   # methods whose complexity was moved into private/single-use helpers.
   class WeightedInlinedCognitiveComplexity
-    MethodBody = Struct.new(:id, :owner, :name, :file, :line, :span, :node, keyword_init: true)
+    MethodBody = Struct.new(:id, :owner, :name, :file, :line, :span, :node,
+                            :complexity, keyword_init: true)
     LocalScore = Struct.new(:id, :owner, :name, :file, :line, :span, :score, :signals, keyword_init: true)
     Contribution = Struct.new(:callee_id, :callee_name, :score, :weight, :depth, :chain, keyword_init: true)
 
@@ -31,9 +32,9 @@ module Decomplex
 
     def scan
       topology = StructuralTopology.scan(@files)
-      bodies = LocalFlow.scan(@files).map { |summary| method_body(summary) }
+      bodies = syntax_method_bodies
       scores = bodies.to_h do |body|
-        score = LocalScorer.new.score(body.node)
+        score = body.complexity
         [body.id, LocalScore.new(
           id: body.id,
           owner: body.owner,
@@ -51,7 +52,17 @@ module Decomplex
 
     private
 
-    def method_body(summary)
+    def syntax_method_bodies
+      @files.flat_map do |file|
+        document = Syntax.parse(file, parser: "tree_sitter")
+        score_by_id = document.local_complexity_scores
+        document.local_methods.map do |method|
+          method_body(method, complexity: score_by_id.fetch(method.id, { score: 0.0, signals: {} }))
+        end
+      end
+    end
+
+    def method_body(summary, complexity:)
       owner = summary.owner == "(top-level)" ? "(top-level:#{summary.file})" : summary.owner
       MethodBody.new(
         id: "#{owner}##{summary.name}",
@@ -60,179 +71,9 @@ module Decomplex
         file: summary.file,
         line: summary.line,
         span: summary.span,
-        node: summary.node
+        node: summary.node,
+        complexity: complexity
       )
-    end
-
-    class LocalScorer
-      def score(method_node)
-        signals = Hash.new(0)
-        {
-          score: round(score_node(method_node, nesting: 0, signals: signals)),
-          signals: signals.to_h
-        }
-      end
-
-      private
-
-      def score_node(node, nesting:, signals:)
-        return 0.0 unless tree_sitter_node?(node)
-
-        score_tree_sitter_node(node, nesting: nesting, signals: signals)
-      end
-
-      def boolean_count(node)
-        tree_sitter_boolean_count(node)
-      end
-
-      def score_tree_sitter_node(node, nesting:, signals:)
-        return 0.0 if skip_tree_sitter_nested?(node)
-
-        if tree_sitter_branch?(node)
-          signals[:branches] += 1
-          signals[:nested] += 1 if nesting.positive?
-          return branch_cost(nesting) +
-                 tree_sitter_predicate_cost(node, signals) +
-                 score_tree_sitter_children(node, nesting: nesting + 1, signals: signals)
-        end
-
-        if tree_sitter_loop?(node)
-          signals[:loops] += 1
-          signals[:nested] += 1 if nesting.positive?
-          return branch_cost(nesting) +
-                 score_tree_sitter_children(node, nesting: nesting + 1, signals: signals)
-        end
-
-        if tree_sitter_case?(node)
-          signals[:cases] += 1
-          return 0.5 + score_tree_sitter_children(node, nesting: nesting + 1, signals: signals)
-        end
-
-        if tree_sitter_rescue?(node)
-          signals[:rescues] += 1
-          return branch_cost(nesting) +
-                 score_tree_sitter_children(node, nesting: nesting + 1, signals: signals)
-        end
-
-        if tree_sitter_early_exit?(node)
-          signals[:early_exits] += 1
-          exit_cost = nesting.positive? ? 0.5 + (nesting * 0.25) : 0.0
-          return exit_cost + score_tree_sitter_children(node, nesting: nesting, signals: signals)
-        end
-
-        if tree_sitter_boolean_node?(node)
-          signals[:boolean_ops] += 1
-          return 0.25 + score_tree_sitter_children(node, nesting: nesting, signals: signals)
-        end
-
-        score_tree_sitter_children(node, nesting: nesting, signals: signals)
-      end
-
-      def score_tree_sitter_children(node, nesting:, signals:)
-        node.children.sum { |child| score_node(child, nesting: nesting, signals: signals) }
-      end
-
-      def tree_sitter_predicate_cost(node, signals)
-        predicate = tree_sitter_condition_node(node)
-        bools = tree_sitter_boolean_count(predicate)
-        signals[:boolean_ops] += bools
-        bools * 0.5
-      end
-
-      def tree_sitter_condition_node(node)
-        return node.named_children.last if tree_sitter_modifier_if?(node)
-        return node.named_children.first if node.kind == "body_statement"
-
-        node.named_children.first
-      end
-
-      def tree_sitter_boolean_count(node)
-        return 0 unless tree_sitter_node?(node)
-
-        own = tree_sitter_boolean_node?(node) ? 1 : 0
-        own + node.children.sum { |child| tree_sitter_boolean_count(child) }
-      end
-
-      def tree_sitter_boolean_node?(node)
-        tree_sitter_node?(node) &&
-          %w[binary binary_expression boolean_operator conjunction_expression disjunction_expression].include?(node.kind) &&
-          node.children.any? { |child| !child.named? && %w[&& || and or].include?(child.text.to_s) }
-      end
-
-      def tree_sitter_branch?(node)
-        return false unless tree_sitter_node?(node)
-        return true if %w[if unless if_statement if_expression if_modifier unless_modifier].include?(node.kind) &&
-                       node.named_children.any?
-
-        tree_sitter_hidden_if?(node) || tree_sitter_modifier_if?(node)
-      end
-
-      def tree_sitter_hidden_if?(node)
-        return true if node.kind == "expression_statement" && node.text.to_s.lstrip.start_with?("if ")
-
-        %w[body_statement block statements statement_list].include?(node.kind) &&
-          node.children.first &&
-          !node.children.first.named? &&
-          %w[if unless].include?(node.children.first.kind.to_s)
-      end
-
-      def tree_sitter_modifier_if?(node)
-        return true if %w[if_modifier unless_modifier].include?(node.kind)
-        return false unless node.kind == "body_statement"
-
-        seen_named = false
-        node.children.any? do |child|
-          seen_named ||= child.named?
-          seen_named && !child.named? && %w[if unless].include?(child.kind.to_s)
-        end
-      end
-
-      def tree_sitter_loop?(node)
-        return false unless tree_sitter_node?(node)
-        return true if %w[while until while_statement for for_statement for_in_statement do_block].include?(node.kind)
-        return true if tree_sitter_hidden_loop?(node)
-
-        (node.kind == "expression_statement" && node.text.to_s.lstrip.match?(/\A(?:for|while|loop)\b/)) ||
-          (node.kind == "labeled_statement" && node.text.to_s.lstrip.start_with?("for "))
-      end
-
-      def tree_sitter_hidden_loop?(node)
-        %w[body_statement block statements statement_list].include?(node.kind) &&
-          node.children.first &&
-          !node.children.first.named? &&
-          %w[for while loop].include?(node.children.first.kind.to_s)
-      end
-
-      def tree_sitter_case?(node)
-        tree_sitter_node?(node) &&
-          (%w[case switch_statement switch_expression match_statement match_expression].include?(node.kind) ||
-           (node.kind == "expression_statement" && node.text.to_s.lstrip.start_with?("match ")))
-      end
-
-      def tree_sitter_rescue?(node)
-        tree_sitter_node?(node) && %w[rescue rescue_modifier rescue_clause rescue_body].include?(node.kind)
-      end
-
-      def tree_sitter_early_exit?(node)
-        tree_sitter_node?(node) &&
-          %w[return break next redo retry return_statement break_statement continue_statement].include?(node.kind)
-      end
-
-      def skip_tree_sitter_nested?(node)
-        %w[class module lambda].include?(node.kind)
-      end
-
-      def tree_sitter_node?(node)
-        node.respond_to?(:kind) && node.respond_to?(:children)
-      end
-
-      def branch_cost(nesting)
-        1.1 + nesting
-      end
-
-      def round(value)
-        (value * 10).round / 10.0
-      end
     end
 
     class Analyzer

@@ -5,7 +5,13 @@
   },
   "expected": {
     "state_mesh": {
-      "present": true
-    }
+      "total_fields": 1,
+      "total_writes": 3,
+      "total_reads": 2,
+      "total_re_derivations": 0
+    },
+    "field_names": [
+      "a"
+    ]
   }
 }

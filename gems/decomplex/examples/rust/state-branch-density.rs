@@ -3,12 +3,12 @@ struct StateBranchChecker {
 }
 
 impl StateBranchChecker {
-    fn check(&mut self, user: User) {
-        if user.admin {
+    fn check(&mut self, admin: bool, name: String) {
+        if admin {
             self.checked = true;
         }
 
-        if self.checked && user.name == "admin" {
+        if self.checked && name == "admin" {
             print("hello");
         }
     }

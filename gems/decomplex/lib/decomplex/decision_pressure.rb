@@ -21,7 +21,7 @@ module Decomplex
       files.each do |file|
         document = Syntax.parse(file, parser: "tree_sitter")
         assignment_maps = document.local_methods.to_h do |method|
-          [method.name, build_assignment_map(method)]
+          [method.name, build_assignment_map(document, method)]
         end
 
         document.call_sites.each do |call|
@@ -39,6 +39,7 @@ module Decomplex
 
         guard.concat(rescue_nil_hits(document, assignment_maps))
       end
+      guard.uniq! { |hit| [hit.contract, hit.file, hit.defn, hit.line] }
       Report.new(guard, dispatch)
     end
 
@@ -85,23 +86,10 @@ module Decomplex
       end
     end
 
-    def self.build_assignment_map(method)
-      method.statements.each_with_object({}) do |statement, map|
-        next unless statement.writes.size == 1
-
-        name = statement.writes.first.to_s
-        map[name] ||= simple_source_contract(statement.source)
+    def self.build_assignment_map(document, method)
+      document.local_contract_assignments(method).transform_values do |source|
+        contract_of(source, {})
       end.compact
-    end
-
-    def self.simple_source_contract(source)
-      match = source.to_s.match(/\A\s*[A-Za-z_]\w*\s*=\s*(.+?)\s*\z/m)
-      return nil unless match
-
-      rhs = match[1].strip
-      return nil if rhs.match?(/\s(?:if|unless|rescue)\s|\?|:/)
-
-      contract_of(rhs, {})
     end
 
     def self.contract_of(receiver, assignment_map, depth = 0)

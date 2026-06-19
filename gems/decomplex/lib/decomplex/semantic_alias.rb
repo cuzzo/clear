@@ -48,7 +48,20 @@ module Decomplex
             span: comparison.span
           )
         end
+        document.branch_arms.each do |arm|
+          next unless arm.predicate.to_s.match?(/(?:==|!=)/)
+
+          uses << Use.new(
+            canon: canon(arm.predicate),
+            file: arm.file,
+            defn: arm.function,
+            line: arm.decision_line,
+            raw: arm.predicate,
+            span: arm.decision_span
+          )
+        end
       end
+      uses.uniq! { |use| [use.file, use.defn, use.line, use.canon, use.raw] }
       Report.new(preds, uses)
     end
 

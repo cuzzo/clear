@@ -5,7 +5,14 @@
   },
   "expected": [
     {
-      "present": true
+      "pattern": [
+        "x.p",
+        "y.q",
+        "z.r"
+      ],
+      "support": 3,
+      "missing": "z.r",
+      "action": "go(x)"
     }
   ]
 }

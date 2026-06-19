@@ -3,7 +3,7 @@
 class Worker
   def run(items)
     prepare
-    if ready
+    if ready()
       validate
     end
     items.each do |item|

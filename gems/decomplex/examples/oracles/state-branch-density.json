@@ -5,7 +5,11 @@
   },
   "expected": [
     {
-      "present": true
+      "decisions": 1,
+      "method": "check",
+      "state_refs": [
+        "checked"
+      ]
     }
   ]
 }

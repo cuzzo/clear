@@ -5,8 +5,7 @@ Result mixed(int price, int tax, Logger logger) {
 
   int timestamp = now();
   Buffer buffer = Buffer_init();
-  int stamp = timestamp;
-  buffer.push(stamp);
+  buffer.push(timestamp);
   logger.info(buffer);
 
   return Result_init(rounded, buffer);

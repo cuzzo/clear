@@ -25,6 +25,7 @@ module Decomplex
       edges = documents.flat_map do |file, document|
         EdgeFacts.new(file, document, methods).edges
       end
+      edges.uniq! { |edge| [edge.caller, edge.callee, edge.type] }
 
       Graph.new(methods, edges)
     end

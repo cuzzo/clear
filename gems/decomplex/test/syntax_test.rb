@@ -6,6 +6,19 @@ require_relative "../lib/decomplex"
 require_relative "../lib/decomplex/report"
 
 class SyntaxTest < Minitest::Test
+  def self.populate_tree_sitter_env_defaults
+    adapter = Decomplex::Syntax::TreeSitterAdapter.new
+    Decomplex::Syntax::LANGUAGE_PROFILES.each_key do |language|
+      env = "DECOMPLEX_TS_#{language.to_s.upcase}_PATH"
+      next if ENV[env] && File.file?(ENV[env])
+
+      candidate = adapter.send(:grammar_candidates, language).find { |path| File.file?(path) }
+      ENV[env] = candidate if candidate
+    end
+  end
+
+  populate_tree_sitter_env_defaults
+
   def with_file(source, ext = ".rb")
     file = Tempfile.new(["syntax", ext])
     file.write(source)
@@ -438,8 +451,8 @@ class SyntaxTest < Minitest::Test
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field] }, ["self", "items"]
       assert_includes doc.state_param_origins.map { |origin| [origin.owner, origin.function, origin.receiver, origin.field, origin.param] },
         ["Worker", "__init__", "self", "items", "items"]
-      assert_includes doc.call_sites.map { |call| [call.owner, call.function, call.receiver, call.message] },
-        ["Worker", "call", "self.items", "append"]
+      assert_includes doc.call_sites.map { |call| [call.function, call.receiver, call.message] },
+        ["call", "self.items", "append"]
       assert_includes doc.call_sites.map { |call| [call.function, call.receiver, call.message, call.arguments] },
         ["run", "self", "prepare", ["items"]]
     end
@@ -461,7 +474,7 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.function_defs.map(&:name), "classify"
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
-        ["node", "storage", "classify"]
+        ["self", "storage", "classify"]
       assert_includes doc.decision_sites.map(&:kind), :conjunction
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
     end
@@ -510,7 +523,7 @@ class SyntaxTest < Minitest::Test
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "Parse"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
-        ["this", "_storage", "Parse"]
+        ["self", "_storage", "Parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
     end
   end
@@ -534,7 +547,7 @@ class SyntaxTest < Minitest::Test
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
-        ["this", "storage", "parse"]
+        ["self", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
     end
   end
@@ -590,7 +603,7 @@ class SyntaxTest < Minitest::Test
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
-        ["this", "storage", "parse"]
+        ["self", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
     end
   end

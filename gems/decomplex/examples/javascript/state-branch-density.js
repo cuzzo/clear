@@ -1,1 +1,1 @@
-class StateBranchChecker { check(user) { if (user.admin) { this.checked = true; } if (this.checked && user.name == "admin") { print("hello"); } } }
+class StateBranchChecker { check(admin, name) { if (admin) { this.checked = true; } if (this.checked && name == "admin") { print("hello"); } } }

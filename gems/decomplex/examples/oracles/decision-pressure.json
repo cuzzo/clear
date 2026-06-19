@@ -5,7 +5,10 @@
   },
   "expected": [
     {
-      "present": true
+      "contract": ".symbol",
+      "decisions": 1,
+      "essential": 0,
+      "methods": 1
     }
   ]
 }

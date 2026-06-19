@@ -6,8 +6,7 @@ func mixed(price int, tax int, logger Logger) Result {
 
   timestamp := now()
   buffer := Buffer_init()
-  stamp := timestamp
-  buffer.push(stamp)
+  buffer.push(timestamp)
   logger.info(buffer)
 
   return Result_init(rounded, buffer)

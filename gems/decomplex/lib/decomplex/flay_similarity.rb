@@ -4,52 +4,14 @@ require "set"
 require_relative "syntax"
 
 module Decomplex
-  # Tree-sitter structural similarity scanner for Type-2 / Type-3 clone pressure.
+  # Structural similarity scanner for Type-2 / Type-3 clone pressure.
   #
-  # The public class name is retained for report compatibility. The detector no
-  # longer shells through the flay gem: it builds language-neutral structural
-  # fingerprints from Tree-sitter node kinds, normalizing identifiers/literals
-  # so renamed-but-isomorphic code groups as Type-2. Type-3 uses a small fuzzy
-  # signature over child statements, matching functions/subtrees with a missing
-  # or inserted child within the configured fuzzy budget.
+  # Parser-specific structural fingerprinting is owned by Syntax adapters. This
+  # detector ranks already-normalized clone candidates and emits report rows.
   class FlaySimilarity
     DEFAULT_MASS = 32
     DEFAULT_FUZZY = 1
     MAX_FUZZY_CHILDREN = 14
-
-    MethodSpan = Struct.new(:name, :first_line, :last_line, keyword_init: true)
-    Candidate = Struct.new(:file, :line, :span, :method_name, :node_name, :mass,
-                           :fingerprint, :raw, :child_fingerprints,
-                           :child_masses, keyword_init: true)
-
-    IDENTIFIER_KINDS = %w[
-      identifier constant type_identifier field_identifier property_identifier
-      shorthand_property_identifier_pattern simple_identifier variable_name
-    ].freeze
-    LITERAL_KINDS = %w[
-      string string_content string_literal interpreted_string_literal raw_string_literal
-      integer float int number rational imaginary character char_literal
-      symbol simple_symbol true false nil none null
-    ].freeze
-    SKIP_CANDIDATE_KINDS = %w[
-      comment identifier constant type_identifier field_identifier property_identifier
-      parameters formal_parameters parameter_list argument_list arguments
-      block_parameters call_suffix function_value_parameters method_parameters value_argument
-      scope_resolution
-    ].freeze
-    CLONE_CANDIDATE_KINDS = %w[
-      array assignment assignment_statement block case case_clause class
-      class_definition class_declaration compound_statement conjunction_expression control_structure_body
-      do_block enum_declaration for for_statement function_body hash if if_statement match_expression
-      match_statement method method_definition module operator_assignment singleton_method statements
-      struct_declaration switch_case switch_expression switch_statement
-      unless until while while_statement
-    ].freeze
-    BODY_KINDS = %w[
-      body block body_statement declaration_list statement_block compound_statement
-      function_body statements suite do_block
-    ].freeze
-    CALL_KINDS = %w[call call_expression function_call method_call method_invocation invocation_expression].freeze
 
     def self.scan(files, mass: DEFAULT_MASS, fuzzy: DEFAULT_FUZZY)
       new(files, mass: mass, fuzzy: fuzzy).scan
@@ -59,7 +21,6 @@ module Decomplex
       @files = files
       @mass = mass
       @fuzzy = fuzzy
-      @method_spans = {}
     end
 
     def scan
@@ -77,60 +38,11 @@ module Decomplex
     def candidates_for_file(file)
       return [] unless Syntax.supported_source?(file, parser: "tree_sitter")
 
-      doc = Syntax.parse(file, parser: "tree_sitter")
-      @method_spans[file] = collect_method_spans(doc)
-      out = []
-      seen = Set.new
-
-      doc.function_defs.each do |fn|
-        candidate = candidate_for(file, fn.body, node_name: "defn")
-        add_candidate(out, seen, candidate) if candidate
+      Syntax.parse(file, parser: "tree_sitter").clone_candidates.select do |candidate|
+        candidate.mass >= effective_mass_floor
       end
-
-      walk(doc.root) do |node|
-        next unless candidate_node?(node)
-
-        add_candidate(out, seen, candidate_for(file, node))
-      end
-
-      out
     rescue StandardError
       []
-    end
-
-    def add_candidate(out, seen, candidate)
-      return unless candidate
-      return if candidate.mass < effective_mass_floor
-      return if typed_struct_schema_text?(candidate.raw)
-
-      key = [candidate.file, candidate.line, candidate.span, candidate.node_name, candidate.fingerprint]
-      return if seen.include?(key)
-
-      seen << key
-      out << candidate
-    end
-
-    def candidate_for(file, node, node_name: nil)
-      fp, mass = fingerprint(node)
-      return nil if fp.to_s.empty?
-
-      line = line(node)
-      method = method_span_for(file, line)
-      children = fuzzy_children_for(node)
-      child_data = children.map { |child| fingerprint(child) }.reject { |child_fp, child_mass| child_fp.to_s.empty? || child_mass.zero? }
-
-      Candidate.new(
-        file: file,
-        line: line,
-        span: span(node),
-        method_name: method.name,
-        node_name: node_name || flay_node_name(node),
-        mass: mass,
-        fingerprint: fp,
-        raw: normalize_text(node.text),
-        child_fingerprints: child_data.map(&:first),
-        child_masses: child_data.map(&:last)
-      )
     end
 
     def type2_findings(candidates)
@@ -138,7 +50,6 @@ module Decomplex
         cluster = uniq_sites(cluster)
         next if cluster.size < 2
         next if cluster.map(&:raw).uniq.size < 2
-        next if typed_struct_schema_cluster?(cluster)
 
         finding_for(cluster, clone_type: :type2, mass: cluster.map(&:mass).min)
       end
@@ -161,7 +72,6 @@ module Decomplex
         cluster = uniq_sites(rows.map(&:first))
         next if cluster.size < 2
         next if cluster.map(&:fingerprint).uniq.size < 2
-        next if typed_struct_schema_cluster?(cluster)
 
         key = cluster.map { |candidate| [candidate.file, candidate.line, candidate.node_name] }.sort
         next if seen.include?(key)
@@ -185,8 +95,12 @@ module Decomplex
     end
 
     def prune_nested_findings(findings)
+      defn_site_sets = findings.select { |finding| finding[:node].to_s == "defn" }
+                               .map { |finding| [finding[:clone_type], site_identities(finding)] }
       kept = []
       findings.each do |finding|
+        next if finding[:node].to_s != "defn" &&
+                defn_site_sets.include?([finding[:clone_type], site_identities(finding)])
         next if kept.any? { |larger| nested_finding?(finding, larger) }
 
         kept << finding
@@ -219,12 +133,18 @@ module Decomplex
       parts[0...-2].join(":")
     end
 
+    def site_identities(finding)
+      Array(finding[:sites]).map do |site|
+        parts = site.to_s.split(":")
+        [parts[0...-2].join(":"), parts[-2]]
+      end.sort
+    end
+
     def spans_for(cluster)
       cluster.each_with_object({}) do |candidate, out|
         out[site_for(candidate)] =
           if candidate.node_name == "defn"
-            method = method_span_for(candidate.file, candidate.line)
-            [method.first_line, 0, method.last_line, 1]
+            [candidate.span[0], 0, candidate.span[2], 1]
           else
             candidate.span
           end
@@ -263,217 +183,8 @@ module Decomplex
       signatures
     end
 
-    def candidate_node?(node)
-      return false unless ts_node?(node)
-      return false unless node.named?
-      return false if SKIP_CANDIDATE_KINDS.include?(node.kind)
-      return false unless CLONE_CANDIDATE_KINDS.include?(node.kind)
-      return false if typed_struct_schema_text?(node.text)
-
-      node.named_child_count.positive?
-    end
-
     def effective_mass_floor
       @effective_mass_floor ||= [@mass, (@mass * 23.0 / 8.0).ceil].max
-    end
-
-    def fuzzy_children_for(node)
-      body = body_node(node)
-      source = body || node
-      children = source.named_children
-      children = node.named_children if children.empty?
-      children.reject { |child| SKIP_CANDIDATE_KINDS.include?(child.kind) || typed_struct_schema_text?(child.text) }
-    end
-
-    def body_node(node)
-      named_field(node, "body") ||
-        node.named_children.find { |child| BODY_KINDS.include?(child.kind) }
-    end
-
-	    def fingerprint(node, active = nil)
-	      return ["", 0] unless ts_node?(node)
-	      active ||= Set.new
-	      key = node_key(node)
-	      return ["", 0] if active.include?(key)
-
-	      active << key
-	      begin
-	      return ["", 0] if node.kind == "comment"
-	      return fingerprint_call(node, active) if CALL_KINDS.include?(node.kind) && call_message(node)
-
-	      if node.child_count.zero?
-	        token = terminal_token(node)
-	        return ["", 0] if token.empty?
-
-        return [token, 1]
-      end
-
-	      child_parts = []
-	      mass = 1
-	      node.children.each do |child|
-	        child_fp, child_mass = fingerprint(child, active)
-	        next if child_fp.empty?
-
-	        child_parts << child_fp
-	        mass += child_mass
-      end
-
-	      return [terminal_token(node), 1] if child_parts.empty?
-
-	      ["#{node.kind}(#{child_parts.join(' ')})", mass]
-	      ensure
-	        active.delete(key)
-	      end
-	    end
-
-	    def fingerprint_call(node, active)
-	      message = call_message(node)
-	      child_parts = []
-	      mass = 1
-	      node.children.each do |child|
-	        child_fp, child_mass = fingerprint(child, active)
-	        next if child_fp.empty?
-
-        child_parts << child_fp
-        mass += child_mass
-      end
-      ["#{node.kind}<#{message}>(#{child_parts.join(' ')})", mass]
-    end
-
-    def call_message(node)
-      return nil unless node.children.any? { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
-
-      callee = named_field(node, "function") || named_field(node, "callee")
-      return callee_message(callee) if callee
-
-      argument_node = node.children.find { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
-      named_before_args = node.named_children.select do |child|
-        argument_node.nil? || child.start_byte < argument_node.start_byte
-      end
-      callee_message(named_before_args.last)
-    end
-
-    def callee_message(node)
-      return nil unless ts_node?(node)
-      return node.text if IDENTIFIER_KINDS.include?(node.kind)
-      return navigation_suffix_message(node) if %w[navigation_expression directly_assignable_expression].include?(node.kind)
-
-      leaf = node.named_children.reverse.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
-      leaf&.text
-    end
-
-    def navigation_suffix_message(node)
-      suffix = node.named_children.reverse.find { |child| child.kind == "navigation_suffix" }
-      leaf = suffix&.named_children&.reverse&.find { |child| IDENTIFIER_KINDS.include?(child.kind) }
-      leaf&.text
-    end
-
-    def terminal_token(node)
-      kind = node.kind.to_s
-      return "id" if IDENTIFIER_KINDS.include?(kind)
-      return literal_token(kind) if LITERAL_KINDS.include?(kind)
-
-      text = normalize_text(node.text)
-      return "" if text.empty?
-      return "id" if text.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
-      return "lit" if text.match?(/\A(?::[A-Za-z_]\w*|[-+]?\d+(?:\.\d+)?|".*"|'.*')\z/)
-
-      "#{kind}:#{text}"
-    end
-
-    def literal_token(kind)
-      case kind
-      when "true", "false" then "bool"
-      when "nil", "none", "null" then "nil"
-      else "lit"
-      end
-    end
-
-    def flay_node_name(node)
-      return "defn" if %w[method function_definition function_declaration method_definition function_item].include?(node.kind)
-      return "defs" if node.kind == "singleton_method"
-
-      node.kind
-    end
-
-    def typed_struct_schema_cluster?(cluster)
-      cluster.all? { |candidate| typed_struct_schema_line?(candidate.file, candidate.line) || typed_struct_schema_text?(candidate.raw) }
-    end
-
-    def typed_struct_schema_line?(file, line_no)
-      source_line(file, line_no).match?(/\A\s*(?:const|prop)\s+:[A-Za-z_]\w*\b/)
-    end
-
-    def typed_struct_schema_text?(text)
-      text.to_s.match?(/<\s*T::Struct\b/) ||
-        text.to_s.lines.all? { |line| line.strip.empty? || line.match?(/\A\s*(?:const|prop)\s+:[A-Za-z_]\w*\b/) }
-    end
-
-    def source_line(file, line_no)
-      (@source_lines ||= {})
-      (@source_lines[file] ||= File.readlines(file))[line_no - 1].to_s
-    rescue StandardError
-      ""
-    end
-
-    def collect_method_spans(document)
-      document.function_defs.map do |fn|
-        MethodSpan.new(name: fn.name.to_s, first_line: fn.span[0], last_line: fn.span[2])
-      end.sort_by { |span| [span.first_line, -span.last_line] }
-    rescue StandardError
-      []
-    end
-
-    def method_span_for(file, line_no)
-      spans = @method_spans[file] || []
-      spans.find { |span| span.first_line <= line_no && line_no <= span.last_line } ||
-        MethodSpan.new(name: "(top-level)", first_line: line_no, last_line: line_no)
-    end
-
-	    def walk(node, &block)
-	      return unless ts_node?(node)
-
-	      pending = [node]
-	      seen = Set.new
-	      until pending.empty?
-	        current = pending.pop
-	        next unless ts_node?(current)
-	        key = node_key(current)
-	        next if seen.include?(key)
-
-	        seen << key
-	        yield current
-	        current.children.reverse_each { |child| pending << child }
-	      end
-	    end
-
-    def named_field(node, name)
-      node.child_by_field_name(name)
-    rescue StandardError
-      nil
-    end
-
-	    def ts_node?(node)
-	      node && node.respond_to?(:kind) && node.respond_to?(:children)
-	    end
-
-	    def node_key(node)
-	      [node.kind, node.start_byte, node.end_byte]
-	    rescue StandardError
-	      node.object_id
-	    end
-
-    def span(node)
-      [node.start_point.row + 1, node.start_point.column,
-       node.end_point.row + 1, node.end_point.column]
-    end
-
-    def line(node)
-      node.start_point.row + 1
-    end
-
-    def normalize_text(text)
-      text.to_s.strip.gsub(/\s+/, " ")
     end
   end
 end

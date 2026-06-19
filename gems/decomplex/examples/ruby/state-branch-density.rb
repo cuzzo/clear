@@ -1,18 +1,12 @@
 # frozen_string_literal: true
 
-class StateBranchUser < T::Struct
-  const :name, String
-  const :admin, T::Boolean
-end
-
 class StateBranchChecker
-  sig { params(user: StateBranchUser).void }
-  def check(user)
-    if user.admin
+  def check(admin, name)
+    if admin
       @checked = true
     end
 
-    if @checked && user.name == "admin"
+    if @checked && name == "admin"
       puts "hello"
     end
   end

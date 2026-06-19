@@ -3,7 +3,7 @@ struct Worker;
 impl Worker {
     pub fn run(&self, items: Items) {
         self.prepare();
-        if true {
+        if self.ready() {
             self.validate();
         }
         for item in items {

@@ -5,7 +5,26 @@
   },
   "expected": [
     {
-      "present": true
+      "common": [
+        "col",
+        "line",
+        "parent",
+        "span",
+        "ty"
+      ],
+      "variant": [
+        "name",
+        "recv",
+        "value"
+      ],
+      "degenerate": false,
+      "support": 1,
+      "scatter": 1,
+      "variant_set": [
+        "AST.Call",
+        "AST.Func",
+        "AST.Lit"
+      ]
     }
   ]
 }

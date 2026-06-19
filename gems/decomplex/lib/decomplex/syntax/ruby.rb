@@ -856,7 +856,7 @@ module Decomplex
 
           events.each do |event|
             if event.is_a?(FunctionDef)
-              event.visibility ||= event.name.to_s.start_with?("self.") ? :public : visibility
+              event.visibility ||= event.name.to_s.include?(".") ? :public : visibility
             elsif event.arguments.to_a.empty?
               visibility = event.message.to_sym
             else

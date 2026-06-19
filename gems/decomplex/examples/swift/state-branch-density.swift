@@ -1,1 +1,13 @@
-class StateBranchChecker { var checked = false; func check(user: User) { if user.admin { self.checked = true } if self.checked && user.name == "admin" { print("hello") } } }
+class StateBranchChecker {
+  var checked = false
+
+  func check(admin: Bool, name: String) {
+    if admin {
+      self.checked = true
+    }
+
+    if self.checked && name == "admin" {
+      print("hello")
+    }
+  }
+}

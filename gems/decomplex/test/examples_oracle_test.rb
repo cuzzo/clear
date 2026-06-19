@@ -85,7 +85,7 @@ class ExamplesOracleTest < Minitest::Test
         "neglected_updates" => rows(output["neglected_updates"], %w[pair support has missing])
       }
     when "decision-pressure"
-      present_rows(output)
+      rows(output, %w[contract decisions essential methods])
     when "predicate-alias"
       {
         "alias_clusters" => Array(output["alias_clusters"]).map do |row|
@@ -94,29 +94,38 @@ class ExamplesOracleTest < Minitest::Test
       }
     when "miner"
       {
-        "missing_abstractions" => present_rows(output["missing_abstractions"])
+        "missing_abstractions" => Array(output["missing_abstractions"]).map do |row|
+          pick(row, %w[kind members support scatter])
+        end,
+        "neglected_conditions" => rows(output["neglected_conditions"], %w[pattern support missing])
       }
     when "semantic-alias"
       {
         "alias_clusters" => Array(output["alias_clusters"]).map do |row|
-          { "name_count" => Array(row["names"]).size }
-        end
+          { "canon" => canonical_predicate(row["canon"]), "name_count" => Array(row["names"]).size }
+        end,
+        "reification_miss_count" => Array(output["reification_misses"]).size
       }
     when "flay-similarity"
-      findings = Array(output["findings"])
-      defn_findings = findings.select { |row| row["node"].to_s == "defn" }
-      findings = defn_findings unless defn_findings.empty?
-      findings.map do |row|
+      Array(output["findings"]).map do |row|
         pick(row, %w[clone_type node]).merge("site_count" => Array(row["sites"]).size)
-      end.uniq
+      end
     when "temporal-ordering-pressure"
-      Array(output).empty? ? [] : [{ "present" => true }]
+      Array(output).map do |row|
+        pick(row, %w[owner public_methods state_methods writers orderings]).merge(
+          "state_fields" => canonical_state_refs(row["state_fields"]),
+          "shared_fields" => canonical_state_refs(row["shared_fields"])
+        )
+      end
     when "state-branch-density"
       Array(output).map do |row|
-        { "present" => !row.empty? }
+        pick(row, %w[decisions]).merge(
+          "method" => canonical_method_name(row["method"]),
+          "state_refs" => canonical_state_refs(row["state_refs"])
+        )
       end
     when "redundant-nil-guard"
-      rows(output, %w[local]).uniq
+      rows(output, %w[local])
     when "state-mesh"
       project_state_mesh(output)
     when "inconsistent-rename-clone"
@@ -127,8 +136,8 @@ class ExamplesOracleTest < Minitest::Test
       rows(output, %w[derived source])
     when "implicit-control-flow"
       {
-        "ordered_protocols" => present_rows(output["ordered_protocols"]),
-        "order_drift" => present_rows(output["order_drift"])
+        "ordered_protocols" => project_protocols(output["ordered_protocols"]),
+        "order_drift" => project_protocols(output["order_drift"])
       }
     when "weighted-inlined-complexity"
       Array(output).map do |row|
@@ -143,15 +152,26 @@ class ExamplesOracleTest < Minitest::Test
         pick(row, %w[count]).merge("atom_count" => Array(row["atoms"]).size)
       end
     when "path-condition"
-      present_rows(output["neglected"])
+      Array(output["neglected"]).map do |row|
+        {
+          "pattern" => canonical_predicate_atoms(row["pattern"]),
+          "support" => row["support"],
+          "missing" => canonical_predicate(row["missing"]),
+          "action" => canonical_action(row["action"])
+        }
+      end
     when "sequence-mine"
       rows(output["broken"], %w[pair support has missing])
     when "function-lcom"
-      present_rows(output)
+      rows(output, %w[mode components locals statements terminal_join])
     when "false-simplicity"
       rows(output, %w[kind])
     when "fat-union"
-      present_rows(output["fat_unions"])
+      Array(output["fat_unions"]).map do |row|
+        pick(row, %w[common variant degenerate support scatter]).merge(
+          "variant_set" => canonical_variants(row["variant_set"])
+        )
+      end
     when "local-flow"
       Array(output).map do |method|
         {
@@ -160,18 +180,69 @@ class ExamplesOracleTest < Minitest::Test
         }
       end
     when "structural-topology"
-      { "present" => !Array(output["methods"]).empty? || !Array(output["edges"]).empty? }
+      {
+        "method_count" => Array(output["methods"]).size,
+        "edges" => rows(output["edges"], %w[caller_name callee_name type])
+      }
     else
       scrub_locations(output)
     end
   end
 
   def project_state_mesh(output)
-    { "state_mesh" => { "present" => meaningful?(output.fetch("state_mesh", {})) } }
+    state_mesh = output.fetch("state_mesh", {})
+    fields = output.fetch("fields", {})
+    {
+      "state_mesh" => pick(state_mesh, %w[total_fields total_writes total_reads total_re_derivations]),
+      "field_names" => canonical_state_refs(fields.keys)
+    }
   end
 
   def project_protocols(rows)
-    rows(rows, %w[protocol dependency states support observed missing])
+    Array(rows).map do |row|
+      pick(row, %w[protocol dependency support observed missing]).merge(
+        "states" => canonical_state_refs(row["states"])
+      )
+    end
+  end
+
+  def canonical_variants(value)
+    Array(value).map do |item|
+      item.to_s
+          .sub(/\A([A-Z][A-Za-z0-9]*)_([A-Z][A-Za-z0-9]*)\z/, '\1.\2')
+          .tr(":", ".")
+          .gsub(/\.+/, ".")
+    end.sort
+  end
+
+  def canonical_state_refs(value)
+    Array(value).map do |item|
+      text = item.to_s
+      text = text.sub(/\A@/, "")
+      text = text.sub(/\A(?:self|this)\./, "")
+      text
+    end.uniq.sort
+  end
+
+  def canonical_method_name(value)
+    value.to_s.split(/[.:#]/).last.to_s
+  end
+
+  def canonical_predicate_atoms(value)
+    Array(value).map { |item| canonical_predicate(item) }.sort
+  end
+
+  def canonical_predicate(value)
+    text = value.to_s.strip
+    text = text.delete_suffix(";").strip
+    text = text.gsub(/:([A-Za-z_]\w*)/) { Regexp.last_match(1).upcase }
+    text = text.gsub(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.(\w+)\?/, '\1.\2')
+    text = text.gsub(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.(\w+)\(\)/, '\1.\2')
+    text
+  end
+
+  def canonical_action(value)
+    canonical_predicate(value).sub(/\A([A-Za-z_]\w*)\((.*)\)\z/, '\1(\2)')
   end
 
   def present_rows(value)

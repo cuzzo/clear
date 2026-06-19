@@ -383,7 +383,7 @@ module Decomplex
           generic_call_target(document, node)
 	      when "attribute", "selector_expression", "field", "field_access", "member_expression",
 	           "member_access_expression", "field_expression", "expression_list",
-             "dot_index_expression", "variable_list", "identifier", "simple_identifier"
+             "navigation_expression", "dot_index_expression", "variable_list", "identifier", "simple_identifier"
           adjacent_argument_call_target(node)
         end
       end
@@ -398,177 +398,6 @@ module Decomplex
 
       def state_target(lhs)
         generic_state_target(lhs)
-      end
-    end
-
-    class RubySyntaxAdapter < TreeSitterLanguageAdapter; end
-
-    class PythonSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        name = function_name(node).to_s
-        return :private if name.start_with?("_") && !name.start_with?("__")
-
-        :public
-      end
-
-      def call_target(document, node)
-        python_adjacent_call_target(node) || super
-      end
-
-      def local_methods(document)
-        super
-      end
-
-      private
-
-      def python_function_body_statements(node)
-        body = named_field(node, "body") ||
-               node.named_children.find { |child| child.kind == "block" }
-        return [] unless body
-
-        body.named_children.reject { |child| child.kind == "comment" }
-      end
-
-      def python_adjacent_call_target(node)
-        return nil unless %w[identifier].include?(node.kind)
-
-        args = next_sibling(node)
-        return nil unless args&.kind == "argument_list"
-
-        {
-          receiver: "self",
-          message: node.text,
-          arguments: args.named_children.map { |child| normalize_text(child.text) }
-        }
-      rescue StandardError
-        nil
-      end
-    end
-
-    class GoSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        exported_name_visibility(function_name(node))
-      end
-    end
-
-    class RustSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        modifier_visibility(node) || :private
-      end
-    end
-
-    class JavaScriptSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        modifier_visibility(node) || private_name_visibility(node)
-      end
-
-      private
-
-      def private_name_visibility(node)
-        function_name(node).to_s.start_with?("#") ? :private : :public
-      end
-    end
-
-    class CppSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        modifier_visibility(node) || cpp_visibility(node)
-      end
-    end
-
-    class CSharpSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        modifier_visibility(node) || :private
-      end
-    end
-
-    class CSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        c_visibility(node)
-      end
-    end
-
-    class LuaSyntaxAdapter < TreeSitterLanguageAdapter
-      def generated_prelude?(document, node)
-        return false unless line(node) == 1
-
-        first_line = document.lines.first.to_s
-        first_line.include?("_tl_compat") && first_line.include?("compat53.module")
-      end
-    end
-
-    class ZigSyntaxAdapter < TreeSitterLanguageAdapter
-      def visibility(_document, node)
-        modifier_visibility(node) || :private
-      end
-
-      def state_declaration(node)
-        return zig_container_field_declaration(node) if node.kind == "container_field"
-
-        super
-      end
-
-      private
-
-      def zig_container_field_declaration(node)
-        name = node.named_children.find { |child| child.kind == "identifier" }
-        return nil unless name
-
-        { field: name.text, type: declared_type_text(node, name) }
-      end
-    end
-
-    class CppSyntaxAdapter
-      def implicit_state_accesses?
-        true
-      end
-
-      private
-
-      def cpp_visibility(node)
-        visibility = previous_cpp_access_specifier(node)
-        return visibility if visibility
-
-        owner = nearest_owner_declaration(node)
-        return :public if owner&.kind == "struct_specifier"
-
-        :private
-      end
-
-      def previous_cpp_access_specifier(node)
-        sibling = prev_sibling(node)
-        while sibling
-          return sibling.text.to_sym if sibling.kind == "access_specifier" &&
-                                       %w[public private protected].include?(sibling.text)
-
-          sibling = prev_sibling(sibling)
-        end
-        nil
-      end
-
-      def nearest_owner_declaration(node)
-        parent = parent_node(node)
-        seen = Set.new
-        while parent && !seen.include?(node_key(parent))
-          seen << node_key(parent)
-          return parent if %w[class_specifier struct_specifier class class_definition class_declaration].include?(parent.kind)
-
-          parent = parent_node(parent)
-        end
-        nil
-      end
-    end
-
-    class CSharpSyntaxAdapter
-      def implicit_state_accesses?
-        true
-      end
-    end
-
-    class CSyntaxAdapter
-      private
-
-      def c_visibility(node)
-        node.children.any? { |child| child.text == "static" } ? :private : :public
       end
     end
 
@@ -1002,6 +831,7 @@ module Decomplex
           owner = parent_node(parent)
           return true if owner && field_like_node?(owner)
         end
+        return false if parent&.kind == "expression_list" && !member_expression_list?(parent)
         return false unless parent && field_like_node?(parent)
 
         field = named_field(parent, "field") || named_field(parent, "property") ||
@@ -1014,7 +844,12 @@ module Decomplex
         parent = parent_node(node)
         return false unless parent
 
-        %w[call_expression method_invocation invocation_expression].include?(parent.kind) &&
+        if %w[method_invocation invocation_expression].include?(parent.kind)
+          names = parent.named_children.select { |child| generic_identifier?(child) }
+          return names.size >= 2 ? names.last == node : parent.named_children.first == node
+        end
+
+        %w[call_expression function_call method_call].include?(parent.kind) &&
           (named_field(parent, "function") == node || parent.named_children.first == node)
       end
 
@@ -1059,6 +894,8 @@ module Decomplex
         ].compact
         bodies = node.named_children.drop(1) if bodies.empty?
         bodies.flat_map do |body|
+          next [body] if simple_action_wrapper?(body)
+
           children = body.named_children.reject { |child| comment_node?(child) }
           children.empty? ? [body] : children
         end
@@ -1082,8 +919,16 @@ module Decomplex
         return false unless ts_node?(node)
         return false if branch_node?(node)
 
+        return true if simple_action_wrapper?(node)
+
         generic_assignment_statement?(node) ||
-          %w[call call_expression expression_statement return_statement identifier simple_identifier].include?(node.kind)
+          %w[call call_expression expression_statement return_statement].include?(node.kind)
+      end
+
+      def simple_action_wrapper?(node)
+        return false unless %w[block statement_list statements control_structure_body].include?(node.kind)
+
+        normalize_text(node.text).match?(/\A[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?\s*\([^{};]*\)\s*;?\z/)
       end
 
       def comparison_target(node)
@@ -1366,8 +1211,12 @@ module Decomplex
         )
       end
 
-      def skip_state_write_node?(_node)
-        false
+      def skip_state_write_node?(node)
+        parent = parent_node(node)
+        return false unless parent
+
+        assignment_lhs?(node) &&
+          %w[assignment assignment_expression augmented_assignment assignment_statement operator_assignment].include?(parent.kind)
       end
 
       def skip_state_write_target?(target)
@@ -2175,6 +2024,8 @@ module Decomplex
         return nil unless target[:receiver] == "self"
 
         first_arg = call_argument_nodes(node).first
+        return nil unless first_arg
+
         arg_target = state_read_target(first_arg)
         return nil unless arg_target
 
@@ -2196,6 +2047,9 @@ module Decomplex
       end
 
       def adjacent_argument_call_target(node)
+        return nil if generic_member_name?(node)
+        return nil if %w[call_expression method_invocation invocation_expression function_call method_call].include?(parent_node(node)&.kind)
+
         args = next_sibling(node)
         return nil unless %w[argument_list arguments call_suffix].include?(args&.kind)
 
@@ -2496,6 +2350,15 @@ module Decomplex
         ].include?(node.kind)
       end
 
+      def member_expression_list?(node)
+        return false unless node.kind == "expression_list"
+        return true if named_field(node, "operand") && named_field(node, "field")
+
+        node.children.any? do |child|
+          !child.named? && %w[. -> :].include?(child.text.to_s)
+        end
+      end
+
       def member_field_text(field)
         return nil unless ts_node?(field)
 
@@ -2622,6 +2485,9 @@ module Decomplex
       end
     end
 
+    require_relative "syntax/ruby"
+    require_relative "syntax/adapters"
+
     LanguageProfile = TreeSitterLanguageAdapter
 
 	    LANGUAGE_PROFILES = {
@@ -2694,19 +2560,19 @@ module Decomplex
           grammar_names: %w[c-sharp csharp],
           tree_sitter_language_name: "c_sharp"
         ),
-	      java: TreeSitterLanguageAdapter.new(
+	      java: JavaSyntaxAdapter.new(
           language: :java,
           extensions: %w[.java],
           lexicon: JAVA_LEXICON,
           package: "tree-sitter-java"
         ),
-	      swift: TreeSitterLanguageAdapter.new(
+	      swift: SwiftSyntaxAdapter.new(
           language: :swift,
           extensions: %w[.swift],
           lexicon: SWIFT_LEXICON,
           package: "tree-sitter-swift"
         ),
-	      kotlin: TreeSitterLanguageAdapter.new(
+	      kotlin: KotlinSyntaxAdapter.new(
           language: :kotlin,
           extensions: %w[.kt .kts],
           lexicon: KOTLIN_LEXICON,
@@ -3420,6 +3286,10 @@ module Decomplex
   end
 end
 
-require_relative "syntax/ruby"
 require_relative "syntax/effects"
 require_relative "syntax/protocols"
+require_relative "syntax/contracts"
+require_relative "syntax/dispatch"
+require_relative "syntax/clone_similarity"
+require_relative "syntax/complexity"
+require_relative "syntax/nil_guards"
