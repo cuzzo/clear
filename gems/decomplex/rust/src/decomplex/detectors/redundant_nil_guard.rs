@@ -30,6 +30,12 @@ struct NilFact {
     non_nil_when_true: bool,
 }
 
+struct CallParts<'a> {
+    receiver: Option<&'a Node>,
+    message: String,
+    no_args: bool,
+}
+
 struct Finding {
     file: String,
     defn: String,
@@ -240,7 +246,7 @@ impl RedundantNilGuard {
         if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
             return;
         }
-        if recorded && node.r#type == "OPCALL" {
+        if recorded && (node.r#type == "OPCALL" || self.call_parts(node).is_some()) {
             return;
         }
         for child in node.children.iter().filter_map(ast::node) {
@@ -283,26 +289,43 @@ impl RedundantNilGuard {
     }
 
     fn nil_fact(&self, node: &Node) -> Option<NilFact> {
+        if self.parenthesized_wrapper(node) {
+            return self.nil_fact(self.first_node_child(node)?);
+        }
+
+        if let Some(call) = self.call_parts(node) {
+            if call.no_args && NIL_PREDICATE_MIDS.contains(&call.message.as_str()) {
+                let subject = self.subject_key(call.receiver?)?;
+                return Some(NilFact {
+                    local: subject,
+                    non_nil_when_true: false,
+                });
+            }
+            if call.no_args && NON_NIL_PREDICATE_MIDS.contains(&call.message.as_str()) {
+                let subject = self.subject_key(call.receiver?)?;
+                return Some(NilFact {
+                    local: subject,
+                    non_nil_when_true: true,
+                });
+            }
+        }
+
         match node.r#type.as_str() {
             "CALL" => {
                 let recv = node.children.get(0).and_then(ast::node)?;
                 let mid = match node.children.get(1)? {
-                    Child::Symbol(s) => s,
+                    Child::String(s) | Child::Symbol(s) => s,
                     _ => return None,
                 };
                 let args = node.children.get(2);
-                if NIL_PREDICATE_MIDS.contains(&mid.as_str())
-                    && (args.is_none() || matches!(args, Some(Child::Nil)))
-                {
+                if NIL_PREDICATE_MIDS.contains(&mid.as_str()) && self.no_call_arguments(args) {
                     let subject = self.subject_key(recv)?;
                     return Some(NilFact {
                         local: subject,
                         non_nil_when_true: false,
                     });
                 }
-                if NON_NIL_PREDICATE_MIDS.contains(&mid.as_str())
-                    && (args.is_none() || matches!(args, Some(Child::Nil)))
-                {
+                if NON_NIL_PREDICATE_MIDS.contains(&mid.as_str()) && self.no_call_arguments(args) {
                     let subject = self.subject_key(recv)?;
                     return Some(NilFact {
                         local: subject,
@@ -331,6 +354,12 @@ impl RedundantNilGuard {
     }
 
     fn branch_nil_facts(&self, node: &Node, cond_truth: bool) -> Vec<NilFact> {
+        if self.parenthesized_wrapper(node) {
+            if let Some(child) = self.first_node_child(node) {
+                return self.branch_nil_facts(child, cond_truth);
+            }
+        }
+
         if node.r#type == "AND" {
             if !cond_truth {
                 return Vec::new();
@@ -425,28 +454,146 @@ impl RedundantNilGuard {
                 Child::String(s) | Child::Symbol(s) => Some(s.clone()),
                 _ => None,
             },
-            "CALL" => {
-                let recv = node.children.get(0).and_then(ast::node);
-                let mid = match node.children.get(1)? {
-                    Child::Symbol(s) => s,
-                    _ => return None,
-                };
-                let args = node.children.get(2);
-                if (args.is_none() || matches!(args, Some(Child::Nil)))
-                    && self.stable_reader_name(mid)
-                {
-                    if let Some(recv) = recv {
-                        if recv.r#type == "SELF" {
-                            return Some(format!("self.{}", mid));
-                        }
-                        let recv_key = self.subject_key(recv)?;
-                        return Some(format!("{}.{}", recv_key, mid));
-                    }
+            _ if self.call_parts(node).is_some() => {
+                let call = self.call_parts(node)?;
+                if !call.no_args || !self.stable_reader_name(&call.message) {
+                    return None;
                 }
-                None
+                let recv = call.receiver?;
+                if recv.r#type == "SELF" {
+                    return Some(format!("self.{}", call.message));
+                }
+                let recv_key = self.subject_key(recv)?;
+                Some(format!("{}.{}", recv_key, call.message))
             }
             _ => None,
         }
+    }
+
+    fn call_parts<'a>(&self, node: &'a Node) -> Option<CallParts<'a>> {
+        match node.r#type.as_str() {
+            "CALL" => {
+                let receiver = node.children.get(0).and_then(ast::node);
+                let message = self.child_name(node.children.get(1)?)?;
+                Some(CallParts {
+                    receiver,
+                    message,
+                    no_args: self.no_call_arguments(node.children.get(2)),
+                })
+            }
+            "METHOD_INVOCATION" => {
+                let nodes = node
+                    .children
+                    .iter()
+                    .filter_map(ast::node)
+                    .collect::<Vec<_>>();
+                let receiver = nodes.first().copied();
+                let message = nodes.get(1).and_then(|child| self.node_name(child))?;
+                Some(CallParts {
+                    receiver,
+                    message,
+                    no_args: self.no_call_arguments(node.children.get(2)),
+                })
+            }
+            "FUNCTION_CALL" | "METHOD_CALL" => {
+                let callee = node.children.iter().filter_map(ast::node).next()?;
+                let args = node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .find(|child| matches!(child, Child::Node(n) if matches!(n.r#type.as_str(), "ARGUMENTS" | "ARGUMENT_LIST" | "LIST")));
+                self.field_call_parts(callee, args)
+            }
+            "BLOCK" => {
+                let callee = node.children.iter().filter_map(ast::node).next()?;
+                let args = node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .find(|child| matches!(child, Child::Node(n) if matches!(n.r#type.as_str(), "ARGUMENTS" | "ARGUMENT_LIST" | "LIST")));
+                self.field_call_parts(callee, args)
+            }
+            "INVOCATION_EXPRESSION" => {
+                let callee = node.children.iter().filter_map(ast::node).next()?;
+                let mut parts = self.call_parts(callee)?;
+                let args = node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .find(|child| matches!(child, Child::Node(n) if matches!(n.r#type.as_str(), "ARGUMENTS" | "ARGUMENT_LIST" | "LIST")));
+                parts.no_args = self.no_call_arguments(args);
+                Some(parts)
+            }
+            _ => None,
+        }
+    }
+
+    fn field_call_parts<'a>(
+        &self,
+        node: &'a Node,
+        args: Option<&'a Child>,
+    ) -> Option<CallParts<'a>> {
+        if !matches!(
+            node.r#type.as_str(),
+            "DOT_INDEX_EXPRESSION"
+                | "FIELD_EXPRESSION"
+                | "FIELD_ACCESS"
+                | "MEMBER_EXPRESSION"
+                | "CALL"
+        ) {
+            return self.call_parts(node);
+        }
+        let nodes = node
+            .children
+            .iter()
+            .filter_map(ast::node)
+            .collect::<Vec<_>>();
+        let receiver = nodes.first().copied();
+        let message = nodes.last().and_then(|child| self.node_name(child))?;
+        Some(CallParts {
+            receiver,
+            message,
+            no_args: self.no_call_arguments(args),
+        })
+    }
+
+    fn child_name(&self, child: &Child) -> Option<String> {
+        match child {
+            Child::String(s) | Child::Symbol(s) => Some(s.clone()),
+            Child::Node(node) => self.node_name(node),
+            _ => None,
+        }
+    }
+
+    fn node_name(&self, node: &Node) -> Option<String> {
+        match node.children.first() {
+            Some(Child::String(s)) | Some(Child::Symbol(s)) => Some(s.clone()),
+            _ => {
+                let text = ast::slice(node, &self.lines).trim().to_string();
+                (!text.is_empty()).then_some(text)
+            }
+        }
+    }
+
+    fn no_call_arguments(&self, args: Option<&Child>) -> bool {
+        match args {
+            None | Some(Child::Nil) => true,
+            Some(Child::Node(node)) => {
+                !node.children.iter().any(|child| ast::node(child).is_some())
+            }
+            Some(_) => false,
+        }
+    }
+
+    fn parenthesized_wrapper(&self, node: &Node) -> bool {
+        matches!(
+            node.r#type.as_str(),
+            "CONDITION_CLAUSE" | "PARENTHESIZED_EXPRESSION" | "PARENTHESIZED_STATEMENTS"
+        ) && self.first_node_child(node).is_some()
+    }
+
+    fn first_node_child<'a>(&self, node: &'a Node) -> Option<&'a Node> {
+        node.children.iter().find_map(ast::node)
     }
 
     fn stable_reader_name(&self, mid: &str) -> bool {
@@ -480,6 +627,9 @@ impl RedundantNilGuard {
 
     fn stmts_for<'a>(&self, node: Option<&'a Node>) -> Vec<&'a Node> {
         let Some(node) = node else { return Vec::new() };
+        if self.call_parts(node).is_some() {
+            return vec![node];
+        }
         if node.r#type == "BLOCK" {
             node.children.iter().filter_map(ast::node).collect()
         } else {
@@ -491,24 +641,28 @@ impl RedundantNilGuard {
         if matches!(node.r#type.as_str(), "RETURN" | "NEXT" | "BREAK") {
             return true;
         }
-        if !matches!(node.r#type.as_str(), "FCALL" | "VCALL" | "CALL") {
+        if !matches!(node.r#type.as_str(), "FCALL" | "VCALL" | "CALL")
+            && self.call_parts(node).is_none()
+        {
             return false;
         }
 
-        let mid = if node.r#type == "CALL" {
+        let mid = if let Some(call) = self.call_parts(node) {
+            Some(call.message)
+        } else if node.r#type == "CALL" {
             node.children.get(1).and_then(|c| match c {
-                Child::Symbol(s) => Some(s.as_str()),
+                Child::String(s) | Child::Symbol(s) => Some(s.clone()),
                 _ => None,
             })
         } else {
             node.children.get(0).and_then(|c| match c {
-                Child::Symbol(s) => Some(s.as_str()),
+                Child::String(s) | Child::Symbol(s) => Some(s.clone()),
                 _ => None,
             })
         };
 
         if let Some(mid) = mid {
-            return TERMINATING_CALLS.contains(&mid);
+            return TERMINATING_CALLS.contains(&mid.as_str());
         }
         false
     }

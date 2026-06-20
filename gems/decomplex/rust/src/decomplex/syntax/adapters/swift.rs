@@ -1,6 +1,7 @@
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::{node_text, normalize_text};
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct SwiftProfile;
 
@@ -37,6 +38,10 @@ impl LanguageProfile for SwiftProfile {
         &["function_body", "statements"]
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        &["statements"]
+    }
+
     fn call_node_kinds(&self) -> &[&str] {
         &["call_expression"]
     }
@@ -65,6 +70,10 @@ impl LanguageProfile for SwiftProfile {
             "additive_expression",
             "multiplicative_expression",
         ]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_statement", "for_statement", "switch_statement"]
     }
 
     fn case_node_kinds(&self) -> &[&str] {
@@ -113,5 +122,21 @@ impl LanguageProfile for SwiftProfile {
 
     fn field_like_node_kinds(&self) -> &[&str] {
         &["navigation_expression"]
+    }
+
+    fn call_argument_texts(&self, node: Node<'_>, source: &str) -> Vec<String> {
+        self.call_argument_nodes(node)
+            .into_iter()
+            .filter_map(|argument| {
+                let text = normalize_text(node_text(argument, source));
+                let value = text
+                    .strip_prefix('(')
+                    .and_then(|inner| inner.strip_suffix(')'))
+                    .unwrap_or(&text)
+                    .trim()
+                    .to_string();
+                (!value.is_empty()).then_some(value)
+            })
+            .collect()
     }
 }

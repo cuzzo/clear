@@ -48,6 +48,10 @@ impl LanguageProfile for RubyProfile {
         &["body_statement", "do_block"]
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        &["body_statement"]
+    }
+
     fn identifier_node_kinds(&self) -> &[&str] {
         &["identifier", "constant"]
     }

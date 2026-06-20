@@ -47,6 +47,14 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PathCondition
 }
 
 pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
+    let mined_sites = documents
+        .iter()
+        .flat_map(sites_from_mined_facts)
+        .collect::<Vec<_>>();
+    if !mined_sites.is_empty() {
+        return Report::new(mined_sites).findings();
+    }
+
     let mut sites = Vec::new();
     for document in documents {
         let mut pc = PathCondition::new(document.file.clone(), document.lines.clone());
@@ -54,6 +62,64 @@ pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
         sites.extend(pc.sites);
     }
     Report::new(sites).findings()
+}
+
+fn sites_from_mined_facts(document: &Document) -> Vec<Site> {
+    let mut sites = Vec::new();
+    for decision in &document.decision_sites {
+        if decision.members.len() < 2 {
+            continue;
+        }
+        for call in &document.call_sites {
+            if call.function != decision.function
+                || !span_inside(call.span, decision.enclosing_span)
+            {
+                continue;
+            }
+            if span_inside(call.span, decision.span) {
+                continue;
+            }
+            if decision
+                .members
+                .iter()
+                .any(|member| member == &guard_call_text(call))
+            {
+                continue;
+            }
+            sites.push(Site {
+                guards: decision.members.clone(),
+                action: action_text(call),
+                file: call.file.clone(),
+                defn: call.function.clone(),
+                line: call.line,
+                span: call.span,
+            });
+        }
+    }
+    sites
+}
+
+fn action_text(call: &syntax::CallSite) -> String {
+    let arguments = call.arguments.join(", ");
+    if call.receiver == "self" {
+        format!("{}({arguments})", call.message)
+    } else {
+        format!("{}.{}({arguments})", call.receiver, call.message)
+    }
+}
+
+fn guard_call_text(call: &syntax::CallSite) -> String {
+    if call.receiver == "self" {
+        format!("{}()", call.message)
+    } else {
+        format!("{}.{}()", call.receiver, call.message)
+    }
+}
+
+fn span_inside(inner: Span, outer: Span) -> bool {
+    let starts_after_or_at = inner[0] > outer[0] || (inner[0] == outer[0] && inner[1] >= outer[1]);
+    let ends_before_or_at = inner[2] < outer[2] || (inner[2] == outer[2] && inner[3] <= outer[3]);
+    starts_after_or_at && ends_before_or_at
 }
 
 struct PathCondition {

@@ -1,9 +1,12 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::ast::Span;
+use crate::decomplex::detectors::local_flow;
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
+use regex::Regex;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct InconsistentRenameCloneRow {
@@ -21,9 +24,6 @@ pub struct InconsistentRenameCloneRow {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 enum Skeleton {
     ID,
-    MID,
-    CALL,
-    FCALL,
     Node(String),
 }
 
@@ -37,7 +37,6 @@ struct Block {
     span: Span,
 }
 
-const HOLE_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "LASGN", "DASGN", "IASGN"];
 const MIN_TOKENS: usize = 8;
 
 pub fn scan_files(
@@ -49,109 +48,97 @@ pub fn scan_files(
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<InconsistentRenameCloneRow> {
-    let mut blocks = Vec::new();
-    for document in documents {
-        let detector = InconsistentRenameClone::new(document.file.clone());
-        detector.collect(&document.normalized_root, &Vec::new(), &mut blocks);
-    }
+    let blocks = local_flow::scan_documents(documents)
+        .into_iter()
+        .filter_map(|method| block_from_method(&method))
+        .collect::<Vec<_>>();
     Report::new(blocks).inconsistent_renames()
 }
 
-struct InconsistentRenameClone {
-    file: String,
+fn block_from_method(method: &local_flow::MethodSummary) -> Option<Block> {
+    if method.statements.len() < 3 {
+        return None;
+    }
+    let mut skeleton = Vec::new();
+    let mut names = Vec::new();
+    for statement in &method.statements {
+        tokenize_source(&statement.source, &mut skeleton, &mut names);
+    }
+    if skeleton.len() < MIN_TOKENS {
+        return None;
+    }
+
+    let first = method.statements.first()?;
+    let last = method.statements.last()?;
+    Some(Block {
+        skeleton,
+        names,
+        file: method.file.clone(),
+        defn: method.name.clone(),
+        line: first.line,
+        span: [first.span[0], first.span[1], last.span[2], last.span[3]],
+    })
 }
 
-impl InconsistentRenameClone {
-    fn new(file: String) -> Self {
-        Self { file }
-    }
-
-    fn collect(&self, node: &Node, defstack: &[String], blocks: &mut Vec<Block>) {
-        let mut next_defstack = defstack.to_vec();
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                next_defstack.push(name.clone());
-            }
-        }
-
-        if node.r#type == "BLOCK" {
-            let stmts: Vec<_> = node.children.iter().filter_map(ast::node).collect();
-            if stmts.len() >= 3 {
-                self.add_block(&stmts, &next_defstack, blocks);
-            }
-        }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.collect(child, &next_defstack, blocks);
+fn tokenize_source(source: &str, skeleton: &mut Vec<Skeleton>, names: &mut Vec<String>) {
+    for token in token_re().find_iter(source).map(|match_| match_.as_str()) {
+        if identifier_token(token) {
+            skeleton.push(Skeleton::ID);
+            names.push(
+                token
+                    .trim_start_matches('@')
+                    .trim_end_matches('=')
+                    .to_string(),
+            );
+        } else if literal_token(token) {
+            skeleton.push(Skeleton::Node("LIT".to_string()));
+        } else {
+            skeleton.push(Skeleton::Node(token.to_string()));
         }
     }
+}
 
-    fn add_block(&self, stmts: &[&Node], defstack: &[String], blocks: &mut Vec<Block>) {
-        let mut skeleton = Vec::new();
-        let mut names = Vec::new();
-        for stmt in stmts {
-            self.tokenize(stmt, &mut skeleton, &mut names);
-        }
-        if skeleton.len() < MIN_TOKENS {
-            return;
-        }
+fn token_re() -> &'static Regex {
+    static TOKEN_RE: OnceLock<Regex> = OnceLock::new();
+    TOKEN_RE.get_or_init(|| {
+        Regex::new(r#"[A-Za-z_]\w*[!?=]?|@\w+|\d+(?:\.\d+)?|:[A-Za-z_]\w*|"[^"]*"|'[^']*'|\S"#)
+            .expect("inconsistent-rename-clone token regex")
+    })
+}
 
-        blocks.push(Block {
-            skeleton,
-            names,
-            file: self.file.clone(),
-            defn: defstack
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "(top-level)".to_string()),
-            line: stmts[0].first_lineno,
-            span: [
-                stmts[0].first_lineno,
-                stmts[0].first_column,
-                stmts.last().unwrap().last_lineno,
-                stmts.last().unwrap().last_column,
-            ],
-        });
-    }
+fn identifier_token(token: &str) -> bool {
+    let token = token.strip_prefix('@').unwrap_or(token);
+    let token = token.trim_end_matches(['!', '?', '=']);
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
 
-    fn tokenize(&self, node: &Node, skeleton: &mut Vec<Skeleton>, names: &mut Vec<String>) {
-        match node.r#type.as_str() {
-            t if HOLE_TYPES.contains(&t) => {
-                skeleton.push(Skeleton::ID);
-                if let Some(Child::String(name)) = node.children.first() {
-                    names.push(name.clone());
-                }
-            }
-            "VCALL" => {
-                skeleton.push(Skeleton::ID);
-                if let Some(Child::Symbol(name)) = node.children.first() {
-                    names.push(name.clone());
-                }
-            }
-            "CALL" | "FCALL" => {
-                skeleton.push(if node.r#type == "CALL" {
-                    Skeleton::CALL
-                } else {
-                    Skeleton::FCALL
-                });
-                let mid_index = if node.r#type == "CALL" { 1 } else { 0 };
-                skeleton.push(Skeleton::MID);
-                if let Some(Child::Symbol(mid)) = node.children.get(mid_index) {
-                    names.push(mid.clone());
-                }
-            }
-            "LIT" | "STR" | "SYM" | "INTEGER" | "FLOAT" => {
-                skeleton.push(Skeleton::Node(node.r#type.clone()));
-            }
-            _ => {
-                skeleton.push(Skeleton::Node(node.r#type.clone()));
-            }
-        }
-        for child in node.children.iter().filter_map(ast::node) {
-            self.tokenize(child, skeleton, names);
+fn literal_token(token: &str) -> bool {
+    token.starts_with(':') || quoted_token(token) || numeric_token(token)
+}
+
+fn quoted_token(token: &str) -> bool {
+    (token.starts_with('"') && token.ends_with('"'))
+        || (token.starts_with('\'') && token.ends_with('\''))
+}
+
+fn numeric_token(token: &str) -> bool {
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    for ch in token.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+        } else if ch == '.' && !saw_dot {
+            saw_dot = true;
+        } else {
+            return false;
         }
     }
+    saw_digit
 }
 
 struct Report {

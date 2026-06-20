@@ -1,6 +1,9 @@
+use super::super::tree_sitter_adapter::{named_children, CallTarget};
 use super::super::Language;
 use super::base::LanguageProfile;
+use crate::decomplex::ast::node_text;
 use tree_sitter::Language as TreeSitterLanguage;
+use tree_sitter::Node;
 
 pub(crate) struct JavaProfile;
 
@@ -53,6 +56,14 @@ impl LanguageProfile for JavaProfile {
         &["binary_expression"]
     }
 
+    fn branch_node_kinds(&self) -> &[&str] {
+        &[
+            "if_statement",
+            "enhanced_for_statement",
+            "switch_expression",
+        ]
+    }
+
     fn case_node_kinds(&self) -> &[&str] {
         &["switch_expression"]
     }
@@ -87,5 +98,25 @@ impl LanguageProfile for JavaProfile {
 
     fn field_like_node_kinds(&self) -> &[&str] {
         &["field_access"]
+    }
+
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        if node.kind() != "method_invocation" {
+            return None;
+        }
+        let children = named_children(node);
+        let identifiers = children
+            .iter()
+            .copied()
+            .filter(|child| child.kind() == "identifier")
+            .collect::<Vec<_>>();
+        if identifiers.len() >= 2 {
+            return Some(CallTarget::new(
+                node_text(identifiers[0], source).to_string(),
+                node_text(identifiers[1], source).to_string(),
+                self.call_argument_texts(node, source),
+            ));
+        }
+        self.default_call_target(node, source)
     }
 }

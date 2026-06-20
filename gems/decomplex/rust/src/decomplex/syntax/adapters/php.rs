@@ -1,4 +1,4 @@
-use super::super::tree_sitter_adapter::{named_children, AssignmentTarget, Target};
+use super::super::tree_sitter_adapter::{named_children, AssignmentTarget, CallTarget, Target};
 use super::super::Language;
 use super::base::LanguageProfile;
 use crate::decomplex::ast::{node_text, normalize_text};
@@ -138,6 +138,22 @@ impl LanguageProfile for PhpProfile {
 
     fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
         self.default_assignment_target(node)
+    }
+
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        if !self.call_node_kinds().contains(&node.kind()) {
+            return None;
+        }
+        let mut target = self.default_call_target(node, source)?;
+        target.receiver = php_normalize_receiver(&target.receiver);
+        Some(target)
+    }
+
+    fn call_argument_texts(&self, node: Node<'_>, source: &str) -> Vec<String> {
+        self.call_argument_nodes(node)
+            .into_iter()
+            .map(|argument| normalize_text(&php_normalize_source(node_text(argument, source))))
+            .collect()
     }
 
     fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {

@@ -79,6 +79,10 @@ impl LanguageProfile for CProfile {
         &["binary_expression"]
     }
 
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_statement", "for_statement", "switch_statement"]
+    }
+
     fn case_node_kinds(&self) -> &[&str] {
         &["switch_statement"]
     }

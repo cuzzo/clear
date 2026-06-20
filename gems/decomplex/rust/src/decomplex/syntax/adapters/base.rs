@@ -173,6 +173,10 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn identifier_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -215,6 +219,10 @@ pub(crate) trait LanguageProfile {
 
     fn comparison_operators(&self) -> &[&str] {
         DEFAULT_COMPARISON_OPERATORS
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
     }
 
     fn case_node_kinds(&self) -> &[&str] {
@@ -453,10 +461,20 @@ pub(crate) trait LanguageProfile {
                 .into_iter()
                 .find(|child| self.function_body_node_kinds().contains(&child.kind()))
         })?;
-        let statements: Vec<Node<'_>> = named_children(body)
+        let mut statements: Vec<Node<'_>> = named_children(body)
             .into_iter()
             .filter(|child| !self.ignored_statement_node_kinds().contains(&child.kind()))
             .collect();
+        if statements.len() == 1
+            && self
+                .nested_statement_wrapper_node_kinds()
+                .contains(&statements[0].kind())
+        {
+            statements = named_children(statements[0])
+                .into_iter()
+                .filter(|child| !self.ignored_statement_node_kinds().contains(&child.kind()))
+                .collect();
+        }
         if statements.len() == 1 {
             statements.first().copied()
         } else {

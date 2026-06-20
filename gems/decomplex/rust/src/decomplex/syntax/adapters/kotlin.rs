@@ -33,6 +33,10 @@ impl LanguageProfile for KotlinProfile {
         &["function_body", "statements"]
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        &["statements"]
+    }
+
     fn call_node_kinds(&self) -> &[&str] {
         &["call_expression"]
     }
@@ -56,6 +60,7 @@ impl LanguageProfile for KotlinProfile {
             "conjunction_expression",
             "additive_expression",
             "multiplicative_expression",
+            "binary_expression",
         ]
     }
 
@@ -96,6 +101,7 @@ impl LanguageProfile for KotlinProfile {
             "conjunction_expression",
             "equality_expression",
             "comparison_expression",
+            "binary_expression",
         ]
     }
 

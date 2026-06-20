@@ -1,6 +1,8 @@
+use super::super::tree_sitter_adapter::{named_children, normalize_type_owner, CallTarget};
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::{node_text, normalize_text};
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct GoProfile;
 
@@ -13,8 +15,26 @@ impl LanguageProfile for GoProfile {
         tree_sitter_go::LANGUAGE.into()
     }
 
+    fn first_argument_receiver(&self) -> bool {
+        true
+    }
+
     fn function_node_kinds(&self) -> &[&str] {
         &["function_declaration", "method_declaration"]
+    }
+
+    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node.kind() == "method_declaration" {
+            return go_method_receiver(node, source).map(|(owner, _name)| owner);
+        }
+        self.default_owner_name_from_declaration(node, source)
+    }
+
+    fn function_receiver_name(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node.kind() == "method_declaration" {
+            return go_method_receiver(node, source).map(|(_owner, name)| name);
+        }
+        None
     }
 
     fn generic_owner_node_kinds(&self) -> &[&str] {
@@ -33,8 +53,12 @@ impl LanguageProfile for GoProfile {
         &["block", "statement_list"]
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        &["statement_list"]
+    }
+
     fn call_node_kinds(&self) -> &[&str] {
-        &["call_expression"]
+        &["call_expression", "go_statement"]
     }
 
     fn identifier_node_kinds(&self) -> &[&str] {
@@ -77,6 +101,14 @@ impl LanguageProfile for GoProfile {
         &["binary_expression"]
     }
 
+    fn branch_node_kinds(&self) -> &[&str] {
+        &[
+            "if_statement",
+            "for_statement",
+            "expression_switch_statement",
+        ]
+    }
+
     fn case_node_kinds(&self) -> &[&str] {
         &["expression_switch_statement"]
     }
@@ -116,4 +148,52 @@ impl LanguageProfile for GoProfile {
     fn field_like_node_kinds(&self) -> &[&str] {
         &["selector_expression"]
     }
+
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        match node.kind() {
+            "call_expression" => self.default_call_target(node, source),
+            "go_statement" => go_keyword_call_target(node, source),
+            _ => None,
+        }
+    }
+}
+
+fn go_method_receiver(node: Node<'_>, source: &str) -> Option<(String, String)> {
+    let receiver_params = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "parameter_list")?;
+    let receiver = named_children(receiver_params)
+        .into_iter()
+        .find(|child| child.kind() == "parameter_declaration")?;
+    let children = named_children(receiver);
+    let name = children
+        .iter()
+        .find(|child| matches!(child.kind(), "identifier" | "field_identifier"))
+        .map(|child| node_text(*child, source).to_string())?;
+    let type_node = children
+        .iter()
+        .find(|child| matches!(child.kind(), "pointer_type" | "type_identifier"))?;
+    Some((normalize_type_owner(node_text(*type_node, source)), name))
+}
+
+fn go_keyword_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+    if node.kind() != "go_statement" {
+        return None;
+    }
+    let arguments = go_statement_arguments(node, source)?;
+    let mut target = CallTarget::new("self".to_string(), "go".to_string(), arguments);
+    target.source_node = Some(node);
+    Some(target)
+}
+
+fn go_statement_arguments(node: Node<'_>, source: &str) -> Option<Vec<String>> {
+    let text = node_text(node, source).trim();
+    let inner = text.strip_prefix("go(")?.strip_suffix(')')?;
+    Some(
+        inner
+            .split(',')
+            .map(normalize_text)
+            .filter(|argument| !argument.is_empty())
+            .collect(),
+    )
 }

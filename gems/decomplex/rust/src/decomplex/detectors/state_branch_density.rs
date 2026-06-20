@@ -41,6 +41,14 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<StateBran
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<StateBranchDensityRow> {
+    let all_decisions = documents
+        .iter()
+        .flat_map(decisions_from_mined_facts)
+        .collect::<Vec<_>>();
+    if !all_decisions.is_empty() {
+        return Report::new(all_decisions).findings();
+    }
+
     let mut global_immutable_readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut global_immutable_reader_types: BTreeMap<String, BTreeMap<String, String>> =
         BTreeMap::new();
@@ -83,6 +91,68 @@ pub fn scan_documents(documents: &[Document]) -> Vec<StateBranchDensityRow> {
     let all_decisions = decision_chunks.into_iter().flatten().collect();
 
     Report::new(all_decisions).findings()
+}
+
+fn decisions_from_mined_facts(document: &Document) -> Vec<Decision> {
+    let state_fields = document
+        .state_writes
+        .iter()
+        .map(|write| normalized_state_field(&write.field))
+        .collect::<BTreeSet<_>>();
+
+    document
+        .decision_sites
+        .iter()
+        .filter_map(|decision| {
+            let refs = document
+                .state_reads
+                .iter()
+                .filter(|read| {
+                    read.function == decision.function && span_inside(read.span, decision.span)
+                })
+                .filter_map(|read| mined_state_ref(read, &state_fields))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            if refs.is_empty() {
+                return None;
+            }
+            Some(Decision {
+                file: decision.file.clone(),
+                defn: decision.function.clone(),
+                line: decision.line,
+                span: decision.span,
+                predicate: decision.predicate.clone(),
+                state_refs: refs,
+            })
+        })
+        .collect()
+}
+
+fn mined_state_ref(read: &syntax::StateRead, state_fields: &BTreeSet<String>) -> Option<String> {
+    let field = normalized_state_field(&read.field);
+    if !state_fields.is_empty() && !state_fields.contains(&field) {
+        return None;
+    }
+    let receiver = read.receiver.trim_start_matches('$');
+    if receiver.is_empty() || matches!(receiver, "self" | "this") {
+        Some(field)
+    } else {
+        Some(format!("{}.{}", receiver, field))
+    }
+}
+
+fn normalized_state_field(field: &str) -> String {
+    field
+        .trim_start_matches('@')
+        .trim_start_matches('$')
+        .to_string()
+}
+
+fn span_inside(inner: Span, outer: Span) -> bool {
+    let starts_after_or_at = inner[0] > outer[0] || (inner[0] == outer[0] && inner[1] >= outer[1]);
+    let ends_before_or_at = inner[2] < outer[2] || (inner[2] == outer[2] && inner[3] <= outer[3]);
+    starts_after_or_at && ends_before_or_at
 }
 
 struct StateBranchDensity {

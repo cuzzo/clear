@@ -90,7 +90,7 @@ struct LocalFlow {
     file: String,
     lines: Vec<String>,
     language: Language,
-    methods_by_line: BTreeMap<usize, MethodMetadata>,
+    methods_by_span: BTreeMap<Span, MethodMetadata>,
 }
 
 impl LocalFlow {
@@ -98,13 +98,13 @@ impl LocalFlow {
         file: String,
         lines: Vec<String>,
         language: Language,
-        methods_by_line: BTreeMap<usize, MethodMetadata>,
+        methods_by_span: BTreeMap<Span, MethodMetadata>,
     ) -> Self {
         Self {
             file,
             lines,
             language,
-            methods_by_line,
+            methods_by_span,
         }
     }
 
@@ -147,7 +147,13 @@ impl LocalFlow {
     }
 
     fn method_summary(&self, node: &Node, owner_hint: Option<&str>) -> MethodSummary {
-        let metadata = self.methods_by_line.get(&node.first_lineno);
+        let node_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let metadata = self.methods_by_span.get(&node_span);
         let owner = metadata
             .map(|item| item.owner.as_str())
             .or(owner_hint)
@@ -155,7 +161,10 @@ impl LocalFlow {
         let name = metadata
             .map(|item| item.name.clone())
             .unwrap_or_else(|| self.method_name(node));
-        let statement_nodes = ast::body_stmts(node);
+        let statement_nodes = ast::body_stmts(node)
+            .into_iter()
+            .filter(|statement| !comment_statement(statement))
+            .collect::<Vec<_>>();
         let local_names = self.local_names(&statement_nodes, metadata);
         let statements: Vec<_> = statement_nodes
             .iter()
@@ -186,8 +195,9 @@ impl LocalFlow {
         index: usize,
         local_names: &BTreeSet<String>,
     ) -> Statement {
-        let reads = self.local_reads(node, local_names);
+        let source = ast::slice(node, &self.lines);
         let writes = self.local_writes(node);
+        let reads = self.local_reads(node, local_names, &writes);
         Statement {
             index,
             line: node.first_lineno,
@@ -198,7 +208,7 @@ impl LocalFlow {
                 node.last_lineno,
                 node.last_column,
             ],
-            source: ast::slice(node, &self.lines),
+            source,
             dependencies: self.assignment_dependencies(node, local_names),
             co_uses: self.co_use_edges(node, local_names),
             reads,
@@ -377,7 +387,12 @@ impl LocalFlow {
         }
     }
 
-    fn local_reads(&self, node: &Node, local_names: &BTreeSet<String>) -> BTreeSet<String> {
+    fn local_reads(
+        &self,
+        node: &Node,
+        local_names: &BTreeSet<String>,
+        writes: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
         let mut reads = Vec::new();
         self.walk_local(node, &mut |child| {
             if LOCAL_READ_TYPES.contains(&child.r#type.as_str()) {
@@ -388,6 +403,11 @@ impl LocalFlow {
                 }
             }
         });
+        reads.extend(textual_local_reads(
+            &ast::slice(node, &self.lines),
+            local_names,
+            writes,
+        ));
         reads.into_iter().collect()
     }
 
@@ -400,6 +420,7 @@ impl LocalFlow {
                 }
             }
         });
+        writes.extend(textual_local_writes(&ast::slice(node, &self.lines)));
         writes.into_iter().collect()
     }
 
@@ -413,7 +434,8 @@ impl LocalFlow {
             if LOCAL_WRITE_TYPES.contains(&child.r#type.as_str()) {
                 if let Some(Child::String(lhs)) = child.children.first() {
                     if let Some(rhs) = child.children.get(1).and_then(ast::node) {
-                        for read in self.local_reads(rhs, local_names) {
+                        let rhs_writes = BTreeSet::new();
+                        for read in self.local_reads(rhs, local_names, &rhs_writes) {
                             if lhs != &read {
                                 deps.push((lhs.clone(), read));
                             }
@@ -422,13 +444,28 @@ impl LocalFlow {
                 }
             }
         });
+        let lhs_names = self.local_writes(node);
+        if !lhs_names.is_empty() {
+            let reads = self.local_reads(node, local_names, &lhs_names);
+            for lhs in lhs_names {
+                for read in &reads {
+                    if &lhs != read {
+                        deps.push((lhs.clone(), read.clone()));
+                    }
+                }
+            }
+        }
         deps.sort();
         deps.dedup();
         deps
     }
 
     fn co_use_edges(&self, node: &Node, local_names: &BTreeSet<String>) -> Vec<(String, String)> {
-        let reads: Vec<_> = self.local_reads(node, local_names).into_iter().collect();
+        let writes = self.local_writes(node);
+        let reads: Vec<_> = self
+            .local_reads(node, local_names, &writes)
+            .into_iter()
+            .collect();
         let mut out = Vec::new();
         for i in 0..reads.len() {
             for j in i + 1..reads.len() {
@@ -457,11 +494,226 @@ fn local_read_name(node: &Node) -> Option<String> {
     }
 }
 
-fn method_metadata(document: &Document) -> BTreeMap<usize, MethodMetadata> {
+fn textual_local_writes(source: &str) -> Vec<String> {
+    let Some((lhs, operator)) = split_assignment(source) else {
+        return Vec::new();
+    };
+    if lhs.contains('.') || lhs.contains("->") || lhs.contains('[') {
+        return Vec::new();
+    }
+
+    let identifiers = identifiers_with_positions(lhs)
+        .into_iter()
+        .map(|identifier| identifier.name)
+        .filter(|name| !local_keyword(name))
+        .collect::<Vec<_>>();
+    if identifiers.is_empty() {
+        return Vec::new();
+    }
+
+    if operator == ":=" || declaration_like_lhs(lhs) || identifiers.len() == 1 {
+        return identifiers
+            .into_iter()
+            .filter(|name| simple_identifier(name))
+            .collect();
+    }
+
+    Vec::new()
+}
+
+fn textual_local_reads(
+    source: &str,
+    local_names: &BTreeSet<String>,
+    writes: &BTreeSet<String>,
+) -> Vec<String> {
+    identifiers_with_positions(source)
+        .into_iter()
+        .filter(|identifier| local_names.contains(&identifier.name))
+        .filter(|identifier| !writes.contains(&identifier.name))
+        .filter(|identifier| !local_keyword(&identifier.name))
+        .filter(|identifier| !member_name(source, identifier.start))
+        .filter(|identifier| !call_name(source, identifier.end))
+        .map(|identifier| identifier.name)
+        .collect()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IdentifierSpan {
+    name: String,
+    start: usize,
+    end: usize,
+}
+
+fn identifiers_with_positions(source: &str) -> Vec<IdentifierSpan> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let start = if bytes[index] == b'$' {
+            let next = index + 1;
+            if next < bytes.len() && identifier_start(bytes[next]) {
+                next
+            } else {
+                index += 1;
+                continue;
+            }
+        } else if identifier_start(bytes[index]) {
+            index
+        } else {
+            index += 1;
+            continue;
+        };
+        let mut end = start + 1;
+        while end < bytes.len() && identifier_part(bytes[end]) {
+            end += 1;
+        }
+        out.push(IdentifierSpan {
+            name: source[start..end].to_string(),
+            start,
+            end,
+        });
+        index = end;
+    }
+    out
+}
+
+fn identifier_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn identifier_part(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+fn split_assignment(source: &str) -> Option<(&str, &str)> {
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if index + 1 < bytes.len() && &source[index..index + 2] == ":=" {
+            return Some((source[..index].trim(), ":="));
+        }
+        if bytes[index] == b'=' {
+            let previous = index.checked_sub(1).and_then(|i| bytes.get(i)).copied();
+            let next = bytes.get(index + 1).copied();
+            if !matches!(
+                previous,
+                Some(
+                    b'=' | b'!'
+                        | b'<'
+                        | b'>'
+                        | b':'
+                        | b'+'
+                        | b'-'
+                        | b'*'
+                        | b'/'
+                        | b'%'
+                        | b'&'
+                        | b'|'
+                )
+            ) && !matches!(next, Some(b'=' | b'>'))
+            {
+                return Some((source[..index].trim(), "="));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn declaration_like_lhs(lhs: &str) -> bool {
+    identifiers_with_positions(lhs)
+        .first()
+        .map(|identifier| {
+            matches!(
+                identifier.name.as_str(),
+                "let"
+                    | "const"
+                    | "var"
+                    | "val"
+                    | "auto"
+                    | "int"
+                    | "long"
+                    | "float"
+                    | "double"
+                    | "bool"
+                    | "boolean"
+                    | "char"
+                    | "String"
+                    | "string"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn local_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "as" | "break"
+            | "auto"
+            | "boolean"
+            | "bool"
+            | "case"
+            | "char"
+            | "class"
+            | "const"
+            | "continue"
+            | "default"
+            | "double"
+            | "else"
+            | "false"
+            | "float"
+            | "for"
+            | "func"
+            | "fun"
+            | "function"
+            | "if"
+            | "in"
+            | "int"
+            | "long"
+            | "let"
+            | "mut"
+            | "nil"
+            | "None"
+            | "null"
+            | "private"
+            | "protected"
+            | "public"
+            | "return"
+            | "self"
+            | "short"
+            | "static"
+            | "String"
+            | "string"
+            | "this"
+            | "true"
+            | "val"
+            | "var"
+            | "void"
+            | "while"
+    )
+}
+
+fn simple_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn member_name(source: &str, start: usize) -> bool {
+    let prefix = source[..start].trim_end();
+    prefix.ends_with('.') || prefix.ends_with("->") || prefix.ends_with("::")
+}
+
+fn call_name(source: &str, end: usize) -> bool {
+    let suffix = source[end..].trim_start();
+    suffix.starts_with('(')
+}
+
+fn method_metadata(document: &Document) -> BTreeMap<Span, MethodMetadata> {
     document
         .function_defs
         .iter()
-        .map(|function| (function.line, metadata_for_function(document, function)))
+        .map(|function| (function.span, metadata_for_function(document, function)))
         .collect()
 }
 
@@ -489,6 +741,13 @@ fn file_owner(file: &str) -> String {
 
 fn statement_container(node: &Node) -> bool {
     STATEMENT_CONTAINER_TYPES.contains(&node.r#type.as_str())
+}
+
+fn comment_statement(node: &Node) -> bool {
+    node.r#type.to_ascii_lowercase().contains("comment")
+        || node.text.trim_start().starts_with("//")
+        || node.text.trim_start().starts_with('#')
+        || node.text.trim_start().starts_with("--")
 }
 
 struct RawBoundary {

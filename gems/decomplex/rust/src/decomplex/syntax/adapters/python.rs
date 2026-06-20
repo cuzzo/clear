@@ -33,6 +33,10 @@ impl LanguageProfile for PythonProfile {
         &["block"]
     }
 
+    fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn call_node_kinds(&self) -> &[&str] {
         &["call"]
     }

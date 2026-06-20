@@ -177,7 +177,8 @@ pub fn scan_documents_with_semantic_aliases_and_min_writes(
     }
 
     let mut sm = StateMesh::new(src_map, min_writes);
-    sm.run(semantic_aliases);
+    sm.load_document_facts(documents);
+    sm.find_re_derivations(semantic_aliases);
     sm.to_json_graph()
 }
 
@@ -210,6 +211,49 @@ impl StateMesh {
 
         self.find_reads();
         self.find_re_derivations(semantic_aliases);
+    }
+
+    fn load_document_facts(&mut self, documents: &[Document]) {
+        for document in documents {
+            for write in &document.state_writes {
+                let norm = self.normalize(&write.field);
+                self.writes.push(Write {
+                    attr: write.field.clone(),
+                    norm,
+                    recv: write.receiver.clone(),
+                    file: write.file.clone(),
+                    defn: write.function.clone(),
+                    line: write.line,
+                    span: write.span,
+                });
+            }
+        }
+
+        let field_norms = self.known_field_norms();
+        if field_norms.is_empty() {
+            return;
+        }
+
+        for document in documents {
+            for read in &document.state_reads {
+                let norm = self.normalize(&read.field);
+                if !field_norms.contains(&norm) {
+                    continue;
+                }
+                let candidate = Read {
+                    attr: read.field.clone(),
+                    norm,
+                    recv: read.receiver.clone(),
+                    file: read.file.clone(),
+                    defn: read.function.clone(),
+                    line: read.line,
+                    span: read.span,
+                };
+                if !self.write_target_read(&candidate) {
+                    self.reads.push(candidate);
+                }
+            }
+        }
     }
 
     fn discover_fields(&mut self) {

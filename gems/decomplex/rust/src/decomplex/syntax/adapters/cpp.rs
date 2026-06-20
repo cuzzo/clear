@@ -91,6 +91,10 @@ impl LanguageProfile for CppProfile {
         &["binary_expression"]
     }
 
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_statement", "for_range_loop", "switch_statement"]
+    }
+
     fn case_node_kinds(&self) -> &[&str] {
         &["switch_statement"]
     }

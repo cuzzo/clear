@@ -1,11 +1,11 @@
 use super::{
     adapters::{language_profile, LanguageProfile},
-    CallSite, ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias,
-    StateRead, StateWrite,
+    CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef, Language,
+    PredicateAlias, StateRead, StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser};
@@ -17,6 +17,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let mut state_reads = Vec::new();
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
+    let mut dispatch_sites = Vec::new();
     let mut predicate_aliases = Vec::new();
     let mut comparison_uses = Vec::new();
     let mut seen_writes = HashSet::new();
@@ -44,6 +45,16 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut seen_decisions,
     );
     language_profile(language).after_collect_facts(&mut function_defs, &call_sites);
+    collect_dispatch_sites(
+        parsed.tree.root_node(),
+        &parsed.source,
+        &parsed.file,
+        language,
+        &context,
+        &call_sites,
+        &mut dispatch_sites,
+    );
+    collect_equality_dispatch_sites(&comparison_uses, &call_sites, &mut dispatch_sites);
 
     Ok(Document {
         file: parsed.file.to_string_lossy().to_string(),
@@ -57,6 +68,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         state_reads,
         state_writes,
         decision_sites,
+        dispatch_sites,
         predicate_aliases,
         comparison_uses,
     })
@@ -223,6 +235,213 @@ fn collect_facts(
     }
 }
 
+fn collect_dispatch_sites(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    call_sites: &[CallSite],
+    out: &mut Vec<DispatchSite>,
+) {
+    let next_context = push_control_context(
+        node,
+        push_function_context(
+            node,
+            push_owner_context(node, source, context, language),
+            source,
+            language,
+        ),
+        source,
+        language,
+    );
+    record_dispatch_site(node, source, file, language, &next_context, call_sites, out);
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_dispatch_sites(
+            child,
+            source,
+            file,
+            language,
+            &next_context,
+            call_sites,
+            out,
+        );
+    }
+}
+
+fn record_dispatch_site(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    call_sites: &[CallSite],
+    out: &mut Vec<DispatchSite>,
+) {
+    let profile = language_profile(language);
+    if !(case_node(profile, node) || profile.hidden_case(node)) {
+        return;
+    }
+
+    let decision_node = profile.case_source_node(node);
+    if profile.predicate_less_case(decision_node) {
+        return;
+    }
+    let predicate = strip_enclosing_parentheses(
+        &profile.normalize_source_text(&decision_predicate(profile, decision_node, source)),
+    );
+    if predicate.is_empty() {
+        return;
+    }
+
+    let mut arm_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for arm in case_arms(profile, decision_node) {
+        let members = dispatch_members_inside(
+            call_sites,
+            &predicate,
+            &context.current_function(),
+            span(arm),
+        );
+        if members.is_empty() {
+            continue;
+        }
+        for pattern in case_arm_patterns(arm, source, profile) {
+            for variant in dispatch_constant_patterns(&pattern) {
+                arm_members
+                    .entry(variant)
+                    .or_default()
+                    .extend(members.clone());
+            }
+        }
+    }
+    if arm_members.len() < 2 {
+        return;
+    }
+    for members in arm_members.values_mut() {
+        members.sort();
+        members.dedup();
+    }
+
+    let mut variant_set = arm_members.keys().cloned().collect::<Vec<_>>();
+    variant_set.sort();
+    let outside = dispatch_members_outside(
+        call_sites,
+        &predicate,
+        &context.current_function(),
+        span(decision_node),
+    );
+    let site = DispatchSite {
+        variant_set,
+        arm_members,
+        outside,
+        file: file.to_string_lossy().to_string(),
+        function: context.current_function(),
+        line: line(decision_node),
+        span: span(decision_node),
+    };
+    if out.iter().any(|existing| existing == &site) {
+        return;
+    }
+    out.push(site);
+}
+
+fn collect_equality_dispatch_sites(
+    comparisons: &[ComparisonUse],
+    call_sites: &[CallSite],
+    out: &mut Vec<DispatchSite>,
+) {
+    let mut groups: BTreeMap<(String, String, String), Vec<(&ComparisonUse, String)>> =
+        BTreeMap::new();
+    for comparison in comparisons {
+        let Some((predicate, variant)) = dispatch_equality(&comparison.canon_source) else {
+            continue;
+        };
+        groups
+            .entry((
+                comparison.file.clone(),
+                comparison.function.clone(),
+                predicate,
+            ))
+            .or_default()
+            .push((comparison, variant));
+    }
+
+    for ((file, function, predicate), entries) in groups {
+        let variant_set = entries
+            .iter()
+            .map(|(_, variant)| variant.clone())
+            .collect::<BTreeSet<_>>();
+        if variant_set.len() < 2 {
+            continue;
+        }
+
+        let mut arm_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut branch_spans = Vec::new();
+        for (comparison, variant) in entries {
+            branch_spans.push(comparison.enclosing_span);
+            let members = dispatch_members_inside(
+                call_sites,
+                &predicate,
+                &function,
+                comparison.enclosing_span,
+            );
+            if members.is_empty() {
+                continue;
+            }
+            arm_members.entry(variant).or_default().extend(members);
+        }
+        if arm_members.len() < 2 {
+            continue;
+        }
+        for members in arm_members.values_mut() {
+            members.sort();
+            members.dedup();
+        }
+
+        let outside =
+            dispatch_members_outside_any(call_sites, &predicate, &function, &branch_spans);
+        let mut variant_set = arm_members.keys().cloned().collect::<Vec<_>>();
+        variant_set.sort();
+        let span = branch_spans
+            .into_iter()
+            .reduce(union_span)
+            .unwrap_or([0, 0, 0, 0]);
+        let site = DispatchSite {
+            variant_set,
+            arm_members,
+            outside,
+            file,
+            function,
+            line: span[0],
+            span,
+        };
+        if out.iter().any(|existing| existing == &site) {
+            continue;
+        }
+        out.push(site);
+    }
+}
+
+fn dispatch_equality(source: &str) -> Option<(String, String)> {
+    for operator in ["===", "=="] {
+        let Some((left, right)) = source.split_once(operator) else {
+            continue;
+        };
+        let left = strip_enclosing_parentheses(&normalize_text(left));
+        let right = strip_enclosing_parentheses(&normalize_text(right));
+        let left_variant = dispatch_constant_pattern(&left);
+        let right_variant = dispatch_constant_pattern(&right);
+        return match (left_variant, right_variant) {
+            (true, false) => Some((right, left)),
+            (false, true) => Some((left, right)),
+            _ => None,
+        };
+    }
+    None
+}
+
 fn record_function_def(
     node: Node<'_>,
     source: &str,
@@ -277,10 +496,9 @@ fn record_predicate_alias(
     let Some(body) = profile.single_expression_body(node) else {
         return;
     };
-    let text = profile.normalize_source_text(node_text(body, source));
-    if text.is_empty() || text == "nil" || text.len() > 200 {
+    let Some(text) = predicate_body_text(profile, node_text(body, source)) else {
         return;
-    }
+    };
     let file_name = file.to_string_lossy().to_string();
     out.push(PredicateAlias {
         name: name.clone(),
@@ -292,18 +510,58 @@ fn record_predicate_alias(
     });
 }
 
+fn predicate_body_text(profile: &dyn LanguageProfile, source: &str) -> Option<String> {
+    let mut text = profile.normalize_source_text(source);
+    if text.starts_with('{') && text.ends_with('}') {
+        text = text[1..text.len() - 1].trim().to_string();
+    }
+    let text = text
+        .strip_prefix("return ")
+        .unwrap_or(&text)
+        .trim_end_matches(';')
+        .trim()
+        .to_string();
+    if text.contains(';') {
+        return None;
+    }
+    if text.is_empty() || text == "nil" || text.len() > 200 {
+        return None;
+    }
+    if predicate_like_body(&text) {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn predicate_like_body(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    matches!(lower.as_str(), "true" | "false")
+        || lower.contains("true")
+        || lower.contains("false")
+        || lower.contains("null")
+        || lower.contains("nil")
+        || text.contains("==")
+        || text.contains("!=")
+        || text.contains("&&")
+        || text.contains("||")
+        || lower.contains(" and ")
+        || lower.contains(" or ")
+}
+
 fn record_comparison_use(
     node: Node<'_>,
     source: &str,
     file: &Path,
-    _language: Language,
+    language: Language,
     context: &ContextState,
     out: &mut Vec<ComparisonUse>,
 ) {
-    if !comparison_node(language_profile(_language), node, source) {
+    let profile = language_profile(language);
+    if !comparison_node(profile, node, source) {
         return;
     }
-    let raw = language_profile(_language).normalize_source_text(node_text(node, source));
+    let raw = profile.normalize_source_text(node_text(node, source));
     out.push(ComparisonUse {
         canon_source: raw.clone(),
         raw,
@@ -311,14 +569,18 @@ fn record_comparison_use(
         function: context.current_function(),
         line: line(node),
         span: span(node),
+        enclosing_span: decision_enclosing_span(profile, node),
     });
 }
 
 fn comparison_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
     if profile.comparison_node_kinds().contains(&node.kind()) {
-        return profile
-            .comparison_operators()
-            .contains(&direct_operator_from_source(node, source).as_str());
+        let operator = direct_operator_from_source(node, source);
+        return profile.comparison_operators().contains(&operator.as_str())
+            || profile
+                .comparison_operators()
+                .iter()
+                .any(|operator| node_text(node, source).contains(operator));
     }
     if !profile.call_node_kinds().contains(&node.kind()) {
         return false;
@@ -371,6 +633,7 @@ fn record_decision_site(
                     decision_node,
                     source,
                 )),
+                enclosing_span: span(decision_node),
             },
         );
     }
@@ -435,6 +698,7 @@ fn record_conjunction_decision(
             line: conjunction_span(node)[0],
             span: conjunction_span(node),
             predicate: profile.normalize_source_text(node_text(node, source)),
+            enclosing_span: decision_enclosing_span(profile, node),
         },
     );
 }
@@ -874,6 +1138,125 @@ fn default_case_pattern(profile: &dyn LanguageProfile, text: &str) -> bool {
     text.is_empty() || profile.default_case_patterns().contains(&text)
 }
 
+fn dispatch_members_inside(
+    call_sites: &[CallSite],
+    predicate: &str,
+    function: &str,
+    outer: [usize; 4],
+) -> Vec<String> {
+    let mut members = dispatch_member_calls(call_sites, predicate, function)
+        .into_iter()
+        .filter(|call| dispatch_inside_span(call.span, outer))
+        .map(dispatch_member_name)
+        .collect::<Vec<_>>();
+    members.sort();
+    members.dedup();
+    members
+}
+
+fn dispatch_members_outside(
+    call_sites: &[CallSite],
+    predicate: &str,
+    function: &str,
+    decision_span: [usize; 4],
+) -> Vec<String> {
+    let mut members = dispatch_member_calls(call_sites, predicate, function)
+        .into_iter()
+        .filter(|call| !dispatch_inside_span(call.span, decision_span))
+        .map(dispatch_member_name)
+        .collect::<Vec<_>>();
+    members.sort();
+    members.dedup();
+    members
+}
+
+fn dispatch_members_outside_any(
+    call_sites: &[CallSite],
+    predicate: &str,
+    function: &str,
+    decision_spans: &[[usize; 4]],
+) -> Vec<String> {
+    let mut members = dispatch_member_calls(call_sites, predicate, function)
+        .into_iter()
+        .filter(|call| {
+            !decision_spans
+                .iter()
+                .any(|span| dispatch_inside_span(call.span, *span))
+        })
+        .map(dispatch_member_name)
+        .collect::<Vec<_>>();
+    members.sort();
+    members.dedup();
+    members
+}
+
+fn dispatch_member_calls<'a>(
+    call_sites: &'a [CallSite],
+    predicate: &str,
+    function: &str,
+) -> Vec<&'a CallSite> {
+    call_sites
+        .iter()
+        .filter(|call| {
+            call.function == function && call.receiver == predicate && !call.message.is_empty()
+        })
+        .collect()
+}
+
+fn dispatch_member_name(call: &CallSite) -> String {
+    strip_assignment_suffix(&call.message)
+}
+
+fn dispatch_constant_patterns(member: &str) -> Vec<String> {
+    member
+        .split(',')
+        .map(|pattern| {
+            pattern
+                .trim()
+                .strip_prefix("case ")
+                .unwrap_or(pattern.trim())
+        })
+        .filter(|pattern| dispatch_constant_pattern(pattern))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn dispatch_constant_pattern(pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    pattern.replace("::", ".").split(['.', '_']).all(|part| {
+        let mut chars = part.chars();
+        matches!(chars.next(), Some(first) if first.is_ascii_uppercase())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    })
+}
+
+fn dispatch_inside_span(inner: [usize; 4], outer: [usize; 4]) -> bool {
+    let starts_after_or_at = inner[0] > outer[0] || (inner[0] == outer[0] && inner[1] >= outer[1]);
+    let ends_before_or_at = inner[2] < outer[2] || (inner[2] == outer[2] && inner[3] <= outer[3]);
+    starts_after_or_at && ends_before_or_at
+}
+
+fn union_span(left: [usize; 4], right: [usize; 4]) -> [usize; 4] {
+    let starts_before_or_at = left[0] < right[0] || (left[0] == right[0] && left[1] <= right[1]);
+    let ends_after_or_at = left[2] > right[2] || (left[2] == right[2] && left[3] >= right[3]);
+    [
+        if starts_before_or_at {
+            left[0]
+        } else {
+            right[0]
+        },
+        if starts_before_or_at {
+            left[1]
+        } else {
+            right[1]
+        },
+        if ends_after_or_at { left[2] } else { right[2] },
+        if ends_after_or_at { left[3] } else { right[3] },
+    ]
+}
+
 fn decision_predicate(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> String {
     let target = profile.decision_subject(node);
     normalize_text(
@@ -919,6 +1302,38 @@ fn conjunction_span(node: Node<'_>) -> [usize; 4] {
         base[1] += 1;
     }
     base
+}
+
+fn decision_enclosing_span(profile: &dyn LanguageProfile, node: Node<'_>) -> [usize; 4] {
+    let mut parent = node.parent();
+    let mut seen = HashSet::new();
+    while let Some(current) = parent {
+        let key = format!("{:?}\0{}", span(current), current.kind());
+        if !seen.insert(key) {
+            break;
+        }
+        if branch_like_node(profile, current) {
+            return span(current);
+        }
+        parent = current.parent();
+    }
+    span(node)
+}
+
+fn branch_like_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.branch_node_kinds().contains(&node.kind())
+        || profile.case_node_kinds().contains(&node.kind())
+        || matches!(
+            node.kind(),
+            "if" | "unless"
+                | "if_statement"
+                | "if_expression"
+                | "while"
+                | "while_statement"
+                | "for_statement"
+                | "foreach_statement"
+                | "for_expression"
+        )
 }
 
 fn decision_member_text(node: Node<'_>, source: &str) -> String {

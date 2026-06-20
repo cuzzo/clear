@@ -57,6 +57,10 @@ impl LanguageProfile for CSharpProfile {
         &["binary_expression"]
     }
 
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_statement", "foreach_statement", "switch_statement"]
+    }
+
     fn case_node_kinds(&self) -> &[&str] {
         &["switch_statement"]
     }

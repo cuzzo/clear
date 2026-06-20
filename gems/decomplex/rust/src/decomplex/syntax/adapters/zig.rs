@@ -1,6 +1,8 @@
+use super::super::tree_sitter_adapter::named_children;
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::node_text;
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct ZigProfile;
 
@@ -15,6 +17,21 @@ impl LanguageProfile for ZigProfile {
 
     fn function_node_kinds(&self) -> &[&str] {
         &["function_declaration"]
+    }
+
+    fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node.kind() == "struct_declaration" {
+            return node
+                .parent()
+                .filter(|parent| parent.kind() == "variable_declaration")
+                .and_then(|parent| {
+                    named_children(parent)
+                        .into_iter()
+                        .find(|child| child.kind() == "identifier")
+                })
+                .map(|name| node_text(name, source).to_string());
+        }
+        self.default_owner_name_from_declaration(node, source)
     }
 
     fn parameter_list_node_kinds(&self) -> &[&str] {

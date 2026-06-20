@@ -104,6 +104,7 @@ pub struct Document {
     pub state_reads: Vec<StateRead>,
     pub state_writes: Vec<StateWrite>,
     pub decision_sites: Vec<DecisionSite>,
+    pub dispatch_sites: Vec<DispatchSite>,
     pub predicate_aliases: Vec<PredicateAlias>,
     pub comparison_uses: Vec<ComparisonUse>,
 }
@@ -177,6 +178,18 @@ pub struct DecisionSite {
     pub line: usize,
     pub span: Span,
     pub predicate: String,
+    pub enclosing_span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DispatchSite {
+    pub variant_set: Vec<String>,
+    pub arm_members: BTreeMap<String, Vec<String>>,
+    pub outside: Vec<String>,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -187,6 +200,7 @@ pub struct ComparisonUse {
     pub function: String,
     pub line: usize,
     pub span: Span,
+    pub enclosing_span: Span,
 }
 
 #[derive(Clone, Debug)]
