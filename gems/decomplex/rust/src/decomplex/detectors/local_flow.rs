@@ -260,6 +260,8 @@ fn raw_local_reads(
         };
         if local_names.contains(&name)
             && !raw_local_write_node(child, parent, profile)
+            && !raw_python_import_name(parent, profile)
+            && !raw_python_with_alias_read(child, parent, profile)
             && !raw_declaration_name_in_tree(node, child, profile)
             && !raw_declaration_name(child, parent, profile)
             && !raw_member_name(child, parent, profile)
@@ -275,7 +277,15 @@ fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<S
         return BTreeSet::new();
     }
 
-    let mut writes = textual_local_writes(&ast::normalize_text(&node.text));
+    let source = ast::normalize_text(&node.text);
+    let mut writes = if profile.language() == Language::Python {
+        python_textual_local_writes(&source)
+    } else {
+        textual_local_writes(&source)
+    };
+    if profile.language() == Language::Python {
+        writes.extend(raw_python_with_alias_names(node, profile));
+    }
     raw_walk_local(node, None, node, profile, &mut |child, parent| {
         if raw_local_write_node(child, parent, profile)
             || raw_declaration_name_in_tree(node, child, profile)
@@ -441,6 +451,9 @@ fn raw_local_write_node(
     {
         return false;
     }
+    if raw_call_name(node, parent, profile) {
+        return false;
+    }
     if raw_declaration_name(node, parent, profile) {
         return true;
     }
@@ -457,7 +470,140 @@ fn raw_local_write_node(
             }
         }
     }
+    if profile.language() == Language::Python {
+        if parent.kind == "keyword_argument" {
+            return false;
+        }
+        if raw_python_loop_target(node, parent)
+            || raw_python_named_expression_lhs(node, parent)
+            || raw_python_typed_assignment_lhs(node, parent)
+            || raw_python_annotation_lhs(node, parent)
+        {
+            return true;
+        }
+    }
     raw_assignment_lhs(node, parent, profile)
+}
+
+fn raw_python_loop_target(node: &RawNode, parent: &RawNode) -> bool {
+    if raw_previous_sibling(node, parent)
+        .map(|sibling| sibling.text.as_str() == "for")
+        .unwrap_or(false)
+        && raw_next_sibling(node, parent)
+            .map(|sibling| sibling.text.as_str() != ":")
+            .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let mut seen_for = false;
+    let mut current = raw_previous_sibling(node, parent);
+    while let Some(sibling) = current {
+        match sibling.text.as_str() {
+            "in" | ":" => return false,
+            "for" => {
+                seen_for = true;
+                break;
+            }
+            _ => current = raw_previous_sibling(sibling, parent),
+        }
+    }
+    if !seen_for {
+        return false;
+    }
+
+    current = raw_next_sibling(node, parent);
+    while let Some(sibling) = current {
+        match sibling.text.as_str() {
+            "in" => return true,
+            ":" => return false,
+            _ => current = raw_next_sibling(sibling, parent),
+        }
+    }
+    false
+}
+
+fn raw_python_typed_assignment_lhs(node: &RawNode, parent: &RawNode) -> bool {
+    let Some(colon) = raw_next_sibling(node, parent) else {
+        return false;
+    };
+    if colon.text != ":" {
+        return false;
+    }
+    let Some(type_node) = raw_next_sibling(colon, parent) else {
+        return false;
+    };
+    if type_node.kind != "type" {
+        return false;
+    }
+    raw_next_sibling(type_node, parent)
+        .map(|sibling| sibling.text.as_str() == "=")
+        .unwrap_or(false)
+}
+
+fn raw_python_named_expression_lhs(node: &RawNode, parent: &RawNode) -> bool {
+    parent.kind == "named_expression"
+        && raw_named_children(parent)
+            .first()
+            .map(|lhs| std::ptr::eq(*lhs, node))
+            .unwrap_or(false)
+        && raw_next_sibling(node, parent)
+            .map(|sibling| sibling.text.as_str() == ":=")
+            .unwrap_or(false)
+}
+
+fn raw_python_annotation_lhs(node: &RawNode, parent: &RawNode) -> bool {
+    let Some(colon) = raw_next_sibling(node, parent) else {
+        return false;
+    };
+    if colon.text != ":" {
+        return false;
+    }
+    let Some(type_node) = raw_next_sibling(colon, parent) else {
+        return false;
+    };
+    if type_node.kind != "type" {
+        return false;
+    }
+    !raw_next_sibling(type_node, parent)
+        .map(|sibling| sibling.text.as_str() == "=")
+        .unwrap_or(false)
+}
+
+fn raw_python_with_alias_names(node: &RawNode, profile: &dyn LanguageProfile) -> Vec<String> {
+    let mut names = Vec::new();
+    raw_walk_local(node, None, node, profile, &mut |child, _parent| {
+        if child.kind == "as_pattern_target" && simple_identifier(&child.text) {
+            names.push(child.text.clone());
+        }
+    });
+    names
+}
+
+fn raw_python_import_name(parent: Option<&RawNode>, profile: &dyn LanguageProfile) -> bool {
+    profile.language() == Language::Python
+        && parent
+            .map(|parent| parent.kind.as_str() == "dotted_name")
+            .unwrap_or(false)
+}
+
+fn raw_python_with_alias_read(
+    node: &RawNode,
+    parent: Option<&RawNode>,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    profile.language() == Language::Python
+        && (node.kind == "as_pattern_target"
+            || parent
+                .map(|parent| parent.kind.as_str() == "as_pattern_target")
+                .unwrap_or(false))
+}
+
+fn python_textual_local_writes(source: &str) -> Vec<String> {
+    match split_assignment(source) {
+        Some((_lhs, ":=")) => Vec::new(),
+        _ => textual_local_writes(source),
+    }
 }
 
 fn raw_declaration_name(
@@ -1107,7 +1253,12 @@ fn textual_local_writes(source: &str) -> Vec<String> {
     let Some((lhs, operator)) = split_assignment(source) else {
         return Vec::new();
     };
-    if lhs.contains('.') || lhs.contains("->") || lhs.contains('[') {
+    if lhs.contains('.')
+        || lhs.contains("->")
+        || lhs.contains('[')
+        || lhs.contains('(')
+        || lhs.contains(')')
+    {
         return Vec::new();
     }
 
@@ -1460,9 +1611,7 @@ mod tests {
             summary.statements[0].reads,
             ["self".to_string()].into_iter().collect()
         );
-        assert!(summary.statements[0]
-            .dependencies
-            .contains(&("file".to_string(), "self".to_string())));
+        assert!(!summary.statements[0].writes.contains("file"));
         assert_eq!(
             summary.statements[1].reads,
             ["self".to_string()].into_iter().collect()
@@ -1482,11 +1631,108 @@ mod tests {
 
         assert_eq!(
             summary.statements[0].writes,
-            ["indent_guides".to_string(), "pretty".to_string()]
+            ["pretty".to_string()].into_iter().collect()
+        );
+        assert!(summary.statements[0].dependencies.is_empty());
+    }
+
+    #[test]
+    fn mines_python_loop_and_with_locals_without_keyword_writes() {
+        let summaries = summaries(
+            "def download(urls, dest_dir):\n    with ThreadPoolExecutor(max_workers=4) as pool:\n        for url in urls:\n            filename = url.split(\"/\")[-1]\n            dest_path = os.path.join(dest_dir, filename)\n            task_id = progress.add_task(\"download\", filename=filename, start=False)\n            pool.submit(copy_url, task_id, url, dest_path)\n",
+            Language::Python,
+        );
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "download")
+            .expect("download summary");
+        let statement = &summary.statements[0];
+
+        assert!(statement.reads.contains("urls"));
+        assert!(statement.reads.contains("url"));
+        assert!(statement.reads.contains("pool"));
+        assert!(statement.writes.contains("url"));
+        assert!(statement.writes.contains("pool"));
+        assert!(!statement.writes.contains("urls"));
+        assert!(!statement.writes.contains("max_workers"));
+        assert!(!statement.writes.contains("start"));
+    }
+
+    #[test]
+    fn does_not_read_python_with_alias_at_declaration_site() {
+        let summaries = summaries(
+            "def capture(console):\n    with console.capture() as output:\n        console.line()\n    return output\n",
+            Language::Python,
+        );
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "capture")
+            .expect("capture summary");
+
+        assert!(summary.statements[0].writes.contains("output"));
+        assert!(!summary.statements[0].reads.contains("output"));
+        assert!(summary.statements[1].reads.contains("output"));
+    }
+
+    #[test]
+    fn mines_python_named_expression_writes() {
+        let summaries = summaries(
+            "def scan(text, index):\n    if (character := text[index]):\n        return character\n",
+            Language::Python,
+        );
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "scan")
+            .expect("scan summary");
+        let statement = &summary.statements[0];
+
+        assert!(statement.writes.contains("character"));
+        assert!(statement.reads.contains("text"));
+        assert!(statement.reads.contains("index"));
+        assert!(statement
+            .dependencies
+            .contains(&("character".to_string(), "text".to_string())));
+        assert!(statement
+            .dependencies
+            .contains(&("character".to_string(), "index".to_string())));
+    }
+
+    #[test]
+    fn ignores_python_import_path_segments_that_match_locals() {
+        let summaries = summaries(
+            "def status(status):\n    from .status import Status\n    return status\n",
+            Language::Python,
+        );
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "status")
+            .expect("status summary");
+
+        assert!(summary.statements[0].reads.is_empty());
+        assert_eq!(
+            summary.statements[1].reads,
+            ["status".to_string()].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn reads_python_callable_locals_without_marking_call_callee_as_write() {
+        let summaries = summaries(
+            "def invoke(callback, value):\n    runner = callback\n    return runner(value)\n",
+            Language::Python,
+        );
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.name == "invoke")
+            .expect("invoke summary");
+
+        assert_eq!(
+            summary.statements[1].reads,
+            ["runner".to_string(), "value".to_string()]
                 .into_iter()
                 .collect()
         );
-        assert!(summary.statements[0].dependencies.is_empty());
+        assert!(summary.statements[1].writes.is_empty());
     }
 
     #[test]

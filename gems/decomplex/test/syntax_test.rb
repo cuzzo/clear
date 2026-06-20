@@ -161,6 +161,12 @@ class SyntaxTest < Minitest::Test
     assert_match(/missing Syntax language profile context/, error.message)
   end
 
+  def test_tree_sitter_language_adapter_normalizes_non_breaking_space
+    profile = Decomplex::Syntax.language_profile(:python)
+
+    assert_equal "alpha beta", profile.send(:normalize_text, "alpha\u00A0beta")
+  end
+
   def test_tree_sitter_adapter_delegates_language_normalization_to_profiles
     adapter_class = Decomplex::Syntax::TreeSitterAdapter
     profile_class = Decomplex::Syntax::TreeSitterLanguageAdapter
@@ -515,6 +521,185 @@ class SyntaxTest < Minitest::Test
 
       assert_empty statement.reads
       assert_equal ["version_integers"], statement.writes.to_a
+    end
+  end
+
+  def test_tree_sitter_python_adapter_treats_typed_local_assignment_as_write
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def process(value):
+          try:
+              return_value: PromptType = convert(value)
+          except ValueError:
+              raise
+          return return_value
+    PY
+      statements = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                      .local_methods
+                                      .first
+                                      .statements
+
+      assert_includes statements[0].writes, "return_value"
+      assert_includes statements[0].reads, "value"
+      refute_includes statements[0].reads, "return_value"
+      assert_equal ["return_value"], statements[1].reads.to_a
+    end
+  end
+
+  def test_tree_sitter_python_adapter_mines_loop_and_with_locals_without_keyword_writes
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def download(urls, dest_dir):
+          with ThreadPoolExecutor(max_workers=4) as pool:
+              for url in urls:
+                  filename = url.split("/")[-1]
+                  dest_path = os.path.join(dest_dir, filename)
+                  task_id = progress.add_task("download", filename=filename, start=False)
+                  pool.submit(copy_url, task_id, url, dest_path)
+    PY
+      statement = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                     .local_methods
+                                     .first
+                                     .statements
+                                     .first
+
+      assert_includes statement.reads, "urls"
+      assert_includes statement.reads, "url"
+      assert_includes statement.reads, "pool"
+      assert_includes statement.writes, "url"
+      assert_includes statement.writes, "pool"
+      refute_includes statement.writes, "urls"
+      refute_includes statement.writes, "max_workers"
+      refute_includes statement.writes, "start"
+    end
+  end
+
+  def test_tree_sitter_python_adapter_counts_callable_locals_as_reads
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def invoke(callback, value):
+          runner = callback
+          return runner(value)
+    PY
+      statements = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                      .local_methods
+                                      .first
+                                      .statements
+
+      assert_equal ["callback"], statements[0].reads.to_a
+      assert_equal %w[runner value], statements[1].reads.to_a.sort
+    end
+  end
+
+  def test_tree_sitter_python_adapter_mines_named_expression_writes
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def scan(text, index):
+          if (character := text[index]):
+              return character
+    PY
+      statement = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                     .local_methods
+                                     .first
+                                     .statements
+                                     .first
+
+      assert_includes statement.writes, "character"
+      assert_includes statement.reads, "text"
+      assert_includes statement.reads, "index"
+      assert_includes statement.dependencies, ["character", "text"]
+      assert_includes statement.dependencies, ["character", "index"]
+    end
+  end
+
+  def test_tree_sitter_python_adapter_groups_try_except_as_one_statement
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def foo():
+          try:
+              raise RuntimeError("Hello")
+          except Exception as e:
+              raise e from e
+    PY
+      statements = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                      .local_methods
+                                      .first
+                                      .statements
+
+      assert_equal 1, statements.length
+      assert_includes statements.first.writes, "e"
+      assert_includes statements.first.reads, "e"
+    end
+  end
+
+  def test_tree_sitter_python_adapter_groups_if_elif_chain_as_one_statement
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def align(value):
+          if value == "left":
+              return 1
+          elif value == "right":
+              return 2
+    PY
+      statements = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                      .local_methods
+                                      .first
+                                      .statements
+
+      assert_equal 1, statements.length
+      assert_equal ["value"], statements.first.reads.to_a
+    end
+  end
+
+  def test_tree_sitter_python_adapter_ignores_import_paths_that_match_locals
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def inspect():
+          from rich._inspect import Inspect
+          _inspect = Inspect()
+          return _inspect
+    PY
+      statements = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                      .local_methods
+                                      .first
+                                      .statements
+
+      assert_empty statements[0].reads
+      assert_equal ["_inspect"], statements[1].writes.to_a
+      assert_equal ["_inspect"], statements[2].reads.to_a
+    end
+  end
+
+  def test_tree_sitter_python_adapter_reads_bare_with_context_local
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def use_status(status):
+          with status:
+              sleep(0.2)
+    PY
+      statement = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                     .local_methods
+                                     .first
+                                     .statements
+                                     .first
+
+      assert_equal ["status"], statement.reads.to_a
     end
   end
 

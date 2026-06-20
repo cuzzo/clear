@@ -537,7 +537,7 @@ module Decomplex
           next if generic_local_write_node?(child)
           next if generic_declaration_name?(child)
           next if generic_member_name?(child)
-          next if generic_call_name?(child)
+          next if skip_local_read_identifier?(child)
 
           reads << name
         end
@@ -722,6 +722,10 @@ module Decomplex
                 named_field(parent, "name") || named_field(parent, "suffix") ||
                 parent.named_children.last
         field == node
+      end
+
+      def skip_local_read_identifier?(_node)
+        false
       end
 
       def generic_call_name?(node)
@@ -2367,7 +2371,7 @@ module Decomplex
       end
 
       def normalize_text(text)
-        text.to_s.strip.gsub(/\s+/, " ")
+        text.to_s.tr("\u00A0", " ").strip.gsub(/\s+/, " ")
       end
     end
 

@@ -42,7 +42,7 @@ module Decomplex
       FIELD_IDENTIFIER_NODE_KINDS = [].freeze
       PARAMETER_IDENTIFIER_NODE_KINDS = %w[identifier].freeze
       ASSIGNMENT_NODE_KINDS = %w[assignment augmented_assignment].freeze
-      ASSIGNMENT_OPERATOR_TOKENS = %w[= += -= *= /= %=].freeze
+      ASSIGNMENT_OPERATOR_TOKENS = %w[= += -= *= /= %= :=].freeze
       PATH_ACTION_NODE_KINDS = %w[call expression_statement return_statement].freeze
       SIMPLE_ACTION_WRAPPER_NODE_KINDS = %w[block].freeze
       COMPARISON_NODE_KINDS = %w[comparison_operator binary_operator boolean_operator].freeze
@@ -68,6 +68,7 @@ module Decomplex
       BOOLEAN_WRAPPER_NODE_KINDS = %w[block].freeze
       PARENTHESIZED_WRAPPER_NODE_KINDS = %w[parenthesized_expression].freeze
       LOCAL_VARIABLE_DECLARATOR_NODE_KINDS = [].freeze
+      LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS = %w[with_clause].freeze
       FIELD_DECLARATION_NODE_KINDS = [].freeze
       DECLARATION_SITE_PARENT_NODE_KINDS = %w[parameters].freeze
       ADJACENT_METHOD_INVOCATION_NODE_KINDS = [].freeze
@@ -230,11 +231,21 @@ module Decomplex
       end
 
       def assignment_lhs?(node)
+        return false if parent_node(node)&.kind == "keyword_argument"
+
         super || !!python_hidden_assignment_parts(node)
       end
 
       def generic_local_write_node?(node)
-        super || python_annotation_lhs?(node)
+        super || python_annotation_lhs?(node) || python_loop_target?(node)
+      end
+
+      def generic_local_writes(node)
+        (super + python_with_alias_names(node)).uniq
+      end
+
+      def skip_local_read_identifier?(node)
+        parent_node(node)&.kind == "dotted_name" || super
       end
 
       def python_hidden_assignment_parts(node)
@@ -244,10 +255,14 @@ module Decomplex
         return nil unless operator
 
         if assignment_operator_tokens.include?(operator.text.to_s)
+          return nil unless python_statement_assignment_context?(node)
+
           rhs = next_sibling(operator)
           return { lhs: node, rhs: rhs } if rhs
         elsif operator.text.to_s == ":"
           type_node = next_sibling(operator)
+          return nil unless type_node&.kind == "type"
+
           equal = next_sibling(type_node)
           rhs = next_sibling(equal)
           return { lhs: node, rhs: rhs } if equal&.text.to_s == "=" && rhs
@@ -264,8 +279,55 @@ module Decomplex
         return false unless colon&.text.to_s == ":"
 
         type_node = next_sibling(colon)
+        return false unless type_node&.kind == "type"
+
         equal = next_sibling(type_node)
         !equal || equal.text.to_s != "="
+      end
+
+      def python_statement_assignment_context?(node)
+        parent_node(node)&.kind == "expression_statement"
+      end
+
+      def python_loop_target?(node)
+        return false unless generic_identifier?(node)
+
+        before = prev_sibling(node)
+        after = next_sibling(node)
+        return true if before&.text.to_s == "for" && after&.text.to_s != ":"
+
+        seen_for = false
+        current = before
+        while ts_node?(current)
+          text = current.text.to_s
+          return false if %w[in :].include?(text)
+          if text == "for"
+            seen_for = true
+            break
+          end
+          current = prev_sibling(current)
+        end
+        return false unless seen_for
+
+        current = after
+        while ts_node?(current)
+          text = current.text.to_s
+          return true if text == "in"
+          return false if text == ":"
+          current = next_sibling(current)
+        end
+        false
+      end
+
+      def python_with_alias_names(node)
+        names = []
+        generic_walk_local(node) do |child|
+          next unless child.kind == "as_pattern_target"
+
+          text = child.text.to_s
+          names << text if simple_identifier_text?(text)
+        end
+        names
       end
 
       def python_assignment_span(lhs, rhs)
@@ -298,7 +360,10 @@ module Decomplex
 
       def python_new_statement_child?(current, child, body_column)
         return false unless child.start_point.row > current.map { |item| item.end_point.row }.max
-        return false if %w[elif else except finally case].include?(child.kind)
+        return false if %w[
+          elif else except finally case
+          elif_clause else_clause except_clause finally_clause case_clause
+        ].include?(child.kind)
 
         child.start_point.column <= body_column
       end
