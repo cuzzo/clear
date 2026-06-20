@@ -66,7 +66,9 @@ pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveCom
     analyzer.findings()
 }
 
-fn raw_complexity_scores(documents: &[Document]) -> BTreeMap<(String, usize, String), ScoreResult> {
+pub(crate) fn raw_complexity_scores(
+    documents: &[Document],
+) -> BTreeMap<(String, usize, String), ScoreResult> {
     let mut out = BTreeMap::new();
     for document in documents {
         for function in &document.function_defs {
@@ -218,17 +220,13 @@ impl LocalScorer {
         nesting: usize,
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
-        node.children
-            .iter()
-            .filter_map(ast::node)
-            .map(|child| {
-                if child.r#type == "WHEN" {
-                    self.score_when(child, nesting, signals)
-                } else {
-                    self.score_node(child, nesting, signals)
-                }
-            })
-            .sum()
+        compensated_sum(node.children.iter().filter_map(ast::node).map(|child| {
+            if child.r#type == "WHEN" {
+                self.score_when(child, nesting, signals)
+            } else {
+                self.score_node(child, nesting, signals)
+            }
+        }))
     }
 
     fn score_when(
@@ -287,11 +285,12 @@ impl LocalScorer {
         nesting: usize,
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
-        node.children
-            .iter()
-            .filter_map(ast::node)
-            .map(|child| self.score_node(child, nesting, signals))
-            .sum()
+        compensated_sum(
+            node.children
+                .iter()
+                .filter_map(ast::node)
+                .map(|child| self.score_node(child, nesting, signals)),
+        )
     }
 
     fn predicate_cost(&self, node: Option<&Node>, signals: &mut BTreeMap<String, usize>) -> f64 {
@@ -368,7 +367,12 @@ impl LocalScorer {
             } else {
                 0.0
             };
-            return exit_cost + self.score_raw_children(node, nesting, signals);
+            let child_cost = if raw_bare_early_exit_wrapper(node) {
+                0.0
+            } else {
+                self.score_raw_children(node, nesting, signals)
+            };
+            return exit_cost + child_cost;
         }
 
         if raw_boolean_node(node) {
@@ -385,10 +389,17 @@ impl LocalScorer {
         nesting: usize,
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
-        node.children
-            .iter()
-            .map(|child| self.score_raw_node(child, nesting, signals))
-            .sum()
+        compensated_sum(node.children.iter().map(|child| {
+            if raw_transparent_single_line_suite_statement(node, child) {
+                if raw_bare_early_exit_wrapper(child) {
+                    0.0
+                } else {
+                    self.score_raw_children(child, nesting, signals)
+                }
+            } else {
+                self.score_raw_node(child, nesting, signals)
+            }
+        }))
     }
 
     fn raw_predicate_cost(
@@ -504,6 +515,44 @@ fn raw_early_exit(node: &RawNode) -> bool {
                 | "break_statement"
                 | "continue_statement"
         )
+}
+
+fn raw_transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) -> bool {
+    parent.kind == "block"
+        && parent.children.len() == 1
+        && parent.text == child.text
+        && matches!(
+            child.kind.as_str(),
+            "return_statement" | "break_statement" | "continue_statement"
+        )
+}
+
+fn raw_bare_early_exit_wrapper(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "return_statement" | "break_statement" | "continue_statement"
+    ) && node.children.len() == 1
+        && !node.children[0].named
+        && node.children[0].text == node.text
+}
+
+fn compensated_sum(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    for value in values {
+        let next = sum + value;
+        if sum.abs() >= value.abs() {
+            compensation += (sum - next) + value;
+        } else {
+            compensation += (value - next) + sum;
+        }
+        sum = next;
+    }
+    sum + compensation
+}
+
+fn format_one_decimal(value: f64) -> String {
+    format!("{value:.1}")
 }
 
 fn raw_boolean_node(node: &RawNode) -> bool {
@@ -676,10 +725,15 @@ impl Analyzer {
             .map(|(_, edges)| {
                 edges
                     .into_iter()
-                    .max_by(|a, b| {
-                        self.edge_weight(&a.r#type)
-                            .partial_cmp(&self.edge_weight(&b.r#type))
-                            .unwrap()
+                    .fold(None, |best: Option<structural_topology::Edge>, edge| {
+                        let Some(current) = best else {
+                            return Some(edge);
+                        };
+                        if self.edge_weight(&edge.r#type) > self.edge_weight(&current.r#type) {
+                            Some(edge)
+                        } else {
+                            Some(current)
+                        }
                     })
                     .unwrap()
             })
@@ -734,7 +788,16 @@ impl Analyzer {
     fn strongest_chain(&self, score: &LocalScore, contributions: &[Contribution]) -> Vec<String> {
         let chain = contributions
             .iter()
-            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+            .fold(None, |best: Option<&Contribution>, contribution| {
+                let Some(current) = best else {
+                    return Some(contribution);
+                };
+                if contribution.score > current.score {
+                    Some(contribution)
+                } else {
+                    Some(current)
+                }
+            })
             .map(|c| c.chain.clone())
             .unwrap_or_default();
         let mut out = vec![score.name.clone()];
@@ -746,13 +809,13 @@ impl Analyzer {
         if single_caller_callees.is_empty() {
             format!(
                 "same-owner call chain adds {} weighted cognitive points",
-                hidden
+                format_one_decimal(hidden)
             )
         } else {
             format!(
                 "{} single-caller helper(s) add {} weighted cognitive points",
                 single_caller_callees.len(),
-                hidden
+                format_one_decimal(hidden)
             )
         }
     }

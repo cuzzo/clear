@@ -135,8 +135,7 @@ impl Scanner {
             }
         }
 
-        let mut seen = HashSet::new();
-        let mut out = Vec::new();
+        let mut best_by_key: BTreeMap<String, SimilarityFinding> = BTreeMap::new();
         for rows in groups.values() {
             let cluster = uniq_sites(
                 rows.iter()
@@ -165,17 +164,21 @@ impl Scanner {
                 .collect::<Vec<_>>();
             key.sort();
             let key = key.join("\0");
-            if !seen.insert(key) {
-                continue;
-            }
             let mass = rows
                 .iter()
                 .map(|(_, signature_mass)| *signature_mass)
                 .max()
                 .unwrap_or(0);
-            out.push(self.finding_for(&cluster, "type3", mass));
+            let finding = self.finding_for(&cluster, "type3", mass);
+            if best_by_key
+                .get(&key)
+                .map(|existing| existing.mass < finding.mass)
+                .unwrap_or(true)
+            {
+                best_by_key.insert(key, finding);
+            }
         }
-        out
+        best_by_key.into_values().collect()
     }
 
     fn finding_for(

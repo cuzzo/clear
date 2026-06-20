@@ -1024,38 +1024,51 @@ pub(crate) trait LanguageProfile {
     }
 
     fn clone_candidates(&self, document: &Document) -> Vec<CloneCandidate> {
-        default_clone_candidates(document)
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+
+        for function in &document.function_defs {
+            let candidate = clone_candidate_for(
+                self,
+                document,
+                &function.body,
+                Some("defn"),
+                Some(function.name.as_str()),
+            );
+            clone_add_candidate(&mut out, &mut seen, candidate);
+        }
+
+        let mut nodes = Vec::new();
+        document.root.walk(&mut nodes);
+        for node in nodes {
+            if self.clone_candidate_node(node) {
+                let candidate = clone_candidate_for(self, document, node, None, None);
+                clone_add_candidate(&mut out, &mut seen, candidate);
+            }
+        }
+
+        out
     }
 
     fn clone_fingerprint(&self, node: &RawNode) -> (String, usize) {
-        clone_fingerprint(node, &mut HashSet::new())
-    }
-}
-
-fn default_clone_candidates(document: &Document) -> Vec<CloneCandidate> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-
-    for function in &document.function_defs {
-        let candidate = clone_candidate_for(
-            document,
-            &function.body,
-            Some("defn"),
-            Some(function.name.as_str()),
-        );
-        clone_add_candidate(&mut out, &mut seen, candidate);
+        clone_fingerprint_for_profile(self, node, &mut HashSet::new())
     }
 
-    let mut nodes = Vec::new();
-    document.root.walk(&mut nodes);
-    for node in nodes {
-        if clone_candidate_node(node) {
-            let candidate = clone_candidate_for(document, node, None, None);
-            clone_add_candidate(&mut out, &mut seen, candidate);
-        }
+    fn clone_candidate_node(&self, node: &RawNode) -> bool {
+        default_clone_candidate_node(node)
     }
 
-    out
+    fn clone_fingerprint_children<'a>(&self, node: &'a RawNode) -> Vec<&'a RawNode> {
+        node.children.iter().collect()
+    }
+
+    fn clone_child_fingerprint(
+        &self,
+        _parent: &RawNode,
+        _child: &RawNode,
+    ) -> Option<(String, usize)> {
+        None
+    }
 }
 
 fn clone_add_candidate(
@@ -1076,24 +1089,25 @@ fn clone_add_candidate(
     }
 }
 
-fn clone_candidate_for(
+fn clone_candidate_for<P: LanguageProfile + ?Sized>(
+    profile: &P,
     document: &Document,
     node: &RawNode,
     node_name: Option<&str>,
     function_name: Option<&str>,
 ) -> Option<CloneCandidate> {
-    let (fingerprint, mass) = clone_fingerprint(node, &mut HashSet::new());
+    let (fingerprint, mass) = profile.clone_fingerprint(node);
     if fingerprint.is_empty() {
         return None;
     }
 
     let line = node.line();
     let method = clone_method_span_for(document, line);
-    let children = clone_fuzzy_children_for(node);
+    let children = clone_fuzzy_children_for(profile, node);
     let mut child_fingerprints = Vec::new();
     let mut child_masses = Vec::new();
     for child in children {
-        let (child_fp, child_mass) = clone_fingerprint(child, &mut HashSet::new());
+        let (child_fp, child_mass) = profile.clone_fingerprint(child);
         if !child_fp.is_empty() && child_mass > 0 {
             child_fingerprints.push(child_fp);
             child_masses.push(child_mass);
@@ -1119,7 +1133,7 @@ fn clone_candidate_for(
     })
 }
 
-fn clone_candidate_node(node: &RawNode) -> bool {
+pub(super) fn default_clone_candidate_node(node: &RawNode) -> bool {
     node.named
         && !CLONE_SKIP_KINDS.contains(&node.kind.as_str())
         && CLONE_CANDIDATE_KINDS.contains(&node.kind.as_str())
@@ -1127,11 +1141,22 @@ fn clone_candidate_node(node: &RawNode) -> bool {
         && !node.named_children().is_empty()
 }
 
-fn clone_fuzzy_children_for(node: &RawNode) -> Vec<&RawNode> {
-    let source = clone_body_node(node).unwrap_or(node);
-    let mut children = source.named_children();
+fn clone_fuzzy_children_for<'a, P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &'a RawNode,
+) -> Vec<&'a RawNode> {
+    let source = clone_body_node_for(profile, node).unwrap_or(node);
+    let mut children = profile
+        .clone_fingerprint_children(source)
+        .into_iter()
+        .filter(|child| child.named)
+        .collect::<Vec<_>>();
     if children.is_empty() {
-        children = node.named_children();
+        children = profile
+            .clone_fingerprint_children(node)
+            .into_iter()
+            .filter(|child| child.named)
+            .collect();
     }
     children
         .into_iter()
@@ -1142,13 +1167,29 @@ fn clone_fuzzy_children_for(node: &RawNode) -> Vec<&RawNode> {
         .collect()
 }
 
+fn clone_body_node_for<'a, P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &'a RawNode,
+) -> Option<&'a RawNode> {
+    clone_body_node(node).or_else(|| {
+        profile
+            .clone_fingerprint_children(node)
+            .into_iter()
+            .find(|child| CLONE_BODY_KINDS.contains(&child.kind.as_str()))
+    })
+}
+
 fn clone_body_node(node: &RawNode) -> Option<&RawNode> {
     node.children
         .iter()
         .find(|child| CLONE_BODY_KINDS.contains(&child.kind.as_str()))
 }
 
-fn clone_fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, usize) {
+fn clone_fingerprint_for_profile<P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &RawNode,
+    active: &mut HashSet<String>,
+) -> (String, usize) {
     let key = clone_node_key(node);
     if active.contains(&key) || node.kind == "comment" {
         return (String::new(), 0);
@@ -1156,7 +1197,7 @@ fn clone_fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, u
     active.insert(key.clone());
     let out =
         if CLONE_CALL_KINDS.contains(&node.kind.as_str()) && clone_call_message(node).is_some() {
-            clone_fingerprint_call(node, active)
+            clone_fingerprint_call(profile, node, active)
         } else if node.children.is_empty() {
             let token = clone_terminal_token(node);
             if token.is_empty() {
@@ -1167,8 +1208,10 @@ fn clone_fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, u
         } else {
             let mut child_parts = Vec::new();
             let mut mass = 1;
-            for child in &node.children {
-                let (child_fp, child_mass) = clone_fingerprint(child, active);
+            for child in profile.clone_fingerprint_children(node) {
+                let (child_fp, child_mass) = profile
+                    .clone_child_fingerprint(node, child)
+                    .unwrap_or_else(|| clone_fingerprint_for_profile(profile, child, active));
                 if child_fp.is_empty() {
                     continue;
                 }
@@ -1185,12 +1228,18 @@ fn clone_fingerprint(node: &RawNode, active: &mut HashSet<String>) -> (String, u
     out
 }
 
-fn clone_fingerprint_call(node: &RawNode, active: &mut HashSet<String>) -> (String, usize) {
+fn clone_fingerprint_call<P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &RawNode,
+    active: &mut HashSet<String>,
+) -> (String, usize) {
     let message = clone_call_message(node).unwrap_or_default();
     let mut child_parts = Vec::new();
     let mut mass = 1;
-    for child in &node.children {
-        let (child_fp, child_mass) = clone_fingerprint(child, active);
+    for child in profile.clone_fingerprint_children(node) {
+        let (child_fp, child_mass) = profile
+            .clone_child_fingerprint(node, child)
+            .unwrap_or_else(|| clone_fingerprint_for_profile(profile, child, active));
         if child_fp.is_empty() {
             continue;
         }

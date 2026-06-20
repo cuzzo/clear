@@ -31,7 +31,10 @@ module Decomplex
       summaries = LocalFlow.scan(files)
       complexity_scores = Array(files).each_with_object({}) do |file, scores|
         document = Syntax.parse(file, parser: "tree_sitter")
-        scores.merge!(document.local_complexity_scores)
+        document.local_methods.each do |method|
+          scores[complexity_key(method)] =
+            document.local_complexity_scores.fetch(method.id, { score: 0.0 })
+        end
       end
       new(
         summaries,
@@ -75,7 +78,7 @@ module Decomplex
     def findings_for(summary)
       return [] if summary.statements.size < @min_unrelated_statements + 2
 
-      local_complexity = @complexity_scores.fetch(summary.id, { score: 0.0 })[:score].to_f
+      local_complexity = @complexity_scores.fetch(complexity_key(summary), { score: 0.0 })[:score].to_f
       return [] if local_complexity < @min_local_complexity
 
       findings = summary.statements.each_with_index.flat_map do |statement, index|
@@ -278,6 +281,14 @@ module Decomplex
 
     def round(value)
       (value * 10).round / 10.0
+    end
+
+    def self.complexity_key(method)
+      [method.file, method.line, method.name]
+    end
+
+    def complexity_key(method)
+      self.class.complexity_key(method)
     end
   end
 end

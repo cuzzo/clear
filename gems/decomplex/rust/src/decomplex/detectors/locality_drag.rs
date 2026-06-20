@@ -1,6 +1,6 @@
 use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::{local_flow, weighted_inlined_cognitive_complexity};
-use crate::decomplex::syntax::{Document, Language};
+use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,16 +46,29 @@ pub struct BoundaryInfo {
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<LocalityDragRow>> {
-    let summaries = local_flow::scan_files(files, language)?;
-    Ok(scan_summaries(summaries))
+    let documents = syntax::parse_files(files, language)?;
+    Ok(scan_documents(&documents))
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<LocalityDragRow> {
-    scan_summaries(local_flow::scan_documents(documents))
+    let summaries = local_flow::scan_documents(documents);
+    let complexity_scores = weighted_inlined_cognitive_complexity::raw_complexity_scores(documents);
+    scan_summaries_with_scores(summaries, complexity_scores)
 }
 
 pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<LocalityDragRow> {
-    let mut detector = LocalityDrag::new(summaries);
+    let mut detector = LocalityDrag::new(summaries, BTreeMap::new());
+    detector.findings()
+}
+
+fn scan_summaries_with_scores(
+    summaries: Vec<local_flow::MethodSummary>,
+    complexity_scores: BTreeMap<
+        (String, usize, String),
+        weighted_inlined_cognitive_complexity::ScoreResult,
+    >,
+) -> Vec<LocalityDragRow> {
+    let mut detector = LocalityDrag::new(summaries, complexity_scores);
     detector.findings()
 }
 
@@ -66,10 +79,18 @@ struct LocalityDrag {
     min_local_complexity: f64,
     min_score: isize,
     max_findings_per_method: usize,
+    complexity_scores:
+        BTreeMap<(String, usize, String), weighted_inlined_cognitive_complexity::ScoreResult>,
 }
 
 impl LocalityDrag {
-    fn new(summaries: Vec<local_flow::MethodSummary>) -> Self {
+    fn new(
+        summaries: Vec<local_flow::MethodSummary>,
+        complexity_scores: BTreeMap<
+            (String, usize, String),
+            weighted_inlined_cognitive_complexity::ScoreResult,
+        >,
+    ) -> Self {
         Self {
             summaries,
             min_unrelated_statements: 4,
@@ -77,6 +98,7 @@ impl LocalityDrag {
             min_local_complexity: 12.0,
             min_score: 60,
             max_findings_per_method: 3,
+            complexity_scores,
         }
     }
 
@@ -102,12 +124,7 @@ impl LocalityDrag {
             return Vec::new();
         }
 
-        let scorer = weighted_inlined_cognitive_complexity::LocalScorer::new();
-        let local_complexity = summary
-            .raw_node
-            .as_ref()
-            .map(|node| scorer.score_raw(node).score)
-            .unwrap_or_else(|| scorer.score(&summary.node).score);
+        let local_complexity = self.local_complexity(summary);
         if local_complexity < self.min_local_complexity {
             return Vec::new();
         }
@@ -133,6 +150,20 @@ impl LocalityDrag {
             .into_iter()
             .take(self.max_findings_per_method)
             .collect()
+    }
+
+    fn local_complexity(&self, summary: &local_flow::MethodSummary) -> f64 {
+        self.complexity_scores
+            .get(&(summary.file.clone(), summary.line, summary.name.clone()))
+            .map(|score| score.score)
+            .unwrap_or_else(|| {
+                let scorer = weighted_inlined_cognitive_complexity::LocalScorer::new();
+                summary
+                    .raw_node
+                    .as_ref()
+                    .map(|node| scorer.score_raw(node).score)
+                    .unwrap_or_else(|| scorer.score(&summary.node).score)
+            })
     }
 
     fn finding_for_write(
