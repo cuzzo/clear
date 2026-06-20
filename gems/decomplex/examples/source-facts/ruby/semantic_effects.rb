@@ -12,4 +12,12 @@ class SourceFactSemanticEffects
     target[:name] = value
     target.items << value
   end
+
+  def shape_hash(data)
+    schema = { "$schema" => "https://example.test/schema.json" }
+    buckets = Hash.new { |hash, key| hash[key] = [] }
+    totals = Hash.new(0)
+    data.each { |key, count| totals[key] += count }
+    [schema, buckets, totals]
+  end
 end

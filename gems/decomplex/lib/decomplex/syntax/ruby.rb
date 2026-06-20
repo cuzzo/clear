@@ -146,7 +146,7 @@ module Decomplex
           return { receiver: target[:receiver], field: target[:message] }
         end
 
-        ruby_state_variable_target(node) || super
+        ruby_unparenthesized_member_argument_target(node) || ruby_state_variable_target(node) || super
       end
 
       def state_target(lhs)
@@ -215,7 +215,7 @@ module Decomplex
             ruby_path_walk(document, statement, function_def.name, [], out)
           end
         end
-        out
+        out.uniq { |site| [site.guards, site.action, site.file, site.function, site.line] }
       end
 
       def immutable_struct_readers(document)
@@ -521,6 +521,7 @@ module Decomplex
         return false if ruby_local_write_identifier?(node)
         return false if ruby_declaration_name?(node, parent_node(node))
         return false if ruby_call_message_identifier?(node)
+        return false if ruby_unary_assertion_argument?(node)
 
         true
       end
@@ -530,7 +531,31 @@ module Decomplex
 
         parent = parent_node(node)
         (parent&.kind == "assignment" && parent.named_children.first == node) ||
+          (parent&.kind == "left_assignment_list" && parent_node(parent)&.kind == "assignment") ||
           (ruby_flat_assignment_statement?(parent) && parent.named_children.first == node)
+      end
+
+      def ruby_unparenthesized_member_argument_target(node)
+        return nil unless node.kind == "argument_list"
+        return nil if node.text.to_s.strip.start_with?("(")
+        return nil unless node.children.any? { |child| !child.named? && child.text == "." }
+
+        named = node.named_children
+        return nil unless named.size == 2
+        return nil unless named.all? { |child| %w[identifier constant].include?(child.kind) }
+
+        { receiver: normalize_text(named.first.text), field: named.last.text }
+      end
+
+      def ruby_unary_assertion_argument?(node)
+        parent = parent_node(node)
+        return false unless parent&.kind == "argument_list"
+
+        call = parent_node(parent)
+        return false unless call&.kind == "call"
+        return false unless %w[assert_empty refute_empty assert_nil refute_nil].include?(call.named_children.first&.text)
+
+        true
       end
 
       def ruby_flat_assignment_statement?(node)
@@ -562,6 +587,7 @@ module Decomplex
 
         if guards.size >= 2 && ruby_path_action_node?(node)
           record_ruby_path_condition(document, node, function, guards, out)
+          return
         end
 
         node.children.each { |child| ruby_path_walk(document, child, function, guards, out) }
@@ -931,9 +957,20 @@ module Decomplex
 
       def ruby_state_variable_node?(node)
         return false unless ts_node?(node)
+        return false if ruby_embedded_text_node?(node)
         return true if %w[instance_variable global_variable].include?(node.kind)
 
         node.named_children.empty? && node.text.to_s.match?(/\A[@$][A-Za-z_]\w*[!?=]?\z/)
+      end
+
+      def ruby_embedded_text_node?(node)
+        current = node
+        while ts_node?(current)
+          return true if %w[string string_content heredoc_body simple_symbol symbol delimited_symbol].include?(current.kind)
+
+          current = parent_node(current)
+        end
+        false
       end
 
       def ruby_instance_variable_node?(node)

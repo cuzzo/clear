@@ -48,17 +48,22 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PathCondition
 }
 
 pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
-    let mut sites = documents
+    let sites = documents
         .iter()
-        .flat_map(sites_for_document)
+        .flat_map(|document| {
+            fact_sites_for_document(document)
+                .into_iter()
+                .map(|site| Site {
+                    guards: site.guards,
+                    action: site.action,
+                    file: site.file,
+                    defn: site.function,
+                    line: site.line,
+                    span: site.span,
+                })
+        })
         .collect::<Vec<_>>();
-    if sites.is_empty() {
-        sites = documents
-            .iter()
-            .flat_map(normalized_sites_from_document)
-            .collect::<Vec<_>>();
-    }
-    Report::new(dedupe_sites(sites)).findings()
+    Report::new(sites).findings()
 }
 
 pub(crate) fn fact_sites_for_document(
@@ -216,8 +221,7 @@ fn raw_path_walk(
         } else {
             raw_negate_guards(&atoms)
         };
-        for (child, branch_guards) in
-            raw_branch_body_nodes(profile, node, &then_atoms, &else_atoms)
+        for (child, branch_guards) in raw_branch_body_nodes(profile, node, &then_atoms, &else_atoms)
         {
             let mut next_guards = guards.to_vec();
             next_guards.extend(branch_guards);
@@ -267,6 +271,9 @@ fn raw_path_condition_atoms(
 }
 
 fn raw_branch_condition(node: &RawNode) -> Option<&RawNode> {
+    if raw_modifier_branch(node) {
+        return raw_named_children(node).into_iter().last();
+    }
     raw_child_by_field(node, "condition")
         .or_else(|| raw_child_by_field(node, "value"))
         .or_else(|| raw_child_by_field(node, "subject"))
@@ -280,8 +287,8 @@ fn raw_branch_body_nodes<'a>(
     else_guards: &[String],
 ) -> Vec<(&'a RawNode, Vec<String>)> {
     let mut bodies = Vec::new();
-    if let Some(body) = raw_child_by_field(node, "consequence")
-        .or_else(|| raw_child_by_field(node, "body"))
+    if let Some(body) =
+        raw_child_by_field(node, "consequence").or_else(|| raw_child_by_field(node, "body"))
     {
         bodies.push((body, then_guards.to_vec()));
     }
@@ -289,19 +296,28 @@ fn raw_branch_body_nodes<'a>(
         bodies.push((body, else_guards.to_vec()));
     }
     if bodies.is_empty() {
-        bodies = raw_named_children(node)
-            .into_iter()
-            .skip(1)
-            .enumerate()
-            .map(|(index, body)| {
-                let guards = if index == 0 {
-                    then_guards.to_vec()
-                } else {
-                    else_guards.to_vec()
-                };
-                (body, guards)
-            })
-            .collect();
+        let named = raw_named_children(node);
+        bodies = if raw_modifier_branch(node) {
+            named
+                .into_iter()
+                .next()
+                .map(|body| vec![(body, then_guards.to_vec())])
+                .unwrap_or_default()
+        } else {
+            named
+                .into_iter()
+                .skip(1)
+                .enumerate()
+                .map(|(index, body)| {
+                    let guards = if index == 0 {
+                        then_guards.to_vec()
+                    } else {
+                        else_guards.to_vec()
+                    };
+                    (body, guards)
+                })
+                .collect()
+        };
     }
     bodies
         .into_iter()
@@ -311,6 +327,10 @@ fn raw_branch_body_nodes<'a>(
                 .map(move |child| (child, branch_guards.clone()))
         })
         .collect()
+}
+
+fn raw_modifier_branch(node: &RawNode) -> bool {
+    matches!(node.kind.as_str(), "if_modifier" | "unless_modifier")
 }
 
 fn raw_flatten_branch_body<'a>(

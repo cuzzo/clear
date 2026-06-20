@@ -958,7 +958,9 @@ fn raw_assignment_lhs_read_in_tree(
     {
         return false;
     }
-    if profile.assignment_node_kinds().contains(&root.kind.as_str())
+    if profile
+        .assignment_node_kinds()
+        .contains(&root.kind.as_str())
         || (profile.language() == Language::Ruby && raw_assignment_statement(root, profile))
     {
         if let Some(lhs) = raw_named_children(root).first() {
@@ -983,7 +985,9 @@ fn raw_assignment_lhs_write_in_tree(
     {
         return false;
     }
-    if profile.assignment_node_kinds().contains(&root.kind.as_str())
+    if profile
+        .assignment_node_kinds()
+        .contains(&root.kind.as_str())
         || (profile.language() == Language::Ruby && raw_assignment_statement(root, profile))
     {
         if let Some(lhs) = raw_named_children(root).first() {

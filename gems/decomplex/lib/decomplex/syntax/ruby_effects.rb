@@ -139,6 +139,8 @@ module Decomplex
           ruby_operator_assignment_effect(document, node, stack)
         when "binary"
           ruby_binary_effect(document, node, stack)
+        when "body_statement", "block_body"
+          ruby_flat_statement_effects(document, node, stack)
         else
           []
         end
@@ -191,6 +193,28 @@ module Decomplex
         return [] unless direct_operator(node) == "<<"
 
         [semantic_effect_site(document, node, stack, :hidden_mutation, "<<")]
+      end
+
+      def ruby_flat_statement_effects(document, node, stack)
+        operator = direct_operator(node)
+        case operator
+        when "<<"
+          [semantic_effect_site(document, node, stack, :hidden_mutation, "<<")]
+        when "="
+          ruby_flat_element_assignment_effect(document, node, stack, "[]=")
+        when "+=", "-=", "*=", "/=", "%=", "&&=", "||="
+          ruby_flat_element_assignment_effect(document, node, stack, "op-assign")
+        else
+          []
+        end
+      end
+
+      def ruby_flat_element_assignment_effect(document, node, stack, detail)
+        lhs = node.named_children.first
+        return [] unless lhs&.kind == "element_reference"
+        return [] if lhs.named_children.first&.text == "ENV"
+
+        [semantic_effect_site(document, node, stack, :hidden_mutation, detail)]
       end
     end
   end

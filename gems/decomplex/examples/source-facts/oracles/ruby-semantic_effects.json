@@ -12,6 +12,15 @@
         ]
       },
       {
+        "name": "shape_hash",
+        "owner": "SourceFactSemanticEffects",
+        "line": 16,
+        "visibility": "public",
+        "params": [
+          "data"
+        ]
+      },
+      {
         "name": "perform",
         "owner": "SourceFactSemanticEffects",
         "line": 4,
@@ -23,6 +32,19 @@
       }
     ],
     "calls": [
+      {
+        "receiver": "Hash",
+        "message": "new",
+        "function": "shape_hash",
+        "line": 19,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "0"
+        ]
+      },
       {
         "receiver": "self",
         "message": "send",
@@ -72,7 +94,35 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": []
+        "arguments": [
+
+        ]
+      },
+      {
+        "receiver": "Hash",
+        "message": "new",
+        "function": "shape_hash",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": [
+
+        ]
+      },
+      {
+        "receiver": "data",
+        "message": "each",
+        "function": "shape_hash",
+        "line": 20,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": [
+
+        ]
       }
     ],
     "state_reads": [
@@ -81,6 +131,12 @@
         "field": "$source_fact_seen",
         "function": "perform",
         "line": 8
+      },
+      {
+        "receiver": "data",
+        "field": "each",
+        "function": "shape_hash",
+        "line": 20
       },
       {
         "receiver": "target",
@@ -109,10 +165,22 @@
         "line": 12
       },
       {
+        "kind": "hidden_mutation",
+        "detail": "[]=",
+        "function": "shape_hash",
+        "line": 18
+      },
+      {
         "kind": "dynamic_dispatch",
         "detail": "callback.call",
         "function": "perform",
         "line": 6
+      },
+      {
+        "kind": "hidden_mutation",
+        "detail": "op-assign",
+        "function": "shape_hash",
+        "line": 20
       },
       {
         "kind": "hidden_io",

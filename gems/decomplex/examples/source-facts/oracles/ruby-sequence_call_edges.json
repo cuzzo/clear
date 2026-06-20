@@ -1,0 +1,344 @@
+{
+  "syntax": {
+    "calls": [
+      {
+        "receiver": "arms",
+        "message": "map",
+        "function": "symbol_proc_maps",
+        "line": 16,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "&:category"
+        ]
+      },
+      {
+        "receiver": "C.classify_file(rsf.path, f.path)",
+        "message": "map",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "&:category"
+        ]
+      },
+      {
+        "receiver": "C.classify_file(rsf.path, f.path, diagnostic_mids: [:report_invalid_input!])",
+        "message": "map",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "&:category"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "assert_empty",
+        "function": "assertion_single_call_argument",
+        "line": 10,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "C",
+          "classify_file",
+          "(coverage, file, root: dir)"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "assert_nil",
+        "function": "assertion_single_call_argument",
+        "line": 11,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "SlopCop::DecomplexVerdict",
+          "lookup",
+          "(v, path, \"plain\", 2)"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "with_env",
+        "function": "assertion_single_call_argument",
+        "line": 9,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": [
+          "\"DECOMPLEX_PARSER\"",
+          "\"tree_sitter\""
+        ]
+      },
+      {
+        "receiver": "result",
+        "message": "dig",
+        "function": "assertion_argument_calls",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "\"locations\"",
+          "0",
+          "\"physicalLocation\"",
+          "\"artifactLocation\"",
+          "\"uri\""
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "assert_equal",
+        "function": "assertion_argument_calls",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "\"uri\"",
+          "result.dig(\"locations\", 0, \"physicalLocation\", \"artifactLocation\", \"uri\")"
+        ]
+      },
+      {
+        "receiver": "File",
+        "message": "file?",
+        "function": "chained_multiline",
+        "line": 26,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "abs"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "overlay_arm",
+        "function": "chained_multiline",
+        "line": 34,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "arm",
+          "repo"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "repo_relative",
+        "function": "chained_multiline",
+        "line": 24,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "file",
+          "repo"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "Array",
+        "function": "chained_multiline",
+        "line": 23,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "files"
+        ]
+      },
+      {
+        "receiver": "File",
+        "message": "expand_path",
+        "function": "chained_multiline",
+        "line": 25,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "rel",
+          "repo"
+        ]
+      },
+      {
+        "receiver": "Classifier",
+        "message": "classify_file",
+        "function": "chained_multiline",
+        "line": 28,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "resultset",
+          "abs",
+          "root: repo",
+          "ffi_boundary: ffi_boundary",
+          "diagnostic_mids: diagnostic_mids"
+        ]
+      },
+      {
+        "receiver": "C",
+        "message": "classify_file",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "rsf.path",
+          "f.path",
+          "diagnostic_mids: [:report_invalid_input!]"
+        ]
+      },
+      {
+        "receiver": "C",
+        "message": "classify_file",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "rsf.path",
+          "f.path"
+        ]
+      },
+      {
+        "receiver": "Array(files).flat_map do |file| rel = repo_relative(file, repo) abs = File.expand_path(rel, repo) next [] unless File.file?(abs) Classifier.classify_file( resultset, abs, root: repo, ffi_boundary: ffi_boundary, diagnostic_mids: diagnostic_mids ).map { |arm| overlay_arm(arm, repo) } end",
+        "message": "compact",
+        "function": "chained_multiline",
+        "line": 23,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "arms",
+        "function": "chained_multiline",
+        "line": 38,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "f",
+        "message": "path",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "rsf",
+        "message": "path",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "f",
+        "message": "path",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "rsf",
+        "message": "path",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "arm[\"line\"]",
+        "message": "to_i",
+        "function": "chained_multiline",
+        "line": 36,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "Array(files)",
+        "message": "flat_map",
+        "function": "chained_multiline",
+        "line": 23,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "Array(files).flat_map do |file| rel = repo_relative(file, repo) abs = File.expand_path(rel, repo) next [] unless File.file?(abs) Classifier.classify_file( resultset, abs, root: repo, ffi_boundary: ffi_boundary, diagnostic_mids: diagnostic_mids ).map { |arm| overlay_arm(arm, repo) } end.compact",
+        "message": "sort_by",
+        "function": "chained_multiline",
+        "line": 23,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "Classifier.classify_file( resultset, abs, root: repo, ffi_boundary: ffi_boundary, diagnostic_mids: diagnostic_mids )",
+        "message": "map",
+        "function": "chained_multiline",
+        "line": 28,
+        "conditional": true,
+        "control": "iterates",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ]
+  }
+}

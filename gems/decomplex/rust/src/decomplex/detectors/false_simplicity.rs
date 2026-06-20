@@ -132,7 +132,12 @@ impl Report {
                 grouped.push((rec.name.clone(), vec![rec]));
             }
         }
-        for (_name, recs) in grouped {
+        for (_name, mut recs) in grouped {
+            recs.sort_by(|left, right| {
+                left.file
+                    .cmp(&right.file)
+                    .then_with(|| left.line.cmp(&right.line))
+            });
             if recs.first().is_some_and(|rec| rec.core) {
                 continue;
             }

@@ -1,0 +1,285 @@
+{
+  "syntax": {
+    "calls": [
+      {
+        "receiver": "gaps",
+        "message": "first",
+        "function": "report",
+        "line": 7,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "@top"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "source_path?",
+        "function": "scan",
+        "line": 13,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "path"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "Array",
+        "function": "scan",
+        "line": 12,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "paths"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "Array",
+        "function": "scan",
+        "line": 13,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "paths"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "emit",
+        "function": "guarded_emit",
+        "line": 23,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "source"
+        ]
+      },
+      {
+        "receiver": "x[:detectors]",
+        "message": "to_a",
+        "function": "report",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "dup",
+        "message": "positive?",
+        "function": "report",
+        "line": 8,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "gaps",
+        "message": "size",
+        "function": "report",
+        "line": 8,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "source",
+        "function": "guarded_emit",
+        "line": 20,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "evidence",
+        "message": "covered?",
+        "function": "guarded_emit",
+        "line": 21,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "Array(paths)",
+        "message": "empty?",
+        "function": "scan",
+        "line": 12,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "gaps",
+        "message": "reject",
+        "function": "report",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "flagged",
+        "message": "count",
+        "function": "report",
+        "line": 6,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "gaps.first(@top)",
+        "message": "map",
+        "function": "report",
+        "line": 7,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "Array(paths)",
+        "message": "select",
+        "function": "scan",
+        "line": 13,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@top",
+        "function": "report",
+        "line": 7
+      },
+      {
+        "receiver": "flagged",
+        "field": "count",
+        "function": "report",
+        "line": 6
+      },
+      {
+        "receiver": "evidence",
+        "field": "covered?",
+        "function": "guarded_emit",
+        "line": 21
+      },
+      {
+        "receiver": "Array(paths)",
+        "field": "empty?",
+        "function": "scan",
+        "line": 12
+      },
+      {
+        "receiver": "gaps.first(@top)",
+        "field": "map",
+        "function": "report",
+        "line": 7
+      },
+      {
+        "receiver": "dup",
+        "field": "positive?",
+        "function": "report",
+        "line": 8
+      },
+      {
+        "receiver": "gaps",
+        "field": "reject",
+        "function": "report",
+        "line": 5
+      },
+      {
+        "receiver": "Array(paths)",
+        "field": "select",
+        "function": "scan",
+        "line": 13
+      },
+      {
+        "receiver": "gaps",
+        "field": "size",
+        "function": "report",
+        "line": 8
+      },
+      {
+        "receiver": "x[:detectors]",
+        "field": "to_a",
+        "function": "report",
+        "line": 5
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "guarded_emit",
+        "line": 21,
+        "predicate": "evidence.covered?",
+        "state_refs": [
+          "evidence.covered?"
+        ]
+      },
+      {
+        "function": "scan",
+        "line": 12,
+        "predicate": "paths && !Array(paths).empty?",
+        "state_refs": [
+          "Array(paths).empty?"
+        ]
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactSlopcopParityEdges#guarded_emit",
+        "score": 3.7,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "early_exits": 2
+        }
+      },
+      {
+        "id": "SourceFactSlopcopParityEdges#report",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactSlopcopParityEdges#scan",
+        "score": 1.9,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 1
+        }
+      }
+    ]
+  }
+}

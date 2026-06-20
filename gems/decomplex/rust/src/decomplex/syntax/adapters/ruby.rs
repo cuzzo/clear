@@ -169,6 +169,10 @@ impl LanguageProfile for RubyProfile {
         &["element_assignment", "element_reference"]
     }
 
+    fn expression_list_node_kinds(&self) -> &[&str] {
+        &["left_assignment_list"]
+    }
+
     fn assignment_operator_tokens(&self) -> &[&str] {
         &["=", "+=", "-=", "*=", "/=", "%=", "&&=", "||="]
     }
@@ -247,17 +251,14 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
-        if ruby_embedded_text_node(node) {
-            return None;
-        }
-        if node.kind() == "call" && ruby_command_argument_call(node, source) {
+        if node.kind() == "call" && ruby_single_command_argument_call(node, source) {
             return None;
         }
         let mut target = match node.kind() {
             "call" => {
                 ruby_proc_call_target(node, source).or_else(|| ruby_call_target(node, source))
             }
-            "body_statement" => ruby_bare_body_call_target(node, source),
+            "body_statement" | "block_body" => ruby_bare_body_call_target(node, source),
             "identifier" => ruby_visibility_identifier_call_target(node, source)
                 .or_else(|| ruby_bare_call_target(node, source)),
             _ => None,
@@ -276,6 +277,9 @@ impl LanguageProfile for RubyProfile {
             && target.message.ends_with('?')
             && effective_span[0] != effective_span[2]
         {
+            return None;
+        }
+        if ruby_chained_element_predicate_target(&target) {
             return None;
         }
         ruby_valid_call_target(&target).then_some(target)
@@ -436,6 +440,9 @@ impl LanguageProfile for RubyProfile {
         }
         let target = ruby_state_variable_target(node, source)
             .or_else(|| self.default_state_read_target(node, source))?;
+        if ruby_chained_element_predicate_read_target(&target) {
+            return None;
+        }
         Some(target)
     }
 
@@ -540,7 +547,6 @@ fn inline_def_name(node: Node<'_>, source: &str) -> Option<String> {
 fn ruby_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
     let receiver = node.child_by_field_name("receiver");
     let method = node.child_by_field_name("method");
-    let arguments = ruby_argument_texts(node, source);
     let message = method
         .map(|method| node_text(method, source).to_string())
         .or_else(|| first_named_text(node, source, &["identifier", "constant"]))
@@ -548,6 +554,11 @@ fn ruby_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget
             let text = normalize_text(node_text(node, source));
             (receiver.is_none() && ruby_simple_call_text(&text)).then_some(text)
         })?;
+    let arguments = if ruby_require_message(&message) {
+        ruby_require_argument_texts(node, source)
+    } else {
+        ruby_argument_texts(node, source)
+    };
 
     let mut target = CallTarget::new(
         receiver
@@ -800,6 +811,9 @@ fn ruby_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
     if let Some(arguments) = ruby_inline_def_argument_texts(args, source) {
         return arguments;
     }
+    if let Some(arguments) = ruby_single_command_call_argument_texts(args, source) {
+        return arguments;
+    }
     let values = named_children(args)
         .into_iter()
         .map(|child| ruby_argument_text(child, args, source))
@@ -818,24 +832,71 @@ fn ruby_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
         .collect()
 }
 
-fn ruby_argument_text(node: Node<'_>, args: Node<'_>, source: &str) -> String {
-    if node.kind() == "string" && !node_text(args, source).trim_start().starts_with('(') {
-        if let Some(content) = named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "string_content")
-        {
-            return normalize_text(node_text(content, source));
-        }
-        let text = normalize_text(node_text(node, source));
-        if text.len() >= 2
-            && ((text.starts_with('"') && text.ends_with('"'))
-                || (text.starts_with('\'') && text.ends_with('\'')))
-        {
-            return text[1..text.len() - 1].to_string();
-        }
-        return text;
-    }
+fn ruby_argument_text(node: Node<'_>, _args: Node<'_>, source: &str) -> String {
     normalize_text(node_text(node, source))
+}
+
+fn ruby_single_command_call_argument_texts(args: Node<'_>, source: &str) -> Option<Vec<String>> {
+    if node_text(args, source).trim_start().starts_with('(') {
+        return None;
+    }
+    let children = named_children(args);
+    if children.len() != 1 || children[0].kind() != "call" {
+        return None;
+    }
+    let values = named_children(children[0])
+        .into_iter()
+        .map(|part| normalize_text(node_text(part, source)))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
+}
+
+fn ruby_require_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
+    let args = node.child_by_field_name("arguments").or_else(|| {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "argument_list")
+    });
+    let Some(args) = args else {
+        return Vec::new();
+    };
+    let children = named_children(args);
+    if children.len() == 1 {
+        let child = children[0];
+        if child.kind() == "string" && !node_text(args, source).trim_start().starts_with('(') {
+            return vec![ruby_unquoted_string_text(child, source)];
+        }
+        if child.kind() == "call" && !node_text(args, source).trim_start().starts_with('(') {
+            return named_children(child)
+                .into_iter()
+                .map(|part| normalize_text(node_text(part, source)))
+                .filter(|part| !part.is_empty())
+                .collect();
+        }
+    }
+    children
+        .into_iter()
+        .map(|child| normalize_text(node_text(child, source)))
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+fn ruby_unquoted_string_text(node: Node<'_>, source: &str) -> String {
+    if let Some(content) = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "string_content")
+    {
+        return normalize_text(node_text(content, source));
+    }
+    let text = normalize_text(node_text(node, source));
+    if text.len() >= 2
+        && ((text.starts_with('"') && text.ends_with('"'))
+            || (text.starts_with('\'') && text.ends_with('\'')))
+    {
+        return text[1..text.len() - 1].to_string();
+    }
+    text
 }
 
 fn ruby_inline_def_argument_texts(args: Node<'_>, source: &str) -> Option<Vec<String>> {
@@ -1351,14 +1412,7 @@ fn ruby_protocol_collect_state_access(
     }
 
     for child in &node.children {
-        ruby_protocol_collect_state_access(
-            child,
-            Some(node),
-            local_names,
-            reads,
-            writes,
-            false,
-        );
+        ruby_protocol_collect_state_access(child, Some(node), local_names, reads, writes, false);
     }
 }
 
@@ -1395,10 +1449,7 @@ fn ruby_protocol_record_write(
     }
 }
 
-fn ruby_protocol_state_target(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> Option<String> {
+fn ruby_protocol_state_target(node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
     match node.kind.as_str() {
         "instance_variable" => Some(normalize_protocol_state(&node.text)),
         "element_reference" => raw_named_children(node)
@@ -1542,10 +1593,7 @@ fn ruby_protocol_case_paths(
     } else {
         branch_paths
     };
-    ruby_protocol_combine_path_lists(
-        &subject_paths,
-        &alternatives,
-    )
+    ruby_protocol_combine_path_lists(&subject_paths, &alternatives)
 }
 
 fn ruby_protocol_body_paths(
@@ -1579,7 +1627,9 @@ fn ruby_protocol_child_nodes(node: &RawNode) -> Vec<&RawNode> {
             .into_iter()
             .filter(|child| matches!(child.kind.as_str(), "argument_list" | "block" | "do_block"))
             .collect(),
-        "assignment" | "operator_assignment" => raw_named_children(node).into_iter().skip(1).collect(),
+        "assignment" | "operator_assignment" => {
+            raw_named_children(node).into_iter().skip(1).collect()
+        }
         _ => raw_named_children(node)
             .into_iter()
             .filter(|child| child.kind != "comment")
@@ -1587,13 +1637,11 @@ fn ruby_protocol_child_nodes(node: &RawNode) -> Vec<&RawNode> {
     }
 }
 
-fn ruby_protocol_internal_call(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> Option<String> {
+fn ruby_protocol_internal_call(node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
     let target = if node.kind == "call" {
         ruby_raw_call_target(node)
-    } else if node.kind == "identifier" && ruby_protocol_bare_internal_identifier(node, local_names) {
+    } else if node.kind == "identifier" && ruby_protocol_bare_internal_identifier(node, local_names)
+    {
         Some(RubyRawCallTarget {
             receiver: "self".to_string(),
             message: node.text.clone(),
@@ -1605,7 +1653,9 @@ fn ruby_protocol_internal_call(
     if target.receiver != "self" {
         return None;
     }
-    if local_names.contains(&target.message) || RUBY_PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str()) {
+    if local_names.contains(&target.message)
+        || RUBY_PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
+    {
         return None;
     }
     Some(target.message)
@@ -1656,10 +1706,7 @@ fn ruby_protocol_mutating_mid(mid: &str) -> bool {
         && (RUBY_PROTOCOL_MUTATING_MIDS.contains(&mid) || mid.ends_with('!'))
 }
 
-fn ruby_protocol_bare_internal_identifier(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> bool {
+fn ruby_protocol_bare_internal_identifier(node: &RawNode, local_names: &BTreeSet<String>) -> bool {
     ruby_simple_call_text(&node.text)
         && !local_names.contains(&node.text)
         && !RUBY_PROTOCOL_IGNORED_MIDS.contains(&node.text.as_str())
@@ -1692,9 +1739,11 @@ fn ruby_raw_call_target(node: &RawNode) -> Option<RubyRawCallTarget> {
 }
 
 fn ruby_raw_argument_texts(node: &RawNode) -> Vec<String> {
-    let Some(args) = raw_child_by_field(node, "arguments")
-        .or_else(|| raw_named_children(node).into_iter().find(|child| child.kind == "argument_list"))
-    else {
+    let Some(args) = raw_child_by_field(node, "arguments").or_else(|| {
+        raw_named_children(node)
+            .into_iter()
+            .find(|child| child.kind == "argument_list")
+    }) else {
         return Vec::new();
     };
     let values = raw_named_children(args)
@@ -1728,7 +1777,10 @@ fn ruby_raw_function_body_statements(node: &RawNode) -> Vec<&RawNode> {
     if named.is_empty() && body.text.trim().is_empty() {
         return Vec::new();
     }
-    if ruby_raw_if_node(body) || ruby_raw_case_node(body) || ruby_raw_flat_assignment_statement(body) {
+    if ruby_raw_if_node(body)
+        || ruby_raw_case_node(body)
+        || ruby_raw_flat_assignment_statement(body)
+    {
         return vec![body];
     }
     if named.is_empty() || ruby_raw_heredoc_body(&named) {
@@ -1767,7 +1819,12 @@ fn ruby_raw_heredoc_body(named: &[&RawNode]) -> bool {
 
 fn ruby_raw_flat_assignment_statement(node: &RawNode) -> bool {
     node.kind == "body_statement"
-        && node.children.iter().filter(|child| !child.named && child.text == "=").count() == 1
+        && node
+            .children
+            .iter()
+            .filter(|child| !child.named && child.text == "=")
+            .count()
+            == 1
         && raw_named_children(node).len() >= 2
 }
 
@@ -1775,14 +1832,18 @@ fn ruby_raw_if_node(node: &RawNode) -> bool {
     matches!(
         node.kind.as_str(),
         "if" | "unless" | "if_modifier" | "unless_modifier"
-    ) || (matches!(node.kind.as_str(), "expression_statement" | "block" | "body_statement")
-        && matches!(raw_first_child_kind(node).as_deref(), Some("if" | "unless")))
+    ) || (matches!(
+        node.kind.as_str(),
+        "expression_statement" | "block" | "body_statement"
+    ) && matches!(raw_first_child_kind(node).as_deref(), Some("if" | "unless")))
 }
 
 fn ruby_raw_case_node(node: &RawNode) -> bool {
     node.kind == "case"
-        || (matches!(node.kind.as_str(), "body_statement" | "block_body" | "argument_list")
-            && raw_first_child_kind(node).as_deref() == Some("case"))
+        || (matches!(
+            node.kind.as_str(),
+            "body_statement" | "block_body" | "argument_list"
+        ) && raw_first_child_kind(node).as_deref() == Some("case"))
 }
 
 fn ruby_raw_path_condition(node: &RawNode) -> Option<&RawNode> {
@@ -2006,6 +2067,21 @@ fn ruby_command_argument_call(node: Node<'_>, source: &str) -> bool {
     !node_text(parent, source).trim_start().starts_with('(')
 }
 
+fn ruby_single_command_argument_call(node: Node<'_>, source: &str) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "argument_list" || node_text(parent, source).trim_start().starts_with('(') {
+        return false;
+    }
+    let children = named_children(parent);
+    children.len() == 1 && children[0] == node
+}
+
+fn ruby_require_message(message: &str) -> bool {
+    matches!(message, "require" | "require_relative")
+}
+
 fn ruby_embedded_text_node(node: Node<'_>) -> bool {
     let mut current = Some(node);
     while let Some(node) = current {
@@ -2068,11 +2144,7 @@ fn ruby_narrow_no_arg_call_span(
 }
 
 fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
-    if invalid_call_text(&target.receiver)
-        || invalid_call_text(&target.message)
-        || (target.receiver.split_whitespace().count() > 1
-            && !ruby_literal_receiver_text(&target.receiver))
-    {
+    if invalid_call_text(&target.message) {
         return false;
     }
     if matches!(target.message.as_str(), "[]" | "[]=") {
@@ -2083,23 +2155,33 @@ fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
         .is_match(target.message.as_str())
 }
 
-fn ruby_literal_receiver_text(text: &str) -> bool {
-    let value = text.trim();
-    (value.starts_with("%w[") || value.starts_with("%i["))
-        && value.ends_with(']')
-        && !value.contains('\n')
-}
-
 fn invalid_call_text(text: &str) -> bool {
     text.chars()
         .any(|ch| matches!(ch, '"' | '\'' | '\n' | '\r'))
 }
 
 fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
+    if ruby_embedded_text_node(node) {
+        return None;
+    }
     matches!(node.kind(), "instance_variable" | "global_variable").then(|| Target {
         receiver: "self".to_string(),
         field: node_text(node, source).to_string(),
     })
+}
+
+fn ruby_chained_element_predicate_target(target: &CallTarget<'_>) -> bool {
+    ruby_chained_element_predicate(&target.receiver, &target.message)
+}
+
+fn ruby_chained_element_predicate_read_target(target: &Target) -> bool {
+    ruby_chained_element_predicate(&target.receiver, &target.field)
+}
+
+fn ruby_chained_element_predicate(receiver: &str, message: &str) -> bool {
+    message.ends_with('?')
+        && receiver.contains('.')
+        && (receiver.contains("[:") || receiver.contains("[\"") || receiver.contains("['"))
 }
 
 fn ruby_sorbet_signature_payload_node(node: Node<'_>, source: &str) -> bool {

@@ -3,9 +3,9 @@ use super::{
         false_simplicity_lexicon::{false_simplicity_lexicon, FalseSimplicityLexicon},
         language_profile, LanguageProfile,
     },
-    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef,
-    Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateDeclaration, StateRead,
-    StateWrite,
+    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document,
+    FunctionDef, Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateDeclaration,
+    StateRead, StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use crate::decomplex::syntax::complexity::local_complexity_scores;
@@ -290,14 +290,7 @@ fn collect_facts(
         &next_context,
         branch_decisions,
     );
-    record_branch_arm(
-        node,
-        source,
-        file,
-        language,
-        &next_context,
-        branch_arms,
-    );
+    record_branch_arm(node, source, file, language, &next_context, branch_arms);
     record_predicate_alias(
         node,
         source,
@@ -859,9 +852,7 @@ fn normalize_comparison_source(source: &str) -> String {
         let receiver = &text[..dot_index];
         let rest = &text[dot_index + 1..];
         if simple_identifier(receiver)
-            && (rest.contains(" == ")
-                || rest.contains(" != ")
-                || rest.contains('.'))
+            && (rest.contains(" == ") || rest.contains(" != ") || rest.contains('.'))
         {
             text = rest.to_string();
         }
@@ -1021,18 +1012,19 @@ fn record_if_arms(
         .child_by_field_name("consequence")
         .or_else(|| node.child_by_field_name("body"))
         .or_else(|| named.get(1).copied());
-    let alternative = node
-        .child_by_field_name("alternative")
-        .or_else(|| {
-            named.iter()
-                .copied()
-                .find(|child| child.kind().contains("else") || child.kind().contains("alternative"))
-        })
-        .or_else(|| {
-            named.get(2)
-                .copied()
-                .filter(|candidate| consequence != Some(*candidate))
-        });
+    let alternative =
+        node.child_by_field_name("alternative")
+            .or_else(|| {
+                named.iter().copied().find(|child| {
+                    child.kind().contains("else") || child.kind().contains("alternative")
+                })
+            })
+            .or_else(|| {
+                named
+                    .get(2)
+                    .copied()
+                    .filter(|candidate| consequence != Some(*candidate))
+            });
 
     for (arm, member) in [(consequence, "then"), (alternative, "else")] {
         let Some(arm) = arm else {
@@ -1103,10 +1095,7 @@ fn case_arm_body(
         .map(|child| node_text(child, source))
         .unwrap_or_else(|| node_text(arm, source));
     let mut text = profile.normalize_source_text(body);
-    for prefix in [
-        format!("when {pattern} then "),
-        format!("when {pattern} "),
-    ] {
+    for prefix in [format!("when {pattern} then "), format!("when {pattern} ")] {
         if let Some(stripped) = text.strip_prefix(&prefix) {
             text = stripped.to_string();
             break;
@@ -1161,7 +1150,7 @@ fn collect_branch_state_refs(
             normalized_state_ref_field(&target.field)
         };
         let receiver = target.receiver.trim_start_matches('$');
-        if constant_like_state_ref(receiver, &field) {
+        if namespace_receiver(receiver) || constant_like_state_ref(receiver, &field) {
             // Constants and type namespaces are not mutable object state.
         } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
@@ -1253,7 +1242,10 @@ fn ruby_immutable_struct_readers(source: &str) -> BTreeMap<String, BTreeSet<Stri
         if let Some(owner) = class_stack.last() {
             if let Some(field) = stripped
                 .strip_prefix("const :")
-                .and_then(|rest| rest.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_').next())
+                .and_then(|rest| {
+                    rest.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                        .next()
+                })
                 .filter(|field| !field.is_empty())
             {
                 readers
@@ -1478,11 +1470,27 @@ fn normalized_state_ref_field(field: &str) -> String {
 }
 
 fn constant_like_state_ref(receiver: &str, field: &str) -> bool {
-    starts_uppercase(receiver) || (receiver.is_empty() && starts_uppercase(field))
+    constant_namespace_receiver(receiver) || (receiver.is_empty() && starts_uppercase(field))
 }
 
 fn starts_uppercase(value: &str) -> bool {
     matches!(value.chars().next(), Some(ch) if ch.is_ascii_uppercase())
+}
+
+fn constant_namespace_receiver(value: &str) -> bool {
+    let text = value.trim().trim_start_matches("::");
+    if text.is_empty() || !starts_uppercase(text) {
+        return false;
+    }
+    text.split("::").all(|part| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric())
+            && part
+                .split('.')
+                .all(|segment| !segment.is_empty() && starts_uppercase(segment))
+    })
 }
 
 fn record_conjunction_decision(
@@ -2087,7 +2095,10 @@ fn namespace_receiver(text: &str) -> bool {
         return true;
     }
 
-    matches!(receiver.chars().next(), Some(first) if first.is_ascii_uppercase())
+    if !starts_uppercase(receiver) {
+        return false;
+    }
+    !receiver.contains('(') || receiver.contains('.') || receiver.contains("::")
 }
 
 pub(crate) fn first_named_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {

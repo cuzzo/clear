@@ -97,6 +97,8 @@ impl LocalComplexityScorer {
         compensated_sum(node.children.iter().map(|child| {
             if return_fallback_boolean_wrapper(node, child) {
                 0.0
+            } else if duplicate_ruby_early_exit_token(node, child) {
+                0.0
             } else if transparent_single_line_suite_statement(node, child) {
                 self.score_children(child, nesting, signals)
             } else {
@@ -270,6 +272,15 @@ fn early_exit(node: &RawNode) -> bool {
             | "break_statement"
             | "continue_statement"
     )
+}
+
+fn duplicate_ruby_early_exit_token(parent: &RawNode, child: &RawNode) -> bool {
+    matches!(
+        parent.kind.as_str(),
+        "return" | "break" | "next" | "redo" | "retry"
+    ) && !child.named
+        && child.text == parent.kind
+        && parent.text.trim() == parent.kind
 }
 
 fn transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) -> bool {

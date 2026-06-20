@@ -1,0 +1,254 @@
+{
+  "syntax": {
+    "state_reads": [
+      {
+        "receiver": "findings",
+        "field": "each",
+        "function": "build",
+        "line": 11
+      },
+      {
+        "receiver": "sections",
+        "field": "each",
+        "function": "build",
+        "line": 8
+      },
+      {
+        "receiver": "file",
+        "field": "empty?",
+        "function": "build",
+        "line": 13
+      },
+      {
+        "receiver": "meth",
+        "field": "empty?",
+        "function": "build",
+        "line": 13
+      },
+      {
+        "receiver": "audit",
+        "field": "findings",
+        "function": "build",
+        "line": 16
+      },
+      {
+        "receiver": "audit",
+        "field": "findings",
+        "function": "build",
+        "line": 20
+      },
+      {
+        "receiver": "finding",
+        "field": "loc",
+        "function": "build",
+        "line": 12
+      },
+      {
+        "receiver": "audit.findings",
+        "field": "size",
+        "function": "build",
+        "line": 16
+      }
+    ],
+    "semantic_effects": [
+      {
+        "kind": "hidden_mutation",
+        "detail": "<<",
+        "function": "build",
+        "line": 16
+      },
+      {
+        "kind": "hidden_io",
+        "detail": "File.file?",
+        "function": "build",
+        "line": 6
+      }
+    ],
+    "path_conditions": [
+      {
+        "guards": [
+          "!File.file?(grammar)",
+          "!grammar"
+        ],
+        "action": "skip \"missing grammar\"",
+        "function": "build",
+        "line": 6
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactLocalFlowEdges#build",
+        "score": 14.7,
+        "signals": {
+          "boolean_ops": 8,
+          "branches": 3,
+          "early_exits": 2,
+          "loops": 2,
+          "nested": 3
+        }
+      }
+    ]
+  },
+  "local_flow": [
+    {
+      "method": "build",
+      "statements": [
+        {
+          "reads": [
+
+          ],
+          "writes": [
+            "rows"
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "grammar"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "audit",
+            "file",
+            "key",
+            "meth",
+            "rows",
+            "sections"
+          ],
+          "writes": [
+            "file",
+            "key",
+            "meth"
+          ],
+          "dependencies": [
+            [
+              "key",
+              "file"
+            ],
+            [
+              "key",
+              "meth"
+            ]
+          ],
+          "co_uses": [
+            [
+              "audit",
+              "file"
+            ],
+            [
+              "audit",
+              "key"
+            ],
+            [
+              "audit",
+              "meth"
+            ],
+            [
+              "audit",
+              "rows"
+            ],
+            [
+              "audit",
+              "sections"
+            ],
+            [
+              "file",
+              "key"
+            ],
+            [
+              "file",
+              "meth"
+            ],
+            [
+              "file",
+              "rows"
+            ],
+            [
+              "file",
+              "sections"
+            ],
+            [
+              "key",
+              "meth"
+            ],
+            [
+              "key",
+              "rows"
+            ],
+            [
+              "key",
+              "sections"
+            ],
+            [
+              "meth",
+              "rows"
+            ],
+            [
+              "meth",
+              "sections"
+            ],
+            [
+              "rows",
+              "sections"
+            ]
+          ]
+        },
+        {
+          "reads": [
+
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "rows"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        }
+      ],
+      "boundaries": [
+        {
+          "before_index": 1,
+          "after_index": 2,
+          "kind": "blank"
+        },
+        {
+          "before_index": 2,
+          "after_index": 3,
+          "kind": "blank"
+        }
+      ]
+    }
+  ]
+}

@@ -65,6 +65,7 @@ pub struct SourceFile {
 
 struct SharedFacts {
     local_summaries: Vec<local_flow::MethodSummary>,
+    local_complexity_scores: BTreeMap<(String, String), syntax::LocalComplexityScore>,
     semantic_aliases: semantic_alias::SemanticAliasReport,
 }
 
@@ -72,9 +73,13 @@ impl SharedFacts {
     fn new(documents: &[Document]) -> Self {
         thread::scope(|scope| {
             let local_summaries = scope.spawn(|| local_flow::scan_documents(documents));
+            let local_complexity_scores = scope.spawn(|| local_complexity_scores(documents));
             let semantic_aliases = scope.spawn(|| semantic_alias::scan_documents(documents));
             Self {
                 local_summaries: local_summaries.join().expect("local-flow facts worker"),
+                local_complexity_scores: local_complexity_scores
+                    .join()
+                    .expect("local-complexity facts worker"),
                 semantic_aliases: semantic_aliases
                     .join()
                     .expect("semantic-alias facts worker"),
@@ -118,10 +123,15 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
 
     let detectors = collect_detector_facts(&groups, &shared, options)?;
 
+    let mut reported_files = files
+        .iter()
+        .map(|file| file.path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    reported_files.sort();
+
     Ok(json!({
         "format": FORMAT,
-        "files": files.iter().map(|file| file.path.to_string_lossy().to_string()).collect::<Vec<_>>(),
-        "languages": language_counts(files),
+        "files": reported_files,
         "detectors": detectors,
     }))
 }
@@ -253,8 +263,9 @@ fn collect_detector_facts(
             })
         });
         spawn_detector!("locality_drag", {
-            json_value(locality_drag::scan_summaries(
+            json_value(locality_drag::scan_summaries_with_scores(
                 shared.local_summaries.clone(),
+                shared.local_complexity_scores.clone(),
             ))
         });
         spawn_detector!("function_lcom", {
@@ -422,8 +433,9 @@ fn collect_detector_facts_sequential(
     );
     detectors.insert(
         "locality_drag".to_string(),
-        json_value(locality_drag::scan_summaries(
+        json_value(locality_drag::scan_summaries_with_scores(
             shared.local_summaries.clone(),
+            shared.local_complexity_scores.clone(),
         ))?,
     );
     detectors.insert(
@@ -439,6 +451,20 @@ fn collect_detector_facts_sequential(
         ))?,
     );
     Ok(detectors)
+}
+
+fn local_complexity_scores(
+    documents: &[Document],
+) -> BTreeMap<(String, String), syntax::LocalComplexityScore> {
+    documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .local_complexity_scores
+                .iter()
+                .map(|(id, score)| ((document.file.clone(), id.clone()), score.clone()))
+        })
+        .collect()
 }
 
 fn merge_object_reports<F>(
@@ -563,16 +589,6 @@ fn site_location(site: &state_mesh::SiteInfo) -> String {
 
 fn re_derivation_location(site: &state_mesh::ReDerivationInfo) -> String {
     format!("{}:{}:{}", site.file, site.defn, site.line)
-}
-
-fn language_counts(files: &[SourceFile]) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    for file in files {
-        *counts
-            .entry(file.language.as_str().to_string())
-            .or_insert(0) += 1;
-    }
-    counts
 }
 
 fn retain_git_tracked_files(files: &mut Vec<SourceFile>) -> Result<()> {
