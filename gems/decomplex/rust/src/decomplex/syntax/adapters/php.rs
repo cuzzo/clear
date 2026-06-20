@@ -135,6 +135,10 @@ impl LanguageProfile for PhpProfile {
         php_identifier_text_value(text)
     }
 
+    fn normalize_local_identifier_text(&self, text: &str) -> String {
+        php_identifier_text_value(text)
+    }
+
     fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
         if self.function_node_kinds().contains(&node.kind()) {
             return node

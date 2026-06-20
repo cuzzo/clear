@@ -225,8 +225,8 @@ module Decomplex
         super
       end
 
-      def generic_local_writes(node)
-        (super + php_local_write_names(node)).map { |name| php_identifier_text_value(name) }.uniq
+      def generic_local_writes(node, **kwargs)
+        (super(node, **kwargs) + php_local_write_names(node)).map { |name| php_identifier_text_value(name) }.uniq
       end
 
       def generic_local_write_node?(node)

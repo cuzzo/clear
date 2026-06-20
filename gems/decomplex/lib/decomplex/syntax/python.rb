@@ -263,8 +263,8 @@ module Decomplex
         super || python_annotation_lhs?(node) || python_loop_target?(node)
       end
 
-      def generic_local_writes(node)
-        (super + python_with_alias_names(node)).uniq
+      def generic_local_writes(node, **kwargs)
+        (super(node, **kwargs) + python_with_alias_names(node)).uniq
       end
 
       def skip_local_read_identifier?(node)

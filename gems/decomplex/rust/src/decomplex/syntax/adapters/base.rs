@@ -181,6 +181,10 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn normalize_local_identifier_text(&self, text: &str) -> String {
+        text.to_string()
+    }
+
     fn field_identifier_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -201,6 +205,18 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn indexed_lhs_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn indexed_lhs_bracket_wrapper_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn update_statement_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn local_declaration_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -213,11 +229,19 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn multi_name_variable_declaration_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn declaration_assignment_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 
     fn receiver_type_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn method_receiver_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 
@@ -316,6 +340,14 @@ pub(crate) trait LanguageProfile {
 
     fn field_like_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
+    }
+
+    fn field_like_dot_wrapper_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn suppress_field_receiver_lhs_reads(&self) -> bool {
+        false
     }
 
     fn path_action_node_kinds(&self) -> &[&str] {

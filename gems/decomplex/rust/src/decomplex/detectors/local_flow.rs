@@ -73,29 +73,14 @@ pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
     for document in documents {
         let normalized = normalized_local_methods(document);
         if document.language != Language::Ruby {
-            if document.language == Language::Python {
-                let raw = raw_local_methods(document);
-                let raw_keys: BTreeSet<_> = raw.iter().map(method_summary_key).collect();
-                out.extend(raw);
-                out.extend(
-                    normalized
-                        .into_iter()
-                        .filter(|summary| !raw_keys.contains(&method_summary_key(summary))),
-                );
-            } else {
-                let mut normalized_by_key: BTreeMap<_, _> = normalized
+            let raw = raw_local_methods(document);
+            let raw_keys: BTreeSet<_> = raw.iter().map(method_summary_key).collect();
+            out.extend(raw);
+            out.extend(
+                normalized
                     .into_iter()
-                    .map(|summary| (method_summary_key(&summary), summary))
-                    .collect();
-                for raw in raw_local_methods(document) {
-                    out.push(
-                        normalized_by_key
-                            .remove(&method_summary_key(&raw))
-                            .unwrap_or(raw),
-                    );
-                }
-                out.extend(normalized_by_key.into_values());
-            }
+                    .filter(|summary| !raw_keys.contains(&method_summary_key(summary))),
+            );
             continue;
         }
 
@@ -217,10 +202,40 @@ fn raw_local_names(
     profile: &dyn LanguageProfile,
 ) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = function.params.iter().cloned().collect();
+    if let Some(receiver) = raw_function_receiver_name(&function.body, profile) {
+        names.insert(receiver);
+    }
     for statement in statements {
         names.extend(raw_local_writes(statement, profile));
     }
     names
+}
+
+fn raw_function_receiver_name(node: &RawNode, profile: &dyn LanguageProfile) -> Option<String> {
+    if !profile
+        .method_receiver_node_kinds()
+        .contains(&node.kind.as_str())
+    {
+        return None;
+    }
+    let receiver_params = raw_named_children(node).into_iter().find(|child| {
+        profile
+            .parameter_list_node_kinds()
+            .contains(&child.kind.as_str())
+    })?;
+    let receiver = raw_named_children(receiver_params)
+        .into_iter()
+        .find(|child| {
+            profile
+                .receiver_parameter_node_kinds()
+                .contains(&child.kind.as_str())
+        })?;
+    let name = raw_named_children(receiver).into_iter().find(|child| {
+        profile
+            .first_argument_receiver_name_node_kinds()
+            .contains(&child.kind.as_str())
+    })?;
+    raw_local_identifier_text(name, profile)
 }
 
 fn raw_statement_summary(
@@ -236,7 +251,7 @@ fn raw_statement_summary(
         line: node.span[0],
         end_line: node.span[2],
         span: node.span,
-        source: ast::normalize_text(&node.text),
+        source: profile.normalize_source_text(&node.text),
         dependencies: raw_assignment_dependencies(node, local_names, profile),
         co_uses: co_use_pairs(&reads),
         reads,
@@ -260,6 +275,7 @@ fn raw_local_reads(
         };
         if local_names.contains(&name)
             && !raw_local_write_node(child, parent, profile)
+            && !raw_assignment_lhs_read_in_tree(node, child, profile)
             && !raw_python_import_name(parent, profile)
             && !raw_python_with_alias_read(child, parent, profile)
             && !raw_declaration_name_in_tree(node, child, profile)
@@ -277,8 +293,14 @@ fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<S
         return BTreeSet::new();
     }
 
-    let source = ast::normalize_text(&node.text);
-    let mut writes = if profile.language() == Language::Python {
+    let source = profile.normalize_source_text(&node.text);
+    let textual_writes_allowed = raw_assignment_statement(node, profile)
+        || profile
+            .local_declaration_node_kinds()
+            .contains(&node.kind.as_str());
+    let mut writes = if !textual_writes_allowed {
+        Vec::new()
+    } else if profile.language() == Language::Python {
         python_textual_local_writes(&source)
     } else {
         textual_local_writes(&source)
@@ -289,13 +311,20 @@ fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<S
     raw_walk_local(node, None, node, profile, &mut |child, parent| {
         if raw_local_write_node(child, parent, profile)
             || raw_declaration_name_in_tree(node, child, profile)
+            || raw_assignment_lhs_write_in_tree(node, child, profile)
         {
             if let Some(name) = raw_local_identifier_text(child, profile) {
                 writes.push(name);
             }
         }
     });
-    writes.into_iter().collect()
+    writes
+        .into_iter()
+        .filter_map(|name| {
+            let normalized = profile.normalize_local_identifier_text(&name);
+            (!normalized.is_empty()).then_some(normalized)
+        })
+        .collect()
 }
 
 fn raw_assignment_dependencies(
@@ -428,7 +457,8 @@ fn raw_local_identifier_text(node: &RawNode, profile: &dyn LanguageProfile) -> O
         .identifier_node_kinds()
         .contains(&node.kind.as_str())
     {
-        return Some(node.text.clone());
+        let text = profile.normalize_local_identifier_text(&node.text);
+        return (!text.is_empty()).then_some(text);
     }
     if profile
         .local_identifier_wrapper_node_kinds()
@@ -437,7 +467,8 @@ fn raw_local_identifier_text(node: &RawNode, profile: &dyn LanguageProfile) -> O
         && raw_named_children(node).is_empty()
         && simple_identifier(&node.text)
     {
-        return Some(node.text.clone());
+        let text = profile.normalize_local_identifier_text(&node.text);
+        return (!text.is_empty()).then_some(text);
     }
     None
 }
@@ -460,6 +491,16 @@ fn raw_local_write_node(
     let Some(parent) = parent else {
         return false;
     };
+    if profile
+        .update_statement_node_kinds()
+        .contains(&parent.kind.as_str())
+        && raw_named_children(parent)
+            .first()
+            .map(|target| std::ptr::eq(*target, node))
+            .unwrap_or(false)
+    {
+        return true;
+    }
     if profile
         .assignment_node_kinds()
         .contains(&parent.kind.as_str())
@@ -612,8 +653,11 @@ fn raw_declaration_name(
     profile: &dyn LanguageProfile,
 ) -> bool {
     parent
-        .and_then(|parent| raw_local_declaration_name_node(parent, profile))
-        .map(|name| std::ptr::eq(name, node) || raw_contains_node(name, node))
+        .map(|parent| {
+            raw_local_declaration_name_nodes(parent, profile)
+                .into_iter()
+                .any(|name| std::ptr::eq(name, node) || raw_contains_node(name, node))
+        })
         .unwrap_or(false)
 }
 
@@ -622,9 +666,9 @@ fn raw_declaration_name_in_tree(
     target: &RawNode,
     profile: &dyn LanguageProfile,
 ) -> bool {
-    raw_local_declaration_name_node(root, profile)
-        .map(|name| std::ptr::eq(name, target) || raw_contains_node(name, target))
-        .unwrap_or(false)
+    raw_local_declaration_name_nodes(root, profile)
+        .into_iter()
+        .any(|name| std::ptr::eq(name, target) || raw_contains_node(name, target))
         || root
             .children
             .iter()
@@ -635,14 +679,20 @@ fn raw_local_declaration_name_node<'a>(
     node: &'a RawNode,
     profile: &dyn LanguageProfile,
 ) -> Option<&'a RawNode> {
+    raw_local_declaration_name_nodes(node, profile)
+        .into_iter()
+        .next()
+}
+
+fn raw_local_declaration_name_nodes<'a>(
+    node: &'a RawNode,
+    profile: &dyn LanguageProfile,
+) -> Vec<&'a RawNode> {
     if !profile
         .local_declaration_node_kinds()
         .contains(&node.kind.as_str())
-        && !profile
-            .variable_declaration_node_kinds()
-            .contains(&node.kind.as_str())
     {
-        return None;
+        return Vec::new();
     }
 
     if profile
@@ -654,20 +704,28 @@ fn raw_local_declaration_name_node<'a>(
                 .variable_declaration_node_kinds()
                 .contains(&child.kind.as_str())
         }) {
-            return raw_first_identifier(left, profile).or(Some(left));
+            let identifiers = raw_named_children(left)
+                .into_iter()
+                .filter(|child| raw_local_identifier_text(child, profile).is_some())
+                .collect::<Vec<_>>();
+            if !identifiers.is_empty() {
+                return identifiers;
+            }
+            if simple_identifier(&left.text) {
+                return vec![left];
+            }
         }
+        return Vec::new();
     }
 
-    if let Some(variable) = raw_named_children(node).into_iter().find(|child| {
-        profile
-            .variable_declaration_node_kinds()
-            .contains(&child.kind.as_str())
-    }) {
-        if simple_identifier(&variable.text) {
-            return Some(variable);
-        }
-        if let Some(identifier) = raw_first_identifier(variable, profile) {
-            return Some(identifier);
+    let variables = raw_variable_declaration_nodes(node, profile);
+    if !variables.is_empty() {
+        let names = variables
+            .into_iter()
+            .flat_map(|variable| raw_variable_declaration_name_nodes(variable, profile))
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            return names;
         }
     }
 
@@ -677,7 +735,10 @@ fn raw_local_declaration_name_node<'a>(
             .contains(&child.kind.as_str())
     }) {
         if let Some(lhs) = raw_named_children(declaration_assignment).first().copied() {
-            return raw_first_identifier(lhs, profile).or(Some(lhs));
+            return raw_first_identifier(lhs, profile)
+                .or(Some(lhs))
+                .into_iter()
+                .collect();
         }
     }
 
@@ -689,6 +750,60 @@ fn raw_local_declaration_name_node<'a>(
                 .contains(&child.kind.as_str())
         })
         .or_else(|| raw_first_identifier(node, profile))
+        .into_iter()
+        .collect()
+}
+
+fn raw_variable_declaration_nodes<'a>(
+    node: &'a RawNode,
+    profile: &dyn LanguageProfile,
+) -> Vec<&'a RawNode> {
+    let mut out = Vec::new();
+    raw_collect_variable_declaration_nodes(node, profile, &mut out);
+    out
+}
+
+fn raw_collect_variable_declaration_nodes<'a>(
+    node: &'a RawNode,
+    profile: &dyn LanguageProfile,
+    out: &mut Vec<&'a RawNode>,
+) {
+    if profile
+        .variable_declaration_node_kinds()
+        .contains(&node.kind.as_str())
+    {
+        out.push(node);
+        return;
+    }
+    for child in raw_named_children(node) {
+        raw_collect_variable_declaration_nodes(child, profile, out);
+    }
+}
+
+fn raw_variable_declaration_name_nodes<'a>(
+    variable: &'a RawNode,
+    profile: &dyn LanguageProfile,
+) -> Vec<&'a RawNode> {
+    if simple_identifier(&variable.text) {
+        return vec![variable];
+    }
+
+    if profile
+        .multi_name_variable_declaration_node_kinds()
+        .contains(&variable.kind.as_str())
+    {
+        let names = raw_named_children(variable)
+            .into_iter()
+            .take_while(|child| raw_local_identifier_text(child, profile).is_some())
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            return names;
+        }
+    }
+
+    raw_first_identifier(variable, profile)
+        .into_iter()
+        .collect()
 }
 
 fn raw_first_identifier<'a>(
@@ -720,6 +835,152 @@ fn raw_assignment_lhs(node: &RawNode, parent: &RawNode, profile: &dyn LanguagePr
         .unwrap_or(false)
 }
 
+fn raw_assignment_lhs_read_in_tree(
+    root: &RawNode,
+    target: &RawNode,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    if profile
+        .assignment_node_kinds()
+        .contains(&root.kind.as_str())
+    {
+        if let Some(lhs) = raw_named_children(root).first() {
+            if raw_assignment_lhs_read_target(lhs, target, profile) {
+                return true;
+            }
+        }
+    }
+    root.children
+        .iter()
+        .any(|child| raw_assignment_lhs_read_in_tree(child, target, profile))
+}
+
+fn raw_assignment_lhs_write_in_tree(
+    root: &RawNode,
+    target: &RawNode,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    if profile
+        .assignment_node_kinds()
+        .contains(&root.kind.as_str())
+    {
+        if let Some(lhs) = raw_named_children(root).first() {
+            if raw_assignment_lhs_write_target(lhs, target, profile) {
+                return true;
+            }
+        }
+    }
+    root.children
+        .iter()
+        .any(|child| raw_assignment_lhs_write_in_tree(child, target, profile))
+}
+
+fn raw_assignment_lhs_read_target(
+    lhs: &RawNode,
+    target: &RawNode,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    if raw_indexed_lhs_node(lhs, profile) {
+        return raw_contains_node(lhs, target);
+    }
+    if raw_field_like_node(lhs, profile) {
+        return profile.suppress_field_receiver_lhs_reads()
+            && raw_member_receiver_target(lhs, target, profile);
+    }
+    if raw_local_identifier_text(lhs, profile).is_some() {
+        return std::ptr::eq(lhs, target);
+    }
+    if profile
+        .expression_list_node_kinds()
+        .contains(&lhs.kind.as_str())
+    {
+        if raw_named_children(lhs).is_empty() && raw_local_identifier_text(lhs, profile).is_some() {
+            return std::ptr::eq(lhs, target);
+        }
+        return raw_named_children(lhs)
+            .into_iter()
+            .any(|child| raw_assignment_lhs_read_target(child, target, profile));
+    }
+    raw_contains_node(lhs, target)
+}
+
+fn raw_assignment_lhs_write_target(
+    lhs: &RawNode,
+    target: &RawNode,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    if raw_indexed_lhs_node(lhs, profile) {
+        return raw_named_children(lhs)
+            .first()
+            .map(|object| {
+                !raw_field_like_node(object, profile)
+                    && raw_assignment_lhs_write_target(object, target, profile)
+            })
+            .unwrap_or(false);
+    }
+    if raw_field_like_node(lhs, profile) {
+        return raw_member_receiver_target(lhs, target, profile);
+    }
+    if raw_local_identifier_text(lhs, profile).is_some() {
+        return std::ptr::eq(lhs, target);
+    }
+    if profile
+        .expression_list_node_kinds()
+        .contains(&lhs.kind.as_str())
+    {
+        if raw_named_children(lhs).is_empty() && raw_local_identifier_text(lhs, profile).is_some() {
+            return std::ptr::eq(lhs, target);
+        }
+        return raw_named_children(lhs)
+            .into_iter()
+            .any(|child| raw_assignment_lhs_write_target(child, target, profile));
+    }
+    raw_contains_node(lhs, target)
+}
+
+fn raw_indexed_lhs_node(node: &RawNode, profile: &dyn LanguageProfile) -> bool {
+    profile
+        .indexed_lhs_node_kinds()
+        .contains(&node.kind.as_str())
+        || (profile
+            .indexed_lhs_bracket_wrapper_node_kinds()
+            .contains(&node.kind.as_str())
+            && node
+                .children
+                .iter()
+                .any(|child| !child.named && child.text == "["))
+}
+
+fn raw_field_like_node(node: &RawNode, profile: &dyn LanguageProfile) -> bool {
+    profile
+        .field_like_node_kinds()
+        .contains(&node.kind.as_str())
+        || (profile
+            .field_like_dot_wrapper_node_kinds()
+            .contains(&node.kind.as_str())
+            && node
+                .children
+                .iter()
+                .any(|child| !child.named && child.text == "."))
+}
+
+fn raw_member_receiver_target(
+    node: &RawNode,
+    target: &RawNode,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    let Some(receiver) = raw_named_children(node).first().copied() else {
+        return false;
+    };
+    if raw_local_identifier_text(receiver, profile).is_some() {
+        return std::ptr::eq(receiver, target);
+    }
+    if raw_field_like_node(receiver, profile) {
+        return raw_member_receiver_target(receiver, target, profile);
+    }
+    false
+}
+
 fn raw_member_name(
     node: &RawNode,
     parent: Option<&RawNode>,
@@ -728,10 +989,7 @@ fn raw_member_name(
     let Some(parent) = parent else {
         return false;
     };
-    if !profile
-        .field_like_node_kinds()
-        .contains(&parent.kind.as_str())
-    {
+    if !raw_field_like_node(parent, profile) {
         return false;
     }
     raw_named_children(parent)
@@ -744,10 +1002,7 @@ fn raw_call_name(node: &RawNode, parent: Option<&RawNode>, profile: &dyn Languag
     let Some(parent) = parent else {
         return false;
     };
-    if profile
-        .field_like_node_kinds()
-        .contains(&parent.kind.as_str())
-    {
+    if raw_field_like_node(parent, profile) {
         return false;
     }
     profile.call_node_kinds().contains(&parent.kind.as_str())

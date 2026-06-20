@@ -32,10 +32,11 @@ module Decomplex
       IDENTIFIER_NODE_KINDS = %w[identifier].freeze
       FIELD_IDENTIFIER_NODE_KINDS = %w[field_identifier].freeze
       PARAMETER_IDENTIFIER_NODE_KINDS = %w[identifier field_identifier].freeze
-      LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS = %w[expression_list].freeze
-      LOCAL_DECLARATION_NODE_KINDS = %w[short_var_declaration variable_declaration].freeze
-      SHORT_VARIABLE_DECLARATION_NODE_KINDS = %w[short_var_declaration].freeze
-      VARIABLE_DECLARATION_NODE_KINDS = %w[expression_list variable_declaration].freeze
+      LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS = %w[expression_list literal_element].freeze
+      INDEXED_LHS_NODE_KINDS = %w[index_expression slice_expression].freeze
+      LOCAL_DECLARATION_NODE_KINDS = %w[short_var_declaration range_clause var_declaration variable_declaration].freeze
+      SHORT_VARIABLE_DECLARATION_NODE_KINDS = %w[short_var_declaration range_clause].freeze
+      VARIABLE_DECLARATION_NODE_KINDS = %w[expression_list var_spec variable_declaration].freeze
       LOCAL_VARIABLE_DECLARATOR_NODE_KINDS = [].freeze
       FIELD_DECLARATION_NODE_KINDS = %w[field_declaration].freeze
       DECLARATION_SITE_PARENT_NODE_KINDS = %w[parameter_declaration function_declaration method_declaration type_spec].freeze
@@ -81,12 +82,95 @@ module Decomplex
         exported_name_visibility(function_name(node))
       end
 
+      def function_params(node)
+        lists = node.named_children.select { |child| child.kind == "parameter_list" }
+        params = node.kind == "method_declaration" ? lists[1] : lists.first
+        return super unless params
+
+        params.named_children.filter_map { |param| parameter_name(param) }.uniq
+      end
+
+      def generic_function_body_statements(node)
+        body = generic_function_body_node(node)
+        return super unless body
+
+        named = body.named_children.reject { |child| comment_node?(child) }
+        if named.size == 1 && named.first.kind == "statement_list" && go_adjacent_call_statement?(named.first)
+          return [named.first]
+        end
+
+        super
+      end
+
+      def generic_local_identifier_text(node)
+        name = super
+        name == "_" ? nil : name
+      end
+
+      def generic_local_declaration_text(node)
+        return nil if node.text == "_"
+
+        super
+      end
+
+      def generic_local_write_node?(node)
+        go_update_statement_target?(node) || super
+      end
+
+      def skip_local_read_identifier?(node)
+        go_keyed_element_key?(node) || super
+      end
+
+      def generic_local_declaration_name_nodes(node)
+        return go_var_spec_name_nodes(node) if node.kind == "var_declaration"
+
+        super
+      end
+
+      def indexed_lhs_node?(node)
+        super || (node.kind == "expression_list" && node.children.any? { |child| !child.named? && child.text == "[" })
+      end
+
       private
 
       def boolean_container?(node)
         return true if boolean_expression_list?(node, "&&")
 
         super
+      end
+
+      def go_update_statement_target?(node)
+        parent = parent_node(node)
+        return false unless parent && %w[inc_statement dec_statement].include?(parent.kind)
+
+        parent.named_children.first == node
+      end
+
+      def go_adjacent_call_statement?(node)
+        named = node.named_children.reject { |child| comment_node?(child) }
+        named.size == 2 &&
+          adjacent_call_node_kinds.include?(named.first.kind) &&
+          argument_list_node_kinds.include?(named.last.kind)
+      end
+
+      def go_keyed_element_key?(node)
+        parent = parent_node(node)
+        return false unless parent&.kind == "keyed_element"
+
+        parent.named_children.first == node
+      end
+
+      def go_var_spec_name_nodes(node)
+        go_var_spec_nodes(node).flat_map do |spec|
+          names = spec.named_children.take_while { |child| child.kind == "identifier" }
+          names.empty? ? [] : names
+        end
+      end
+
+      def go_var_spec_nodes(node)
+        return [node] if node.kind == "var_spec"
+
+        node.named_children.flat_map { |child| go_var_spec_nodes(child) }
       end
     end
   end

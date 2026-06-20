@@ -87,6 +87,7 @@ module Decomplex
         nested_statement_wrapper_node_kinds: :NESTED_STATEMENT_WRAPPER_NODE_KINDS,
         identifier_node_kinds: :IDENTIFIER_NODE_KINDS,
         local_identifier_wrapper_node_kinds: :LOCAL_IDENTIFIER_WRAPPER_NODE_KINDS,
+        indexed_lhs_node_kinds: :INDEXED_LHS_NODE_KINDS,
         assignment_node_kinds: :ASSIGNMENT_NODE_KINDS,
         assignment_operator_tokens: :ASSIGNMENT_OPERATOR_TOKENS,
         local_declaration_node_kinds: :LOCAL_DECLARATION_NODE_KINDS,
@@ -514,6 +515,10 @@ module Decomplex
 
       def generic_local_names(function_def, statements)
         names = Set.new(function_def.params.to_a.map(&:to_s))
+        if method_receiver_node_kinds.include?(function_def.body.kind) &&
+           (receiver = function_receiver_name(function_def.body, []))
+          names.add(receiver)
+        end
         statements.each do |statement|
           names.merge(generic_local_writes(statement))
         end
@@ -521,8 +526,20 @@ module Decomplex
       end
 
       def generic_local_statement(node, index, local_names)
-        reads = generic_local_reads(node, local_names).uniq
-        writes = generic_local_writes(node).uniq
+        declaration_target_keys = generic_declaration_target_keys(node)
+        assignment_lhs_read_target_keys = generic_assignment_lhs_read_target_keys(node)
+        assignment_lhs_target_keys = generic_assignment_lhs_target_keys(node)
+        reads = generic_local_reads(
+          node,
+          local_names,
+          declaration_target_keys: declaration_target_keys,
+          assignment_lhs_target_keys: assignment_lhs_read_target_keys
+        ).uniq
+        writes = generic_local_writes(
+          node,
+          declaration_target_keys: declaration_target_keys,
+          assignment_lhs_target_keys: assignment_lhs_target_keys
+        ).uniq
         LocalStatement.new(
           index: index,
           line: line(node),
@@ -531,18 +548,28 @@ module Decomplex
           source: normalize_text(node.text),
           reads: reads.to_set,
           writes: writes.to_set,
-          dependencies: generic_assignment_dependencies(node, local_names),
+          dependencies: generic_assignment_dependencies(
+            node,
+            local_names,
+            declaration_target_keys: declaration_target_keys,
+            assignment_lhs_read_target_keys: assignment_lhs_read_target_keys,
+            assignment_lhs_target_keys: assignment_lhs_target_keys
+          ),
           co_uses: reads.combination(2).map { |left, right| [left, right] }
         )
       end
 
-      def generic_local_reads(node, local_names)
+      def generic_local_reads(node, local_names, declaration_target_keys: nil, assignment_lhs_target_keys: nil)
+        declaration_target_keys ||= generic_declaration_target_keys(node)
+        assignment_lhs_target_keys ||= generic_assignment_lhs_read_target_keys(node)
         reads = []
         generic_walk_local(node) do |child|
           name = generic_local_identifier_text(child)
           next unless name
           next unless local_names.include?(name)
           next if generic_local_write_node?(child)
+          next if assignment_lhs_target_keys.include?(node_key(child))
+          next if declaration_target_keys.include?(node_key(child))
           next if generic_declaration_name?(child)
           next if generic_member_name?(child)
           next if skip_local_read_identifier?(child)
@@ -552,27 +579,48 @@ module Decomplex
         reads
       end
 
-      def generic_local_writes(node)
+      def generic_local_writes(node, declaration_target_keys: nil, assignment_lhs_target_keys: nil)
+        declaration_target_keys ||= generic_declaration_target_keys(node)
+        assignment_lhs_target_keys ||= generic_assignment_lhs_target_keys(node)
         writes = []
-        if (name = generic_local_declaration_name(node))
-          writes << name
-        end
+        writes.concat(generic_local_declaration_names(node))
         writes.concat(generic_assignment_lhs_names(node))
 
         generic_walk_local(node) do |child|
-          next unless generic_identifier?(child)
-          next unless generic_local_write_node?(child)
+          name = generic_local_identifier_text(child)
+          next unless name
+          next unless generic_local_write_node?(child) ||
+                      declaration_target_keys.include?(node_key(child)) ||
+                      assignment_lhs_target_keys.include?(node_key(child))
 
-          writes << child.text.to_s
+          writes << name
         end
         writes
       end
 
-      def generic_assignment_dependencies(node, local_names)
-        lhs_names = generic_local_writes(node)
+      def generic_assignment_dependencies(
+        node,
+        local_names,
+        declaration_target_keys: nil,
+        assignment_lhs_read_target_keys: nil,
+        assignment_lhs_target_keys: nil
+      )
+        declaration_target_keys ||= generic_declaration_target_keys(node)
+        assignment_lhs_read_target_keys ||= generic_assignment_lhs_read_target_keys(node)
+        assignment_lhs_target_keys ||= generic_assignment_lhs_target_keys(node)
+        lhs_names = generic_local_writes(
+          node,
+          declaration_target_keys: declaration_target_keys,
+          assignment_lhs_target_keys: assignment_lhs_target_keys
+        )
         return [] if lhs_names.empty?
 
-        reads = generic_local_reads(node, local_names) - lhs_names
+        reads = generic_local_reads(
+          node,
+          local_names,
+          declaration_target_keys: declaration_target_keys,
+          assignment_lhs_target_keys: assignment_lhs_read_target_keys
+        ) - lhs_names
         lhs_names.product(reads).reject { |left, right| left == right }.uniq
       end
 
@@ -663,42 +711,69 @@ module Decomplex
         parent = parent_node(node)
         return false unless parent
 
-        generic_local_declaration_name_node(parent) == node
+        generic_local_declaration_name_nodes(parent).any? { |candidate| candidate == node }
+      end
+
+      def generic_declaration_name_in_tree?(root, target)
+        generic_local_declaration_name_nodes(root).any? { |candidate| candidate == target } ||
+          root.named_children.any? { |child| generic_declaration_name_in_tree?(child, target) }
+      end
+
+      def generic_declaration_target_keys(root)
+        keys = Set.new
+        generic_walk_local(root) do |node|
+          generic_local_declaration_name_nodes(node).each { |target| keys << node_key(target) }
+        end
+        keys
       end
 
       def generic_local_declaration_name(node)
-        generic_local_declaration_name_node(node)&.text
+        generic_local_declaration_name_nodes(node).filter_map { |child| generic_local_declaration_text(child) }.first
+      end
+
+      def generic_local_declaration_names(node)
+        generic_local_declaration_name_nodes(node).filter_map { |child| generic_local_declaration_text(child) }
+      end
+
+      def generic_local_declaration_text(node)
+        generic_local_identifier_text(node) || (simple_identifier_text?(node&.text) ? node.text.to_s : nil)
       end
 
       def generic_local_declaration_name_node(node)
-        return nil unless ts_node?(node)
-        return nil unless local_declaration_node_kinds.include?(node.kind)
+        generic_local_declaration_name_nodes(node).first
+      end
+
+      def generic_local_declaration_name_nodes(node)
+        return [] unless ts_node?(node)
+        return [] unless local_declaration_node_kinds.include?(node.kind)
 
         if short_variable_declaration_node_kinds.include?(node.kind)
           left = node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }
           if left
-            identifier = left.named_children.find { |child| generic_identifier?(child) }
-            return identifier if identifier
+            identifiers = left.named_children.select { |child| generic_local_identifier_text(child) }
+            return identifiers unless identifiers.empty?
+            return [left] if simple_identifier_text?(left.text)
           end
-          return left if simple_identifier_text?(left&.text)
+          return []
         end
 
         variable = node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }
-        return variable if simple_identifier_text?(variable&.text)
+        return [variable] if simple_identifier_text?(variable&.text)
 
         declaration_assignment = node.named_children.find { |child| declaration_assignment_node_kinds.include?(child.kind) }
         if declaration_assignment
           lhs = declaration_assignment.named_children.first
           identifier = lhs&.named_children&.find { |child| generic_identifier?(child) }
-          return identifier if identifier
-          return lhs if simple_identifier_text?(lhs&.text)
+          return [identifier] if identifier
+          return [lhs] if simple_identifier_text?(lhs&.text)
         end
 
-        named_field(node, "pattern") ||
+        candidate = named_field(node, "pattern") ||
           named_field(node, "name") ||
           node.named_children.find { |child| local_identifier_wrapper_node_kinds.include?(child.kind) } ||
           node.named_children.find { |child| variable_declaration_node_kinds.include?(child.kind) }&.named_children&.find { |child| generic_identifier?(child) } ||
           node.named_children.find { |child| generic_identifier?(child) }
+        candidate ? [candidate] : []
       end
 
       def generic_assignment_lhs_names(node)
@@ -706,11 +781,159 @@ module Decomplex
         return [] unless assignment_node_kinds.include?(node.kind)
 
         lhs = named_field(node, "left") || node.named_children.first
+        collect_generic_assignment_lhs_names(lhs)
+      end
+
+      def collect_generic_assignment_lhs_names(lhs)
         return [] unless ts_node?(lhs)
-        return [lhs.text] if generic_identifier?(lhs)
+
+        if indexed_lhs_node?(lhs)
+          object = lhs.named_children.first
+          return collect_generic_assignment_lhs_names(object)
+        end
+
+        if expression_list_node_kinds.include?(lhs.kind)
+          return [lhs.text] if lhs.named_children.empty? && generic_local_identifier_text(lhs)
+
+          return lhs.named_children.flat_map { |child| collect_generic_assignment_lhs_names(child) }
+        end
+
+        if indexed_lhs_node_kinds.include?(lhs.kind)
+          object = lhs.named_children.first
+          return collect_generic_assignment_lhs_names(object)
+        end
+
+        if (name = generic_local_identifier_text(lhs))
+          return [name]
+        end
+        return [] if generic_identifier?(lhs)
+        return [] if generic_member_name?(lhs)
         return [lhs.text] if simple_identifier_text?(lhs.text)
 
         lhs.named_children.filter_map { |child| child.text if generic_identifier?(child) }
+      end
+
+      def generic_assignment_lhs_in_tree?(root, target)
+        return false unless ts_node?(root)
+
+        if assignment_node_kinds.include?(root.kind)
+          lhs = named_field(root, "left") || root.named_children.first
+          return generic_assignment_lhs_read_target?(lhs, target)
+        end
+
+        root.named_children.any? { |child| generic_assignment_lhs_in_tree?(child, target) }
+      end
+
+      def generic_assignment_lhs_read_target_keys(root)
+        keys = Set.new
+        generic_walk_local(root) do |node|
+          next unless assignment_node_kinds.include?(node.kind)
+
+          lhs = named_field(node, "left") || node.named_children.first
+          collect_generic_assignment_lhs_read_target_keys(lhs, keys)
+        end
+        keys
+      end
+
+      def generic_assignment_lhs_target_keys(root)
+        keys = Set.new
+        generic_walk_local(root) do |node|
+          next unless assignment_node_kinds.include?(node.kind)
+
+          lhs = named_field(node, "left") || node.named_children.first
+          collect_generic_assignment_lhs_target_keys(lhs, keys)
+        end
+        keys
+      end
+
+      def collect_generic_assignment_lhs_read_target_keys(lhs, keys)
+        return unless ts_node?(lhs)
+
+        if indexed_lhs_node?(lhs)
+          lhs.named_children.each { |child| collect_generic_assignment_lhs_read_target_keys(child, keys) }
+          return
+        end
+
+        if expression_list_node_kinds.include?(lhs.kind)
+          if lhs.named_children.empty? && generic_local_identifier_text(lhs)
+            keys << node_key(lhs)
+            return
+          end
+
+          lhs.named_children.each { |child| collect_generic_assignment_lhs_read_target_keys(child, keys) }
+          return
+        end
+
+        return if field_like_node?(lhs)
+
+        if generic_identifier?(lhs) || generic_local_identifier_text(lhs)
+          keys << node_key(lhs)
+          return
+        end
+
+        lhs.named_children.each { |child| collect_generic_assignment_lhs_read_target_keys(child, keys) }
+      end
+
+      def collect_generic_assignment_lhs_target_keys(lhs, keys)
+        return unless ts_node?(lhs)
+
+        if indexed_lhs_node?(lhs)
+          object = lhs.named_children.first
+          collect_generic_assignment_lhs_target_keys(object, keys)
+          return
+        end
+
+        if expression_list_node_kinds.include?(lhs.kind)
+          if lhs.named_children.empty? && generic_local_identifier_text(lhs)
+            keys << node_key(lhs)
+            return
+          end
+
+          lhs.named_children.each { |child| collect_generic_assignment_lhs_target_keys(child, keys) }
+          return
+        end
+
+        return if field_like_node?(lhs)
+
+        if generic_identifier?(lhs) || generic_local_identifier_text(lhs)
+          keys << node_key(lhs)
+          return
+        end
+
+        lhs.named_children.each { |child| collect_generic_assignment_lhs_target_keys(child, keys) }
+      end
+
+      def generic_assignment_lhs_target?(lhs, target)
+        generic_assignment_lhs_read_target?(lhs, target)
+      end
+
+      def generic_assignment_lhs_read_target?(lhs, target)
+        return false unless ts_node?(lhs)
+
+        return ts_node_contains?(lhs, target) if indexed_lhs_node?(lhs)
+
+        if expression_list_node_kinds.include?(lhs.kind)
+          return lhs == target if lhs.named_children.empty? && generic_local_identifier_text(lhs)
+
+          return lhs.named_children.any? { |child| generic_assignment_lhs_read_target?(child, target) }
+        end
+
+        return false if field_like_node?(lhs)
+
+        return lhs == target if generic_identifier?(lhs)
+
+        ts_node_contains?(lhs, target)
+      end
+
+      def indexed_lhs_node?(node)
+        ts_node?(node) && indexed_lhs_node_kinds.include?(node.kind)
+      end
+
+      def ts_node_contains?(root, target)
+        return false unless ts_node?(root)
+        return true if root == target
+
+        root.named_children.any? { |child| ts_node_contains?(child, target) }
       end
 
       def simple_identifier_text?(text)

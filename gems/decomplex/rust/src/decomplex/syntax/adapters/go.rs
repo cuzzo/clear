@@ -58,7 +58,19 @@ impl LanguageProfile for GoProfile {
     }
 
     fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &["expression_list", "literal_element"]
+    }
+
+    fn indexed_lhs_node_kinds(&self) -> &[&str] {
+        &["index_expression", "slice_expression"]
+    }
+
+    fn indexed_lhs_bracket_wrapper_node_kinds(&self) -> &[&str] {
         &["expression_list"]
+    }
+
+    fn update_statement_node_kinds(&self) -> &[&str] {
+        &["inc_statement", "dec_statement"]
     }
 
     fn call_node_kinds(&self) -> &[&str] {
@@ -66,7 +78,7 @@ impl LanguageProfile for GoProfile {
     }
 
     fn identifier_node_kinds(&self) -> &[&str] {
-        &["identifier", "type_identifier"]
+        &["identifier"]
     }
 
     fn field_identifier_node_kinds(&self) -> &[&str] {
@@ -98,19 +110,40 @@ impl LanguageProfile for GoProfile {
     }
 
     fn local_declaration_node_kinds(&self) -> &[&str] {
-        &["short_var_declaration", "variable_declaration"]
+        &[
+            "short_var_declaration",
+            "range_clause",
+            "var_declaration",
+            "variable_declaration",
+        ]
     }
 
     fn short_variable_declaration_node_kinds(&self) -> &[&str] {
-        &["short_var_declaration"]
+        &["short_var_declaration", "range_clause"]
     }
 
     fn variable_declaration_node_kinds(&self) -> &[&str] {
-        &["expression_list", "variable_declaration"]
+        &["expression_list", "var_spec", "variable_declaration"]
+    }
+
+    fn multi_name_variable_declaration_node_kinds(&self) -> &[&str] {
+        &["var_spec"]
+    }
+
+    fn normalize_local_identifier_text(&self, text: &str) -> String {
+        if text == "_" {
+            String::new()
+        } else {
+            text.to_string()
+        }
     }
 
     fn receiver_type_node_kinds(&self) -> &[&str] {
         &["pointer_type", "type_identifier"]
+    }
+
+    fn method_receiver_node_kinds(&self) -> &[&str] {
+        &["method_declaration"]
     }
 
     fn receiver_parameter_node_kinds(&self) -> &[&str] {
@@ -175,6 +208,14 @@ impl LanguageProfile for GoProfile {
 
     fn field_like_node_kinds(&self) -> &[&str] {
         &["selector_expression"]
+    }
+
+    fn field_like_dot_wrapper_node_kinds(&self) -> &[&str] {
+        &["expression_list"]
+    }
+
+    fn suppress_field_receiver_lhs_reads(&self) -> bool {
+        true
     }
 
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
