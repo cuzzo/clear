@@ -62,6 +62,10 @@ impl LanguageProfile for ZigProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
     }

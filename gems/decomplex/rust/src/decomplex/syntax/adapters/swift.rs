@@ -62,6 +62,22 @@ impl LanguageProfile for SwiftProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &[
+            "directly_assignable_expression",
+            "value_argument",
+            "pattern",
+        ]
+    }
+
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["property_declaration", "variable_declaration"]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration", "directly_assignable_expression"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &[
             "equality_expression",

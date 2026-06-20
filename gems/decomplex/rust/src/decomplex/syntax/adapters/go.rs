@@ -57,6 +57,10 @@ impl LanguageProfile for GoProfile {
         &["statement_list"]
     }
 
+    fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &["expression_list"]
+    }
+
     fn call_node_kinds(&self) -> &[&str] {
         &["call_expression", "go_statement"]
     }
@@ -79,6 +83,18 @@ impl LanguageProfile for GoProfile {
 
     fn assignment_operator_tokens(&self) -> &[&str] {
         &["=", ":=", "+=", "-=", "*=", "/=", "%="]
+    }
+
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["short_var_declaration", "variable_declaration"]
+    }
+
+    fn short_variable_declaration_node_kinds(&self) -> &[&str] {
+        &["short_var_declaration"]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["expression_list", "variable_declaration"]
     }
 
     fn receiver_type_node_kinds(&self) -> &[&str] {

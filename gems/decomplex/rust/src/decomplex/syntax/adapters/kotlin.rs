@@ -34,7 +34,7 @@ impl LanguageProfile for KotlinProfile {
     }
 
     fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
-        &["statements"]
+        &["block", "statements"]
     }
 
     fn call_node_kinds(&self) -> &[&str] {
@@ -51,6 +51,18 @@ impl LanguageProfile for KotlinProfile {
 
     fn assignment_operator_tokens(&self) -> &[&str] {
         &["=", "+=", "-=", "*=", "/=", "%="]
+    }
+
+    fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &["directly_assignable_expression", "value_argument"]
+    }
+
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["property_declaration", "variable_declaration"]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration", "directly_assignable_expression"]
     }
 
     fn comparison_node_kinds(&self) -> &[&str] {

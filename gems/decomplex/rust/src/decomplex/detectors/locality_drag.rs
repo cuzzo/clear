@@ -102,9 +102,12 @@ impl LocalityDrag {
             return Vec::new();
         }
 
-        let local_complexity = weighted_inlined_cognitive_complexity::LocalScorer::new()
-            .score(&summary.node)
-            .score;
+        let scorer = weighted_inlined_cognitive_complexity::LocalScorer::new();
+        let local_complexity = summary
+            .raw_node
+            .as_ref()
+            .map(|node| scorer.score_raw(node).score)
+            .unwrap_or_else(|| scorer.score(&summary.node).score);
         if local_complexity < self.min_local_complexity {
             return Vec::new();
         }
@@ -406,11 +409,7 @@ impl LocalityDrag {
 
     fn example_for(&self, statement: &local_flow::Statement) -> Example {
         let source = statement.source.lines().next().unwrap_or("").trim();
-        let source = if source.len() > 99 {
-            format!("{}...", &source[0..96])
-        } else {
-            source.to_string()
-        };
+        let source = truncate_example_source(source);
         Example {
             line: statement.line,
             source,
@@ -458,5 +457,28 @@ impl LocalityDrag {
 
     fn round(&self, value: f64) -> f64 {
         (value * 10.0).round() / 10.0
+    }
+}
+
+fn truncate_example_source(source: &str) -> String {
+    if source.chars().count() <= 99 {
+        return source.to_string();
+    }
+
+    let prefix: String = source.chars().take(96).collect();
+    format!("{prefix}...")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncates_non_ascii_examples_on_character_boundaries() {
+        let source = "value = \"✓\"".repeat(12);
+        let truncated = truncate_example_source(&source);
+
+        assert_eq!(truncated.chars().count(), 99);
+        assert!(truncated.ends_with("..."));
     }
 }

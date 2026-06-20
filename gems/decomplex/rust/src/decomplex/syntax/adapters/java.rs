@@ -52,6 +52,14 @@ impl LanguageProfile for JavaProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["local_variable_declaration", "variable_declarator"]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declarator"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
     }

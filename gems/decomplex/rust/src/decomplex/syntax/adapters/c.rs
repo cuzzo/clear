@@ -58,6 +58,10 @@ impl LanguageProfile for CProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["declaration", "init_declarator"]
+    }
+
     fn receiver_parameter_node_kinds(&self) -> &[&str] {
         &["parameter_declaration"]
     }

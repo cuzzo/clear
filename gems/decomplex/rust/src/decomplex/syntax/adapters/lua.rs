@@ -60,6 +60,18 @@ impl LanguageProfile for LuaProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration"]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration", "variable_list"]
+    }
+
+    fn declaration_assignment_node_kinds(&self) -> &[&str] {
+        &["assignment_statement"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
     }

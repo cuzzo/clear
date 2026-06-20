@@ -57,6 +57,14 @@ impl LanguageProfile for RustProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &["pattern"]
+    }
+
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &["let_declaration"]
+    }
+
     fn receiver_type_node_kinds(&self) -> &[&str] {
         &["type_identifier", "generic_type", "scoped_type_identifier"]
     }

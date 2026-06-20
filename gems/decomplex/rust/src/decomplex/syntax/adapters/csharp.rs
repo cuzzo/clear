@@ -49,6 +49,22 @@ impl LanguageProfile for CSharpProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
+        &["argument"]
+    }
+
+    fn local_declaration_node_kinds(&self) -> &[&str] {
+        &[
+            "local_declaration_statement",
+            "variable_declaration",
+            "variable_declarator",
+        ]
+    }
+
+    fn variable_declaration_node_kinds(&self) -> &[&str] {
+        &["variable_declaration"]
+    }
+
     fn declarator_node_kinds(&self) -> &[&str] {
         &["variable_declaration", "variable_declarator"]
     }
