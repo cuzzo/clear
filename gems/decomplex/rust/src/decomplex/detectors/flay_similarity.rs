@@ -1,5 +1,4 @@
 use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::adapters::language_profile;
 use crate::decomplex::syntax::{self, CloneCandidate, Document, Language, SimilarityFinding};
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -59,7 +58,7 @@ impl Scanner {
     fn candidates_for_document(&mut self, document: &Document) -> Vec<CloneCandidate> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
-        for candidate in language_profile(document.language).clone_candidates(document) {
+        for candidate in syntax::clone_candidates(document) {
             self.add_candidate(&mut out, &mut seen, candidate);
         }
         out
@@ -400,6 +399,7 @@ fn combinations(size: usize, count: usize) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decomplex::syntax::adapters::language_profile;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

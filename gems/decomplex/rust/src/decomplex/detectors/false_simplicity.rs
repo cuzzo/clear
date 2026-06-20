@@ -1,5 +1,4 @@
 use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::adapters::false_simplicity_lexicon::false_simplicity_lexicon;
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
@@ -60,7 +59,7 @@ fn class_records_for_document(document: &Document) -> (Vec<ClassRec>, Vec<Hit>) 
         .map(|function| function.owner.clone())
         .filter(|owner| !owner.is_empty())
         .collect::<BTreeSet<_>>();
-    let lexicon = false_simplicity_lexicon(document.language);
+    let core_owner_names = syntax::core_owner_names(document);
     let mut recs = Vec::new();
     let mut hits = Vec::new();
 
@@ -77,7 +76,7 @@ fn class_records_for_document(document: &Document) -> (Vec<ClassRec>, Vec<Hit>) 
             .last()
             .unwrap_or(canonical.as_str())
             .to_string();
-        let core = !canonical.contains("::") && lexicon.core_consts.contains(&simple.as_str());
+        let core = !canonical.contains("::") && core_owner_names.contains(&simple.as_str());
         recs.push(ClassRec {
             name: canonical.clone(),
             file: owner.file.clone(),

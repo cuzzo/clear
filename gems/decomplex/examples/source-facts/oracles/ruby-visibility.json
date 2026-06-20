@@ -1,0 +1,86 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "prepare",
+        "owner": "SourceFactVisibility",
+        "line": 10,
+        "visibility": "private",
+        "params": []
+      },
+      {
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility",
+        "line": 14,
+        "visibility": "private",
+        "params": []
+      },
+      {
+        "name": "public_step",
+        "owner": "SourceFactVisibility",
+        "line": 4,
+        "visibility": "public",
+        "params": []
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "private",
+        "function": "(top-level)",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          ":inline_guard"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "protected",
+        "function": "(top-level)",
+        "line": 14,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "inline_guard",
+          "true"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "private",
+        "function": "(top-level)",
+        "line": 8,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "prepare",
+        "function": "public_step",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_writes": [
+      {
+        "receiver": "self",
+        "field": "@ready",
+        "function": "prepare",
+        "line": 11
+      }
+    ]
+  }
+}

@@ -1,5 +1,8 @@
 pub(crate) mod adapters;
 pub(crate) mod complexity;
+pub mod local_flow;
+pub mod path_condition;
+pub mod redundant_nil_guard;
 pub mod tree_sitter_adapter;
 
 use crate::decomplex::ast::{Node as NormalizedNode, RawNode, Span};
@@ -142,6 +145,10 @@ pub struct Document {
     pub comparison_uses: Vec<ComparisonUse>,
     #[serde(default)]
     pub path_condition_sites: Vec<PathConditionSite>,
+    #[serde(default)]
+    pub protocol_method_effects: Vec<ProtocolMethodEffect>,
+    #[serde(default)]
+    pub protocol_call_paths: Vec<ProtocolMethodPath>,
 }
 
 fn empty_raw_node() -> RawNode {
@@ -318,6 +325,35 @@ pub struct PathConditionSite {
     pub span: Span,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProtocolMethodEffect {
+    pub file: String,
+    pub owner: String,
+    pub name: String,
+    pub line: usize,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProtocolCall {
+    pub mid: String,
+    pub file: String,
+    pub owner: String,
+    pub defn: String,
+    pub line: usize,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProtocolMethodPath {
+    pub file: String,
+    pub owner: String,
+    pub name: String,
+    pub line: usize,
+    pub calls: Vec<ProtocolCall>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CloneCandidate {
     pub(crate) file: String,
@@ -349,6 +385,14 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
 
 pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document>> {
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
+}
+
+pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
+    adapters::language_profile(document.language).clone_candidates(document)
+}
+
+pub(crate) fn core_owner_names(document: &Document) -> &'static [&'static str] {
+    adapters::false_simplicity_lexicon::false_simplicity_lexicon(document.language).core_consts
 }
 
 #[cfg(test)]

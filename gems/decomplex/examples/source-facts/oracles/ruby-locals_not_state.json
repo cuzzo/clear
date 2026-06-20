@@ -1,0 +1,163 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "build",
+        "owner": "SourceFactLocalsNotState",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "values",
+          "config"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "assert_empty",
+        "function": "build",
+        "line": 12,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "values"
+        ]
+      },
+      {
+        "receiver": "values",
+        "message": "each",
+        "function": "build",
+        "line": 8,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "values",
+        "field": "each",
+        "function": "build",
+        "line": 8
+      }
+    ],
+    "state_writes": [],
+    "semantic_effects": [
+      {
+        "kind": "context_dependency",
+        "detail": "ENV",
+        "function": "build",
+        "line": 6
+      },
+      {
+        "kind": "hidden_mutation",
+        "detail": "[]=",
+        "function": "build",
+        "line": 11
+      }
+    ]
+  },
+  "local_flow": [
+    {
+      "method": "build",
+      "statements": [
+        {
+          "reads": [],
+          "writes": [
+            "key"
+          ],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "key"
+          ],
+          "writes": [
+            "path"
+          ],
+          "dependencies": [
+            [
+              "path",
+              "key"
+            ]
+          ],
+          "co_uses": []
+        },
+        {
+          "reads": [],
+          "writes": [
+            "total"
+          ],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "total",
+            "values"
+          ],
+          "writes": [
+            "total"
+          ],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "total",
+              "values"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "config",
+            "path"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "config",
+              "path"
+            ]
+          ]
+        },
+        {
+          "reads": [],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "config",
+            "path",
+            "total"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "config",
+              "path"
+            ],
+            [
+              "config",
+              "total"
+            ],
+            [
+              "path",
+              "total"
+            ]
+          ]
+        }
+      ],
+      "boundaries": []
+    }
+  ]
+}

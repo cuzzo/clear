@@ -1,0 +1,93 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "initialize",
+        "owner": "SourceFactStateReads",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "user"
+        ]
+      },
+      {
+        "name": "inspect_profile",
+        "owner": "SourceFactStateReads",
+        "line": 9,
+        "visibility": "public",
+        "params": [
+          "account"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "@user.profile",
+        "message": "name",
+        "function": "inspect_profile",
+        "line": 10,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": true,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "@user",
+        "message": "profile",
+        "function": "inspect_profile",
+        "line": 10,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "account",
+        "message": "active?",
+        "function": "inspect_profile",
+        "line": 12,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@status",
+        "function": "inspect_profile",
+        "line": 11
+      },
+      {
+        "receiver": "self",
+        "field": "@user",
+        "function": "inspect_profile",
+        "line": 10
+      },
+      {
+        "receiver": "account",
+        "field": "active?",
+        "function": "inspect_profile",
+        "line": 12
+      }
+    ],
+    "state_writes": [
+      {
+        "receiver": "self",
+        "field": "@status",
+        "function": "initialize",
+        "line": 6
+      },
+      {
+        "receiver": "self",
+        "field": "@user",
+        "function": "initialize",
+        "line": 5
+      }
+    ]
+  }
+}

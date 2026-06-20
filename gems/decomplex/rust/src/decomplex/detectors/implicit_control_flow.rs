@@ -76,23 +76,16 @@ pub fn scan_documents(documents: &[Document]) -> ImplicitControlFlowReport {
 
 fn sequences_for_document(document: &Document, effect_index: &EffectIndex) -> Vec<MethodSequence> {
     document
-        .function_defs
+        .protocol_call_paths
         .iter()
-        .filter_map(|function_def| {
-            let defn = protocol_method_name(&function_def.name);
-            let calls = document
-                .call_sites
+        .filter_map(|path| {
+            let calls = path
+                .calls
                 .iter()
-                .filter(|call| {
-                    call.owner == function_def.owner
-                        && call.function == function_def.name
-                        && call.receiver == "self"
-                })
                 .map(|call| {
-                    let mid = protocol_method_name(&call.message);
-                    let effect = effect_index.effect_for(&function_def.owner, &mid);
+                    let effect = effect_index.effect_for(&path.owner, &call.mid);
                     Call {
-                        mid,
+                        mid: call.mid.clone(),
                         line: call.line,
                         span: call.span,
                         reads: effect.map(|e| e.reads.clone()).unwrap_or_default(),
@@ -111,28 +104,14 @@ fn sequences_for_document(document: &Document, effect_index: &EffectIndex) -> Ve
             }
 
             Some(MethodSequence {
-                file: function_def.file.clone(),
-                owner: function_def.owner.clone(),
-                defn,
-                line: function_def.line,
+                file: path.file.clone(),
+                owner: path.owner.clone(),
+                defn: path.name.clone(),
+                line: path.line,
                 calls,
             })
         })
         .collect()
-}
-
-fn protocol_method_name(name: &str) -> String {
-    name.split(['.', ':'])
-        .filter(|part| !part.is_empty())
-        .last()
-        .unwrap_or(name)
-        .to_string()
-}
-
-fn normalize_protocol_state(name: &str) -> String {
-    name.trim_start_matches('@')
-        .trim_end_matches('=')
-        .to_string()
 }
 
 struct EffectIndex {
@@ -144,34 +123,12 @@ impl EffectIndex {
     fn build_documents(documents: &[Document]) -> Self {
         let mut effects = Vec::new();
         for document in documents {
-            for function_def in &document.function_defs {
-                let mut reads = document
-                    .state_reads
-                    .iter()
-                    .filter(|read| {
-                        read.owner == function_def.owner && read.function == function_def.name
-                    })
-                    .map(|read| normalize_protocol_state(&read.field))
-                    .collect::<Vec<_>>();
-                reads.sort();
-                reads.dedup();
-
-                let mut writes = document
-                    .state_writes
-                    .iter()
-                    .filter(|write| {
-                        write.owner == function_def.owner && write.function == function_def.name
-                    })
-                    .map(|write| normalize_protocol_state(&write.field))
-                    .collect::<Vec<_>>();
-                writes.sort();
-                writes.dedup();
-
+            for effect in &document.protocol_method_effects {
                 effects.push(MethodEffect {
-                    owner: function_def.owner.clone(),
-                    name: protocol_method_name(&function_def.name),
-                    reads,
-                    writes,
+                    owner: effect.owner.clone(),
+                    name: effect.name.clone(),
+                    reads: effect.reads.clone(),
+                    writes: effect.writes.clone(),
                 });
             }
         }

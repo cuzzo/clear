@@ -79,12 +79,21 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut dispatch_sites,
     );
     collect_equality_dispatch_sites(&comparison_uses, &call_sites, &mut dispatch_sites);
+    let profile = language_profile(language);
     let mut semantic_effect_sites = semantic_effect_sites_from_calls(language, &call_sites);
-    semantic_effect_sites.extend(ruby_global_context_effects(language, &state_reads));
+    semantic_effect_sites.extend(profile.structural_semantic_effect_sites(
+        parsed.tree.root_node(),
+        &parsed.source,
+        &parsed.file,
+        &function_defs,
+        &state_reads,
+        &state_writes,
+    ));
+    dedup_semantic_effect_sites(&mut semantic_effect_sites);
     let local_complexity_scores =
         local_complexity_scores(&parsed.file.to_string_lossy(), &function_defs);
 
-    Ok(Document {
+    let mut document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source: parsed.source.clone(),
@@ -105,7 +114,12 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         predicate_aliases,
         comparison_uses,
         path_condition_sites: Vec::new(),
-    })
+        protocol_method_effects: Vec::new(),
+        protocol_call_paths: Vec::new(),
+    };
+    document.protocol_method_effects = profile.protocol_method_effects(&document);
+    document.protocol_call_paths = profile.protocol_call_paths(&document);
+    Ok(document)
 }
 
 struct ParsedDocument {
@@ -955,25 +969,18 @@ fn collect_branch_state_refs(
     }
 }
 
-fn ruby_global_context_effects(
-    language: Language,
-    state_reads: &[StateRead],
-) -> Vec<SemanticEffectSite> {
-    if language != Language::Ruby {
-        return Vec::new();
-    }
-    state_reads
-        .iter()
-        .filter(|read| read.field.starts_with('$'))
-        .map(|read| SemanticEffectSite {
-            kind: "context_dependency".to_string(),
-            detail: read.field.clone(),
-            file: read.file.clone(),
-            function: read.function.clone(),
-            line: read.line,
-            span: read.span,
-        })
-        .collect()
+fn dedup_semantic_effect_sites(sites: &mut Vec<SemanticEffectSite>) {
+    let mut seen = HashSet::new();
+    sites.retain(|site| {
+        seen.insert((
+            site.kind.clone(),
+            site.detail.clone(),
+            site.file.clone(),
+            site.function.clone(),
+            site.line,
+            site.span,
+        ))
+    });
 }
 
 fn branch_local_ref(

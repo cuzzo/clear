@@ -3,9 +3,13 @@ use super::super::tree_sitter_adapter::{
     named_children, normalize_type_owner, strip_assignment_suffix, AssignmentTarget, CallTarget,
     Target,
 };
-use super::super::{CallSite, CloneCandidate, Document, FunctionDef, Language};
+use super::super::{
+    CallSite, CloneCandidate, Document, FunctionDef, Language, ProtocolCall, ProtocolMethodEffect,
+    ProtocolMethodPath, SemanticEffectSite, StateRead, StateWrite,
+};
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
 use std::collections::HashSet;
+use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) const EMPTY_NODE_KINDS: &[&str] = &[];
@@ -370,6 +374,22 @@ pub(crate) trait LanguageProfile {
         false
     }
 
+    fn suppress_indexed_lhs_reads(&self) -> bool {
+        true
+    }
+
+    fn indexed_lhs_descendants_are_writes(&self) -> bool {
+        true
+    }
+
+    fn keyed_element_first_named_child_is_key(&self) -> bool {
+        true
+    }
+
+    fn nested_assignment_dependencies_only(&self) -> bool {
+        false
+    }
+
     fn implicit_state_accesses(&self) -> bool {
         false
     }
@@ -427,6 +447,91 @@ pub(crate) trait LanguageProfile {
     }
 
     fn after_collect_facts(&self, _functions: &mut Vec<FunctionDef>, _calls: &[CallSite]) {}
+
+    fn structural_semantic_effect_sites(
+        &self,
+        _root: Node<'_>,
+        _source: &str,
+        _file: &Path,
+        _functions: &[FunctionDef],
+        _state_reads: &[StateRead],
+        _state_writes: &[StateWrite],
+    ) -> Vec<SemanticEffectSite> {
+        Vec::new()
+    }
+
+    fn protocol_method_effects(&self, document: &Document) -> Vec<ProtocolMethodEffect> {
+        document
+            .function_defs
+            .iter()
+            .map(|function_def| {
+                let mut reads = document
+                    .state_reads
+                    .iter()
+                    .filter(|read| {
+                        read.owner == function_def.owner && read.function == function_def.name
+                    })
+                    .map(|read| normalize_protocol_state(&read.field))
+                    .collect::<Vec<_>>();
+                reads.sort();
+                reads.dedup();
+
+                let mut writes = document
+                    .state_writes
+                    .iter()
+                    .filter(|write| {
+                        write.owner == function_def.owner && write.function == function_def.name
+                    })
+                    .map(|write| normalize_protocol_state(&write.field))
+                    .collect::<Vec<_>>();
+                writes.sort();
+                writes.dedup();
+
+                ProtocolMethodEffect {
+                    file: function_def.file.clone(),
+                    owner: function_def.owner.clone(),
+                    name: protocol_method_name(&function_def.name),
+                    line: function_def.line,
+                    reads,
+                    writes,
+                }
+            })
+            .collect()
+    }
+
+    fn protocol_call_paths(&self, document: &Document) -> Vec<ProtocolMethodPath> {
+        document
+            .function_defs
+            .iter()
+            .map(|function_def| {
+                let calls = document
+                    .call_sites
+                    .iter()
+                    .filter(|call| {
+                        call.owner == function_def.owner
+                            && call.function == function_def.name
+                            && call.receiver == "self"
+                    })
+                    .map(|call| ProtocolCall {
+                        mid: protocol_method_name(&call.message),
+                        file: function_def.file.clone(),
+                        owner: function_def.owner.clone(),
+                        defn: protocol_method_name(&function_def.name),
+                        line: call.line,
+                        span: call.span,
+                    })
+                    .collect();
+
+                ProtocolMethodPath {
+                    file: function_def.file.clone(),
+                    owner: function_def.owner.clone(),
+                    name: protocol_method_name(&function_def.name),
+                    line: function_def.line,
+                    calls,
+                }
+            })
+            .collect()
+    }
 
     fn default_function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
         if !self.function_node_kinds().contains(&node.kind()) {
@@ -1671,6 +1776,20 @@ fn generic_branch_context(node: Node<'_>, source: &str) -> bool {
             && normalize_text(node_text(node, source))
                 .trim_start()
                 .starts_with("if ")
+}
+
+pub(crate) fn protocol_method_name(name: &str) -> String {
+    name.split(['.', ':'])
+        .filter(|part| !part.is_empty())
+        .last()
+        .unwrap_or(name)
+        .to_string()
+}
+
+pub(crate) fn normalize_protocol_state(name: &str) -> String {
+    name.trim_start_matches('@')
+        .trim_end_matches('=')
+        .to_string()
 }
 
 fn clone_node_key(node: &RawNode) -> String {
