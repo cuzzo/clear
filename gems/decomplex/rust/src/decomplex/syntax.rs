@@ -134,6 +134,8 @@ pub struct Document {
     #[serde(default)]
     pub branch_decisions: Vec<BranchDecision>,
     #[serde(default)]
+    pub branch_arms: Vec<BranchArm>,
+    #[serde(default)]
     pub dispatch_sites: Vec<DispatchSite>,
     #[serde(default)]
     pub semantic_effect_sites: Vec<SemanticEffectSite>,
@@ -275,6 +277,20 @@ pub struct BranchDecision {
     pub span: Span,
     pub predicate: String,
     pub state_refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BranchArm {
+    pub file: String,
+    pub function: String,
+    pub kind: String,
+    pub line: usize,
+    pub span: Span,
+    pub decision_line: usize,
+    pub decision_span: Span,
+    pub predicate: String,
+    pub member: String,
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

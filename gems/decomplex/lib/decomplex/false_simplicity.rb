@@ -30,8 +30,9 @@ module Decomplex
 
     def self.hits_for_document(document)
       document.semantic_effect_sites.map do |site|
+        defn = site.function.to_s.empty? ? "(top-level)" : site.function
         Hit.new(kind: site.kind, detail: site.detail, file: site.file,
-                defn: site.function || "(top-level)", line: site.line,
+                defn: defn, line: site.line,
                 span: site.span)
       end
     end

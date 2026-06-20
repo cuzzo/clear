@@ -50,25 +50,47 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PathCondition
 pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
     let mut sites = documents
         .iter()
-        .flat_map(sites_from_document_facts)
+        .flat_map(sites_for_document)
         .collect::<Vec<_>>();
-    sites.extend(
-        documents
+    if sites.is_empty() {
+        sites = documents
             .iter()
-            .flat_map(sites_from_raw_facts)
-            .collect::<Vec<_>>(),
-    );
-    if !sites.is_empty() {
-        return Report::new(dedupe_sites(sites)).findings();
+            .flat_map(normalized_sites_from_document)
+            .collect::<Vec<_>>();
     }
+    Report::new(dedupe_sites(sites)).findings()
+}
 
-    let mut sites = Vec::new();
-    for document in documents {
-        let mut pc = PathCondition::new(document.file.clone(), document.lines.clone());
-        pc.walk(&document.normalized_root, &Vec::new(), &Vec::new());
-        sites.extend(pc.sites);
+pub(crate) fn fact_sites_for_document(
+    document: &Document,
+) -> Vec<crate::decomplex::syntax::PathConditionSite> {
+    let mut sites = sites_for_document(document);
+    if sites.is_empty() {
+        sites = normalized_sites_from_document(document);
     }
-    Report::new(sites).findings()
+    dedupe_sites(sites)
+        .into_iter()
+        .map(|site| crate::decomplex::syntax::PathConditionSite {
+            guards: site.guards,
+            action: site.action,
+            file: site.file,
+            function: site.defn,
+            line: site.line,
+            span: site.span,
+        })
+        .collect()
+}
+
+fn sites_for_document(document: &Document) -> Vec<Site> {
+    let mut sites = sites_from_document_facts(document);
+    sites.extend(sites_from_raw_facts(document));
+    sites
+}
+
+fn normalized_sites_from_document(document: &Document) -> Vec<Site> {
+    let mut pc = PathCondition::new(document.file.clone(), document.lines.clone());
+    pc.walk(&document.normalized_root, &Vec::new(), &Vec::new());
+    pc.sites
 }
 
 fn dedupe_sites(sites: Vec<Site>) -> Vec<Site> {
@@ -184,9 +206,21 @@ fn raw_path_walk(
     if raw_branch_node(profile, node) {
         let condition = raw_branch_condition(node);
         let atoms = raw_path_condition_atoms(profile, condition);
-        for child in raw_branch_body_nodes(profile, node) {
+        let then_atoms = if raw_unless_node(node) {
+            raw_negate_guards(&atoms)
+        } else {
+            atoms.clone()
+        };
+        let else_atoms = if raw_unless_node(node) {
+            atoms
+        } else {
+            raw_negate_guards(&atoms)
+        };
+        for (child, branch_guards) in
+            raw_branch_body_nodes(profile, node, &then_atoms, &else_atoms)
+        {
             let mut next_guards = guards.to_vec();
-            next_guards.extend(atoms.clone());
+            next_guards.extend(branch_guards);
             raw_path_walk(document, profile, child, function, &next_guards, out);
         }
         return;
@@ -239,51 +273,103 @@ fn raw_branch_condition(node: &RawNode) -> Option<&RawNode> {
         .or_else(|| raw_named_children(node).into_iter().next())
 }
 
-fn raw_branch_body_nodes<'a>(profile: &dyn LanguageProfile, node: &'a RawNode) -> Vec<&'a RawNode> {
-    let mut bodies = ["consequence", "body", "alternative"]
-        .into_iter()
-        .filter_map(|field| raw_child_by_field(node, field))
-        .collect::<Vec<_>>();
+fn raw_branch_body_nodes<'a>(
+    profile: &dyn LanguageProfile,
+    node: &'a RawNode,
+    then_guards: &[String],
+    else_guards: &[String],
+) -> Vec<(&'a RawNode, Vec<String>)> {
+    let mut bodies = Vec::new();
+    if let Some(body) = raw_child_by_field(node, "consequence")
+        .or_else(|| raw_child_by_field(node, "body"))
+    {
+        bodies.push((body, then_guards.to_vec()));
+    }
+    if let Some(body) = raw_child_by_field(node, "alternative") {
+        bodies.push((body, else_guards.to_vec()));
+    }
     if bodies.is_empty() {
-        bodies = raw_named_children(node).into_iter().skip(1).collect();
+        bodies = raw_named_children(node)
+            .into_iter()
+            .skip(1)
+            .enumerate()
+            .map(|(index, body)| {
+                let guards = if index == 0 {
+                    then_guards.to_vec()
+                } else {
+                    else_guards.to_vec()
+                };
+                (body, guards)
+            })
+            .collect();
     }
     bodies
         .into_iter()
-        .flat_map(|body| {
-            if raw_simple_action_wrapper(profile, body) {
-                return vec![body];
-            }
-            let body_children = raw_named_children(body);
-            let children = if profile
-                .path_transparent_branch_body_node_kinds()
-                .contains(&body.kind.as_str())
-            {
-                body_children.into_iter().skip(1).collect::<Vec<_>>()
-            } else {
-                body_children
-            };
-            let children = children
+        .flat_map(|(body, branch_guards)| {
+            raw_flatten_branch_body(profile, body)
                 .into_iter()
-                .flat_map(|child| {
-                    if profile
-                        .path_transparent_branch_body_node_kinds()
-                        .contains(&child.kind.as_str())
-                    {
-                        raw_named_children(child)
-                            .into_iter()
-                            .skip(1)
-                            .collect::<Vec<_>>()
-                    } else {
-                        vec![child]
-                    }
-                })
-                .filter(|child| !raw_comment_node(child))
-                .collect::<Vec<_>>();
-            if children.is_empty() {
-                vec![body]
+                .map(move |child| (child, branch_guards.clone()))
+        })
+        .collect()
+}
+
+fn raw_flatten_branch_body<'a>(
+    profile: &dyn LanguageProfile,
+    body: &'a RawNode,
+) -> Vec<&'a RawNode> {
+    if raw_simple_action_wrapper(profile, body) {
+        return vec![body];
+    }
+    let body_children = raw_named_children(body);
+    let children = if profile
+        .path_transparent_branch_body_node_kinds()
+        .contains(&body.kind.as_str())
+    {
+        body_children.into_iter().skip(1).collect::<Vec<_>>()
+    } else {
+        body_children
+    };
+    let children = children
+        .into_iter()
+        .flat_map(|child| {
+            if profile
+                .path_transparent_branch_body_node_kinds()
+                .contains(&child.kind.as_str())
+            {
+                raw_named_children(child)
+                    .into_iter()
+                    .skip(1)
+                    .collect::<Vec<_>>()
             } else {
-                children
+                vec![child]
             }
+        })
+        .filter(|child| !raw_comment_node(child))
+        .collect::<Vec<_>>();
+    if children.is_empty() {
+        vec![body]
+    } else {
+        children
+    }
+}
+
+fn raw_unless_node(node: &RawNode) -> bool {
+    node.kind.contains("unless")
+        || node
+            .children
+            .first()
+            .map(|child| child.kind == "unless" || child.text == "unless")
+            .unwrap_or(false)
+}
+
+fn raw_negate_guards(guards: &[String]) -> Vec<String> {
+    guards
+        .iter()
+        .map(|guard| {
+            guard
+                .strip_prefix('!')
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("!{guard}"))
         })
         .collect()
 }

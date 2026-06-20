@@ -1,0 +1,271 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "ready?",
+        "owner": "SourceFactBranchPredicatePaths",
+        "line": 4,
+        "visibility": "public",
+        "params": []
+      },
+      {
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths",
+        "line": 8,
+        "visibility": "public",
+        "params": [
+          "user"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "publish",
+        "function": "route",
+        "line": 10,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          ":ready"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "warn",
+        "function": "route",
+        "line": 12,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "\"not ready\""
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "audit",
+        "function": "route",
+        "line": 17,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "user"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "fallback",
+        "function": "route",
+        "line": 19,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "user"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "default",
+        "function": "route",
+        "line": 21,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "user"
+        ]
+      },
+      {
+        "receiver": "user",
+        "message": "role",
+        "function": "route",
+        "line": 15,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "user",
+        "message": "active?",
+        "function": "route",
+        "line": 9,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@status",
+        "function": "ready?",
+        "line": 5
+      },
+      {
+        "receiver": "self",
+        "field": "@status",
+        "function": "route",
+        "line": 9
+      },
+      {
+        "receiver": "user",
+        "field": "active?",
+        "function": "route",
+        "line": 9
+      },
+      {
+        "receiver": "user",
+        "field": "role",
+        "function": "route",
+        "line": 15
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "case_dispatch",
+        "members": [
+          "\"admin\"",
+          "\"guest\""
+        ],
+        "function": "route",
+        "line": 15,
+        "predicate": "user.role"
+      },
+      {
+        "kind": "conjunction",
+        "members": [
+          "@status == :ready",
+          "user.active?"
+        ],
+        "function": "route",
+        "line": 9,
+        "predicate": "@status == :ready && user.active?"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "route",
+        "line": 15,
+        "predicate": "user.role",
+        "state_refs": [
+          "user.role"
+        ]
+      },
+      {
+        "function": "route",
+        "line": 9,
+        "predicate": "@status == :ready && user.active?",
+        "state_refs": [
+          "@status",
+          "user.active?"
+        ]
+      }
+    ],
+    "branch_arms": [
+      {
+        "function": "route",
+        "kind": "case",
+        "line": 16,
+        "decision_line": 15,
+        "predicate": "user.role",
+        "member": "\"admin\"",
+        "body": "audit(user)"
+      },
+      {
+        "function": "route",
+        "kind": "if",
+        "line": 11,
+        "decision_line": 9,
+        "predicate": "@status == :ready && user.active?",
+        "member": "else",
+        "body": "else warn(\"not ready\")"
+      },
+      {
+        "function": "route",
+        "kind": "case",
+        "line": 18,
+        "decision_line": 15,
+        "predicate": "user.role",
+        "member": "\"guest\"",
+        "body": "fallback(user)"
+      },
+      {
+        "function": "route",
+        "kind": "if",
+        "line": 9,
+        "decision_line": 9,
+        "predicate": "@status == :ready && user.active?",
+        "member": "then",
+        "body": "publish(:ready)"
+      }
+    ],
+    "dispatch_sites": [],
+    "predicate_bodies": [
+      {
+        "name": "ready?",
+        "owner": "SourceFactBranchPredicatePaths",
+        "body": "@status == :ready",
+        "line": 4
+      }
+    ],
+    "comparisons": [
+      {
+        "source": "@status == :ready",
+        "raw": "@status == :ready",
+        "canon_source": "status == :ready",
+        "operator": "==",
+        "function": "ready?",
+        "line": 5
+      },
+      {
+        "source": "@status == :ready",
+        "raw": "@status == :ready",
+        "canon_source": "status == :ready",
+        "operator": "==",
+        "function": "route",
+        "line": 9
+      }
+    ],
+    "path_conditions": [
+      {
+        "guards": [
+          "@status == :ready",
+          "user.active?"
+        ],
+        "action": "publish(:ready)",
+        "function": "route",
+        "line": 10
+      },
+      {
+        "guards": [
+          "!@status == :ready",
+          "!user.active?"
+        ],
+        "action": "warn(\"not ready\")",
+        "function": "route",
+        "line": 12
+      }
+    ],
+    "semantic_effects": [
+      {
+        "kind": "hidden_io",
+        "detail": "warn",
+        "function": "route",
+        "line": 12
+      }
+    ]
+  }
+}

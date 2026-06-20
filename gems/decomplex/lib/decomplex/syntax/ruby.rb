@@ -100,7 +100,7 @@ module Decomplex
         case node.kind
         when "call"
           ruby_proc_call_target(node) || ruby_call_target(node)
-        when "body_statement"
+        when "body_statement", "block_body"
           ruby_bare_body_call_target(node)
         when "identifier"
           ruby_bare_call_target(node)
@@ -141,6 +141,11 @@ module Decomplex
       end
 
       def state_read_target(node)
+        if ruby_explicit_receiver_body_read_node?(node) &&
+           (target = ruby_explicit_receiver_body_call_target(node))
+          return { receiver: target[:receiver], field: target[:message] }
+        end
+
         ruby_state_variable_target(node) || super
       end
 
@@ -153,12 +158,22 @@ module Decomplex
         apply_ruby_visibility!(out)
       end
 
+      def descend_into_children?(node, stack)
+        return false if node.kind == "lambda"
+        return false if ruby_stabby_lambda_node?(node)
+        return false if ruby_nested_local_scope?(node) && stack.any? { |frame| frame[:function] }
+
+        true
+      end
+
       def predicate_def(_document, function_def)
-        expression = ruby_single_expression_function_body(function_def.body)
+        expression = ruby_single_expression_function_body(function_def.body) ||
+                     ruby_predicate_expression_body(function_def.body)
         return nil unless expression
 
         body = normalize_text(expression.text).delete_suffix(";").strip
         return nil if body.empty? || body == "nil" || body.length > 200
+        return nil unless predicate_body?(body)
 
         PredicateDef.new(
           file: function_def.file,
@@ -218,7 +233,7 @@ module Decomplex
       private
 
       def comparison_target(node)
-        ruby_nil_predicate_comparison(node) || super
+        ruby_nil_predicate_comparison(node) || ruby_flat_comparison_statement(node) || super
       end
 
       def ruby_nil_predicate_comparison(node)
@@ -228,6 +243,15 @@ module Decomplex
         return nil unless target && target[:message].to_s == "nil?"
 
         { source: normalize_text(node.text), operator: "nil?" }
+      end
+
+      def ruby_flat_comparison_statement(node)
+        return nil unless node.kind == "body_statement"
+
+        operator = direct_operator(node)
+        return nil unless COMPARISON_OPERATORS.include?(operator)
+
+        { source: normalize_text(node.text), operator: operator }
       end
 
       def inline_def_argument_list?(node)
@@ -317,6 +341,41 @@ module Decomplex
         nil
       end
 
+      def ruby_predicate_expression_body(node)
+        body = ruby_method_body_wrapper(node)
+        return nil unless body
+
+        expression = ruby_single_expression_body_child(body)
+        return expression if expression
+
+        source = normalize_text(body.text).delete_suffix(";").strip
+        return body if ruby_flat_predicate_body_statement?(body, source)
+
+        nil
+      end
+
+      def ruby_flat_predicate_body_statement?(body, source)
+        body.kind == "body_statement" &&
+          predicate_body?(source) &&
+          COMPARISON_OPERATORS.include?(direct_operator(body))
+      end
+
+      def predicate_body?(source)
+        text = source.to_s
+        lower = text.downcase
+        %w[true false].include?(lower) ||
+          lower.include?("true") ||
+          lower.include?("false") ||
+          lower.include?("null") ||
+          lower.include?("nil") ||
+          text.include?("==") ||
+          text.include?("!=") ||
+          text.include?("&&") ||
+          text.include?("||") ||
+          lower.include?(" and ") ||
+          lower.include?(" or ")
+      end
+
       def ruby_heredoc_body?(_body, named_children)
         named_children.first&.kind == "call" &&
           named_children[1..].to_a.all? { |child| child.kind == "heredoc_body" }
@@ -357,7 +416,7 @@ module Decomplex
           reads: reads.to_set,
           writes: writes.to_set,
           dependencies: ruby_assignment_dependencies(node, local_names),
-          co_uses: reads.combination(2).map { |left, right| [left, right] }
+          co_uses: reads.sort.combination(2).map { |left, right| [left, right] }
         )
       end
 
@@ -447,6 +506,13 @@ module Decomplex
 
       def ruby_nested_local_scope?(node)
         %w[class module method singleton_method lambda].include?(node.kind)
+      end
+
+      def ruby_stabby_lambda_node?(node)
+        return false unless ts_node?(node)
+        return true if node.kind == "body_statement" && node.children.first&.kind == "->"
+
+        node.kind == "block" && prev_sibling(node)&.kind == "->"
       end
 
       def ruby_local_read_identifier?(node, local_names)
@@ -693,6 +759,12 @@ module Decomplex
         }
       end
 
+      def ruby_explicit_receiver_body_read_node?(node)
+        return true if node.kind == "block_body"
+
+        node.kind == "body_statement" && parent_node(node)&.kind == "do_block"
+      end
+
       def ruby_simple_call_text?(text)
         text.to_s.strip.match?(/\A[a-z_]\w*[!?=]?\z/)
       end
@@ -711,7 +783,7 @@ module Decomplex
         return false if next_sibling(node)&.text == "=" || prev_sibling(node)&.text == "="
         return false if next_sibling(node)&.text == "." || prev_sibling(node)&.text == "."
 
-        %w[body_statement then else elsif ensure rescue].include?(parent.kind) ||
+        %w[body_statement then else elsif ensure rescue if_modifier unless_modifier].include?(parent.kind) ||
           next_sibling(node)&.kind == "argument_list"
       end
 

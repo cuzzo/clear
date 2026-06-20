@@ -1,0 +1,67 @@
+{
+  "detector": "co-update",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/co_update.rb",
+        "language": "ruby",
+        "state_writes": [
+          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "create", "line": 1, "span": [1, 0, 1, 14], "owner": "Fixture"},
+          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "create", "line": 2, "span": [2, 0, 2, 15], "owner": "Fixture"},
+          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "replace", "line": 4, "span": [4, 0, 4, 14], "owner": "Fixture"},
+          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "replace", "line": 5, "span": [5, 0, 5, 15], "owner": "Fixture"},
+          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "restore", "line": 7, "span": [7, 0, 7, 14], "owner": "Fixture"},
+          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "restore", "line": 8, "span": [8, 0, 8, 15], "owner": "Fixture"},
+          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "touch_status", "line": 10, "span": [10, 0, 10, 14], "owner": "Fixture"},
+          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "touch_version", "line": 12, "span": [12, 0, 12, 15], "owner": "Fixture"}
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "co_written_pairs": [
+      {
+        "pair": [
+          "status",
+          "version"
+        ],
+        "sites": [
+          "facts/co_update.rb:create",
+          "facts/co_update.rb:replace",
+          "facts/co_update.rb:restore"
+        ],
+        "support": 3
+      }
+    ],
+    "neglected_updates": [
+      {
+        "at": "facts/co_update.rb:touch_status:10",
+        "has": "status",
+        "missing": "version",
+        "pair": [
+          "status",
+          "version"
+        ],
+        "recv": "self",
+        "spans": {
+          "facts/co_update.rb:touch_status:10": [10, 0, 10, 14]
+        },
+        "support": 3
+      },
+      {
+        "at": "facts/co_update.rb:touch_version:12",
+        "has": "version",
+        "missing": "status",
+        "pair": [
+          "status",
+          "version"
+        ],
+        "recv": "self",
+        "spans": {
+          "facts/co_update.rb:touch_version:12": [12, 0, 12, 15]
+        },
+        "support": 3
+      }
+    ]
+  }
+}

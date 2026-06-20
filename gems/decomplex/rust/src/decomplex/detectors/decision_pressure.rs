@@ -137,39 +137,10 @@ fn methods_by_file<'a>(methods: &'a [MethodSummary]) -> BTreeMap<String, Vec<&'a
 }
 
 fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
-    let mut map = BTreeMap::new();
-    for statement in &method.statements {
-        if statement.writes.len() != 1 {
-            continue;
-        }
-        let name = statement.writes.iter().next().unwrap();
-        if map.contains_key(name) {
-            continue;
-        }
-        if let Some(source) = local_contract_source(name, &statement.source) {
-            map.insert(name.clone(), source);
-        }
-    }
-    map.into_iter()
+    local_flow::local_contract_assignments(method)
+        .into_iter()
         .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0).map(|c| (name, c)))
         .collect()
-}
-
-fn local_contract_source(name: &str, source: &str) -> Option<String> {
-    let pattern = format!(
-        r"(?s)\b{}\b\s*(?::=|=)\s*(.+?)\s*;?\s*$",
-        regex::escape(name)
-    );
-    let assignment = Regex::new(&pattern).ok()?;
-    let rhs = assignment.captures(source)?.get(1)?.as_str().trim();
-    static CONDITIONAL_SOURCE: OnceLock<Regex> = OnceLock::new();
-    let conditional =
-        CONDITIONAL_SOURCE.get_or_init(|| Regex::new(r"\s(?:if|unless|rescue)\s|\?|:").unwrap());
-    if conditional.is_match(rhs) {
-        None
-    } else {
-        Some(rhs.to_string())
-    }
 }
 
 fn rescue_nil_hits(

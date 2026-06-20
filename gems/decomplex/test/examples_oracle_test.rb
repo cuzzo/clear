@@ -208,7 +208,9 @@ class ExamplesOracleTest < Minitest::Test
         {
           "method" => method["name"],
           "statements" => Array(method["statements"]).map do |statement|
-            pick(statement, %w[reads writes dependencies co_uses])
+            row = pick(statement, %w[reads writes dependencies co_uses])
+            row["co_uses"] = canonical_co_uses(row.fetch("co_uses", []))
+            row
           end,
           "boundaries" => rows(method["boundaries"], %w[before_index after_index kind])
         }
@@ -247,6 +249,10 @@ class ExamplesOracleTest < Minitest::Test
           .tr(":", ".")
           .gsub(/\.+/, ".")
     end.sort
+  end
+
+  def canonical_co_uses(value)
+    Array(value).map { |pair| Array(pair).map(&:to_s).sort }.sort_by { |pair| JSON.generate(pair) }
   end
 
   def canonical_state_refs(value)

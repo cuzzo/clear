@@ -463,7 +463,7 @@ fn run_detector_on_fact_input(
             let options = fixture.get("options").cloned().unwrap_or_else(|| json!({}));
             let mass = option_usize(&options, "mass", 32)?;
             let fuzzy = option_usize(&options, "fuzzy", 1)?;
-            value(flay_similarity::scan_documents(documents, mass, fuzzy))
+            value(json!({ "findings": flay_similarity::scan_documents(documents, mass, fuzzy) }))
         }
         "temporal-ordering-pressure" => {
             value(temporal_ordering_pressure::scan_documents(documents))
@@ -791,6 +791,7 @@ fn project_source_syntax(fixture: &Path, expected: &Value) -> Result<Value> {
         for key in object.keys() {
             let keys = match key.as_str() {
                 "functions" => &["name", "owner", "line", "visibility", "params"][..],
+                "owners" => &["name", "kind", "line"][..],
                 "calls" => &[
                     "receiver",
                     "message",
@@ -802,9 +803,59 @@ fn project_source_syntax(fixture: &Path, expected: &Value) -> Result<Value> {
                     "block",
                     "arguments",
                 ][..],
+                "state_declarations" => &["field", "owner", "type", "line"][..],
+                "state_param_origins" => {
+                    &["field", "receiver", "owner", "param", "function", "line"][..]
+                }
                 "state_reads" => &["receiver", "field", "function", "line"][..],
                 "state_writes" => &["receiver", "field", "function", "line"][..],
+                "decisions" => &["kind", "members", "function", "line", "predicate"][..],
+                "branch_decisions" => &["function", "line", "predicate", "state_refs"][..],
+                "branch_arms" => &[
+                    "function",
+                    "kind",
+                    "line",
+                    "decision_line",
+                    "predicate",
+                    "member",
+                    "body",
+                ][..],
+                "dispatch_sites" => {
+                    &["variant_set", "arm_members", "outside", "function", "line"][..]
+                }
                 "semantic_effects" => &["kind", "detail", "function", "line"][..],
+                "predicate_bodies" => &["name", "owner", "body", "line"][..],
+                "comparisons" => &[
+                    "source",
+                    "raw",
+                    "canon_source",
+                    "operator",
+                    "function",
+                    "line",
+                ][..],
+                "path_conditions" => &["guards", "action", "function", "line"][..],
+                "protocol_method_effects" => &["owner", "name", "line", "reads", "writes"][..],
+                "protocol_call_paths" => &["owner", "name", "line", "calls"][..],
+                "clone_candidates" => &[
+                    "method_name",
+                    "node_name",
+                    "line",
+                    "mass",
+                    "fingerprint",
+                    "child_fingerprints",
+                    "child_masses",
+                ][..],
+                "redundant_nil_guards" => &["defn", "line", "local", "guard", "proof"][..],
+                "local_methods" => &[
+                    "id",
+                    "owner",
+                    "name",
+                    "line",
+                    "statements",
+                    "boundaries",
+                    "local_contract_assignments",
+                ][..],
+                "local_complexity_scores" => &["id", "score", "signals"][..],
                 _ => bail!("unsupported source syntax section: {key}"),
             };
             out.insert(key.clone(), rows(field(&document, key), keys));
@@ -825,7 +876,7 @@ fn project_local_flow(output: &Value) -> Value {
                             "reads": sorted_array(field(statement, "reads")),
                             "writes": sorted_array(field(statement, "writes")),
                             "dependencies": field(statement, "dependencies").clone(),
-                            "co_uses": field(statement, "co_uses").clone(),
+                            "co_uses": canonical_co_uses(field(statement, "co_uses")),
                         })
                     }).collect::<Vec<_>>(),
                     "boundaries": array(field(method, "boundaries")).iter().map(|boundary| {
@@ -874,6 +925,22 @@ fn project_protocols(rows_value: &Value) -> Value {
             })
             .collect(),
     )
+}
+
+fn canonical_co_uses(value: &Value) -> Value {
+    let mut pairs = array(value)
+        .iter()
+        .map(|pair| {
+            let mut items = array(pair)
+                .iter()
+                .map(|item| item.as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>();
+            items.sort();
+            json!(items)
+        })
+        .collect::<Vec<_>>();
+    pairs.sort_by_key(|item| item.to_string());
+    Value::Array(pairs)
 }
 
 fn rows(value: &Value, keys: &[&str]) -> Value {

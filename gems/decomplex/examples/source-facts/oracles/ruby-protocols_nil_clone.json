@@ -1,0 +1,568 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 12,
+        "visibility": "public",
+        "params": [
+          "item"
+        ]
+      },
+      {
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 17,
+        "visibility": "public",
+        "params": [
+          "value"
+        ]
+      },
+      {
+        "name": "clone_left",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 23,
+        "visibility": "public",
+        "params": [
+          "user"
+        ]
+      },
+      {
+        "name": "clone_right",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 29,
+        "visibility": "public",
+        "params": [
+          "account"
+        ]
+      },
+      {
+        "name": "open",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 4,
+        "visibility": "public",
+        "params": []
+      },
+      {
+        "name": "close",
+        "owner": "SourceFactProtocolsNilClone",
+        "line": 8,
+        "visibility": "public",
+        "params": []
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "audit",
+        "function": "clone_left",
+        "line": 25,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "data"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "audit",
+        "function": "clone_right",
+        "line": 31,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "data"
+        ]
+      },
+      {
+        "receiver": "user.profile",
+        "message": "name",
+        "function": "clone_left",
+        "line": 24,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "user",
+        "message": "profile",
+        "function": "clone_left",
+        "line": 24,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "data",
+        "function": "clone_left",
+        "line": 26,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "account.profile",
+        "message": "name",
+        "function": "clone_right",
+        "line": 30,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "account",
+        "message": "profile",
+        "function": "clone_right",
+        "line": 30,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "data",
+        "function": "clone_right",
+        "line": 32,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "value",
+        "message": "name",
+        "function": "guard",
+        "line": 20,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": true,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "open",
+        "function": "run",
+        "line": 13,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "value",
+        "function": "guard",
+        "line": 18,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "close",
+        "function": "run",
+        "line": 14,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "item",
+        "message": "ready?",
+        "function": "run",
+        "line": 14,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "user.profile",
+        "field": "name",
+        "function": "clone_left",
+        "line": 24
+      },
+      {
+        "receiver": "account.profile",
+        "field": "name",
+        "function": "clone_right",
+        "line": 30
+      },
+      {
+        "receiver": "value",
+        "field": "name",
+        "function": "guard",
+        "line": 20
+      },
+      {
+        "receiver": "user",
+        "field": "profile",
+        "function": "clone_left",
+        "line": 24
+      },
+      {
+        "receiver": "account",
+        "field": "profile",
+        "function": "clone_right",
+        "line": 30
+      },
+      {
+        "receiver": "item",
+        "field": "ready?",
+        "function": "run",
+        "line": 14
+      }
+    ],
+    "state_writes": [
+      {
+        "receiver": "self",
+        "field": "@opened",
+        "function": "close",
+        "line": 9
+      },
+      {
+        "receiver": "self",
+        "field": "@opened",
+        "function": "open",
+        "line": 5
+      }
+    ],
+    "semantic_effects": [
+      {
+        "kind": "hidden_io",
+        "detail": "open",
+        "function": "run",
+        "line": 13
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "run",
+        "line": 12,
+        "reads": [
+          "close",
+          "open"
+        ],
+        "writes": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "guard",
+        "line": 17,
+        "reads": [],
+        "writes": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "clone_left",
+        "line": 23,
+        "reads": [],
+        "writes": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "clone_right",
+        "line": 29,
+        "reads": [],
+        "writes": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "open",
+        "line": 4,
+        "reads": [],
+        "writes": [
+          "opened"
+        ]
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "close",
+        "line": 8,
+        "reads": [],
+        "writes": [
+          "opened"
+        ]
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "guard",
+        "line": 17,
+        "calls": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "guard",
+        "line": 17,
+        "calls": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "open",
+        "line": 4,
+        "calls": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "close",
+        "line": 8,
+        "calls": []
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "run",
+        "line": 12,
+        "calls": [
+          {
+            "line": 13,
+            "mid": "open",
+            "span": [
+              13,
+              4,
+              13,
+              8
+            ]
+          },
+          {
+            "line": 14,
+            "mid": "close",
+            "span": [
+              14,
+              4,
+              14,
+              9
+            ]
+          }
+        ]
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "run",
+        "line": 12,
+        "calls": [
+          {
+            "line": 13,
+            "mid": "open",
+            "span": [
+              13,
+              4,
+              13,
+              8
+            ]
+          }
+        ]
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "clone_left",
+        "line": 23,
+        "calls": [
+          {
+            "line": 25,
+            "mid": "audit",
+            "span": [
+              25,
+              4,
+              25,
+              15
+            ]
+          }
+        ]
+      },
+      {
+        "owner": "SourceFactProtocolsNilClone",
+        "name": "clone_right",
+        "line": 29,
+        "calls": [
+          {
+            "line": 31,
+            "mid": "audit",
+            "span": [
+              31,
+              4,
+              31,
+              15
+            ]
+          }
+        ]
+      }
+    ],
+    "clone_candidates": [
+      {
+        "method_name": "clone_left",
+        "node_name": "defn",
+        "line": 23,
+        "mass": 26,
+        "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id)",
+        "child_fingerprints": [
+          "assignment(id =:= call(call(id .:. id) .:. id))",
+          "call<audit>(id argument_list((:( id ):)))"
+        ],
+        "child_masses": [
+          10,
+          6
+        ]
+      },
+      {
+        "method_name": "clone_right",
+        "node_name": "defn",
+        "line": 29,
+        "mass": 26,
+        "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id)",
+        "child_fingerprints": [
+          "assignment(id =:= call(call(id .:. id) .:. id))",
+          "call<audit>(id argument_list((:( id ):)))"
+        ],
+        "child_masses": [
+          10,
+          6
+        ]
+      },
+      {
+        "method_name": "clone_left",
+        "node_name": "assignment",
+        "line": 24,
+        "mass": 10,
+        "fingerprint": "assignment(id =:= call(call(id .:. id) .:. id))",
+        "child_fingerprints": [
+          "call(call(id .:. id) .:. id)"
+        ],
+        "child_masses": [
+          7
+        ]
+      },
+      {
+        "method_name": "clone_right",
+        "node_name": "assignment",
+        "line": 30,
+        "mass": 10,
+        "fingerprint": "assignment(id =:= call(call(id .:. id) .:. id))",
+        "child_fingerprints": [
+          "call(call(id .:. id) .:. id)"
+        ],
+        "child_masses": [
+          7
+        ]
+      },
+      {
+        "method_name": "run",
+        "node_name": "defn",
+        "line": 12,
+        "mass": 17,
+        "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(id if_modifier(id id call(id .:. id))) id)",
+        "child_fingerprints": [
+          "if_modifier(id id call(id .:. id))"
+        ],
+        "child_masses": [
+          7
+        ]
+      },
+      {
+        "method_name": "open",
+        "node_name": "defn",
+        "line": 4,
+        "mass": 8,
+        "fingerprint": "method(id id body_statement(instance_variable:@opened =:= bool) id)",
+        "child_fingerprints": [
+          "instance_variable:@opened",
+          "bool"
+        ],
+        "child_masses": [
+          1,
+          1
+        ]
+      },
+      {
+        "method_name": "close",
+        "node_name": "defn",
+        "line": 8,
+        "mass": 8,
+        "fingerprint": "method(id id body_statement(instance_variable:@opened =:= bool) id)",
+        "child_fingerprints": [
+          "instance_variable:@opened",
+          "bool"
+        ],
+        "child_masses": [
+          1,
+          1
+        ]
+      },
+      {
+        "method_name": "(top-level)",
+        "node_name": "class",
+        "line": 3,
+        "mass": 107,
+        "fingerprint": "class(id id body_statement(method(id id body_statement(instance_variable:@opened =:= bool) id) method(id id body_statement(instance_variable:@opened =:= bool) id) method(id id method_parameters((:( id ):)) body_statement(id if_modifier(id id call(id .:. id))) id) method(id id method_parameters((:( id ):)) body_statement(unless_modifier(id id id) call(id &.:&. id)) id) method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id) method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id)) id)",
+        "child_fingerprints": [
+          "method(id id body_statement(instance_variable:@opened =:= bool) id)",
+          "method(id id body_statement(instance_variable:@opened =:= bool) id)",
+          "method(id id method_parameters((:( id ):)) body_statement(id if_modifier(id id call(id .:. id))) id)",
+          "method(id id method_parameters((:( id ):)) body_statement(unless_modifier(id id id) call(id &.:&. id)) id)",
+          "method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id)",
+          "method(id id method_parameters((:( id ):)) body_statement(assignment(id =:= call(call(id .:. id) .:. id)) call<audit>(id argument_list((:( id ):))) id) id)"
+        ],
+        "child_masses": [
+          8,
+          8,
+          17,
+          17,
+          26,
+          26
+        ]
+      },
+      {
+        "method_name": "guard",
+        "node_name": "defn",
+        "line": 17,
+        "mass": 17,
+        "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(unless_modifier(id id id) call(id &.:&. id)) id)",
+        "child_fingerprints": [
+          "unless_modifier(id id id)",
+          "call(id &.:&. id)"
+        ],
+        "child_masses": [
+          4,
+          4
+        ]
+      }
+    ],
+    "redundant_nil_guards": [
+      {
+        "defn": "guard",
+        "line": 20,
+        "local": "value",
+        "guard": "value&.name",
+        "proof": "value is already proven non-nil on this path"
+      }
+    ]
+  }
+}

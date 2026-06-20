@@ -1,3 +1,4 @@
 pub use crate::decomplex::syntax::local_flow::{
-    scan_documents, scan_files, Boundary, LocalFlowRow, MethodSummary, Statement,
+    local_contract_assignments, scan_documents, scan_files, Boundary, LocalFlowRow, MethodSummary,
+    Statement,
 };

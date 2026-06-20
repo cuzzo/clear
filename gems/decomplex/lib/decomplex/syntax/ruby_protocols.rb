@@ -75,6 +75,14 @@ module Decomplex
         return unless ts_node?(node)
         return if !root && ruby_protocol_nested_boundary?(node)
 
+        if ruby_flat_assignment_statement?(node)
+          lhs = node.named_children.first
+          rhs = node.named_children[1]
+          ruby_protocol_record_write(lhs, writes, local_names)
+          ruby_protocol_collect_state_access(rhs, reads, writes, local_names: local_names)
+          return
+        end
+
         case node.kind
         when "assignment"
           lhs = named_field(node, "left") || node.named_children.first

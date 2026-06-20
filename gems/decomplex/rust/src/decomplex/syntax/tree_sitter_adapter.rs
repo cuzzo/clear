@@ -3,7 +3,7 @@ use super::{
         false_simplicity_lexicon::{false_simplicity_lexicon, FalseSimplicityLexicon},
         language_profile, LanguageProfile,
     },
-    BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef,
+    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef,
     Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateDeclaration, StateRead,
     StateWrite,
 };
@@ -25,6 +25,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
     let mut branch_decisions = Vec::new();
+    let mut branch_arms = Vec::new();
     let mut dispatch_sites = Vec::new();
     let mut predicate_aliases = Vec::new();
     let mut comparison_uses = Vec::new();
@@ -32,7 +33,10 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let mut seen_reads = HashSet::new();
     let mut seen_calls = HashSet::new();
     let mut seen_decisions = HashSet::new();
-    let context = ContextState::new(file_owner(&parsed.file));
+    let mut context = ContextState::new(file_owner(&parsed.file));
+    if language == Language::Ruby {
+        context.immutable_readers = ruby_immutable_struct_readers(&parsed.source);
+    }
 
     collect_facts(
         parsed.tree.root_node(),
@@ -48,6 +52,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut state_writes,
         &mut decision_sites,
         &mut branch_decisions,
+        &mut branch_arms,
         &mut predicate_aliases,
         &mut comparison_uses,
         &mut seen_writes,
@@ -108,6 +113,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         state_writes,
         decision_sites,
         branch_decisions,
+        branch_arms,
         dispatch_sites,
         semantic_effect_sites,
         local_complexity_scores,
@@ -151,6 +157,8 @@ struct ContextState {
     function_line: Option<usize>,
     pub receiver: Option<String>,
     locals: BTreeSet<String>,
+    param_types: BTreeMap<String, String>,
+    immutable_readers: BTreeMap<String, BTreeSet<String>>,
     controls: Vec<String>,
 }
 
@@ -163,6 +171,8 @@ impl ContextState {
             function_line: None,
             receiver: None,
             locals: BTreeSet::new(),
+            param_types: BTreeMap::new(),
+            immutable_readers: BTreeMap::new(),
             controls: Vec::new(),
         }
     }
@@ -207,6 +217,7 @@ fn collect_facts(
     state_writes: &mut Vec<StateWrite>,
     decision_sites: &mut Vec<DecisionSite>,
     branch_decisions: &mut Vec<BranchDecision>,
+    branch_arms: &mut Vec<BranchArm>,
     predicate_aliases: &mut Vec<PredicateAlias>,
     comparison_uses: &mut Vec<ComparisonUse>,
     seen_writes: &mut HashSet<String>,
@@ -279,6 +290,14 @@ fn collect_facts(
         &next_context,
         branch_decisions,
     );
+    record_branch_arm(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        branch_arms,
+    );
     record_predicate_alias(
         node,
         source,
@@ -305,6 +324,7 @@ fn collect_facts(
             state_writes,
             decision_sites,
             branch_decisions,
+            branch_arms,
             predicate_aliases,
             comparison_uses,
             seen_writes,
@@ -760,11 +780,29 @@ fn predicate_body_text(profile: &dyn LanguageProfile, source: &str) -> Option<St
     if text.is_empty() || text == "nil" || text.len() > 200 {
         return None;
     }
+    if assignment_like_predicate_body(&text) {
+        return None;
+    }
     if predicate_like_body(&text) {
         Some(text)
     } else {
         None
     }
+}
+
+fn assignment_like_predicate_body(text: &str) -> bool {
+    text.contains("||=")
+        || text.contains("&&=")
+        || text.contains("+=")
+        || text.contains("-=")
+        || text.contains("*=")
+        || text.contains("/=")
+        || text.contains("%=")
+        || text
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .any(|window| matches!(window, [left, '=', right] if !matches!(left, '=' | '!' | '<' | '>') && *right != '='))
 }
 
 fn predicate_like_body(text: &str) -> bool {
@@ -796,7 +834,7 @@ fn record_comparison_use(
     }
     let raw = profile.normalize_source_text(node_text(node, source));
     out.push(ComparisonUse {
-        canon_source: raw.clone(),
+        canon_source: normalize_comparison_source(&raw),
         raw,
         file: file.to_string_lossy().to_string(),
         function: context.current_function(),
@@ -806,14 +844,44 @@ fn record_comparison_use(
     });
 }
 
+fn normalize_comparison_source(source: &str) -> String {
+    let mut text = source.trim().to_string();
+    if let Some(stripped) = text.strip_prefix('!') {
+        text = stripped.trim().to_string();
+    }
+    if let Some(stripped) = text.strip_prefix("self.") {
+        text = stripped.to_string();
+    }
+    if let Some(stripped) = text.strip_prefix('@') {
+        text = stripped.to_string();
+    }
+    if let Some(dot_index) = text.find('.') {
+        let receiver = &text[..dot_index];
+        let rest = &text[dot_index + 1..];
+        if simple_identifier(receiver)
+            && (rest.contains(" == ")
+                || rest.contains(" != ")
+                || rest.contains('.'))
+        {
+            text = rest.to_string();
+        }
+    }
+    normalize_text(&text)
+}
+
+fn simple_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
 fn comparison_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
     if profile.comparison_node_kinds().contains(&node.kind()) {
         let operator = direct_operator_from_source(node, source);
-        return profile.comparison_operators().contains(&operator.as_str())
-            || profile
-                .comparison_operators()
-                .iter()
-                .any(|operator| node_text(node, source).contains(operator));
+        return profile.comparison_operators().contains(&operator.as_str());
     }
     if !profile.call_node_kinds().contains(&node.kind()) {
         return false;
@@ -905,6 +973,148 @@ fn record_branch_decision(
     });
 }
 
+fn record_branch_arm(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<BranchArm>,
+) {
+    let profile = language_profile(language);
+    if profile.generated_prelude(node, source)
+        || branch_decision_wrapper_for_real_branch(profile, node, source)
+    {
+        return;
+    }
+    if if_arm_node(profile, node, source) {
+        record_if_arms(profile, node, source, file, context, out);
+        return;
+    }
+    if case_node(profile, node) || profile.hidden_case(node) {
+        let decision_node = profile.case_source_node(node);
+        record_case_arms(profile, decision_node, source, file, context, out);
+    }
+}
+
+fn if_arm_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
+    if case_node(profile, node) || profile.hidden_case(node) {
+        return false;
+    }
+    profile.branch_node_kinds().contains(&node.kind())
+        || profile.control_context(node, source).as_deref() == Some("conditional")
+}
+
+fn record_if_arms(
+    profile: &dyn LanguageProfile,
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<BranchArm>,
+) {
+    let predicate = profile.normalize_source_text(&decision_predicate(profile, node, source));
+    let decision_span = span(node);
+    let decision_line = line(node);
+    let named = named_children(node);
+    let consequence = node
+        .child_by_field_name("consequence")
+        .or_else(|| node.child_by_field_name("body"))
+        .or_else(|| named.get(1).copied());
+    let alternative = node
+        .child_by_field_name("alternative")
+        .or_else(|| {
+            named.iter()
+                .copied()
+                .find(|child| child.kind().contains("else") || child.kind().contains("alternative"))
+        })
+        .or_else(|| {
+            named.get(2)
+                .copied()
+                .filter(|candidate| consequence != Some(*candidate))
+        });
+
+    for (arm, member) in [(consequence, "then"), (alternative, "else")] {
+        let Some(arm) = arm else {
+            continue;
+        };
+        out.push(BranchArm {
+            file: file.to_string_lossy().to_string(),
+            function: context.current_function(),
+            kind: "if".to_string(),
+            line: line(arm),
+            span: span(arm),
+            decision_line,
+            decision_span,
+            predicate: predicate.clone(),
+            member: member.to_string(),
+            body: profile.normalize_source_text(node_text(arm, source)),
+        });
+    }
+}
+
+fn record_case_arms(
+    profile: &dyn LanguageProfile,
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    context: &ContextState,
+    out: &mut Vec<BranchArm>,
+) {
+    let predicate = profile.normalize_source_text(&decision_predicate(profile, node, source));
+    let decision_span = span(node);
+    let decision_line = line(node);
+    for arm in case_arms(profile, node) {
+        let pattern = case_arm_patterns(arm, source, profile)
+            .into_iter()
+            .find(|pattern| !default_case_pattern(profile, pattern))
+            .unwrap_or_default();
+        if pattern.is_empty() {
+            continue;
+        }
+        out.push(BranchArm {
+            file: file.to_string_lossy().to_string(),
+            function: context.current_function(),
+            kind: "case".to_string(),
+            line: line(arm),
+            span: span(arm),
+            decision_line,
+            decision_span,
+            predicate: predicate.clone(),
+            member: pattern.clone(),
+            body: case_arm_body(profile, arm, source, &pattern),
+        });
+    }
+}
+
+fn case_arm_body(
+    profile: &dyn LanguageProfile,
+    arm: Node<'_>,
+    source: &str,
+    pattern: &str,
+) -> String {
+    let body = named_children(arm)
+        .into_iter()
+        .filter(|child| {
+            !profile.case_pattern_node_kinds().contains(&child.kind())
+                && !matches!(child.kind(), "then" | "else")
+        })
+        .last()
+        .map(|child| node_text(child, source))
+        .unwrap_or_else(|| node_text(arm, source));
+    let mut text = profile.normalize_source_text(body);
+    for prefix in [
+        format!("when {pattern} then "),
+        format!("when {pattern} "),
+    ] {
+        if let Some(stripped) = text.strip_prefix(&prefix) {
+            text = stripped.to_string();
+            break;
+        }
+    }
+    text
+}
+
 fn branch_decision_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
     profile.branch_node_kinds().contains(&node.kind())
         || profile.hidden_case(node)
@@ -956,6 +1166,11 @@ fn collect_branch_state_refs(
         } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
             // language permits bare predicate-style method calls.
+        } else if profile.language() == Language::Ruby
+            && ruby_immutable_param_state_read(receiver, &field, context)
+        {
+            // Sorbet T::Struct readers on typed params are immutable data reads,
+            // not mutable object state.
         } else if receiver.is_empty() || receiver == "self" {
             out.insert(field);
         } else {
@@ -993,6 +1208,123 @@ fn branch_local_ref(
     (receiver.is_empty() || matches!(receiver, "self" | "this"))
         && context.locals.contains(field)
         && normalize_text(node_text(node, source)) == field
+}
+
+fn ruby_immutable_param_state_read(receiver: &str, field: &str, context: &ContextState) -> bool {
+    if receiver.is_empty() || matches!(receiver, "self" | "this") {
+        return false;
+    }
+    let Some(param) = receiver.split('.').next() else {
+        return false;
+    };
+    let Some(type_name) = context.param_types.get(param) else {
+        return false;
+    };
+    let field = field.trim_end_matches('?');
+    ruby_immutable_reader(type_name, field, &context.immutable_readers)
+}
+
+fn ruby_immutable_reader(
+    type_name: &str,
+    field: &str,
+    readers: &BTreeMap<String, BTreeSet<String>>,
+) -> bool {
+    let short = type_name.split("::").last().unwrap_or(type_name);
+    readers
+        .get(type_name)
+        .or_else(|| readers.get(short))
+        .map(|fields| fields.contains(field))
+        .unwrap_or(false)
+}
+
+fn ruby_immutable_struct_readers(source: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut class_stack = Vec::new();
+    for line in source.lines() {
+        let stripped = line.trim();
+        if let Some(name) = stripped
+            .strip_prefix("class ")
+            .and_then(|rest| rest.split_once("< T::Struct").map(|(name, _)| name.trim()))
+            .filter(|name| ruby_constant_path(name))
+        {
+            class_stack.push(name.to_string());
+            continue;
+        }
+        if let Some(owner) = class_stack.last() {
+            if let Some(field) = stripped
+                .strip_prefix("const :")
+                .and_then(|rest| rest.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_').next())
+                .filter(|field| !field.is_empty())
+            {
+                readers
+                    .entry(owner.clone())
+                    .or_default()
+                    .insert(field.to_string());
+                continue;
+            }
+        }
+        if !class_stack.is_empty() && stripped.trim_end_matches(';') == "end" {
+            class_stack.pop();
+        }
+    }
+    readers
+}
+
+fn ruby_sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut sig_lines = Vec::new();
+    let mut cursor = function_line.saturating_sub(2);
+    while let Some(line) = lines.get(cursor) {
+        let stripped = line.trim();
+        if stripped.is_empty() {
+            if sig_lines.is_empty() {
+                break;
+            }
+        } else if sig_lines.is_empty() && !stripped.starts_with("sig") {
+            break;
+        }
+        sig_lines.push(*line);
+        if stripped.starts_with("sig") {
+            break;
+        }
+        if cursor == 0 || sig_lines.len() >= 8 {
+            break;
+        }
+        cursor -= 1;
+    }
+    sig_lines.reverse();
+    let sig = sig_lines.join("\n");
+    let Some(params_start) = sig.find("params(").map(|index| index + "params(".len()) else {
+        return BTreeMap::new();
+    };
+    let rest = &sig[params_start..];
+    let Some(params_end) = rest.find(')') else {
+        return BTreeMap::new();
+    };
+    rest[..params_end]
+        .split(',')
+        .filter_map(|part| {
+            let (name, type_name) = part.split_once(':')?;
+            let name = name.trim();
+            let type_name = type_name.trim();
+            (ruby_identifier(name) && ruby_constant_path(type_name))
+                .then(|| (name.to_string(), type_name.to_string()))
+        })
+        .collect()
+}
+
+fn ruby_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn ruby_constant_path(value: &str) -> bool {
+    value.split("::").all(|part| {
+        let mut chars = part.chars();
+        matches!(chars.next(), Some(ch) if ch.is_ascii_uppercase())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    })
 }
 
 fn declared_state_index(declarations: &[StateDeclaration]) -> BTreeMap<String, BTreeSet<String>> {
@@ -1276,6 +1608,11 @@ fn push_function_context(
     context.owner = Some(owner);
     context.receiver = profile.function_receiver_name(node, source);
     context.locals = profile.function_params(node, source).into_iter().collect();
+    context.param_types = if language == Language::Ruby {
+        ruby_sig_param_types(source, line(node))
+    } else {
+        BTreeMap::new()
+    };
     if let Some(receiver) = &context.receiver {
         context.locals.insert(receiver.clone());
     }

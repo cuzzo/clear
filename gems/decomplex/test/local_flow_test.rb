@@ -34,7 +34,7 @@ class LocalFlowTest < Minitest::Test
 
     terminal = summary.statements.last
     assert_equal Set["total", "buffer"], terminal.reads
-    assert_includes terminal.co_uses, ["total", "buffer"]
+    assert_includes terminal.co_uses.map(&:sort), ["buffer", "total"]
   end
 
   def test_collects_top_level_and_inline_private_methods

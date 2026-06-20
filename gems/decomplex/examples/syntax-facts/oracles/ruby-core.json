@@ -882,6 +882,19 @@
           ]
         },
         {
+          "field": "children",
+          "function": "process",
+          "line": 49,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "item",
+          "span": [
+            49,
+            6,
+            49,
+            19
+          ]
+        },
+        {
           "field": "flat_map",
           "function": "process",
           "line": 48,

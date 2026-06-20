@@ -1,0 +1,308 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "user",
+          "items"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "user",
+        "message": "profile",
+        "function": "process",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "names",
+        "message": "any?",
+        "function": "process",
+        "line": 12,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "profile",
+        "message": "name",
+        "function": "process",
+        "line": 12,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "item",
+        "message": "ready?",
+        "function": "process",
+        "line": 8,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "item",
+        "message": "name",
+        "function": "process",
+        "line": 9,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "items",
+        "message": "each",
+        "function": "process",
+        "line": 7,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "names",
+        "field": "any?",
+        "function": "process",
+        "line": 12
+      },
+      {
+        "receiver": "items",
+        "field": "each",
+        "function": "process",
+        "line": 7
+      },
+      {
+        "receiver": "profile",
+        "field": "name",
+        "function": "process",
+        "line": 12
+      },
+      {
+        "receiver": "item",
+        "field": "name",
+        "function": "process",
+        "line": 9
+      },
+      {
+        "receiver": "user",
+        "field": "profile",
+        "function": "process",
+        "line": 5
+      },
+      {
+        "receiver": "item",
+        "field": "ready?",
+        "function": "process",
+        "line": 8
+      }
+    ],
+    "state_writes": [],
+    "semantic_effects": [
+      {
+        "kind": "hidden_mutation",
+        "detail": "<<",
+        "function": "process",
+        "line": 9
+      }
+    ],
+    "local_methods": [
+      {
+        "id": "SourceFactLocalMethodsContracts#process",
+        "owner": "SourceFactLocalMethodsContracts",
+        "name": "process",
+        "line": 4,
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "profile",
+                "user"
+              ]
+            ],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "user"
+            ],
+            "source": "profile = user.profile",
+            "span": [
+              5,
+              4,
+              5,
+              26
+            ],
+            "writes": [
+              "profile"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [],
+            "source": "names = []",
+            "span": [
+              6,
+              4,
+              6,
+              14
+            ],
+            "writes": [
+              "names"
+            ]
+          },
+          {
+            "co_uses": [
+              [
+                "items",
+                "names"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 11,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "items",
+              "names"
+            ],
+            "source": "items.each do |item| if item.ready? names << item.name end end",
+            "span": [
+              7,
+              4,
+              11,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "names",
+                "profile"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 3,
+            "line": 12,
+            "reads": [
+              "names",
+              "profile"
+            ],
+            "source": "profile.name if names.any?",
+            "span": [
+              12,
+              4,
+              12,
+              30
+            ],
+            "writes": []
+          }
+        ],
+        "boundaries": [],
+        "local_contract_assignments": {
+          "names": "[]",
+          "profile": "user.profile"
+        }
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactLocalMethodsContracts#process",
+        "score": 4.3,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "loops": 1,
+          "nested": 1
+        }
+      }
+    ]
+  },
+  "local_flow": [
+    {
+      "method": "process",
+      "statements": [
+        {
+          "reads": [
+            "user"
+          ],
+          "writes": [
+            "profile"
+          ],
+          "dependencies": [
+            [
+              "profile",
+              "user"
+            ]
+          ],
+          "co_uses": []
+        },
+        {
+          "reads": [],
+          "writes": [
+            "names"
+          ],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "items",
+            "names"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "items",
+              "names"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "names",
+            "profile"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "names",
+              "profile"
+            ]
+          ]
+        }
+      ],
+      "boundaries": []
+    }
+  ]
+}

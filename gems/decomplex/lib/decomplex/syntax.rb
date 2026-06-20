@@ -318,6 +318,10 @@ module Decomplex
         out
       end
 
+      def descend_into_children?(_node, _stack)
+        true
+      end
+
       def after_structural_facts(document, out)
         record_implicit_state_accesses(document, out) if implicit_state_accesses?
       end
@@ -329,6 +333,8 @@ module Decomplex
       end
 
       def branch_decision_facts(document, node, stack, immutable_readers:, immutable_reader_types:, type_aliases:)
+        return [] if branch_decision_wrapper_for_real_branch?(node)
+
         out = []
         record_branch_decision(
           document,
@@ -344,6 +350,8 @@ module Decomplex
       end
 
       def branch_arm_facts(document, node, stack)
+        return [] if branch_decision_wrapper_for_real_branch?(node)
+
         out = []
         record_branch_arm(document, node, stack, out)
         out
@@ -555,7 +563,7 @@ module Decomplex
             assignment_lhs_read_target_keys: assignment_lhs_read_target_keys,
             assignment_lhs_target_keys: assignment_lhs_target_keys
           ),
-          co_uses: reads.combination(2).map { |left, right| [left, right] }
+          co_uses: reads.sort.combination(2).map { |left, right| [left, right] }
         )
       end
 
@@ -1781,6 +1789,15 @@ module Decomplex
       def branch_node?(node)
         branch_node_kinds.include?(node.kind) || hidden_match?(node) || hidden_if?(node) ||
           hidden_modifier_if?(node) || hidden_case?(node)
+      end
+
+      def branch_decision_wrapper_for_real_branch?(node)
+        return false unless ts_node?(node)
+        return false if branch_node_kinds.include?(node.kind) || hidden_match?(node) || hidden_case?(node)
+        return false unless hidden_if?(node) || hidden_modifier_if?(node)
+
+        first_named = node.named_children.first
+        ts_node?(first_named) && branch_node?(first_named)
       end
 
       def if_node?(node)
@@ -3178,6 +3195,8 @@ module Decomplex
 
           next_stack = profile.push_context(document, current_stack, current)
           yield current, next_stack
+          next unless profile.descend_into_children?(current, current_stack)
+
           current.children.reverse_each { |child| pending << [child, next_stack] }
         end
       end

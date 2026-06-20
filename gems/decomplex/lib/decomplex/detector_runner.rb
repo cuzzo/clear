@@ -229,6 +229,16 @@ module Decomplex
         @language = row.fetch("language", "ruby").to_sym
         @source = row.fetch("source", "")
         @lines = row.fetch("lines", @source.lines)
+        @root = objectify(row.fetch("root", empty_fact_node("program")))
+        @normalized_root = objectify(row.fetch("normalized_root", {
+                                                "type" => "ROOT",
+                                                "children" => [],
+                                                "first_lineno" => 1,
+                                                "first_column" => 0,
+                                                "last_lineno" => 1,
+                                                "last_column" => 0,
+                                                "text" => ""
+                                              }))
         @immutable_struct_readers = object_hash(row.fetch("immutable_struct_readers", {}))
         @immutable_struct_reader_types = object_hash(row.fetch("immutable_struct_reader_types", {}))
         @type_aliases = object_hash(row.fetch("type_aliases", {}))
@@ -244,6 +254,12 @@ module Decomplex
 
       FACT_ARRAYS.each do |name|
         define_method(name) { instance_variable_get("@#{name}") }
+      end
+
+      attr_reader :root, :normalized_root
+
+      def clone_candidates
+        Syntax.language_profile(language).clone_candidates(self)
       end
 
       def local_methods
@@ -290,6 +306,17 @@ module Decomplex
 
       def fact_array(value)
         Array(value).map { |item| objectify(item) }
+      end
+
+      def empty_fact_node(kind)
+        {
+          "kind" => kind,
+          "text" => "",
+          "span" => [1, 0, 1, 0],
+          "named" => true,
+          "field_name" => nil,
+          "children" => []
+        }
       end
 
       def object_hash(value)
@@ -345,6 +372,7 @@ module Decomplex
 
     class FactNode
       attr_reader :kind, :text, :span, :field_name, :children, :start_point, :end_point
+      attr_reader :start_byte, :end_byte
       attr_accessor :parent, :prev_sibling, :next_sibling
 
       def initialize(row, objectifier)
@@ -353,6 +381,8 @@ module Decomplex
         @span = row.fetch("span")
         @field_name = row["field_name"]
         @named = row.fetch("named", true)
+        @start_byte = row.fetch("start_byte", byte_offset(@span[0], @span[1]))
+        @end_byte = row.fetch("end_byte", byte_offset(@span[2], @span[3]))
         @children = Array(row.fetch("children", [])).map { |child| objectifier.call("node", child) }
         @children.each { |child| child.parent = self if child.respond_to?(:parent=) }
         @children.each_cons(2) do |left, right|
@@ -367,12 +397,26 @@ module Decomplex
         @named
       end
 
+      def child_count
+        @children.length
+      end
+
       def named_children
         @children.select { |child| child.respond_to?(:named?) && child.named? }
       end
 
+      def named_child_count
+        named_children.length
+      end
+
       def child_by_field_name(name)
         @children.find { |child| child.respond_to?(:field_name) && child.field_name.to_s == name.to_s }
+      end
+
+      private
+
+      def byte_offset(line, column)
+        ((line.to_i - 1) * 1_000_000) + column.to_i
       end
     end
 

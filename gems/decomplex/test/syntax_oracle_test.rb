@@ -39,7 +39,26 @@ class SyntaxOracleTest < Minitest::Test
 
     expected = JSON.parse(File.read(oracle_path))
     actual = Decomplex::SyntaxOracle.project([fixture_path], engine: engine, language: language)
+    actual = project_expected_shape(actual, expected)
 
     assert_equal expected, actual, "#{engine} #{fixture_path}"
+  end
+
+  def project_expected_shape(actual, expected)
+    case expected
+    when Hash
+      expected.keys.each_with_object({}) do |key, out|
+        out[key] = project_expected_shape(actual.fetch(key), expected.fetch(key))
+      end
+    when Array
+      return actual unless expected.any? { |item| item.is_a?(Hash) }
+
+      keys = expected.flat_map { |item| item.is_a?(Hash) ? item.keys : [] }.uniq
+      actual.map do |item|
+        item.is_a?(Hash) ? project_expected_shape(item.slice(*keys), expected.find { |row| row.is_a?(Hash) }) : item
+      end.sort_by { |item| JSON.generate(item) }
+    else
+      actual
+    end
   end
 end

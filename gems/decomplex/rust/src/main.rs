@@ -946,9 +946,9 @@ fn run_detector_on_fact_input(
             let options = fixture.get("options").unwrap_or(&Value::Null);
             let mass = value_usize(options, "mass", 32)?;
             let fuzzy = value_usize(options, "fuzzy", 1)?;
-            Ok(json!(flay_similarity::scan_documents(
-                documents, mass, fuzzy
-            )))
+            Ok(json!({
+                "findings": flay_similarity::scan_documents(documents, mass, fuzzy),
+            }))
         }
         "temporal-ordering-pressure" => {
             Ok(json!(temporal_ordering_pressure::scan_documents(documents)))

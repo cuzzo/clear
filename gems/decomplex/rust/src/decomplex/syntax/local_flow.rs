@@ -2,9 +2,11 @@ use crate::decomplex::ast::{self, Child, Node, RawNode, Span};
 use crate::decomplex::syntax::adapters::{language_profile, LanguageProfile};
 use crate::decomplex::syntax::{Document, FunctionDef, Language};
 use anyhow::Result;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LocalFlowRow {
@@ -94,6 +96,42 @@ pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
         );
     }
     out
+}
+
+pub fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for statement in &method.statements {
+        if statement.writes.len() != 1 {
+            continue;
+        }
+        let Some(name) = statement.writes.iter().next() else {
+            continue;
+        };
+        if map.contains_key(name) {
+            continue;
+        }
+        if let Some(source) = local_contract_source(name, &statement.source) {
+            map.insert(name.clone(), source);
+        }
+    }
+    map
+}
+
+fn local_contract_source(name: &str, source: &str) -> Option<String> {
+    let pattern = format!(
+        r"(?s)\b{}\b\s*(?::=|=)\s*(.+?)\s*;?\s*$",
+        regex::escape(name)
+    );
+    let assignment = Regex::new(&pattern).ok()?;
+    let rhs = assignment.captures(source)?.get(1)?.as_str().trim();
+    static CONDITIONAL_SOURCE: OnceLock<Regex> = OnceLock::new();
+    let conditional =
+        CONDITIONAL_SOURCE.get_or_init(|| Regex::new(r"\s(?:if|unless|rescue)\s|\?|:").unwrap());
+    if conditional.is_match(rhs) {
+        None
+    } else {
+        Some(rhs.to_string())
+    }
 }
 
 fn normalized_local_methods(document: &Document) -> Vec<MethodSummary> {
@@ -270,8 +308,18 @@ fn raw_local_reads(
     local_names: &BTreeSet<String>,
     profile: &dyn LanguageProfile,
 ) -> BTreeSet<String> {
+    raw_local_read_list(node, local_names, profile)
+        .into_iter()
+        .collect()
+}
+
+fn raw_local_read_list(
+    node: &RawNode,
+    local_names: &BTreeSet<String>,
+    profile: &dyn LanguageProfile,
+) -> Vec<String> {
     if raw_nested_local_scope(node, profile) {
-        return BTreeSet::new();
+        return Vec::new();
     }
 
     let mut reads = Vec::new();
@@ -288,12 +336,14 @@ fn raw_local_reads(
             && !raw_declaration_name_in_tree(node, child, profile)
             && !raw_declaration_name(child, parent, profile)
             && !raw_member_name(child, parent, profile)
+            && !raw_call_method_name(child, parent, profile)
             && !raw_keyed_element_key(child, parent, profile)
+            && !reads.contains(&name)
         {
             reads.push(name);
         }
     });
-    reads.into_iter().collect()
+    reads
 }
 
 fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<String> {
@@ -908,9 +958,8 @@ fn raw_assignment_lhs_read_in_tree(
     {
         return false;
     }
-    if profile
-        .assignment_node_kinds()
-        .contains(&root.kind.as_str())
+    if profile.assignment_node_kinds().contains(&root.kind.as_str())
+        || (profile.language() == Language::Ruby && raw_assignment_statement(root, profile))
     {
         if let Some(lhs) = raw_named_children(root).first() {
             if raw_assignment_lhs_read_target(lhs, target, profile) {
@@ -934,9 +983,8 @@ fn raw_assignment_lhs_write_in_tree(
     {
         return false;
     }
-    if profile
-        .assignment_node_kinds()
-        .contains(&root.kind.as_str())
+    if profile.assignment_node_kinds().contains(&root.kind.as_str())
+        || (profile.language() == Language::Ruby && raw_assignment_statement(root, profile))
     {
         if let Some(lhs) = raw_named_children(root).first() {
             if raw_assignment_lhs_write_target(lhs, target, profile) {
@@ -1104,6 +1152,25 @@ fn raw_call_name(node: &RawNode, parent: Option<&RawNode>, profile: &dyn Languag
             .first()
             .map(|callee| std::ptr::eq(*callee, node))
             .unwrap_or(false)
+}
+
+fn raw_call_method_name(
+    node: &RawNode,
+    parent: Option<&RawNode>,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    let Some(parent) = parent else {
+        return false;
+    };
+    if !profile.call_node_kinds().contains(&parent.kind.as_str()) {
+        return false;
+    }
+    parent
+        .children
+        .iter()
+        .find(|child| child.field_name.as_deref() == Some("method"))
+        .map(|method| std::ptr::eq(method, node))
+        .unwrap_or(false)
 }
 
 fn raw_keyed_element_key(
