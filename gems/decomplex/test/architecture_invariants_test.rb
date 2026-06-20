@@ -15,6 +15,13 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     temporal_ordering_pressure weighted_inlined_cognitive_complexity
   ].freeze
   DETECTOR_FILES = DETECTOR_BASENAMES.map { |name| File.join(LIB, "#{name}.rb") }.freeze
+  POST_SYNTAX_CONSUMER_BASENAMES = (
+    DETECTOR_BASENAMES + %w[
+      convergence delta report report_facts root_cause sarif
+    ]
+  ).uniq.freeze
+  POST_SYNTAX_CONSUMER_FILES =
+    POST_SYNTAX_CONSUMER_BASENAMES.map { |name| File.join(LIB, "#{name}.rb") }.freeze
 
   RAW_TREE_SITTER_PATTERNS = {
     "raw child traversal" => /(?<!\.)\.(?:children|named_children)\b/,
@@ -24,6 +31,15 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     "Tree-sitter classes" => /\bTreeSitter(?:Adapter|LanguageAdapter|Normalizer|NodeFacade|FacadeContext)?\b/,
     "raw node predicate helpers" => /\b(?:ts_node\?|tree_sitter_node\?)\b/,
     "raw node duck typing" => /respond_to\?\s*\(\s*:children\s*\)/
+  }.freeze
+  ADAPTER_BOUNDARY_PATTERNS = RAW_TREE_SITTER_PATTERNS.merge(
+    "syntax adapter profile access" => /\bSyntax\.language_profile\b|\blanguage_profile\s*\(/,
+    "raw document root access" => /\bdocument\.root\b/,
+    "normalized document root access" => /\bdocument\.normalized_root\b/
+  ).freeze
+  CONCRETE_LANGUAGE_BRANCH_PATTERNS = {
+    "concrete language branch" =>
+      /\b(?:case|when|if|elsif)\b.*(?::ruby|:python|:javascript|:typescript|:go|:rust|:zig|:lua|:c|:cpp|:csharp|:java|:swift|:kotlin|:php)\b|\blanguage\s*==\s*(?::ruby|:python|:javascript|:typescript|:go|:rust|:zig|:lua|:c|:cpp|:csharp|:java|:swift|:kotlin|:php)\b/
   }.freeze
 
   SYNTAX_RB_EXTENSION_HOST_PATTERNS = {
@@ -67,6 +83,24 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Detectors must consume Syntax facts instead of raw Tree-sitter nodes",
+      offenders
+    )
+  end
+
+  def test_post_syntax_consumers_do_not_cross_adapter_boundary
+    offenders = scan_files(POST_SYNTAX_CONSUMER_FILES, ADAPTER_BOUNDARY_PATTERNS)
+
+    assert_empty offenders, format_offenders(
+      "Code after Syntax must consume facts instead of parser or adapter internals",
+      offenders
+    )
+  end
+
+  def test_post_syntax_consumers_do_not_branch_on_concrete_languages
+    offenders = scan_files(POST_SYNTAX_CONSUMER_FILES, CONCRETE_LANGUAGE_BRANCH_PATTERNS)
+
+    assert_empty offenders, format_offenders(
+      "Code after Syntax must not contain language-specific branches",
       offenders
     )
   end

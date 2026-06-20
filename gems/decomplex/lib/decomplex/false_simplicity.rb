@@ -60,13 +60,7 @@ module Decomplex
     end
 
     def self.core_owner_names(language)
-      profile = Syntax.language_profile(language)
-      return [] unless profile.respond_to?(:effect_lexicon, true)
-
-      lexicon = profile.send(:effect_lexicon)
-      lexicon&.core_consts.to_a
-    rescue ArgumentError
-      []
+      Syntax.core_owner_names(language)
     end
 
     # Groups hits by [kind, detail] and ranks by blast radius:

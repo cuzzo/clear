@@ -5,6 +5,38 @@ fn crate_src() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/decomplex")
 }
 
+fn detector_files() -> Vec<PathBuf> {
+    rust_files(crate_src().join("detectors"))
+}
+
+fn post_syntax_consumer_files() -> Vec<PathBuf> {
+    let mut files = detector_files();
+    files.extend(
+        [
+            "convergence.rs",
+            "delta.rs",
+            "report.rs",
+            "report_facts.rs",
+            "report_value.rs",
+            "root_cause.rs",
+            "sarif.rs",
+        ]
+        .iter()
+        .map(|name| crate_src().join(name)),
+    );
+    files
+}
+
+fn rust_files(dir: PathBuf) -> Vec<PathBuf> {
+    let mut files = fs::read_dir(&dir)
+        .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
+        .map(|entry| entry.expect("rust file entry").path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
 #[test]
 fn every_supported_language_has_a_syntax_adapter_file() {
     let adapters = crate_src().join("syntax/adapters");
@@ -140,14 +172,7 @@ fn ast_adapters_do_not_delegate_through_a_language_kind_selector() {
 
 #[test]
 fn detectors_do_not_import_tree_sitter_directly() {
-    let detectors = crate_src().join("detectors");
-    let entries = fs::read_dir(&detectors).expect("read detectors dir");
-
-    for entry in entries {
-        let path = entry.expect("detector entry").path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-            continue;
-        }
+    for path in detector_files() {
         let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
         assert!(
             !source.contains("tree_sitter"),
@@ -159,7 +184,6 @@ fn detectors_do_not_import_tree_sitter_directly() {
 
 #[test]
 fn detectors_do_not_cross_the_syntax_boundary() {
-    let detectors = crate_src().join("detectors");
     let forbidden = [
         ("syntax adapter access", "syntax::adapters"),
         ("language profile access", "language_profile("),
@@ -188,11 +212,7 @@ fn detectors_do_not_cross_the_syntax_boundary() {
     ];
     let mut offenders = Vec::new();
 
-    for entry in fs::read_dir(&detectors).expect("read detectors dir") {
-        let path = entry.expect("detector entry").path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-            continue;
-        }
+    for path in detector_files() {
         let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
         for (reason, pattern) in forbidden {
             if source.contains(pattern) {
@@ -204,6 +224,74 @@ fn detectors_do_not_cross_the_syntax_boundary() {
     assert!(
         offenders.is_empty(),
         "Detectors must consume syntax facts, not language/parser internals:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn post_syntax_consumers_do_not_access_parser_or_adapter_internals() {
+    let forbidden = [
+        ("syntax adapter access", "syntax::adapters"),
+        ("language profile access", "language_profile("),
+        ("raw syntax node type", "RawNode"),
+        ("tree-sitter access", "tree_sitter"),
+        ("raw document root access", "document.root"),
+        (
+            "normalized document root access",
+            "document.normalized_root",
+        ),
+    ];
+    let mut offenders = Vec::new();
+
+    for path in post_syntax_consumer_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
+        for (reason, pattern) in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Post-syntax consumers must consume generated facts, not parser/adaptor internals:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn post_syntax_consumers_do_not_branch_on_concrete_languages() {
+    let forbidden = [
+        ("Ruby language branch", "Language::Ruby"),
+        ("Python language branch", "Language::Python"),
+        ("JavaScript language branch", "Language::JavaScript"),
+        ("Java language branch", "Language::Java"),
+        ("TypeScript language branch", "Language::TypeScript"),
+        ("Swift language branch", "Language::Swift"),
+        ("Kotlin language branch", "Language::Kotlin"),
+        ("Go language branch", "Language::Go"),
+        ("Rust language branch", "Language::Rust"),
+        ("Zig language branch", "Language::Zig"),
+        ("Lua language branch", "Language::Lua"),
+        ("C language branch", "Language::C"),
+        ("Cpp language branch", "Language::Cpp"),
+        ("CSharp language branch", "Language::CSharp"),
+        ("Php language branch", "Language::Php"),
+    ];
+    let mut offenders = Vec::new();
+
+    for path in post_syntax_consumer_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
+        for (reason, pattern) in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Post-syntax consumers must not encode language-specific branches:\n{}",
         offenders.join("\n")
     );
 }

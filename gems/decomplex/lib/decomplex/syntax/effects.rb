@@ -11,6 +11,16 @@ module Decomplex
       keyword_init: true
     )
 
+    def self.core_owner_names(language)
+      profile = language_profile(language)
+      return [] unless profile.respond_to?(:effect_lexicon, true)
+
+      lexicon = profile.send(:effect_lexicon)
+      Array(lexicon&.core_consts)
+    rescue ArgumentError
+      []
+    end
+
     class Document
       def semantic_effect_sites
         @semantic_effect_sites ||= adapter.semantic_effect_sites(self)
