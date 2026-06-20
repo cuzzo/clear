@@ -12,3 +12,4 @@ pub mod report_value;
 pub mod root_cause;
 pub mod sarif;
 pub mod syntax;
+pub mod syntax_oracle;

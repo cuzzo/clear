@@ -34,6 +34,7 @@ require_relative "decomplex/convergence"
 require_relative "decomplex/root_cause"
 require_relative "decomplex/delta"
 require_relative "decomplex/report_facts"
+require_relative "decomplex/syntax_oracle"
 
 # Decomplex: decision-level duplication + neglected-condition detector.
 # See decomplex.gemspec for the rationale. v0 scope is exact-match

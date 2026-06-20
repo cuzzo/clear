@@ -10,6 +10,7 @@ use decomplex_rust::decomplex::parallel;
 use decomplex_rust::decomplex::report::Report;
 use decomplex_rust::decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
 use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
+use decomplex_rust::decomplex::syntax_oracle;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -266,6 +267,14 @@ fn run() -> Result<()> {
             let facts = read_facts(input.as_ref(), from_stdin)?;
             render_report(&facts, &format, output.as_ref())?;
         }
+        Command::SyntaxFacts {
+            language, files, ..
+        } => {
+            let language = Language::parse(&language)?;
+            let facts = syntax_oracle::project_files(&files, language)
+                .with_context(|| "failed to collect syntax facts")?;
+            println!("{}", serde_json::to_string(&facts)?);
+        }
         Command::DetectorFacts { input } => {
             let fixture = read_facts(Some(&input), false)?;
             let detector = fixture
@@ -429,6 +438,11 @@ enum Command {
         format: String,
         output: Option<PathBuf>,
     },
+    SyntaxFacts {
+        language: String,
+        files: Vec<PathBuf>,
+        jobs: Option<usize>,
+    },
     DetectorFacts {
         input: PathBuf,
     },
@@ -463,7 +477,8 @@ impl Command {
             | Self::FalseSimplicity { jobs, .. }
             | Self::FatUnion { jobs, .. }
             | Self::Facts { jobs, .. }
-            | Self::Report { jobs, .. } => *jobs,
+            | Self::Report { jobs, .. }
+            | Self::SyntaxFacts { jobs, .. } => *jobs,
             Self::RenderReport { .. } | Self::DetectorFacts { .. } => None,
         }
     }
@@ -512,6 +527,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         "detector-facts" => {
             let input = parse_input_only_args(cursor.collect(), "detector-facts")?;
             Ok(Command::DetectorFacts { input })
+        }
+        "syntax-facts" => {
+            let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
+            if files.is_empty() {
+                bail!("syntax-facts requires at least one file");
+            }
+            Ok(Command::SyntaxFacts {
+                language,
+                files,
+                jobs,
+            })
         }
         "state-writes" => {
             let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;

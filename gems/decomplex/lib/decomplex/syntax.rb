@@ -1383,6 +1383,8 @@ module Decomplex
       end
 
       def record_state_read(document, node, stack, out)
+        return if assignment_lhs?(node)
+
         target = state_read_target(node)
         return unless target
         target = normalize_target_receiver(target, stack)

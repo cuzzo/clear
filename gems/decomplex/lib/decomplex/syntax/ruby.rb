@@ -273,9 +273,24 @@ module Decomplex
 
       def ruby_single_expression_function_body(node)
         body = ruby_method_body_wrapper(node)
+        return ruby_endless_method_expression(node) unless body
+
         return nil unless body
 
         ruby_single_expression_body_child(body)
+      end
+
+      def ruby_endless_method_expression(node)
+        return nil unless ts_node?(node)
+        return nil unless %w[method singleton_method].include?(node.kind)
+        return nil if node.named_children.any? { |child| child.kind == "body_statement" }
+
+        node.named_children.reverse.find do |child|
+          !%w[
+            identifier field_identifier property_identifier constant self
+            method_parameters superclass
+          ].include?(child.kind)
+        end
       end
 
       def ruby_method_body_wrapper(node)
