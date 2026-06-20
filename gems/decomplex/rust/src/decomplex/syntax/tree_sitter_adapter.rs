@@ -1076,7 +1076,13 @@ fn record_branch_decision(
     if !branch_decision_node(profile, node, source) {
         return;
     }
+    if hidden_case_wrapper_for_real_case(profile, node) {
+        return;
+    }
     if branch_decision_wrapper_for_real_branch(profile, node, source) {
+        return;
+    }
+    if nested_block_branch_decision(profile, node) {
         return;
     }
     let Some(condition) = branch_condition_node(profile, node) else {
@@ -1259,6 +1265,30 @@ fn branch_decision_wrapper_for_real_branch(
         .unwrap_or(false)
 }
 
+fn hidden_case_wrapper_for_real_case(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.hidden_case(node) && profile.hidden_case_source_node(node).is_some()
+}
+
+fn nested_block_branch_decision(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if profile.function_node_kinds().contains(&parent.kind())
+            || profile.class_owner_node_kinds().contains(&parent.kind())
+            || profile.module_owner_node_kinds().contains(&parent.kind())
+        {
+            return false;
+        }
+        if profile
+            .branch_nested_scope_node_kinds()
+            .contains(&parent.kind())
+        {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
 fn branch_condition_node<'tree>(
     _profile: &dyn LanguageProfile,
     node: Node<'tree>,
@@ -1302,6 +1332,12 @@ fn collect_branch_state_refs(
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
+        if profile
+            .branch_nested_scope_node_kinds()
+            .contains(&child.kind())
+        {
+            continue;
+        }
         collect_branch_state_refs(profile, child, source, context, out);
     }
 }
@@ -2269,7 +2305,13 @@ fn namespace_receiver(text: &str) -> bool {
     if !starts_uppercase(receiver) {
         return false;
     }
-    !receiver.contains('(') || receiver.contains('.') || receiver.contains("::")
+    if receiver.contains('(') {
+        return false;
+    }
+    receiver
+        .split(['.', ':'])
+        .filter(|part| !part.is_empty())
+        .all(starts_uppercase)
 }
 
 pub(crate) fn first_named_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {

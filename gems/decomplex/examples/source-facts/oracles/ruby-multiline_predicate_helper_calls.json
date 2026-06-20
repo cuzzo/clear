@@ -1,0 +1,97 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "data_carrier?",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "line": 12,
+        "visibility": "public",
+        "params": [
+          "state_count",
+          "public_methods"
+        ]
+      },
+      {
+        "name": "summarize",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "state_names",
+          "public_funcs"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "data_carrier?",
+        "function": "summarize",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "state_count: state_names.size",
+          "public_methods: public_funcs.size"
+        ]
+      },
+      {
+        "receiver": "public_methods",
+        "message": "positive?",
+        "function": "data_carrier?",
+        "line": 13,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "state_count",
+        "message": "zero?",
+        "function": "data_carrier?",
+        "line": 13,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "state_names",
+        "message": "size",
+        "function": "summarize",
+        "line": 6,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "public_funcs",
+        "message": "size",
+        "function": "summarize",
+        "line": 7,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "self",
+        "message": "data_carrier",
+        "function": "summarize",
+        "line": 9,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ]
+  }
+}

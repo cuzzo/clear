@@ -1,0 +1,41 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "line": 4,
+        "visibility": "public",
+        "params": []
+      },
+      {
+        "name": "build_owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "line": 8,
+        "visibility": "public",
+        "params": []
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "build_owner_edges",
+        "function": "owner_edges",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_writes": [
+      {
+        "receiver": "self",
+        "field": "@owner_edges",
+        "function": "owner_edges",
+        "line": 5
+      }
+    ]
+  }
+}

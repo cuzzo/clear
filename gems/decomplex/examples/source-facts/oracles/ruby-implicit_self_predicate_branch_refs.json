@@ -1,0 +1,155 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "mod",
+          "fn",
+          "calls"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "state_touch_count",
+        "function": "branch_refs",
+        "line": 6,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "fn"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "internal_calls_for",
+        "function": "branch_refs",
+        "line": 7,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "fn"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "states",
+        "function": "branch_refs",
+        "line": 5,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "mod"
+        ]
+      },
+      {
+        "receiver": "states(mod)",
+        "message": "empty?",
+        "function": "branch_refs",
+        "line": 5,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "state_touch_count(fn)",
+        "message": "positive?",
+        "function": "branch_refs",
+        "line": 6,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "calls",
+        "message": "empty?",
+        "function": "branch_refs",
+        "line": 7,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "internal_calls_for(fn)",
+        "message": "empty?",
+        "function": "branch_refs",
+        "line": 7,
+        "conditional": true,
+        "control": "conditional",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "states(mod)",
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 5
+      },
+      {
+        "receiver": "calls",
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 7
+      },
+      {
+        "receiver": "internal_calls_for(fn)",
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 7
+      },
+      {
+        "receiver": "state_touch_count(fn)",
+        "field": "positive?",
+        "function": "branch_refs",
+        "line": 6
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "branch_refs",
+        "line": 5,
+        "predicate": "states(mod).empty?",
+        "state_refs": [
+          "states(mod).empty?"
+        ]
+      },
+      {
+        "function": "branch_refs",
+        "line": 6,
+        "predicate": "state_touch_count(fn).positive?",
+        "state_refs": [
+          "state_touch_count(fn).positive?"
+        ]
+      },
+      {
+        "function": "branch_refs",
+        "line": 7,
+        "predicate": "calls.empty? && internal_calls_for(fn).empty?",
+        "state_refs": [
+          "calls.empty?",
+          "internal_calls_for(fn).empty?"
+        ]
+      }
+    ]
+  }
+}

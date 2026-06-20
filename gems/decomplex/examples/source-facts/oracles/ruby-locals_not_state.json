@@ -60,6 +60,15 @@
         "function": "build",
         "line": 11
       }
+    ],
+    "protocol_method_effects": [
+      {
+        "owner": "SourceFactLocalsNotState",
+        "name": "build",
+        "line": 4,
+        "reads": [],
+        "writes": []
+      }
     ]
   },
   "local_flow": [

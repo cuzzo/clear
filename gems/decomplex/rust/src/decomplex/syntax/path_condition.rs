@@ -334,6 +334,7 @@ fn raw_branch_body_nodes<'a>(
 
 fn raw_modifier_branch(node: &RawNode) -> bool {
     matches!(node.kind.as_str(), "if_modifier" | "unless_modifier")
+        || raw_hidden_modifier_branch(node)
 }
 
 fn raw_flatten_branch_body<'a>(
@@ -341,6 +342,9 @@ fn raw_flatten_branch_body<'a>(
     body: &'a RawNode,
 ) -> Vec<&'a RawNode> {
     if raw_simple_action_wrapper(profile, body) {
+        return vec![body];
+    }
+    if raw_path_action_node(profile, body) {
         return vec![body];
     }
     let body_children = raw_named_children(body);
@@ -381,7 +385,10 @@ fn raw_unless_node(node: &RawNode) -> bool {
         || node
             .children
             .first()
-            .map(|child| child.kind == "unless" || child.text == "unless")
+            .map(|child| !child.named && (child.kind == "unless" || child.text == "unless"))
+            .unwrap_or(false)
+        || raw_modifier_keyword(node)
+            .map(|keyword| keyword == "unless")
             .unwrap_or(false)
 }
 
@@ -443,6 +450,40 @@ fn raw_assignment_statement(profile: &dyn LanguageProfile, node: &RawNode) -> bo
 
 fn raw_branch_node(profile: &dyn LanguageProfile, node: &RawNode) -> bool {
     profile.branch_node_kinds().contains(&node.kind.as_str())
+        || raw_hidden_modifier_branch(node)
+        || raw_keyword_branch_wrapper(node)
+}
+
+fn raw_keyword_branch_wrapper(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "body_statement" | "block" | "statements" | "statement_list" | "expression_statement"
+    ) && node
+        .children
+        .first()
+        .map(|child| !child.named && matches!(child.kind.as_str(), "if" | "unless"))
+        .unwrap_or(false)
+}
+
+fn raw_hidden_modifier_branch(node: &RawNode) -> bool {
+    raw_modifier_keyword(node).is_some()
+}
+
+fn raw_modifier_keyword<'a>(node: &'a RawNode) -> Option<&'a str> {
+    if !matches!(
+        node.kind.as_str(),
+        "body_statement" | "block" | "statements" | "statement_list" | "expression_statement"
+    ) {
+        return None;
+    }
+    let mut seen_named = false;
+    for child in &node.children {
+        seen_named |= child.named;
+        if seen_named && !child.named && matches!(child.kind.as_str(), "if" | "unless") {
+            return Some(child.kind.as_str());
+        }
+    }
+    None
 }
 
 fn raw_nested_local_scope(profile: &dyn LanguageProfile, node: &RawNode) -> bool {

@@ -141,12 +141,29 @@ module Decomplex
       end
 
       def state_read_target(node)
+        if (target = ruby_single_call_wrapper_state_read_target(node))
+          return target
+        end
+
         if ruby_explicit_receiver_body_read_node?(node) &&
            (target = ruby_explicit_receiver_body_call_target(node))
           return { receiver: target[:receiver], field: target[:message] }
         end
 
         ruby_unparenthesized_member_argument_target(node) || ruby_state_variable_target(node) || super
+      end
+
+      def ruby_single_call_wrapper_state_read_target(node)
+        return nil unless ts_node?(node) && node.kind == "body_statement"
+
+        named = node.named_children.reject { |child| child.kind == "comment" }
+        return nil unless named.size == 1
+
+        child = named.first
+        return nil unless child.kind == "call"
+        return nil unless normalize_text(child.text) == normalize_text(node.text)
+
+        state_read_target(child)
       end
 
       def state_target(lhs)
@@ -773,9 +790,12 @@ module Decomplex
       end
 
       def ruby_explicit_receiver_body_call_target(node)
+        return nil unless node.children.any? { |child| !child.named? && child.text == "." }
+
         receiver, message = node.named_children
         return nil unless receiver && message
-        return nil unless %w[self constant identifier].include?(receiver.kind)
+        return nil unless %w[self constant identifier].include?(receiver.kind) ||
+                          ruby_constant_constructor_call?(receiver)
         return nil unless %w[identifier constant].include?(message.kind)
 
         {
@@ -788,7 +808,19 @@ module Decomplex
       def ruby_explicit_receiver_body_read_node?(node)
         return true if node.kind == "block_body"
 
-        node.kind == "body_statement" && parent_node(node)&.kind == "do_block"
+        return false unless node.kind == "body_statement"
+        return true if parent_node(node)&.kind == "do_block"
+        return false if hidden_ruby_method_definition?(node) || hidden_ruby_owner_declaration?(node)
+
+        node.children.any? { |child| !child.named? && child.text == "." }
+      end
+
+      def ruby_constant_constructor_call?(node)
+        return false unless ts_node?(node) && node.kind == "call"
+
+        receiver = named_field(node, "receiver") || node.named_children.first
+        method = named_field(node, "method") || node.named_children[1]
+        receiver&.kind == "constant" && method&.text == "new"
       end
 
       def ruby_simple_call_text?(text)

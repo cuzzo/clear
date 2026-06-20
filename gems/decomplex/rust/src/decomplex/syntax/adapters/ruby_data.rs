@@ -44,6 +44,7 @@ pub(crate) const BOOLEAN_WRAPPER_NODE_KINDS: &[&str] =
 pub(crate) const ACCESSOR_CALL_NODE_KINDS: &[&str] = &["call"];
 pub(crate) const ARGUMENT_LIST_NODE_KINDS: &[&str] = &["argument_list"];
 pub(crate) const BLOCK_ARGUMENT_NODE_KINDS: &[&str] = &["do_block", "block"];
+pub(crate) const BRANCH_NESTED_SCOPE_NODE_KINDS: &[&str] = &["block"];
 
 pub(crate) const CALL_SHAPE: CallShape = CallShape {
     default_receiver: "self",

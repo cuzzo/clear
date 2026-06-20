@@ -354,6 +354,10 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn branch_nested_scope_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn navigation_suffix_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }

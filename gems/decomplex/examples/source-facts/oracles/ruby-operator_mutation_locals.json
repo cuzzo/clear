@@ -1,0 +1,55 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "append_all",
+        "owner": "SourceFactOperatorMutationLocals",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "items"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "self",
+        "message": "out",
+        "function": "append_all",
+        "line": 7,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "items",
+        "message": "each",
+        "function": "append_all",
+        "line": 6,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "items",
+        "field": "each",
+        "function": "append_all",
+        "line": 6
+      }
+    ],
+    "semantic_effects": [
+      {
+        "kind": "hidden_mutation",
+        "detail": "<<",
+        "function": "append_all",
+        "line": 6
+      }
+    ]
+  }
+}

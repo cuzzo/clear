@@ -1,7 +1,8 @@
 use super::super::calls;
 use super::super::raw_tree::{
     first_child_kind as raw_first_child_kind, named_children as raw_named_children,
-    next_sibling_text as raw_next_sibling_text, previous_sibling_text as raw_previous_sibling_text,
+    next_sibling as raw_next_sibling, next_sibling_text as raw_next_sibling_text,
+    previous_sibling_text as raw_previous_sibling_text,
 };
 use super::super::tree_sitter_adapter::{
     direct_operator, first_child_kind, first_named_text, named_children, next_sibling_raw_text,
@@ -150,6 +151,10 @@ impl LanguageProfile for RubyProfile {
         ruby_data::BLOCK_ARGUMENT_NODE_KINDS
     }
 
+    fn branch_nested_scope_node_kinds(&self) -> &[&str] {
+        ruby_data::BRANCH_NESTED_SCOPE_NODE_KINDS
+    }
+
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
         if node.kind() == "call" && ruby_single_command_argument_call(node, source) {
             return None;
@@ -163,6 +168,9 @@ impl LanguageProfile for RubyProfile {
                 .or_else(|| ruby_bare_call_target(node, source)),
             _ => None,
         }?;
+        if ruby_whole_body_implicit_self_chain(node, source) {
+            return None;
+        }
         if target.arguments.is_empty() && !ruby_call_has_block(node) {
             if let Some(span) = calls::narrow_no_arg_call_span(
                 node,
@@ -174,16 +182,10 @@ impl LanguageProfile for RubyProfile {
                 target.span = Some(span);
             }
         }
-        let effective_span = target
-            .span
-            .unwrap_or_else(|| target.source_node.map(span).unwrap_or_else(|| span(node)));
-        if target.receiver == "self"
-            && target.message.ends_with('?')
-            && effective_span[0] != effective_span[2]
-        {
+        if ruby_chained_element_predicate_target(&target) {
             return None;
         }
-        if ruby_chained_element_predicate_target(&target) {
+        if ruby_sorbet_signature_chain_target(node, source, &target) {
             return None;
         }
         ruby_valid_call_target(&target).then_some(target)
@@ -217,6 +219,39 @@ impl LanguageProfile for RubyProfile {
             }
             _ => self.default_function_name(node, source),
         }
+    }
+
+    fn single_expression_body<'tree>(&self, node: Node<'tree>) -> Option<Node<'tree>> {
+        let mut cursor = node.walk();
+        if node.children(&mut cursor).any(|child| {
+            self.expression_body_operator_tokens()
+                .contains(&child.kind())
+        }) {
+            return named_children(node).last().copied();
+        }
+
+        let body = node.child_by_field_name("body").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .rev()
+                .find(|child| self.function_body_node_kinds().contains(&child.kind()))
+        })?;
+        let named = named_children(body)
+            .into_iter()
+            .filter(|child| child.kind() != "comment")
+            .collect::<Vec<_>>();
+        if named.len() == 1 {
+            return named.first().copied();
+        }
+
+        let operator = direct_operator(body);
+        if body.kind() == "body_statement"
+            && self.comparison_operators().contains(&operator.as_str())
+        {
+            return Some(body);
+        }
+
+        None
     }
 
     fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
@@ -307,6 +342,9 @@ impl LanguageProfile for RubyProfile {
     fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
         let target = ruby_state_variable_target(node, source)
             .or_else(|| self.default_state_read_target(node, source))?;
+        if ruby_whole_body_implicit_self_chain(node, source) {
+            return None;
+        }
         if ruby_direct_flat_map_block_statement(node, source) {
             return None;
         }
@@ -586,6 +624,45 @@ fn ruby_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget
     )
 }
 
+fn ruby_implicit_self_call_receiver(node: Node<'_>, source: &str) -> bool {
+    let Some(receiver) = node.child_by_field_name("receiver") else {
+        return false;
+    };
+    if receiver.kind() != "call" || receiver.child_by_field_name("receiver").is_some() {
+        return false;
+    }
+    let message = receiver
+        .child_by_field_name("method")
+        .or_else(|| named_children(receiver).into_iter().next())
+        .map(|method| node_text(method, source).to_string());
+    let Some(message) = message else {
+        return false;
+    };
+    ruby_simple_call_text(&message)
+        && message
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_lowercase() || ch == '_')
+            .unwrap_or(false)
+}
+
+fn ruby_whole_body_implicit_self_chain(node: Node<'_>, source: &str) -> bool {
+    if !ruby_implicit_self_call_receiver(node, source) {
+        return false;
+    }
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "body_statement" {
+        return false;
+    }
+    let named = named_children(parent)
+        .into_iter()
+        .filter(|child| child.kind() != "comment")
+        .collect::<Vec<_>>();
+    named.len() == 1 && named.first().copied() == Some(node)
+}
+
 fn ruby_visibility_call(call: &CallSite) -> bool {
     call.function == "(top-level)"
         && call.receiver == "self"
@@ -676,10 +753,19 @@ fn ruby_explicit_receiver_body_call_target<'tree>(
     node: Node<'tree>,
     source: &str,
 ) -> Option<CallTarget<'tree>> {
+    let mut cursor = node.walk();
+    if !node
+        .children(&mut cursor)
+        .any(|child| !child.is_named() && node_text(child, source) == ".")
+    {
+        return None;
+    }
     let children = named_children(node);
     let receiver = *children.first()?;
     let message = *children.get(1)?;
-    if !matches!(receiver.kind(), "self" | "constant" | "identifier") {
+    if !matches!(receiver.kind(), "self" | "constant" | "identifier")
+        && !ruby_constant_constructor_call(receiver, source)
+    {
         return None;
     }
     if !matches!(message.kind(), "identifier" | "constant") {
@@ -699,6 +785,24 @@ fn ruby_explicit_receiver_body_call_target<'tree>(
         message_span[3],
     ]);
     Some(target)
+}
+
+fn ruby_constant_constructor_call(node: Node<'_>, source: &str) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let receiver = node
+        .child_by_field_name("receiver")
+        .or_else(|| named_children(node).into_iter().next());
+    let method = node
+        .child_by_field_name("method")
+        .or_else(|| named_children(node).into_iter().nth(1));
+    receiver
+        .map(|receiver| receiver.kind() == "constant")
+        .unwrap_or(false)
+        && method
+            .map(|method| node_text(method, source) == "new")
+            .unwrap_or(false)
 }
 
 fn ruby_proc_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
@@ -1074,6 +1178,9 @@ fn ruby_bare_call_identifier(node: Node<'_>, source: &str) -> bool {
                 .map(|sibling| sibling.kind() == "argument_list")
                 .unwrap_or(false);
     }
+    if parent.kind() == "operator_assignment" {
+        return ruby_operator_assignment_rhs_bare_call(node, parent, source);
+    }
     if next_sibling_raw_text(node).as_deref() == Some("=")
         || previous_sibling_raw_text(node).as_deref() == Some("=")
         || next_sibling_raw_text(node).as_deref() == Some(".")
@@ -1098,6 +1205,24 @@ fn ruby_bare_call_identifier(node: Node<'_>, source: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn ruby_operator_assignment_rhs_bare_call(node: Node<'_>, parent: Node<'_>, source: &str) -> bool {
+    let children = named_children(parent);
+    if children.get(1).copied() != Some(node) || !ruby_simple_call_text(node_text(node, source)) {
+        return false;
+    }
+    let Some(grandparent) = parent.parent() else {
+        return false;
+    };
+    if grandparent.kind() != "body_statement" {
+        return false;
+    }
+    let named = named_children(grandparent)
+        .into_iter()
+        .filter(|child| child.kind() != "comment")
+        .collect::<Vec<_>>();
+    named.len() == 1 && named.first().copied() == Some(parent)
+}
+
 fn ruby_protocol_collect_call_state(
     node: &RawNode,
     local_names: &BTreeSet<String>,
@@ -1109,6 +1234,7 @@ fn ruby_protocol_collect_call_state(
     };
     if target.receiver == "self"
         && target.arguments.is_empty()
+        && !ruby_raw_unparenthesized_call_has_arguments(node)
         && !ruby_protocol_mutating_mid(&target.message)
         && !ruby_data::PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
     {
@@ -1119,6 +1245,12 @@ fn ruby_protocol_collect_call_state(
             writes.insert(token);
         }
     }
+}
+
+fn ruby_raw_unparenthesized_call_has_arguments(node: &RawNode) -> bool {
+    raw_named_children(node)
+        .into_iter()
+        .any(|child| child.kind == "argument_list" && !child.text.trim_start().starts_with('('))
 }
 
 fn ruby_protocol_state_target(node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
@@ -1202,7 +1334,24 @@ fn ruby_protocol_bare_internal_identifier(node: &RawNode, local_names: &BTreeSet
 }
 
 fn ruby_raw_call_target(node: &RawNode) -> Option<protocols::RawCallTarget> {
-    protocols::raw_call_target(node, &ruby_data::RAW_CALL_SHAPE)
+    let mut target = protocols::raw_call_target(node, &ruby_data::RAW_CALL_SHAPE)?;
+    if target.receiver == "self" && target.arguments.is_empty() {
+        let named = raw_named_children(node);
+        if named.len() > 1
+            && named
+                .first()
+                .map(|child| child.text.as_str() == target.message)
+                .unwrap_or(false)
+        {
+            target.arguments = named
+                .into_iter()
+                .skip(1)
+                .map(|child| normalize_text(&child.text))
+                .filter(|argument| !argument.is_empty())
+                .collect();
+        }
+    }
+    Some(target)
 }
 
 fn ruby_raw_heredoc_body(named: &[&RawNode]) -> bool {
@@ -1277,6 +1426,12 @@ fn ruby_protocol_bare_reader(
         raw_previous_sibling_text(node, parent).as_deref(),
         Some("=" | "." | ":")
     ) {
+        return false;
+    }
+    if raw_next_sibling(node, parent)
+        .map(|sibling| sibling.kind == "argument_list")
+        .unwrap_or(false)
+    {
         return false;
     }
     true
@@ -1392,6 +1547,14 @@ fn ruby_chained_element_predicate(receiver: &str, message: &str) -> bool {
     message.ends_with('?')
         && receiver.contains('.')
         && (receiver.contains("[:") || receiver.contains("[\"") || receiver.contains("['"))
+}
+
+fn ruby_sorbet_signature_chain_target(
+    node: Node<'_>,
+    source: &str,
+    target: &CallTarget<'_>,
+) -> bool {
+    ruby_sorbet_signature_payload_node(node, source) && target.receiver != "self"
 }
 
 fn ruby_sorbet_signature_payload_node(node: Node<'_>, source: &str) -> bool {

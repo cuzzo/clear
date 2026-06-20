@@ -243,28 +243,19 @@ impl Analyzer {
     }
 
     fn grouped_edges(&self, method_id: &str) -> Vec<structural_topology::Edge> {
-        let mut by_callee: BTreeMap<String, Vec<structural_topology::Edge>> = BTreeMap::new();
+        let mut out: Vec<structural_topology::Edge> = Vec::new();
+        let mut index_by_callee: BTreeMap<String, usize> = BTreeMap::new();
         for edge in self.topology.internal_calls(method_id) {
-            by_callee.entry(edge.callee.clone()).or_default().push(edge);
+            if let Some(index) = index_by_callee.get(&edge.callee).copied() {
+                if self.edge_weight(&edge.r#type) > self.edge_weight(&out[index].r#type) {
+                    out[index] = edge;
+                }
+            } else {
+                index_by_callee.insert(edge.callee.clone(), out.len());
+                out.push(edge);
+            }
         }
-        by_callee
-            .into_iter()
-            .map(|(_, edges)| {
-                edges
-                    .into_iter()
-                    .fold(None, |best: Option<structural_topology::Edge>, edge| {
-                        let Some(current) = best else {
-                            return Some(edge);
-                        };
-                        if self.edge_weight(&edge.r#type) > self.edge_weight(&current.r#type) {
-                            Some(edge)
-                        } else {
-                            Some(current)
-                        }
-                    })
-                    .unwrap()
-            })
-            .collect()
+        out
     }
 
     fn contribution_weight(&self, edge: &structural_topology::Edge, depth: usize) -> f64 {

@@ -1,0 +1,215 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "line": 13,
+        "visibility": "public",
+        "params": []
+      },
+      {
+        "name": "component_list",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "line": 17,
+        "visibility": "public",
+        "params": [
+          "adjacency"
+        ]
+      },
+      {
+        "name": "nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "line": 21,
+        "visibility": "public",
+        "params": []
+      },
+      {
+        "name": "self.build",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "manifest"
+        ]
+      },
+      {
+        "name": "filtered",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "line": 8,
+        "visibility": "public",
+        "params": [
+          "items"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "receiver": "Tarjan",
+        "message": "new",
+        "function": "component_list",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "adjacency"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "Array",
+        "function": "filtered",
+        "line": 10,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "items"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "new",
+        "function": "self.build",
+        "line": 5,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "manifest"
+        ]
+      },
+      {
+        "receiver": "Tarjan.new(adjacency)",
+        "message": "components",
+        "function": "component_list",
+        "line": 18,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "item",
+        "message": "ready?",
+        "function": "filtered",
+        "line": 10,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "node",
+        "message": "kind",
+        "function": "filtered",
+        "line": 9,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "node",
+        "message": "kind",
+        "function": "owner_nodes",
+        "line": 14,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": []
+      },
+      {
+        "receiver": "Array(items)",
+        "message": "select",
+        "function": "filtered",
+        "line": 10,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "nodes",
+        "message": "select",
+        "function": "filtered",
+        "line": 9,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      },
+      {
+        "receiver": "nodes",
+        "message": "select",
+        "function": "owner_nodes",
+        "line": 14,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": []
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@nodes",
+        "function": "nodes",
+        "line": 22
+      },
+      {
+        "receiver": "Tarjan.new(adjacency)",
+        "field": "components",
+        "function": "component_list",
+        "line": 18
+      },
+      {
+        "receiver": "node",
+        "field": "kind",
+        "function": "filtered",
+        "line": 9
+      },
+      {
+        "receiver": "node",
+        "field": "kind",
+        "function": "owner_nodes",
+        "line": 14
+      },
+      {
+        "receiver": "item",
+        "field": "ready?",
+        "function": "filtered",
+        "line": 10
+      },
+      {
+        "receiver": "Array(items)",
+        "field": "select",
+        "function": "filtered",
+        "line": 10
+      },
+      {
+        "receiver": "nodes",
+        "field": "select",
+        "function": "filtered",
+        "line": 9
+      },
+      {
+        "receiver": "nodes",
+        "field": "select",
+        "function": "owner_nodes",
+        "line": 14
+      }
+    ]
+  }
+}

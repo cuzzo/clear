@@ -294,12 +294,13 @@ fn transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) ->
 }
 
 fn return_fallback_boolean_wrapper(parent: &RawNode, child: &RawNode) -> bool {
-    parent.kind == "return_statement"
+    (parent.kind == "return_statement"
         && child.kind == "expression_list"
         && child
             .named_children()
             .iter()
-            .any(|grandchild| boolean_node(grandchild))
+            .any(|grandchild| boolean_node(grandchild)))
+        || (parent.kind == "return" && boolean_node(child))
 }
 
 fn boolean_node(node: &RawNode) -> bool {

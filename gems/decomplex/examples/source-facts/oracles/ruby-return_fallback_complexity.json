@@ -1,0 +1,15 @@
+{
+  "syntax": {
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactReturnFallbackComplexity#state_type_for",
+        "score": 5.2,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "early_exits": 4
+        }
+      }
+    ]
+  }
+}

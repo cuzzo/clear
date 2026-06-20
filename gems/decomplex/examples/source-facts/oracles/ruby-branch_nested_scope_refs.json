@@ -1,0 +1,60 @@
+{
+  "syntax": {
+    "functions": [
+      {
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "line": 10,
+        "visibility": "public",
+        "params": [
+          "edge"
+        ]
+      },
+      {
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "line": 19,
+        "visibility": "public",
+        "params": [
+          "components"
+        ]
+      },
+      {
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "edges",
+          "funcs"
+        ]
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "case_arms",
+        "line": 11,
+        "predicate": "edge.kind",
+        "state_refs": [
+          "edge.kind"
+        ]
+      },
+      {
+        "function": "do_block_branch",
+        "line": 21,
+        "predicate": "component.size <= 1",
+        "state_refs": [
+          "component.size"
+        ]
+      },
+      {
+        "function": "nested_blocks",
+        "line": 5,
+        "predicate": "funcs.any? { |fn| effect_list(fn, :writes).any? }",
+        "state_refs": [
+          "funcs.any?"
+        ]
+      }
+    ]
+  }
+}

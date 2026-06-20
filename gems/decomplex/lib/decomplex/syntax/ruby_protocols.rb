@@ -34,7 +34,7 @@ module Decomplex
           reads = Set.new
           writes = Set.new
           statements = ruby_function_body_statements(function_def.body)
-          local_names = ruby_local_names(function_def, statements)
+          local_names = ruby_protocol_local_names(function_def, statements)
           ruby_protocol_collect_state_access(function_def.body, reads, writes,
                                              local_names: local_names,
                                              root: true)
@@ -52,7 +52,7 @@ module Decomplex
       def protocol_call_paths(document)
         document.function_defs.flat_map do |function_def|
           statements = ruby_function_body_statements(function_def.body)
-          local_names = ruby_local_names(function_def, statements)
+          local_names = ruby_protocol_local_names(function_def, statements)
           ruby_protocol_paths_for_statements(statements, local_names: local_names).map do |path|
             ProtocolMethodPath.new(
               file: function_def.file,
@@ -66,6 +66,25 @@ module Decomplex
       end
 
       private
+
+      def ruby_protocol_local_names(function_def, statements)
+        names = ruby_local_names(function_def, statements).dup
+        statements.each do |statement|
+          ruby_walk_local(statement) do |node|
+            ruby_protocol_local_binding_names(node).each { |name| names.add(name) }
+          end
+        end
+        names
+      end
+
+      def ruby_protocol_local_binding_names(node)
+        return [] unless ts_node?(node)
+        return [] unless %w[block_parameters method_parameters].include?(node.kind)
+
+        node.named_children.filter_map do |child|
+          child.text.to_s if child.kind == "identifier"
+        end
+      end
 
       def ruby_protocol_method_name(name)
         name.to_s.split(".").last
@@ -162,8 +181,8 @@ module Decomplex
         return nil if text.empty?
         return "self" if text == "self"
         return ruby_protocol_normalize_state(text) if text.start_with?("@")
-        return ruby_protocol_normalize_state(text) if text.match?(/\A[a-z_]\w*[!?]?\z/)
         return nil if local_names.include?(text)
+        return ruby_protocol_normalize_state(text) if text.match?(/\A[a-z_]\w*[!?]?\z/)
 
         nil
       end
