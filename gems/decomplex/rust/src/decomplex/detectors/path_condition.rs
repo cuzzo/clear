@@ -48,12 +48,18 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<PathCondition
 }
 
 pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
-    let raw_sites = documents
+    let mut sites = documents
         .iter()
-        .flat_map(sites_from_raw_facts)
+        .flat_map(sites_from_document_facts)
         .collect::<Vec<_>>();
-    if !raw_sites.is_empty() {
-        return Report::new(raw_sites).findings();
+    sites.extend(
+        documents
+            .iter()
+            .flat_map(sites_from_raw_facts)
+            .collect::<Vec<_>>(),
+    );
+    if !sites.is_empty() {
+        return Report::new(dedupe_sites(sites)).findings();
     }
 
     let mut sites = Vec::new();
@@ -63,6 +69,37 @@ pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
         sites.extend(pc.sites);
     }
     Report::new(sites).findings()
+}
+
+fn dedupe_sites(sites: Vec<Site>) -> Vec<Site> {
+    let mut seen = BTreeSet::new();
+    sites
+        .into_iter()
+        .filter(|site| {
+            seen.insert((
+                site.guards.clone(),
+                site.action.clone(),
+                site.file.clone(),
+                site.defn.clone(),
+                site.line,
+            ))
+        })
+        .collect()
+}
+
+fn sites_from_document_facts(document: &Document) -> Vec<Site> {
+    document
+        .path_condition_sites
+        .iter()
+        .map(|site| Site {
+            guards: site.guards.clone(),
+            action: site.action.clone(),
+            file: site.file.clone(),
+            defn: site.function.clone(),
+            line: site.line,
+            span: site.span,
+        })
+        .collect()
 }
 
 fn sites_from_raw_facts(document: &Document) -> Vec<Site> {
@@ -429,64 +466,6 @@ fn raw_child_by_field<'a>(node: &'a RawNode, field: &str) -> Option<&'a RawNode>
 
 fn raw_comment_node(node: &RawNode) -> bool {
     node.kind.contains("comment")
-}
-
-fn sites_from_mined_facts(document: &Document) -> Vec<Site> {
-    let mut sites = Vec::new();
-    for decision in &document.decision_sites {
-        if decision.members.len() < 2 {
-            continue;
-        }
-        for call in &document.call_sites {
-            if call.function != decision.function
-                || !span_inside(call.span, decision.enclosing_span)
-            {
-                continue;
-            }
-            if span_inside(call.span, decision.span) {
-                continue;
-            }
-            if decision
-                .members
-                .iter()
-                .any(|member| member == &guard_call_text(call))
-            {
-                continue;
-            }
-            sites.push(Site {
-                guards: decision.members.clone(),
-                action: action_text(call),
-                file: call.file.clone(),
-                defn: call.function.clone(),
-                line: call.line,
-                span: call.span,
-            });
-        }
-    }
-    sites
-}
-
-fn action_text(call: &syntax::CallSite) -> String {
-    let arguments = call.arguments.join(", ");
-    if call.receiver == "self" {
-        format!("{}({arguments})", call.message)
-    } else {
-        format!("{}.{}({arguments})", call.receiver, call.message)
-    }
-}
-
-fn guard_call_text(call: &syntax::CallSite) -> String {
-    if call.receiver == "self" {
-        format!("{}()", call.message)
-    } else {
-        format!("{}.{}()", call.receiver, call.message)
-    }
-}
-
-fn span_inside(inner: Span, outer: Span) -> bool {
-    let starts_after_or_at = inner[0] > outer[0] || (inner[0] == outer[0] && inner[1] >= outer[1]);
-    let ends_before_or_at = inner[2] < outer[2] || (inner[2] == outer[2] && inner[3] <= outer[3]);
-    starts_after_or_at && ends_before_or_at
 }
 
 struct PathCondition {

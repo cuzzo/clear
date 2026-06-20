@@ -46,9 +46,15 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DecisionP
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<DecisionPressureRow> {
+    scan_documents_with_summaries(documents, local_flow::scan_documents(documents))
+}
+
+pub fn scan_documents_with_summaries(
+    documents: &[Document],
+    methods: Vec<MethodSummary>,
+) -> Vec<DecisionPressureRow> {
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
-    let methods = local_flow::scan_documents(documents);
     let assignment_maps = build_assignment_maps(&methods);
     let methods_by_file = methods_by_file(&methods);
 

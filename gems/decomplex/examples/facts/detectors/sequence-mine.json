@@ -1,0 +1,79 @@
+{
+  "detector": "sequence-mine",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/sequence.rb",
+        "language": "ruby",
+        "source": "",
+        "lines": [],
+        "root": {
+          "kind": "program",
+          "text": "",
+          "span": [1, 0, 1, 0],
+          "named": true,
+          "field_name": null,
+          "children": []
+        },
+        "normalized_root": {
+          "type": "ROOT",
+          "children": [],
+          "first_lineno": 1,
+          "first_column": 0,
+          "last_lineno": 1,
+          "last_column": 0,
+          "text": ""
+        },
+        "function_defs": [],
+        "owner_defs": [],
+        "call_sites": [
+          {"receiver": "", "message": "acquire", "file": "facts/sequence.rb", "function": "paired_0", "owner": "", "line": 1, "span": [1, 0, 1, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "release", "file": "facts/sequence.rb", "function": "paired_0", "owner": "", "line": 2, "span": [2, 0, 2, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "acquire", "file": "facts/sequence.rb", "function": "paired_1", "owner": "", "line": 3, "span": [3, 0, 3, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "release", "file": "facts/sequence.rb", "function": "paired_1", "owner": "", "line": 4, "span": [4, 0, 4, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "acquire", "file": "facts/sequence.rb", "function": "paired_2", "owner": "", "line": 5, "span": [5, 0, 5, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "release", "file": "facts/sequence.rb", "function": "paired_2", "owner": "", "line": 6, "span": [6, 0, 6, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "acquire", "file": "facts/sequence.rb", "function": "paired_3", "owner": "", "line": 7, "span": [7, 0, 7, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "release", "file": "facts/sequence.rb", "function": "paired_3", "owner": "", "line": 8, "span": [8, 0, 8, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "acquire", "file": "facts/sequence.rb", "function": "missing_release", "owner": "", "line": 9, "span": [9, 0, 9, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
+          {"receiver": "", "message": "release", "file": "facts/sequence.rb", "function": "missing_acquire", "owner": "", "line": 10, "span": [10, 0, 10, 7], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false}
+        ],
+        "state_reads": [],
+        "state_writes": [],
+        "decision_sites": [],
+        "branch_decisions": [],
+        "dispatch_sites": [],
+        "semantic_effect_sites": [],
+        "local_complexity_scores": {},
+        "predicate_aliases": [],
+        "comparison_uses": []
+      }
+    ]
+  },
+  "expected": {
+    "broken": [
+      {
+        "at": "facts/sequence.rb:missing_release:9",
+        "confidence": 0.8,
+        "has": "acquire",
+        "missing": "release",
+        "pair": ["acquire", "release"],
+        "spans": {
+          "facts/sequence.rb:missing_release:9": [9, 0, 9, 7]
+        },
+        "support": 4
+      },
+      {
+        "at": "facts/sequence.rb:missing_acquire:10",
+        "confidence": 0.8,
+        "has": "release",
+        "missing": "acquire",
+        "pair": ["acquire", "release"],
+        "spans": {
+          "facts/sequence.rb:missing_acquire:10": [10, 0, 10, 7]
+        },
+        "support": 4
+      }
+    ]
+  }
+}

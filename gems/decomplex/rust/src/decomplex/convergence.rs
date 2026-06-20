@@ -1,11 +1,12 @@
 use crate::decomplex::report::ReportSection;
 use crate::decomplex::report_value as rv;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 pub const TIER_WEIGHT: &[(i64, i64)] = &[(1, 3), (2, 2), (3, 1)];
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Unit {
     pub file: String,
     pub method: String,
@@ -16,7 +17,7 @@ pub struct Unit {
     pub at: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct FileRollup {
     pub file: String,
     pub detectors: Vec<String>,

@@ -1,0 +1,195 @@
+{
+  "detector": "structural-topology",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/topology_rich.rb",
+        "language": "ruby",
+        "lines": [
+          "class Fixture",
+          "  def self.entry",
+          "    self.",
+          "      helper",
+          "    self.entry",
+          "  end",
+          "  def self.helper",
+          "  end",
+          "end"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/topology_rich.rb",
+            "name": "self.entry",
+            "owner": "Fixture",
+            "line": 2,
+            "span": [
+              2,
+              2,
+              6,
+              5
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                2,
+                2,
+                6,
+                5
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/topology_rich.rb",
+            "name": "self.helper",
+            "owner": "Fixture",
+            "line": 7,
+            "span": [
+              7,
+              2,
+              8,
+              5
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                7,
+                2,
+                8,
+                5
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          }
+        ],
+        "owner_defs": [
+          {
+            "file": "facts/topology_rich.rb",
+            "name": "Fixture",
+            "kind": "class",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              9,
+              3
+            ]
+          }
+        ],
+        "call_sites": [
+          {
+            "receiver": "self",
+            "message": "helper",
+            "file": "facts/topology_rich.rb",
+            "function": "self.entry",
+            "owner": "Fixture",
+            "line": 3,
+            "span": [
+              3,
+              4,
+              4,
+              12
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "self",
+            "message": "entry",
+            "file": "facts/topology_rich.rb",
+            "function": "self.entry",
+            "owner": "Fixture",
+            "line": 5,
+            "span": [
+              5,
+              4,
+              5,
+              14
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "edges": [
+      {
+        "callee": "Fixture#self.helper",
+        "callee_name": "self.helper",
+        "caller": "Fixture#self.entry",
+        "caller_name": "self.entry",
+        "confidence": "high",
+        "file": "facts/topology_rich.rb",
+        "kind": "direct_self",
+        "line": 3,
+        "span": [
+          3,
+          4,
+          4,
+          12
+        ],
+        "type": "always"
+      }
+    ],
+    "methods": [
+      {
+        "file": "facts/topology_rich.rb",
+        "id": "Fixture#self.entry",
+        "line": 2,
+        "name": "self.entry",
+        "owner": "Fixture",
+        "span": [
+          2,
+          2,
+          6,
+          5
+        ],
+        "visibility": "public"
+      },
+      {
+        "file": "facts/topology_rich.rb",
+        "id": "Fixture#self.helper",
+        "line": 7,
+        "name": "self.helper",
+        "owner": "Fixture",
+        "span": [
+          7,
+          2,
+          8,
+          5
+        ],
+        "visibility": "public"
+      }
+    ]
+  }
+}

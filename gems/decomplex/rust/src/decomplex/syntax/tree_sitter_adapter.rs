@@ -86,6 +86,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         local_complexity_scores,
         predicate_aliases,
         comparison_uses,
+        path_condition_sites: Vec::new(),
     })
 }
 

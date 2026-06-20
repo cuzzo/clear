@@ -2,6 +2,7 @@ use crate::decomplex::convergence;
 use crate::decomplex::report::ReportSection;
 use crate::decomplex::report_value as rv;
 use regex::Regex;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
@@ -32,7 +33,7 @@ pub struct Entity {
     pub token: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Cluster {
     pub kind: String,
     pub token: String,

@@ -6,8 +6,9 @@ use decomplex_rust::decomplex::detectors::{
     redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
     structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
-use decomplex_rust::decomplex::syntax::Language;
-use serde::Serialize;
+use decomplex_rust::decomplex::report::Report;
+use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 use std::fs;
@@ -64,6 +65,85 @@ fn shared_examples_match_oracles() -> Result<()> {
     }
 }
 
+#[test]
+fn shared_detector_fact_examples_match_exact_oracles() -> Result<()> {
+    let examples_root = examples_root();
+    let mut failures = Vec::new();
+
+    for fixture in detector_fact_fixture_paths(&examples_root)? {
+        let fixture_value: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
+        let detector = fixture_value
+            .get("detector")
+            .and_then(Value::as_str)
+            .with_context(|| format!("{} missing detector", fixture.display()))?;
+        let expected = fixture_value
+            .get("expected")
+            .cloned()
+            .with_context(|| format!("{} missing expected", fixture.display()))?;
+        let input = detector_fact_input(&fixture_value)
+            .with_context(|| format!("{} input", fixture.display()))?;
+        let actual = run_detector_on_fact_input(detector, &input, &fixture_value)
+            .with_context(|| format!("{} {}", detector, fixture.display()))?;
+
+        if actual != expected {
+            failures.push(format!(
+                "{} {}\nexpected: {}\nactual:   {}",
+                detector,
+                fixture.display(),
+                expected,
+                actual
+            ));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "shared detector fact oracle failures:\n{}",
+            failures.join("\n\n")
+        )
+    }
+}
+
+#[test]
+fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
+    let examples_root = examples_root();
+    let mut failures = Vec::new();
+
+    for fixture in report_fact_fixture_paths(&examples_root)? {
+        let fixture_value: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
+        let facts = fixture_value
+            .get("input")
+            .with_context(|| format!("{} missing input", fixture.display()))?;
+        let expected = fixture_value
+            .get("expected")
+            .cloned()
+            .with_context(|| format!("{} missing expected", fixture.display()))?;
+        let report = Report::from_facts(facts)
+            .with_context(|| format!("failed to build report from {}", fixture.display()))?;
+        let actual = project_report(&report);
+
+        if actual != expected {
+            failures.push(format!(
+                "{}\nexpected: {}\nactual:   {}",
+                fixture.display(),
+                expected,
+                actual
+            ));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "shared report fact oracle failures:\n{}",
+            failures.join("\n\n")
+        )
+    }
+}
+
 fn examples_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples")
 }
@@ -86,6 +166,75 @@ fn fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
     }
     paths.sort();
     Ok(paths)
+}
+
+fn report_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
+    let report_root = examples_root.join("facts").join("report");
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(&report_root)? {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn detector_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
+    let detector_root = examples_root.join("facts").join("detectors");
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(&detector_root)? {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+#[derive(Deserialize)]
+struct DetectorFactInput {
+    documents: Vec<Document>,
+    local_methods: Vec<local_flow::MethodSummary>,
+}
+
+fn detector_fact_input(fixture: &Value) -> Result<DetectorFactInput> {
+    let input = fixture
+        .get("input")
+        .cloned()
+        .with_context(|| "detector fact fixture missing input")?;
+    let documents = serde_json::from_value::<DetectorFactDocuments>(input.clone())?.documents;
+    let mut local_methods = Vec::new();
+
+    if let Some(methods) = input.get("local_methods") {
+        local_methods.extend(serde_json::from_value::<Vec<local_flow::MethodSummary>>(
+            methods.clone(),
+        )?);
+    }
+    for document in input
+        .get("documents")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(methods) = document.get("local_methods") {
+            local_methods.extend(serde_json::from_value::<Vec<local_flow::MethodSummary>>(
+                methods.clone(),
+            )?);
+        }
+    }
+
+    Ok(DetectorFactInput {
+        documents,
+        local_methods,
+    })
+}
+
+#[derive(Deserialize)]
+struct DetectorFactDocuments {
+    documents: Vec<Document>,
 }
 
 fn file_stem(path: &Path) -> Result<String> {
@@ -155,6 +304,152 @@ fn run_detector(
         "structural-topology" => value(structural_topology::scan_files(files, language)?),
         _ => bail!("unsupported detector: {detector}"),
     }
+}
+
+fn run_detector_on_fact_input(
+    detector: &str,
+    input: &DetectorFactInput,
+    fixture: &Value,
+) -> Result<Value> {
+    let documents = input.documents.as_slice();
+    match detector {
+        "co-update" => value(co_update::scan_documents(documents)),
+        "decision-pressure" => {
+            if input.local_methods.is_empty() {
+                value(decision_pressure::scan_documents(documents))
+            } else {
+                value(decision_pressure::scan_documents_with_summaries(
+                    documents,
+                    input.local_methods.clone(),
+                ))
+            }
+        }
+        "predicate-alias" | "predicate-aliases" => {
+            value(predicate_alias::scan_documents(documents))
+        }
+        "miner" | "decision-miner" => value(miner::scan_documents(documents)),
+        "semantic-alias" | "semantic-aliases" => value(semantic_alias::scan_documents(documents)),
+        "flay-similarity" | "structural-similarity" => {
+            let options = fixture.get("options").cloned().unwrap_or_else(|| json!({}));
+            let mass = option_usize(&options, "mass", 32)?;
+            let fuzzy = option_usize(&options, "fuzzy", 1)?;
+            value(flay_similarity::scan_documents(documents, mass, fuzzy))
+        }
+        "temporal-ordering-pressure" => {
+            value(temporal_ordering_pressure::scan_documents(documents))
+        }
+        "state-branch-density" => value(state_branch_density::scan_documents(documents)),
+        "redundant-nil-guard" => value(redundant_nil_guard::scan_documents(documents)),
+        "state-mesh" | "state-heatmap" => value(state_mesh::scan_documents(documents)),
+        "inconsistent-rename-clone" => value(inconsistent_rename_clone::scan_documents(documents)),
+        "derived-state" => {
+            if input.local_methods.is_empty() {
+                value(derived_state::scan_documents(documents))
+            } else {
+                value(derived_state::scan_summaries(input.local_methods.clone()))
+            }
+        }
+        "implicit-control-flow" | "ordered-protocol-mine" => {
+            value(implicit_control_flow::scan_documents(documents))
+        }
+        "weighted-inlined-complexity" => {
+            if input.local_methods.is_empty() {
+                value(weighted_inlined_cognitive_complexity::scan_documents(
+                    documents,
+                ))
+            } else {
+                value(
+                    weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
+                        documents,
+                        input.local_methods.clone(),
+                    ),
+                )
+            }
+        }
+        "locality-drag" => {
+            if input.local_methods.is_empty() {
+                value(locality_drag::scan_documents(documents))
+            } else {
+                value(locality_drag::scan_summaries_with_scores(
+                    input.local_methods.clone(),
+                    complexity_scores(documents),
+                ))
+            }
+        }
+        "operational-discontinuity" => {
+            if input.local_methods.is_empty() {
+                value(operational_discontinuity::scan_documents(documents))
+            } else {
+                value(operational_discontinuity::scan_summaries(
+                    input.local_methods.clone(),
+                ))
+            }
+        }
+        "oversized-predicate" => value(oversized_predicate::scan_documents(documents)),
+        "path-condition" => {
+            let report = path_condition::scan_documents(documents);
+            value(json!({ "neglected": report.neglected }))
+        }
+        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_documents(documents)),
+        "function-lcom" => {
+            if input.local_methods.is_empty() {
+                value(function_lcom::scan_documents(documents))
+            } else {
+                value(function_lcom::scan_summaries(input.local_methods.clone()))
+            }
+        }
+        "false-simplicity" => value(false_simplicity::scan_documents(documents)),
+        "fat-union" => value(fat_union::scan_documents(documents)),
+        "local-flow" => value(local_flow::scan_documents(documents)),
+        "structural-topology" => value(structural_topology::scan_documents(documents)),
+        _ => bail!("unsupported detector: {detector}"),
+    }
+}
+
+fn complexity_scores(
+    documents: &[Document],
+) -> std::collections::BTreeMap<(String, String), LocalComplexityScore> {
+    documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .local_complexity_scores
+                .iter()
+                .map(|(id, score)| ((document.file.clone(), id.clone()), score.clone()))
+        })
+        .collect()
+}
+
+fn project_report(report: &Report) -> Value {
+    json!({
+        "convergence": report.convergence_value(),
+        "root_clusters": report.root_clusters_value(),
+        "sarif": compact_sarif(&report.to_sarif_value(false, false, Some(8))),
+    })
+}
+
+fn compact_sarif(sarif: &Value) -> Value {
+    let run = field(sarif, "runs")
+        .as_array()
+        .and_then(|runs| runs.first())
+        .unwrap_or(&Value::Null);
+    let results = array(field(run, "results"));
+    json!({
+        "rule_count": array(field(field(field(run, "tool"), "driver"), "rules")).len(),
+        "result_count": results.len(),
+        "rule_ids": results.iter().map(|result| field(result, "ruleId").clone()).collect::<Vec<_>>(),
+        "messages": results.iter().map(|result| field(field(result, "message"), "text").clone()).collect::<Vec<_>>(),
+        "locations": results.iter().map(|result| {
+            let location = field(
+                array(field(result, "locations")).first().unwrap_or(&Value::Null),
+                "physicalLocation",
+            );
+            json!({
+                "uri": field(field(location, "artifactLocation"), "uri").clone(),
+                "startLine": field(field(location, "region"), "startLine").clone(),
+            })
+        }).collect::<Vec<_>>(),
+    })
 }
 
 fn value<T: Serialize>(value: T) -> Result<Value> {

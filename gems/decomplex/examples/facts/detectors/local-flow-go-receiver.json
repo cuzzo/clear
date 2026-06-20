@@ -1,0 +1,755 @@
+{
+  "detector": "local-flow",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/local_flow_receiver.go",
+        "language": "go",
+        "source": "package main\n\ntype Worker struct{}\n\nfunc (w *Worker) Handle(price int, tax int) Result {\n  subtotal := price + tax\n  return Result_init(w, subtotal)\n}\n",
+        "lines": [
+          "package main",
+          "",
+          "type Worker struct{}",
+          "",
+          "func (w *Worker) Handle(price int, tax int) Result {",
+          "  subtotal := price + tax",
+          "  return Result_init(w, subtotal)",
+          "}"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/local_flow_receiver.go",
+            "name": "Handle",
+            "owner": "Worker",
+            "line": 5,
+            "span": [
+              5,
+              0,
+              8,
+              1
+            ],
+            "body": {
+              "kind": "method_declaration",
+              "text": "func (w *Worker) Handle(price int, tax int) Result {\n  subtotal := price + tax\n  return Result_init(w, subtotal)\n}",
+              "span": [
+                5,
+                0,
+                8,
+                1
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+                {
+                  "kind": "func",
+                  "text": "func",
+                  "span": [
+                    5,
+                    0,
+                    5,
+                    4
+                  ],
+                  "named": false,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "parameter_list",
+                  "text": "(w *Worker)",
+                  "span": [
+                    5,
+                    5,
+                    5,
+                    16
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "(",
+                      "text": "(",
+                      "span": [
+                        5,
+                        5,
+                        5,
+                        6
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "parameter_declaration",
+                      "text": "w *Worker",
+                      "span": [
+                        5,
+                        6,
+                        5,
+                        15
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "w",
+                          "span": [
+                            5,
+                            6,
+                            5,
+                            7
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "pointer_type",
+                          "text": "*Worker",
+                          "span": [
+                            5,
+                            8,
+                            5,
+                            15
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "*",
+                              "text": "*",
+                              "span": [
+                                5,
+                                8,
+                                5,
+                                9
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "type_identifier",
+                              "text": "Worker",
+                              "span": [
+                                5,
+                                9,
+                                5,
+                                15
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": ")",
+                      "text": ")",
+                      "span": [
+                        5,
+                        15,
+                        5,
+                        16
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "field_identifier",
+                  "text": "Handle",
+                  "span": [
+                    5,
+                    17,
+                    5,
+                    23
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "parameter_list",
+                  "text": "(price int, tax int)",
+                  "span": [
+                    5,
+                    23,
+                    5,
+                    43
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "(",
+                      "text": "(",
+                      "span": [
+                        5,
+                        23,
+                        5,
+                        24
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "parameter_declaration",
+                      "text": "price int",
+                      "span": [
+                        5,
+                        24,
+                        5,
+                        33
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "price",
+                          "span": [
+                            5,
+                            24,
+                            5,
+                            29
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "type_identifier",
+                          "text": "int",
+                          "span": [
+                            5,
+                            30,
+                            5,
+                            33
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        5,
+                        33,
+                        5,
+                        34
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "parameter_declaration",
+                      "text": "tax int",
+                      "span": [
+                        5,
+                        35,
+                        5,
+                        42
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "tax",
+                          "span": [
+                            5,
+                            35,
+                            5,
+                            38
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "type_identifier",
+                          "text": "int",
+                          "span": [
+                            5,
+                            39,
+                            5,
+                            42
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": ")",
+                      "text": ")",
+                      "span": [
+                        5,
+                        42,
+                        5,
+                        43
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "type_identifier",
+                  "text": "Result",
+                  "span": [
+                    5,
+                    44,
+                    5,
+                    50
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "block",
+                  "text": "{\n  subtotal := price + tax\n  return Result_init(w, subtotal)\n}",
+                  "span": [
+                    5,
+                    51,
+                    8,
+                    1
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "{",
+                      "text": "{",
+                      "span": [
+                        5,
+                        51,
+                        5,
+                        52
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "statement_list",
+                      "text": "subtotal := price + tax\n  return Result_init(w, subtotal)\n",
+                      "span": [
+                        6,
+                        2,
+                        8,
+                        0
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "short_var_declaration",
+                          "text": "subtotal := price + tax",
+                          "span": [
+                            6,
+                            2,
+                            6,
+                            25
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "expression_list",
+                              "text": "subtotal",
+                              "span": [
+                                6,
+                                2,
+                                6,
+                                10
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": ":=",
+                              "text": ":=",
+                              "span": [
+                                6,
+                                11,
+                                6,
+                                13
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "expression_list",
+                              "text": "price + tax",
+                              "span": [
+                                6,
+                                14,
+                                6,
+                                25
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "price",
+                                  "span": [
+                                    6,
+                                    14,
+                                    6,
+                                    19
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "+",
+                                  "text": "+",
+                                  "span": [
+                                    6,
+                                    20,
+                                    6,
+                                    21
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "tax",
+                                  "span": [
+                                    6,
+                                    22,
+                                    6,
+                                    25
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "return_statement",
+                          "text": "return Result_init(w, subtotal)",
+                          "span": [
+                            7,
+                            2,
+                            7,
+                            33
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "return",
+                              "text": "return",
+                              "span": [
+                                7,
+                                2,
+                                7,
+                                8
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "expression_list",
+                              "text": "Result_init(w, subtotal)",
+                              "span": [
+                                7,
+                                9,
+                                7,
+                                33
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "Result_init",
+                                  "span": [
+                                    7,
+                                    9,
+                                    7,
+                                    20
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "argument_list",
+                                  "text": "(w, subtotal)",
+                                  "span": [
+                                    7,
+                                    20,
+                                    7,
+                                    33
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "(",
+                                      "text": "(",
+                                      "span": [
+                                        7,
+                                        20,
+                                        7,
+                                        21
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "identifier",
+                                      "text": "w",
+                                      "span": [
+                                        7,
+                                        21,
+                                        7,
+                                        22
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": ",",
+                                      "text": ",",
+                                      "span": [
+                                        7,
+                                        22,
+                                        7,
+                                        23
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "identifier",
+                                      "text": "subtotal",
+                                      "span": [
+                                        7,
+                                        24,
+                                        7,
+                                        32
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": ")",
+                                      "text": ")",
+                                      "span": [
+                                        7,
+                                        32,
+                                        7,
+                                        33
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "}",
+                      "text": "}",
+                      "span": [
+                        8,
+                        0,
+                        8,
+                        1
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "visibility": "public",
+            "params": [
+              "price",
+              "tax"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "boundaries": [
+
+      ],
+      "file": "facts/local_flow_receiver.go",
+      "id": "Worker#Handle",
+      "line": 5,
+      "name": "Handle",
+      "owner": "Worker",
+      "span": [
+        5,
+        0,
+        8,
+        1
+      ],
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "price",
+              "tax"
+            ]
+          ],
+          "dependencies": [
+            [
+              "subtotal",
+              "price"
+            ],
+            [
+              "subtotal",
+              "tax"
+            ]
+          ],
+          "end_line": 6,
+          "index": 0,
+          "line": 6,
+          "reads": [
+            "price",
+            "tax"
+          ],
+          "source": "subtotal := price + tax",
+          "span": [
+            6,
+            2,
+            6,
+            25
+          ],
+          "writes": [
+            "subtotal"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "subtotal",
+              "w"
+            ]
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 7,
+          "index": 1,
+          "line": 7,
+          "reads": [
+            "subtotal",
+            "w"
+          ],
+          "source": "return Result_init(w, subtotal)",
+          "span": [
+            7,
+            2,
+            7,
+            33
+          ],
+          "writes": [
+
+          ]
+        }
+      ]
+    }
+  ]
+}

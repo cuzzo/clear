@@ -1,0 +1,2834 @@
+{
+  "detector": "local-flow",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/local_flow_python.py",
+        "language": "python",
+        "source": "class Worker:\n    def handle(self, price, tax, items, mapping, target):\n        subtotal = price + tax\n        running: int = subtotal\n        annotated: int\n        annotated = running\n        if (chosen := mapping.get(\"key\")):\n            running = running + chosen\n        for item in items:\n            running = running + item\n        for other in items:\n            running = running + other\n        with open(\"log\") as handle:\n            buffer = handle.read()\n        target.slot = running\n        target[price] = buffer\n        mapping = {\"key\": buffer}\n        return Result(running, buffer, target)\n",
+        "lines": [
+          "class Worker:",
+          "    def handle(self, price, tax, items, mapping, target):",
+          "        subtotal = price + tax",
+          "        running: int = subtotal",
+          "        annotated: int",
+          "        annotated = running",
+          "        if (chosen := mapping.get(\"key\")):",
+          "            running = running + chosen",
+          "        for item in items:",
+          "            running = running + item",
+          "        for other in items:",
+          "            running = running + other",
+          "        with open(\"log\") as handle:",
+          "            buffer = handle.read()",
+          "        target.slot = running",
+          "        target[price] = buffer",
+          "        mapping = {\"key\": buffer}",
+          "        return Result(running, buffer, target)"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/local_flow_python.py",
+            "name": "handle",
+            "owner": "Worker",
+            "line": 2,
+            "span": [
+              2,
+              4,
+              18,
+              46
+            ],
+            "body": {
+              "kind": "block",
+              "text": "def handle(self, price, tax, items, mapping, target):\n        subtotal = price + tax\n        running: int = subtotal\n        annotated: int\n        annotated = running\n        if (chosen := mapping.get(\"key\")):\n            running = running + chosen\n        for item in items:\n            running = running + item\n        for other in items:\n            running = running + other\n        with open(\"log\") as handle:\n            buffer = handle.read()\n        target.slot = running\n        target[price] = buffer\n        mapping = {\"key\": buffer}\n        return Result(running, buffer, target)",
+              "span": [
+                2,
+                4,
+                18,
+                46
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+                {
+                  "kind": "def",
+                  "text": "def",
+                  "span": [
+                    2,
+                    4,
+                    2,
+                    7
+                  ],
+                  "named": false,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "identifier",
+                  "text": "handle",
+                  "span": [
+                    2,
+                    8,
+                    2,
+                    14
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "parameters",
+                  "text": "(self, price, tax, items, mapping, target)",
+                  "span": [
+                    2,
+                    14,
+                    2,
+                    56
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "(",
+                      "text": "(",
+                      "span": [
+                        2,
+                        14,
+                        2,
+                        15
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "self",
+                      "span": [
+                        2,
+                        15,
+                        2,
+                        19
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        2,
+                        19,
+                        2,
+                        20
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "price",
+                      "span": [
+                        2,
+                        21,
+                        2,
+                        26
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        2,
+                        26,
+                        2,
+                        27
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "tax",
+                      "span": [
+                        2,
+                        28,
+                        2,
+                        31
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        2,
+                        31,
+                        2,
+                        32
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "items",
+                      "span": [
+                        2,
+                        33,
+                        2,
+                        38
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        2,
+                        38,
+                        2,
+                        39
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "mapping",
+                      "span": [
+                        2,
+                        40,
+                        2,
+                        47
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ",",
+                      "text": ",",
+                      "span": [
+                        2,
+                        47,
+                        2,
+                        48
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "identifier",
+                      "text": "target",
+                      "span": [
+                        2,
+                        49,
+                        2,
+                        55
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": ")",
+                      "text": ")",
+                      "span": [
+                        2,
+                        55,
+                        2,
+                        56
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": ":",
+                  "text": ":",
+                  "span": [
+                    2,
+                    56,
+                    2,
+                    57
+                  ],
+                  "named": false,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "block",
+                  "text": "subtotal = price + tax\n        running: int = subtotal\n        annotated: int\n        annotated = running\n        if (chosen := mapping.get(\"key\")):\n            running = running + chosen\n        for item in items:\n            running = running + item\n        for other in items:\n            running = running + other\n        with open(\"log\") as handle:\n            buffer = handle.read()\n        target.slot = running\n        target[price] = buffer\n        mapping = {\"key\": buffer}\n        return Result(running, buffer, target)",
+                  "span": [
+                    3,
+                    8,
+                    18,
+                    46
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "expression_statement",
+                      "text": "subtotal = price + tax",
+                      "span": [
+                        3,
+                        8,
+                        3,
+                        30
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "subtotal",
+                          "span": [
+                            3,
+                            8,
+                            3,
+                            16
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            3,
+                            17,
+                            3,
+                            18
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "binary_operator",
+                          "text": "price + tax",
+                          "span": [
+                            3,
+                            19,
+                            3,
+                            30
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "price",
+                              "span": [
+                                3,
+                                19,
+                                3,
+                                24
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "+",
+                              "text": "+",
+                              "span": [
+                                3,
+                                25,
+                                3,
+                                26
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "identifier",
+                              "text": "tax",
+                              "span": [
+                                3,
+                                27,
+                                3,
+                                30
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "running: int = subtotal",
+                      "span": [
+                        4,
+                        8,
+                        4,
+                        31
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "running",
+                          "span": [
+                            4,
+                            8,
+                            4,
+                            15
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            4,
+                            15,
+                            4,
+                            16
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "type",
+                          "text": "int",
+                          "span": [
+                            4,
+                            17,
+                            4,
+                            20
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            4,
+                            21,
+                            4,
+                            22
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "subtotal",
+                          "span": [
+                            4,
+                            23,
+                            4,
+                            31
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "annotated: int",
+                      "span": [
+                        5,
+                        8,
+                        5,
+                        22
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "annotated",
+                          "span": [
+                            5,
+                            8,
+                            5,
+                            17
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            5,
+                            17,
+                            5,
+                            18
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "type",
+                          "text": "int",
+                          "span": [
+                            5,
+                            19,
+                            5,
+                            22
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "annotated = running",
+                      "span": [
+                        6,
+                        8,
+                        6,
+                        27
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "annotated",
+                          "span": [
+                            6,
+                            8,
+                            6,
+                            17
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            6,
+                            18,
+                            6,
+                            19
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "running",
+                          "span": [
+                            6,
+                            20,
+                            6,
+                            27
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "if_statement",
+                      "text": "if (chosen := mapping.get(\"key\")):\n            running = running + chosen",
+                      "span": [
+                        7,
+                        8,
+                        8,
+                        38
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "if",
+                          "text": "if",
+                          "span": [
+                            7,
+                            8,
+                            7,
+                            10
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "parenthesized_expression",
+                          "text": "(chosen := mapping.get(\"key\"))",
+                          "span": [
+                            7,
+                            11,
+                            7,
+                            41
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "(",
+                              "text": "(",
+                              "span": [
+                                7,
+                                11,
+                                7,
+                                12
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "named_expression",
+                              "text": "chosen := mapping.get(\"key\")",
+                              "span": [
+                                7,
+                                12,
+                                7,
+                                40
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "chosen",
+                                  "span": [
+                                    7,
+                                    12,
+                                    7,
+                                    18
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": ":=",
+                                  "text": ":=",
+                                  "span": [
+                                    7,
+                                    19,
+                                    7,
+                                    21
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "call",
+                                  "text": "mapping.get(\"key\")",
+                                  "span": [
+                                    7,
+                                    22,
+                                    7,
+                                    40
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "attribute",
+                                      "text": "mapping.get",
+                                      "span": [
+                                        7,
+                                        22,
+                                        7,
+                                        33
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "mapping",
+                                          "span": [
+                                            7,
+                                            22,
+                                            7,
+                                            29
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": ".",
+                                          "text": ".",
+                                          "span": [
+                                            7,
+                                            29,
+                                            7,
+                                            30
+                                          ],
+                                          "named": false,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "identifier",
+                                          "text": "get",
+                                          "span": [
+                                            7,
+                                            30,
+                                            7,
+                                            33
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "kind": "argument_list",
+                                      "text": "(\"key\")",
+                                      "span": [
+                                        7,
+                                        33,
+                                        7,
+                                        40
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "(",
+                                          "text": "(",
+                                          "span": [
+                                            7,
+                                            33,
+                                            7,
+                                            34
+                                          ],
+                                          "named": false,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "string",
+                                          "text": "\"key\"",
+                                          "span": [
+                                            7,
+                                            34,
+                                            7,
+                                            39
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+                                            {
+                                              "kind": "string_start",
+                                              "text": "\"",
+                                              "span": [
+                                                7,
+                                                34,
+                                                7,
+                                                35
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+
+                                              ]
+                                            },
+                                            {
+                                              "kind": "string_content",
+                                              "text": "key",
+                                              "span": [
+                                                7,
+                                                35,
+                                                7,
+                                                38
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+
+                                              ]
+                                            },
+                                            {
+                                              "kind": "string_end",
+                                              "text": "\"",
+                                              "span": [
+                                                7,
+                                                38,
+                                                7,
+                                                39
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "kind": ")",
+                                          "text": ")",
+                                          "span": [
+                                            7,
+                                            39,
+                                            7,
+                                            40
+                                          ],
+                                          "named": false,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "kind": ")",
+                              "text": ")",
+                              "span": [
+                                7,
+                                40,
+                                7,
+                                41
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            7,
+                            41,
+                            7,
+                            42
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "block",
+                          "text": "running = running + chosen",
+                          "span": [
+                            8,
+                            12,
+                            8,
+                            38
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "running",
+                              "span": [
+                                8,
+                                12,
+                                8,
+                                19
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "=",
+                              "text": "=",
+                              "span": [
+                                8,
+                                20,
+                                8,
+                                21
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "binary_operator",
+                              "text": "running + chosen",
+                              "span": [
+                                8,
+                                22,
+                                8,
+                                38
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "running",
+                                  "span": [
+                                    8,
+                                    22,
+                                    8,
+                                    29
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "+",
+                                  "text": "+",
+                                  "span": [
+                                    8,
+                                    30,
+                                    8,
+                                    31
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "chosen",
+                                  "span": [
+                                    8,
+                                    32,
+                                    8,
+                                    38
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "for_statement",
+                      "text": "for item in items:\n            running = running + item",
+                      "span": [
+                        9,
+                        8,
+                        10,
+                        36
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "for",
+                          "text": "for",
+                          "span": [
+                            9,
+                            8,
+                            9,
+                            11
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "item",
+                          "span": [
+                            9,
+                            12,
+                            9,
+                            16
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "in",
+                          "text": "in",
+                          "span": [
+                            9,
+                            17,
+                            9,
+                            19
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "items",
+                          "span": [
+                            9,
+                            20,
+                            9,
+                            25
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            9,
+                            25,
+                            9,
+                            26
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "block",
+                          "text": "running = running + item",
+                          "span": [
+                            10,
+                            12,
+                            10,
+                            36
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "running",
+                              "span": [
+                                10,
+                                12,
+                                10,
+                                19
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "=",
+                              "text": "=",
+                              "span": [
+                                10,
+                                20,
+                                10,
+                                21
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "binary_operator",
+                              "text": "running + item",
+                              "span": [
+                                10,
+                                22,
+                                10,
+                                36
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "running",
+                                  "span": [
+                                    10,
+                                    22,
+                                    10,
+                                    29
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "+",
+                                  "text": "+",
+                                  "span": [
+                                    10,
+                                    30,
+                                    10,
+                                    31
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "item",
+                                  "span": [
+                                    10,
+                                    32,
+                                    10,
+                                    36
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "for_statement",
+                      "text": "for other in items:\n            running = running + other",
+                      "span": [
+                        11,
+                        8,
+                        12,
+                        37
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "for",
+                          "text": "for",
+                          "span": [
+                            11,
+                            8,
+                            11,
+                            11
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "other",
+                          "span": [
+                            11,
+                            12,
+                            11,
+                            17
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "in",
+                          "text": "in",
+                          "span": [
+                            11,
+                            18,
+                            11,
+                            20
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "items",
+                          "span": [
+                            11,
+                            21,
+                            11,
+                            26
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            11,
+                            26,
+                            11,
+                            27
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "block",
+                          "text": "running = running + other",
+                          "span": [
+                            12,
+                            12,
+                            12,
+                            37
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "running",
+                              "span": [
+                                12,
+                                12,
+                                12,
+                                19
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "=",
+                              "text": "=",
+                              "span": [
+                                12,
+                                20,
+                                12,
+                                21
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "binary_operator",
+                              "text": "running + other",
+                              "span": [
+                                12,
+                                22,
+                                12,
+                                37
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "running",
+                                  "span": [
+                                    12,
+                                    22,
+                                    12,
+                                    29
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "+",
+                                  "text": "+",
+                                  "span": [
+                                    12,
+                                    30,
+                                    12,
+                                    31
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "other",
+                                  "span": [
+                                    12,
+                                    32,
+                                    12,
+                                    37
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "with_statement",
+                      "text": "with open(\"log\") as handle:\n            buffer = handle.read()",
+                      "span": [
+                        13,
+                        8,
+                        14,
+                        34
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "with",
+                          "text": "with",
+                          "span": [
+                            13,
+                            8,
+                            13,
+                            12
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "with_clause",
+                          "text": "open(\"log\") as handle",
+                          "span": [
+                            13,
+                            13,
+                            13,
+                            34
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "call",
+                              "text": "open(\"log\")",
+                              "span": [
+                                13,
+                                13,
+                                13,
+                                24
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "open",
+                                  "span": [
+                                    13,
+                                    13,
+                                    13,
+                                    17
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "argument_list",
+                                  "text": "(\"log\")",
+                                  "span": [
+                                    13,
+                                    17,
+                                    13,
+                                    24
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "(",
+                                      "text": "(",
+                                      "span": [
+                                        13,
+                                        17,
+                                        13,
+                                        18
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "string",
+                                      "text": "\"log\"",
+                                      "span": [
+                                        13,
+                                        18,
+                                        13,
+                                        23
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "string_start",
+                                          "text": "\"",
+                                          "span": [
+                                            13,
+                                            18,
+                                            13,
+                                            19
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "string_content",
+                                          "text": "log",
+                                          "span": [
+                                            13,
+                                            19,
+                                            13,
+                                            22
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "string_end",
+                                          "text": "\"",
+                                          "span": [
+                                            13,
+                                            22,
+                                            13,
+                                            23
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "kind": ")",
+                                      "text": ")",
+                                      "span": [
+                                        13,
+                                        23,
+                                        13,
+                                        24
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "kind": "as",
+                              "text": "as",
+                              "span": [
+                                13,
+                                25,
+                                13,
+                                27
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "as_pattern_target",
+                              "text": "handle",
+                              "span": [
+                                13,
+                                28,
+                                13,
+                                34
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "kind": ":",
+                          "text": ":",
+                          "span": [
+                            13,
+                            34,
+                            13,
+                            35
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "block",
+                          "text": "buffer = handle.read()",
+                          "span": [
+                            14,
+                            12,
+                            14,
+                            34
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "buffer",
+                              "span": [
+                                14,
+                                12,
+                                14,
+                                18
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "=",
+                              "text": "=",
+                              "span": [
+                                14,
+                                19,
+                                14,
+                                20
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "call",
+                              "text": "handle.read()",
+                              "span": [
+                                14,
+                                21,
+                                14,
+                                34
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "attribute",
+                                  "text": "handle.read",
+                                  "span": [
+                                    14,
+                                    21,
+                                    14,
+                                    32
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "identifier",
+                                      "text": "handle",
+                                      "span": [
+                                        14,
+                                        21,
+                                        14,
+                                        27
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": ".",
+                                      "text": ".",
+                                      "span": [
+                                        14,
+                                        27,
+                                        14,
+                                        28
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "identifier",
+                                      "text": "read",
+                                      "span": [
+                                        14,
+                                        28,
+                                        14,
+                                        32
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "kind": "argument_list",
+                                  "text": "()",
+                                  "span": [
+                                    14,
+                                    32,
+                                    14,
+                                    34
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "(",
+                                      "text": "(",
+                                      "span": [
+                                        14,
+                                        32,
+                                        14,
+                                        33
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": ")",
+                                      "text": ")",
+                                      "span": [
+                                        14,
+                                        33,
+                                        14,
+                                        34
+                                      ],
+                                      "named": false,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "target.slot = running",
+                      "span": [
+                        15,
+                        8,
+                        15,
+                        29
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "attribute",
+                          "text": "target.slot",
+                          "span": [
+                            15,
+                            8,
+                            15,
+                            19
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "target",
+                              "span": [
+                                15,
+                                8,
+                                15,
+                                14
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": ".",
+                              "text": ".",
+                              "span": [
+                                15,
+                                14,
+                                15,
+                                15
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "identifier",
+                              "text": "slot",
+                              "span": [
+                                15,
+                                15,
+                                15,
+                                19
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            15,
+                            20,
+                            15,
+                            21
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "running",
+                          "span": [
+                            15,
+                            22,
+                            15,
+                            29
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "target[price] = buffer",
+                      "span": [
+                        16,
+                        8,
+                        16,
+                        30
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "subscript",
+                          "text": "target[price]",
+                          "span": [
+                            16,
+                            8,
+                            16,
+                            21
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "target",
+                              "span": [
+                                16,
+                                8,
+                                16,
+                                14
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "[",
+                              "text": "[",
+                              "span": [
+                                16,
+                                14,
+                                16,
+                                15
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "identifier",
+                              "text": "price",
+                              "span": [
+                                16,
+                                15,
+                                16,
+                                20
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "]",
+                              "text": "]",
+                              "span": [
+                                16,
+                                20,
+                                16,
+                                21
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            16,
+                            22,
+                            16,
+                            23
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "buffer",
+                          "span": [
+                            16,
+                            24,
+                            16,
+                            30
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "expression_statement",
+                      "text": "mapping = {\"key\": buffer}",
+                      "span": [
+                        17,
+                        8,
+                        17,
+                        33
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "mapping",
+                          "span": [
+                            17,
+                            8,
+                            17,
+                            15
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "=",
+                          "text": "=",
+                          "span": [
+                            17,
+                            16,
+                            17,
+                            17
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "dictionary",
+                          "text": "{\"key\": buffer}",
+                          "span": [
+                            17,
+                            18,
+                            17,
+                            33
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "{",
+                              "text": "{",
+                              "span": [
+                                17,
+                                18,
+                                17,
+                                19
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "pair",
+                              "text": "\"key\": buffer",
+                              "span": [
+                                17,
+                                19,
+                                17,
+                                32
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "string",
+                                  "text": "\"key\"",
+                                  "span": [
+                                    17,
+                                    19,
+                                    17,
+                                    24
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+                                    {
+                                      "kind": "string_start",
+                                      "text": "\"",
+                                      "span": [
+                                        17,
+                                        19,
+                                        17,
+                                        20
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "string_content",
+                                      "text": "key",
+                                      "span": [
+                                        17,
+                                        20,
+                                        17,
+                                        23
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    },
+                                    {
+                                      "kind": "string_end",
+                                      "text": "\"",
+                                      "span": [
+                                        17,
+                                        23,
+                                        17,
+                                        24
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "kind": ":",
+                                  "text": ":",
+                                  "span": [
+                                    17,
+                                    24,
+                                    17,
+                                    25
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "buffer",
+                                  "span": [
+                                    17,
+                                    26,
+                                    17,
+                                    32
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "kind": "}",
+                              "text": "}",
+                              "span": [
+                                17,
+                                32,
+                                17,
+                                33
+                              ],
+                              "named": false,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "return_statement",
+                      "text": "return Result(running, buffer, target)",
+                      "span": [
+                        18,
+                        8,
+                        18,
+                        46
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "return",
+                          "text": "return",
+                          "span": [
+                            18,
+                            8,
+                            18,
+                            14
+                          ],
+                          "named": false,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "call",
+                          "text": "Result(running, buffer, target)",
+                          "span": [
+                            18,
+                            15,
+                            18,
+                            46
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "identifier",
+                              "text": "Result",
+                              "span": [
+                                18,
+                                15,
+                                18,
+                                21
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            },
+                            {
+                              "kind": "argument_list",
+                              "text": "(running, buffer, target)",
+                              "span": [
+                                18,
+                                21,
+                                18,
+                                46
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "(",
+                                  "text": "(",
+                                  "span": [
+                                    18,
+                                    21,
+                                    18,
+                                    22
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "running",
+                                  "span": [
+                                    18,
+                                    22,
+                                    18,
+                                    29
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": ",",
+                                  "text": ",",
+                                  "span": [
+                                    18,
+                                    29,
+                                    18,
+                                    30
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "buffer",
+                                  "span": [
+                                    18,
+                                    31,
+                                    18,
+                                    37
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": ",",
+                                  "text": ",",
+                                  "span": [
+                                    18,
+                                    37,
+                                    18,
+                                    38
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "identifier",
+                                  "text": "target",
+                                  "span": [
+                                    18,
+                                    39,
+                                    18,
+                                    45
+                                  ],
+                                  "named": true,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": ")",
+                                  "text": ")",
+                                  "span": [
+                                    18,
+                                    45,
+                                    18,
+                                    46
+                                  ],
+                                  "named": false,
+                                  "field_name": null,
+                                  "children": [
+
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "visibility": "public",
+            "params": [
+              "self",
+              "price",
+              "tax",
+              "items",
+              "mapping",
+              "target"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "boundaries": [
+
+      ],
+      "file": "facts/local_flow_python.py",
+      "id": "Worker#handle",
+      "line": 2,
+      "name": "handle",
+      "owner": "Worker",
+      "span": [
+        2,
+        4,
+        18,
+        46
+      ],
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "price",
+              "tax"
+            ]
+          ],
+          "dependencies": [
+            [
+              "subtotal",
+              "price"
+            ],
+            [
+              "subtotal",
+              "tax"
+            ]
+          ],
+          "end_line": 3,
+          "index": 0,
+          "line": 3,
+          "reads": [
+            "price",
+            "tax"
+          ],
+          "source": "subtotal = price + tax",
+          "span": [
+            3,
+            8,
+            3,
+            30
+          ],
+          "writes": [
+            "subtotal"
+          ]
+        },
+        {
+          "co_uses": [
+
+          ],
+          "dependencies": [
+            [
+              "running",
+              "subtotal"
+            ]
+          ],
+          "end_line": 4,
+          "index": 1,
+          "line": 4,
+          "reads": [
+            "subtotal"
+          ],
+          "source": "running: int = subtotal",
+          "span": [
+            4,
+            8,
+            4,
+            31
+          ],
+          "writes": [
+            "running"
+          ]
+        },
+        {
+          "co_uses": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 5,
+          "index": 2,
+          "line": 5,
+          "reads": [
+
+          ],
+          "source": "annotated: int",
+          "span": [
+            5,
+            8,
+            5,
+            22
+          ],
+          "writes": [
+            "annotated"
+          ]
+        },
+        {
+          "co_uses": [
+
+          ],
+          "dependencies": [
+            [
+              "annotated",
+              "running"
+            ]
+          ],
+          "end_line": 6,
+          "index": 3,
+          "line": 6,
+          "reads": [
+            "running"
+          ],
+          "source": "annotated = running",
+          "span": [
+            6,
+            8,
+            6,
+            27
+          ],
+          "writes": [
+            "annotated"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "chosen",
+              "mapping"
+            ],
+            [
+              "chosen",
+              "running"
+            ],
+            [
+              "mapping",
+              "running"
+            ]
+          ],
+          "dependencies": [
+            [
+              "chosen",
+              "mapping"
+            ],
+            [
+              "running",
+              "mapping"
+            ]
+          ],
+          "end_line": 8,
+          "index": 4,
+          "line": 7,
+          "reads": [
+            "chosen",
+            "mapping",
+            "running"
+          ],
+          "source": "if (chosen := mapping.get(\"key\")): running = running + chosen",
+          "span": [
+            7,
+            8,
+            8,
+            38
+          ],
+          "writes": [
+            "chosen",
+            "running"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "item",
+              "items"
+            ],
+            [
+              "item",
+              "running"
+            ],
+            [
+              "items",
+              "running"
+            ]
+          ],
+          "dependencies": [
+            [
+              "item",
+              "items"
+            ],
+            [
+              "running",
+              "items"
+            ]
+          ],
+          "end_line": 10,
+          "index": 5,
+          "line": 9,
+          "reads": [
+            "item",
+            "items",
+            "running"
+          ],
+          "source": "for item in items: running = running + item",
+          "span": [
+            9,
+            8,
+            10,
+            36
+          ],
+          "writes": [
+            "item",
+            "running"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "items",
+              "other"
+            ],
+            [
+              "items",
+              "running"
+            ],
+            [
+              "other",
+              "running"
+            ]
+          ],
+          "dependencies": [
+            [
+              "other",
+              "items"
+            ],
+            [
+              "running",
+              "items"
+            ]
+          ],
+          "end_line": 12,
+          "index": 6,
+          "line": 11,
+          "reads": [
+            "items",
+            "other",
+            "running"
+          ],
+          "source": "for other in items: running = running + other",
+          "span": [
+            11,
+            8,
+            12,
+            37
+          ],
+          "writes": [
+            "other",
+            "running"
+          ]
+        },
+        {
+          "co_uses": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 14,
+          "index": 7,
+          "line": 13,
+          "reads": [
+            "handle"
+          ],
+          "source": "with open(\"log\") as handle: buffer = handle.read()",
+          "span": [
+            13,
+            8,
+            14,
+            34
+          ],
+          "writes": [
+            "buffer",
+            "handle"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "running",
+              "target"
+            ]
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 15,
+          "index": 8,
+          "line": 15,
+          "reads": [
+            "running",
+            "target"
+          ],
+          "source": "target.slot = running",
+          "span": [
+            15,
+            8,
+            15,
+            29
+          ],
+          "writes": [
+
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "buffer",
+              "price"
+            ],
+            [
+              "buffer",
+              "target"
+            ],
+            [
+              "price",
+              "target"
+            ]
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 16,
+          "index": 9,
+          "line": 16,
+          "reads": [
+            "buffer",
+            "price",
+            "target"
+          ],
+          "source": "target[price] = buffer",
+          "span": [
+            16,
+            8,
+            16,
+            30
+          ],
+          "writes": [
+
+          ]
+        },
+        {
+          "co_uses": [
+
+          ],
+          "dependencies": [
+            [
+              "mapping",
+              "buffer"
+            ]
+          ],
+          "end_line": 17,
+          "index": 10,
+          "line": 17,
+          "reads": [
+            "buffer"
+          ],
+          "source": "mapping = {\"key\": buffer}",
+          "span": [
+            17,
+            8,
+            17,
+            33
+          ],
+          "writes": [
+            "mapping"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "buffer",
+              "running"
+            ],
+            [
+              "buffer",
+              "target"
+            ],
+            [
+              "running",
+              "target"
+            ]
+          ],
+          "dependencies": [
+
+          ],
+          "end_line": 18,
+          "index": 11,
+          "line": 18,
+          "reads": [
+            "buffer",
+            "running",
+            "target"
+          ],
+          "source": "return Result(running, buffer, target)",
+          "span": [
+            18,
+            8,
+            18,
+            46
+          ],
+          "writes": [
+
+          ]
+        }
+      ]
+    }
+  ]
+}

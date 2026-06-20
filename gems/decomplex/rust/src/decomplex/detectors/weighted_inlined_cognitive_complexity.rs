@@ -31,6 +31,13 @@ pub fn scan_files(
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveComplexityRow> {
+    scan_documents_with_summaries(documents, local_flow::scan_documents(documents))
+}
+
+pub fn scan_documents_with_summaries(
+    documents: &[Document],
+    summaries: Vec<local_flow::MethodSummary>,
+) -> Vec<WeightedInlinedCognitiveComplexityRow> {
     let topology_report = structural_topology::scan_documents(documents);
     let topology = structural_topology::Graph::new(topology_report.methods, topology_report.edges);
     let complexity_scores = documents
@@ -44,7 +51,7 @@ pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveCom
         .collect::<BTreeMap<_, _>>();
 
     let mut scores = BTreeMap::new();
-    for summary in local_flow::scan_documents(documents) {
+    for summary in summaries {
         let owner = if summary.owner == "(top-level)" {
             format!("(top-level:{})", summary.file)
         } else {

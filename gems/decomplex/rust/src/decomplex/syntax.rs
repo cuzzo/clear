@@ -5,7 +5,7 @@ pub mod tree_sitter_adapter;
 use crate::decomplex::ast::{Node as NormalizedNode, RawNode, Span};
 use crate::decomplex::parallel;
 use anyhow::{bail, Result};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -92,29 +92,80 @@ impl Language {
     }
 }
 
-#[derive(Clone, Debug)]
+impl<'de> Deserialize<'de> for Language {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Document {
     pub file: String,
     pub language: Language,
+    #[serde(default)]
     pub source: String,
+    #[serde(default)]
     pub lines: Vec<String>,
+    #[serde(default = "empty_raw_node")]
     pub root: RawNode,
+    #[serde(default = "empty_normalized_node")]
     pub normalized_root: NormalizedNode,
+    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
+    #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
+    #[serde(default)]
     pub call_sites: Vec<CallSite>,
+    #[serde(default)]
     pub state_reads: Vec<StateRead>,
+    #[serde(default)]
     pub state_writes: Vec<StateWrite>,
+    #[serde(default)]
     pub decision_sites: Vec<DecisionSite>,
+    #[serde(default)]
     pub branch_decisions: Vec<BranchDecision>,
+    #[serde(default)]
     pub dispatch_sites: Vec<DispatchSite>,
+    #[serde(default)]
     pub semantic_effect_sites: Vec<SemanticEffectSite>,
+    #[serde(default)]
     pub local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
+    #[serde(default)]
     pub predicate_aliases: Vec<PredicateAlias>,
+    #[serde(default)]
     pub comparison_uses: Vec<ComparisonUse>,
+    #[serde(default)]
+    pub path_condition_sites: Vec<PathConditionSite>,
 }
 
-#[derive(Clone, Debug)]
+fn empty_raw_node() -> RawNode {
+    RawNode {
+        kind: "program".to_string(),
+        text: String::new(),
+        span: [1, 0, 1, 0],
+        named: true,
+        field_name: None,
+        children: Vec::new(),
+    }
+}
+
+fn empty_normalized_node() -> NormalizedNode {
+    NormalizedNode {
+        r#type: "ROOT".to_string(),
+        children: Vec::new(),
+        first_lineno: 1,
+        first_column: 0,
+        last_lineno: 1,
+        last_column: 0,
+        text: String::new(),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct FunctionDef {
     pub file: String,
     pub name: String,
@@ -126,7 +177,7 @@ pub struct FunctionDef {
     pub params: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct OwnerDef {
     pub file: String,
     pub name: String,
@@ -135,7 +186,7 @@ pub struct OwnerDef {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CallSite {
     pub receiver: String,
     pub message: String,
@@ -151,7 +202,7 @@ pub struct CallSite {
     pub block: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateWrite {
     pub field: String,
     pub receiver: String,
@@ -162,7 +213,7 @@ pub struct StateWrite {
     pub owner: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateRead {
     pub field: String,
     pub receiver: String,
@@ -173,7 +224,7 @@ pub struct StateRead {
     pub owner: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PredicateAlias {
     pub name: String,
     pub body: String,
@@ -183,7 +234,7 @@ pub struct PredicateAlias {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DecisionSite {
     pub kind: String,
     pub members: Vec<String>,
@@ -195,7 +246,7 @@ pub struct DecisionSite {
     pub enclosing_span: Span,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BranchDecision {
     pub file: String,
     pub function: String,
@@ -205,7 +256,7 @@ pub struct BranchDecision {
     pub state_refs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DispatchSite {
     pub variant_set: Vec<String>,
     pub arm_members: BTreeMap<String, Vec<String>>,
@@ -216,7 +267,7 @@ pub struct DispatchSite {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SemanticEffectSite {
     pub kind: String,
     pub detail: String,
@@ -226,13 +277,13 @@ pub struct SemanticEffectSite {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct LocalComplexityScore {
     pub score: f64,
     pub signals: BTreeMap<String, usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ComparisonUse {
     pub canon_source: String,
     pub raw: String,
@@ -241,6 +292,16 @@ pub struct ComparisonUse {
     pub line: usize,
     pub span: Span,
     pub enclosing_span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PathConditionSite {
+    pub guards: Vec<String>,
+    pub action: String,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

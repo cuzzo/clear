@@ -19,9 +19,14 @@ class ExamplesOracleTest < Minitest::Test
                   .select { |path| SOURCE_EXTENSIONS.include?(File.extname(path)) }
                   .sort
                   .freeze
+  DETECTOR_FACT_PATHS = Dir[File.join(EXAMPLES_ROOT, "facts", "detectors", "*.json")].sort.freeze
 
   def test_shared_oracle_files_exist
     refute_empty ORACLE_PATHS
+  end
+
+  def test_detector_fact_oracles_exist
+    refute_empty DETECTOR_FACT_PATHS
   end
 
   def test_shared_oracles_are_engine_agnostic
@@ -53,6 +58,15 @@ class ExamplesOracleTest < Minitest::Test
     end
   end
 
+  DETECTOR_FACT_PATHS.product(ENGINES).each_with_index do |(fixture_path, engine), index|
+    detector = File.basename(fixture_path, ".json")
+    method_name = "test_detector_fact_#{index}_#{engine}_#{detector.tr("-", "_")}_matches_exact_oracle"
+
+    define_method(method_name) do
+      assert_detector_fact_fixture_matches_exact_oracle(fixture_path, engine)
+    end
+  end
+
   private
 
   def assert_fixture_matches_shared_oracle(fixture_path, engine)
@@ -76,6 +90,18 @@ class ExamplesOracleTest < Minitest::Test
     )
 
     assert_equal expected, project_detector_output(detector, actual), "#{engine} #{fixture_path}"
+  end
+
+  def assert_detector_fact_fixture_matches_exact_oracle(fixture_path, engine)
+    fixture = JSON.parse(File.read(fixture_path))
+    expected = fixture.fetch("expected")
+    assert meaningful?(expected), "#{fixture_path} expected output is empty"
+
+    actual = JSON.parse(
+      Decomplex::DetectorRunner.canonical_json_from_fact_fixture(fixture_path, engine: engine)
+    )
+
+    assert_equal expected, actual, "#{engine} #{fixture_path}"
   end
 
   def symbolize_options(options)

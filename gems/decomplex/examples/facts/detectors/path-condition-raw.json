@@ -1,0 +1,274 @@
+{
+  "detector": "path-condition",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/path_raw.rb",
+        "language": "ruby",
+        "function_defs": [
+          {
+            "file": "facts/path_raw.rb",
+            "name": "one",
+            "owner": "Fixture",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              5,
+              3
+            ],
+            "body": {
+              "kind": "method",
+              "text": "def one",
+              "span": [
+                1,
+                0,
+                5,
+                3
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+                {
+                  "kind": "identifier",
+                  "text": "one",
+                  "span": [
+                    1,
+                    0,
+                    1,
+                    3
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "body_statement",
+                  "text": "",
+                  "span": [
+                    1,
+                    0,
+                    5,
+                    3
+                  ],
+                  "named": true,
+                  "field_name": "body",
+                  "children": [
+                    {
+                      "kind": "if",
+                      "text": "if a\n if b\n commit\n end\nend",
+                      "span": [
+                        1,
+                        0,
+                        5,
+                        3
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "a",
+                          "span": [
+                            1,
+                            3,
+                            1,
+                            4
+                          ],
+                          "named": true,
+                          "field_name": "condition",
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "body_statement",
+                          "text": "if b",
+                          "span": [
+                            2,
+                            2,
+                            4,
+                            5
+                          ],
+                          "named": true,
+                          "field_name": "consequence",
+                          "children": [
+                            {
+                              "kind": "if",
+                              "text": "if b\n commit\nend",
+                              "span": [
+                                2,
+                                2,
+                                4,
+                                5
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "b",
+                                  "span": [
+                                    2,
+                                    5,
+                                    2,
+                                    6
+                                  ],
+                                  "named": true,
+                                  "field_name": "condition",
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "body_statement",
+                                  "text": "commit",
+                                  "span": [
+                                    3,
+                                    4,
+                                    3,
+                                    10
+                                  ],
+                                  "named": true,
+                                  "field_name": "consequence",
+                                  "children": [
+                                    {
+                                      "kind": "call",
+                                      "text": "commit",
+                                      "span": [
+                                        3,
+                                        4,
+                                        3,
+                                        10
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "commit",
+                                          "span": [
+                                            3,
+                                            4,
+                                            3,
+                                            10
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          }
+        ],
+        "path_condition_sites": [
+          {
+            "guards": [
+              "a",
+              "b"
+            ],
+            "action": "commit",
+            "file": "facts/path_raw.rb",
+            "function": "one",
+            "line": 3,
+            "span": [
+              3,
+              4,
+              3,
+              10
+            ]
+          },
+          {
+            "guards": [
+              "a",
+              "b"
+            ],
+            "action": "commit",
+            "file": "facts/path_raw.rb",
+            "function": "two",
+            "line": 6,
+            "span": [
+              6,
+              0,
+              6,
+              6
+            ]
+          },
+          {
+            "guards": [
+              "a",
+              "b"
+            ],
+            "action": "commit",
+            "file": "facts/path_raw.rb",
+            "function": "three",
+            "line": 7,
+            "span": [
+              7,
+              0,
+              7,
+              6
+            ]
+          },
+          {
+            "guards": [
+              "a"
+            ],
+            "action": "commit",
+            "file": "facts/path_raw.rb",
+            "function": "four",
+            "line": 8,
+            "span": [
+              8,
+              0,
+              8,
+              6
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "neglected": [
+      {
+        "action": "commit",
+        "at": "facts/path_raw.rb:four:8",
+        "missing": "b",
+        "pattern": [
+          "a",
+          "b"
+        ],
+        "spans": {
+          "facts/path_raw.rb:four:8": [
+            8,
+            0,
+            8,
+            6
+          ]
+        },
+        "support": 3
+      }
+    ]
+  }
+}

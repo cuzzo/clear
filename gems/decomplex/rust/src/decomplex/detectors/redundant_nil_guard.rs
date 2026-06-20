@@ -67,7 +67,7 @@ impl Finding {
 
 const TERMINATING_CALLS: &[&str] = &["raise", "fail", "abort", "exit", "exit!"];
 const NIL_PREDICATE_MIDS: &[&str] = &["nil?", "isNull", "is_null", "nil", "is_none"];
-const NON_NIL_PREDICATE_MIDS: &[&str] = &["isSome", "is_some", "present"];
+const NON_NIL_PREDICATE_MIDS: &[&str] = &["isSome", "is_some", "present", "present?"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<RedundantNilGuardRow>> {
     let documents = syntax::parse_files(files, language)?;
@@ -311,29 +311,6 @@ impl RedundantNilGuard {
         }
 
         match node.r#type.as_str() {
-            "CALL" => {
-                let recv = node.children.get(0).and_then(ast::node)?;
-                let mid = match node.children.get(1)? {
-                    Child::String(s) | Child::Symbol(s) => s,
-                    _ => return None,
-                };
-                let args = node.children.get(2);
-                if NIL_PREDICATE_MIDS.contains(&mid.as_str()) && self.no_call_arguments(args) {
-                    let subject = self.subject_key(recv)?;
-                    return Some(NilFact {
-                        local: subject,
-                        non_nil_when_true: false,
-                    });
-                }
-                if NON_NIL_PREDICATE_MIDS.contains(&mid.as_str()) && self.no_call_arguments(args) {
-                    let subject = self.subject_key(recv)?;
-                    return Some(NilFact {
-                        local: subject,
-                        non_nil_when_true: true,
-                    });
-                }
-                None
-            }
             "OPCALL" => {
                 let recv = node.children.get(0).and_then(ast::node)?;
                 let mid = match node.children.get(1)? {
@@ -598,17 +575,6 @@ impl RedundantNilGuard {
 
     fn stable_reader_name(&self, mid: &str) -> bool {
         !(mid.ends_with('=') || mid.ends_with('!') || mid == "[]")
-    }
-
-    #[allow(dead_code)]
-    fn local_name(&self, node: &Node) -> Option<String> {
-        if matches!(node.r#type.as_str(), "LVAR" | "DVAR") {
-            match node.children.first()? {
-                Child::String(s) | Child::Symbol(s) => return Some(s.clone()),
-                _ => {}
-            }
-        }
-        None
     }
 
     fn nil_arg(&self, args: Option<&Child>) -> bool {

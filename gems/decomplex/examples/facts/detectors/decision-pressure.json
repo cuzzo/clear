@@ -1,0 +1,188 @@
+{
+  "detector": "decision-pressure",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/decision.rb",
+        "language": "ruby",
+        "local_contract_assignments": {
+          "check": {
+            "candidate": "input.user"
+          }
+        },
+        "local_methods": [
+          {
+            "id": "Fixture#check",
+            "owner": "Fixture",
+            "name": "check",
+            "file": "facts/decision.rb",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "index": 0,
+                "line": 1,
+                "end_line": 1,
+                "span": [
+                  1,
+                  0,
+                  1,
+                  22
+                ],
+                "source": "candidate = input.user",
+                "reads": [
+                  "input"
+                ],
+                "writes": [
+                  "candidate"
+                ],
+                "dependencies": [
+                  [
+                    "candidate",
+                    "input"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 1,
+                "line": 2,
+                "end_line": 2,
+                "span": [
+                  2,
+                  0,
+                  2,
+                  25
+                ],
+                "source": "candidate.name rescue nil",
+                "reads": [
+                  "candidate"
+                ],
+                "writes": [
+
+                ],
+                "dependencies": [
+
+                ],
+                "co_uses": [
+
+                ]
+              }
+            ],
+            "boundaries": [
+
+            ]
+          }
+        ],
+        "call_sites": [
+          {
+            "receiver": "candidate",
+            "message": "nil?",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "owner": "Fixture",
+            "line": 3,
+            "span": [
+              3,
+              2,
+              3,
+              16
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "candidate",
+            "message": "ready?",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "owner": "Fixture",
+            "line": 4,
+            "span": [
+              4,
+              2,
+              4,
+              18
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "candidate",
+            "message": "name",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "owner": "Fixture",
+            "line": 2,
+            "span": [
+              2,
+              0,
+              2,
+              20
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "contract": ".user",
+      "decisions": 1,
+      "essential": 1,
+      "methods": 1,
+      "sites": [
+        "facts/decision.rb:check:3"
+      ],
+      "spans": {
+        "facts/decision.rb:check:3": [
+          3,
+          2,
+          3,
+          16
+        ]
+      }
+    },
+    {
+      "contract": ".name",
+      "decisions": 1,
+      "essential": 0,
+      "methods": 1,
+      "sites": [
+        "facts/decision.rb:check:2"
+      ],
+      "spans": {
+        "facts/decision.rb:check:2": [
+          2,
+          0,
+          2,
+          25
+        ]
+      }
+    }
+  ]
+}

@@ -1,5 +1,4 @@
-use crate::decomplex::ast::{RawNode, Span};
-use crate::decomplex::syntax::adapters::language_profile;
+use crate::decomplex::ast::Span;
 use crate::decomplex::syntax::{self, CallSite, Document, FunctionDef, Language};
 use anyhow::Result;
 use serde::Serialize;
@@ -266,56 +265,13 @@ fn file_owner(file: &str) -> String {
 }
 
 fn enclosed_by_matching_owner(document: &Document, owner: &str, span: Span) -> bool {
-    let profile = language_profile(document.language);
-    let mut nodes = Vec::new();
-    document.root.walk(&mut nodes);
-    nodes.into_iter().any(|node| {
-        raw_owner_name(profile, node).as_deref() == Some(owner) && encloses(node.span, span)
-    })
-}
-
-fn raw_owner_name(
-    profile: &dyn crate::decomplex::syntax::adapters::LanguageProfile,
-    node: &RawNode,
-) -> Option<String> {
-    let owner_kind = profile
-        .class_owner_node_kinds()
-        .contains(&node.kind.as_str())
-        || profile
-            .module_owner_node_kinds()
-            .contains(&node.kind.as_str())
-        || profile
-            .generic_owner_node_kinds()
-            .contains(&node.kind.as_str())
-        || profile
-            .struct_owner_node_kinds()
-            .contains(&node.kind.as_str())
-        || profile
-            .impl_owner_node_kinds()
-            .contains(&node.kind.as_str());
-    let hidden_ruby_owner = node.kind == "body_statement"
-        && node
-            .children
-            .first()
-            .map(|child| matches!(child.kind.as_str(), "class" | "module"))
-            .unwrap_or(false);
-    if !owner_kind && !hidden_ruby_owner {
-        return None;
-    }
-
-    node.children
+    document
+        .owner_defs
         .iter()
-        .find(|child| {
-            child.named
-                && matches!(
-                    child.kind.as_str(),
-                    "identifier" | "constant" | "type_identifier" | "field_identifier"
-                )
-        })
-        .map(|child| child.text.clone())
+        .any(|owner_def| owner_def.name == owner && span_encloses(owner_def.span, span))
 }
 
-fn encloses(outer: Span, inner: Span) -> bool {
+fn span_encloses(outer: Span, inner: Span) -> bool {
     let starts_before = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]);
     let ends_after = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]);
     starts_before && ends_after

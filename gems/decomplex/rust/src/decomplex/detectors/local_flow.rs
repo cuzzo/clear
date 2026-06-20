@@ -2,7 +2,7 @@ use crate::decomplex::ast::{self, Child, Node, RawNode, Span};
 use crate::decomplex::syntax::adapters::{language_profile, LanguageProfile};
 use crate::decomplex::syntax::{self, Document, FunctionDef, Language};
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,7 @@ pub struct LocalFlowRow {
     pub summaries: Vec<MethodSummary>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct MethodSummary {
     pub id: String,
     pub owner: String,
@@ -19,15 +19,15 @@ pub struct MethodSummary {
     pub file: String,
     pub line: usize,
     pub span: Span,
-    #[serde(skip_serializing)]
+    #[serde(default = "empty_node", skip_serializing)]
     pub node: Node,
-    #[serde(skip_serializing)]
+    #[serde(default, skip_serializing)]
     pub raw_node: Option<RawNode>,
     pub statements: Vec<Statement>,
     pub boundaries: Vec<Boundary>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Statement {
     pub index: usize,
     pub line: usize,
@@ -40,7 +40,7 @@ pub struct Statement {
     pub co_uses: Vec<(String, String)>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Boundary {
     pub before_index: usize,
     pub after_index: usize,
@@ -62,6 +62,18 @@ const STATEMENT_CONTAINER_TYPES: &[&str] = &[
     "HASH",
     "STATEMENTS",
 ];
+
+fn empty_node() -> Node {
+    Node {
+        r#type: "ROOT".to_string(),
+        children: Vec::new(),
+        first_lineno: 1,
+        first_column: 0,
+        last_lineno: 1,
+        last_column: 0,
+        text: String::new(),
+    }
+}
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSummary>> {
     let documents = syntax::parse_files(files, language)?;
@@ -674,15 +686,6 @@ fn raw_declaration_name_in_tree(
             .children
             .iter()
             .any(|child| raw_declaration_name_in_tree(child, target, profile))
-}
-
-fn raw_local_declaration_name_node<'a>(
-    node: &'a RawNode,
-    profile: &dyn LanguageProfile,
-) -> Option<&'a RawNode> {
-    raw_local_declaration_name_nodes(node, profile)
-        .into_iter()
-        .next()
 }
 
 fn raw_local_declaration_name_nodes<'a>(

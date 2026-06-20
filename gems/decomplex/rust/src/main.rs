@@ -11,7 +11,9 @@ use decomplex::detectors::{
 use decomplex::parallel;
 use decomplex::report::Report;
 use decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
-use decomplex::syntax::Language;
+use decomplex::syntax::{Document, Language, LocalComplexityScore};
+use serde::Deserialize;
+use serde_json::{json, Value};
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -266,6 +268,18 @@ fn run() -> Result<()> {
             let facts = read_facts(input.as_ref(), from_stdin)?;
             render_report(&facts, &format, output.as_ref())?;
         }
+        Command::DetectorFacts { input } => {
+            let fixture = read_facts(Some(&input), false)?;
+            let detector = fixture
+                .get("detector")
+                .and_then(Value::as_str)
+                .with_context(|| format!("{} missing detector", input.display()))?;
+            let input = detector_fact_input(&fixture).with_context(|| {
+                format!("failed to read detector facts from {}", input.display())
+            })?;
+            let output = run_detector_on_fact_input(detector, &input, &fixture)?;
+            println!("{}", serde_json::to_string(&output)?);
+        }
     }
     Ok(())
 }
@@ -417,6 +431,9 @@ enum Command {
         format: String,
         output: Option<PathBuf>,
     },
+    DetectorFacts {
+        input: PathBuf,
+    },
 }
 
 impl Command {
@@ -449,7 +466,7 @@ impl Command {
             | Self::FatUnion { jobs, .. }
             | Self::Facts { jobs, .. }
             | Self::Report { jobs, .. } => *jobs,
-            Self::RenderReport { .. } => None,
+            Self::RenderReport { .. } | Self::DetectorFacts { .. } => None,
         }
     }
 }
@@ -493,6 +510,10 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 format: args.format,
                 output: args.output,
             })
+        }
+        "detector-facts" => {
+            let input = parse_input_only_args(cursor.collect(), "detector-facts")?;
+            Ok(Command::DetectorFacts { input })
         }
         "state-writes" => {
             let (language, files, jobs) = parse_language_files_and_jobs(cursor.collect())?;
@@ -810,6 +831,198 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         _ => bail!("unknown decomplex-rust command: {command}"),
+    }
+}
+
+fn parse_input_only_args(args: Vec<String>, command: &str) -> Result<PathBuf> {
+    let mut input = None;
+    let mut cursor = args.into_iter();
+    while let Some(arg) = cursor.next() {
+        if arg == "--input" {
+            input = Some(PathBuf::from(
+                cursor.next().with_context(|| "--input requires a value")?,
+            ));
+        } else if let Some(value) = arg.strip_prefix("--input=") {
+            input = Some(PathBuf::from(value));
+        } else {
+            bail!("unknown {command} argument: {arg}");
+        }
+    }
+    input.with_context(|| format!("{command} requires --input=FILE"))
+}
+
+#[derive(Deserialize)]
+struct DetectorFactDocuments {
+    documents: Vec<Document>,
+}
+
+struct DetectorFactInput {
+    documents: Vec<Document>,
+    local_methods: Vec<local_flow::MethodSummary>,
+}
+
+fn detector_fact_input(fixture: &Value) -> Result<DetectorFactInput> {
+    let input = fixture
+        .get("input")
+        .cloned()
+        .with_context(|| "detector fact fixture missing input")?;
+    let documents: DetectorFactDocuments = serde_json::from_value(input.clone())?;
+    let mut local_methods = Vec::new();
+
+    if let Some(methods) = input.get("local_methods") {
+        local_methods.extend(serde_json::from_value::<Vec<local_flow::MethodSummary>>(
+            methods.clone(),
+        )?);
+    }
+    for document in input
+        .get("documents")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(methods) = document.get("local_methods") {
+            local_methods.extend(serde_json::from_value::<Vec<local_flow::MethodSummary>>(
+                methods.clone(),
+            )?);
+        }
+    }
+
+    Ok(DetectorFactInput {
+        documents: documents.documents,
+        local_methods,
+    })
+}
+
+fn run_detector_on_fact_input(
+    detector: &str,
+    input: &DetectorFactInput,
+    fixture: &Value,
+) -> Result<Value> {
+    let documents = input.documents.as_slice();
+    match detector {
+        "co-update" => Ok(json!(co_update::scan_documents(documents))),
+        "decision-pressure" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(decision_pressure::scan_documents(documents)))
+            } else {
+                Ok(json!(decision_pressure::scan_documents_with_summaries(
+                    documents,
+                    input.local_methods.clone()
+                )))
+            }
+        }
+        "predicate-alias" | "predicate-aliases" => {
+            Ok(json!(predicate_alias::scan_documents(documents)))
+        }
+        "miner" | "decision-miner" => Ok(json!(miner::scan_documents(documents))),
+        "semantic-alias" | "semantic-aliases" => {
+            Ok(json!(semantic_alias::scan_documents(documents)))
+        }
+        "flay-similarity" | "structural-similarity" => {
+            let options = fixture.get("options").unwrap_or(&Value::Null);
+            let mass = value_usize(options, "mass", 32)?;
+            let fuzzy = value_usize(options, "fuzzy", 1)?;
+            Ok(json!(flay_similarity::scan_documents(
+                documents, mass, fuzzy
+            )))
+        }
+        "temporal-ordering-pressure" => {
+            Ok(json!(temporal_ordering_pressure::scan_documents(documents)))
+        }
+        "state-branch-density" => Ok(json!(state_branch_density::scan_documents(documents))),
+        "redundant-nil-guard" => Ok(json!(redundant_nil_guard::scan_documents(documents))),
+        "state-mesh" | "state-heatmap" => Ok(json!(state_mesh::scan_documents(documents))),
+        "inconsistent-rename-clone" => {
+            Ok(json!(inconsistent_rename_clone::scan_documents(documents)))
+        }
+        "derived-state" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(derived_state::scan_documents(documents)))
+            } else {
+                Ok(json!(derived_state::scan_summaries(
+                    input.local_methods.clone()
+                )))
+            }
+        }
+        "implicit-control-flow" | "ordered-protocol-mine" => {
+            Ok(json!(implicit_control_flow::scan_documents(documents)))
+        }
+        "weighted-inlined-complexity" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(
+                    weighted_inlined_cognitive_complexity::scan_documents(documents)
+                ))
+            } else {
+                Ok(json!(
+                    weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
+                        documents,
+                        input.local_methods.clone()
+                    )
+                ))
+            }
+        }
+        "locality-drag" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(locality_drag::scan_documents(documents)))
+            } else {
+                Ok(json!(locality_drag::scan_summaries_with_scores(
+                    input.local_methods.clone(),
+                    complexity_scores(documents)
+                )))
+            }
+        }
+        "operational-discontinuity" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(operational_discontinuity::scan_documents(documents)))
+            } else {
+                Ok(json!(operational_discontinuity::scan_summaries(
+                    input.local_methods.clone()
+                )))
+            }
+        }
+        "oversized-predicate" => Ok(json!(oversized_predicate::scan_documents(documents))),
+        "path-condition" => Ok(json!({
+            "neglected": path_condition::scan_documents(documents).neglected,
+        })),
+        "sequence-mine" | "broken-protocol" => Ok(json!(sequence_mine::scan_documents(documents))),
+        "function-lcom" => {
+            if input.local_methods.is_empty() {
+                Ok(json!(function_lcom::scan_documents(documents)))
+            } else {
+                Ok(json!(function_lcom::scan_summaries(
+                    input.local_methods.clone()
+                )))
+            }
+        }
+        "false-simplicity" => Ok(json!(false_simplicity::scan_documents(documents))),
+        "fat-union" => Ok(json!(fat_union::scan_documents(documents))),
+        "local-flow" => Ok(json!(local_flow::scan_documents(documents))),
+        "structural-topology" => Ok(json!(structural_topology::scan_documents(documents))),
+        _ => bail!("unsupported detector fact fixture: {detector}"),
+    }
+}
+
+fn complexity_scores(
+    documents: &[Document],
+) -> std::collections::BTreeMap<(String, String), LocalComplexityScore> {
+    documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .local_complexity_scores
+                .iter()
+                .map(|(id, score)| ((document.file.clone(), id.clone()), score.clone()))
+        })
+        .collect()
+}
+
+fn value_usize(options: &Value, key: &str, default: usize) -> Result<usize> {
+    match options.get(key) {
+        Some(value) => value
+            .as_u64()
+            .map(|value| value as usize)
+            .with_context(|| format!("option {key} must be an integer")),
+        None => Ok(default),
     }
 }
 

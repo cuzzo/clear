@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "ostruct"
 require_relative "co_update"
 require_relative "flay_similarity"
 require_relative "local_flow"
@@ -143,9 +144,37 @@ module Decomplex
       JSON.generate(canonicalize(run(detector, files, engine: engine, **options))) << "\n"
     end
 
+    def run_fact_fixture(path, engine: "ruby")
+      fixture = JSON.parse(File.read(path.to_s))
+      detector = fixture.fetch("detector")
+
+      case engine.to_s
+      when "ruby"
+        documents = fact_documents(fixture.fetch("input").fetch("documents"))
+        options = symbolize_options(fixture.fetch("options", {}))
+        with_fact_documents(documents) do
+          run(detector, documents.map(&:file), engine: "ruby", **options)
+        end
+      when "rust"
+        JSON.parse(Native::Command.run("detector-facts", "--input", path.to_s))
+      else
+        raise ArgumentError, "unsupported decomplex detector engine: #{engine}"
+      end
+    end
+
+    def canonical_json_from_fact_fixture(path, engine: "ruby")
+      JSON.generate(canonicalize(run_fact_fixture(path, engine: engine))) << "\n"
+    end
+
     def compare(detector, files, **options)
       ruby_json = canonical_json(detector, files, engine: "ruby", **options)
       rust_json = canonical_json(detector, files, engine: "rust", **options)
+      [ruby_json == rust_json, ruby_json, rust_json]
+    end
+
+    def compare_fact_fixture(path)
+      ruby_json = canonical_json_from_fact_fixture(path, engine: "ruby")
+      rust_json = canonical_json_from_fact_fixture(path, engine: "rust")
       [ruby_json == rust_json, ruby_json, rust_json]
     end
 
@@ -163,6 +192,188 @@ module Decomplex
       return if ENGINES.include?(engine.to_s)
 
       raise ArgumentError, "unsupported decomplex detector engine: #{engine}"
+    end
+
+    private_class_method def self.symbolize_options(options)
+      options.each_with_object({}) { |(key, value), out| out[key.to_sym] = value }
+    end
+
+    private_class_method def self.fact_documents(rows)
+      Array(rows).map { |row| FactDocument.new(row) }
+    end
+
+    private_class_method def self.with_fact_documents(documents)
+      by_file = documents.to_h { |document| [document.file.to_s, document] }
+      original_parse = Syntax.method(:parse)
+      Syntax.define_singleton_method(:parse) do |file, **kwargs|
+        by_file.fetch(file.to_s) { original_parse.call(file, **kwargs) }
+      end
+      yield
+    ensure
+      Syntax.define_singleton_method(:parse, original_parse)
+    end
+
+    class FactDocument
+      attr_reader :file, :language, :source, :lines
+
+      FACT_ARRAYS = %w[
+        branch_arms branch_decisions call_sites comparison_sites decision_sites
+        dispatch_sites function_defs local_methods owner_defs path_condition_sites
+        predicate_aliases predicate_defs semantic_effect_sites state_declarations
+        state_param_origins state_reads state_writes
+      ].freeze
+
+      def initialize(row)
+        @row = row
+        @file = row.fetch("file")
+        @language = row.fetch("language", "ruby").to_sym
+        @source = row.fetch("source", "")
+        @lines = row.fetch("lines", @source.lines)
+        @immutable_struct_readers = object_hash(row.fetch("immutable_struct_readers", {}))
+        @immutable_struct_reader_types = object_hash(row.fetch("immutable_struct_reader_types", {}))
+        @type_aliases = object_hash(row.fetch("type_aliases", {}))
+        @local_complexity_scores = row.fetch("local_complexity_scores", {}).to_h do |id, score|
+          [id.to_s, symbolized_value(score)]
+        end
+        @local_contract_assignments = row.fetch("local_contract_assignments", {})
+
+        FACT_ARRAYS.each do |name|
+          instance_variable_set("@#{name}", fact_array(row.fetch(name, [])))
+        end
+      end
+
+      FACT_ARRAYS.each do |name|
+        define_method(name) { instance_variable_get("@#{name}") }
+      end
+
+      def local_methods
+        return @local_methods if @row.key?("local_methods")
+
+        Syntax.language_profile(language).local_methods(self)
+      end
+
+      def path_condition_sites
+        return @path_condition_sites if @row.key?("path_condition_sites")
+
+        Syntax.language_profile(language).path_condition_sites(self)
+      end
+
+      def branch_decisions(immutable_readers:, immutable_reader_types:, type_aliases:)
+        @branch_decisions
+      end
+
+      def immutable_struct_readers
+        @immutable_struct_readers
+      end
+
+      def immutable_struct_reader_types
+        @immutable_struct_reader_types
+      end
+
+      def type_aliases
+        @type_aliases
+      end
+
+      def local_complexity_scores
+        @local_complexity_scores
+      end
+
+      def local_contract_assignments(method)
+        @local_contract_assignments.fetch(method.name.to_s, {})
+      end
+
+      def redundant_nil_guard_findings
+        Syntax::NilGuardAnalyzer.new(self).scan
+      end
+
+      private
+
+      def fact_array(value)
+        Array(value).map { |item| objectify(item) }
+      end
+
+      def object_hash(value)
+        value.to_h { |key, child| [key.to_s, child] }
+      end
+
+      def objectify(value)
+        case value
+        when Hash
+          if value.key?("kind") && value.key?("span") && value.key?("children")
+            return FactNode.new(value, method(:objectify_field))
+          end
+
+          OpenStruct.new(value.to_h { |key, child| [key.to_s, objectify_field(key.to_s, child)] })
+        when Array
+          value.map { |child| objectify(child) }
+        else
+          value
+        end
+      end
+
+      def objectify_field(key, value)
+        if key == "control" && %w[conditional iterates].include?(value.to_s)
+          return value.to_sym
+        end
+        if key == "visibility" && %w[public protected private].include?(value.to_s)
+          return value.to_sym
+        end
+
+        objectify(value)
+      end
+
+      def symbolized_value(value)
+        case value
+        when Hash
+          value.to_h { |key, child| [key.to_sym, symbolized_value(child)] }
+        when Array
+          value.map { |child| symbolized_value(child) }
+        else
+          value
+        end
+      end
+    end
+
+    class FactPoint
+      attr_reader :row, :column
+
+      def initialize(row, column)
+        @row = row
+        @column = column
+      end
+    end
+
+    class FactNode
+      attr_reader :kind, :text, :span, :field_name, :children, :start_point, :end_point
+      attr_accessor :parent, :prev_sibling, :next_sibling
+
+      def initialize(row, objectifier)
+        @kind = row.fetch("kind")
+        @text = row.fetch("text", "")
+        @span = row.fetch("span")
+        @field_name = row["field_name"]
+        @named = row.fetch("named", true)
+        @children = Array(row.fetch("children", [])).map { |child| objectifier.call("node", child) }
+        @children.each { |child| child.parent = self if child.respond_to?(:parent=) }
+        @children.each_cons(2) do |left, right|
+          left.next_sibling = right if left.respond_to?(:next_sibling=)
+          right.prev_sibling = left if right.respond_to?(:prev_sibling=)
+        end
+        @start_point = FactPoint.new(@span[0].to_i - 1, @span[1].to_i)
+        @end_point = FactPoint.new(@span[2].to_i - 1, @span[3].to_i)
+      end
+
+      def named?
+        @named
+      end
+
+      def named_children
+        @children.select { |child| child.respond_to?(:named?) && child.named? }
+      end
+
+      def child_by_field_name(name)
+        @children.find { |child| child.respond_to?(:field_name) && child.field_name.to_s == name.to_s }
+      end
     end
 
     private_class_method def self.co_update(files, engine:, jobs:)

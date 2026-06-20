@@ -141,6 +141,14 @@ impl Report {
         serde_json::to_string_pretty(&self.to_sarif_value(true, true, None)).unwrap()
     }
 
+    pub fn convergence_value(&self) -> Value {
+        json!(self.convergence)
+    }
+
+    pub fn root_clusters_value(&self) -> Value {
+        json!(self.root)
+    }
+
     pub fn to_sarif_value(
         &self,
         include_snapshot: bool,

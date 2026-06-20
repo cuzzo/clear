@@ -1,0 +1,392 @@
+{
+  "input": {
+    "format": "decomplex.report-facts.v1",
+    "files": ["facts/report.rb"],
+    "detectors": {
+      "miner": {
+        "missing_abstractions": [
+          {
+            "kind": "conjunction",
+            "members": ["ready", "valid"],
+            "support": 2,
+            "scatter": 2,
+            "at": "facts/report.rb:checkout:10",
+            "sites": ["facts/report.rb:checkout:10", "facts/report.rb:refund:30"],
+            "spans": {
+              "facts/report.rb:checkout:10": [10, 2, 10, 20]
+            }
+          }
+        ],
+        "neglected_conditions": [
+          {
+            "pattern": ["ready", "valid"],
+            "support": 2,
+            "missing": "valid",
+            "at": "facts/report.rb:checkout:11",
+            "spans": {
+              "facts/report.rb:checkout:11": [11, 2, 11, 18]
+            }
+          }
+        ]
+      },
+      "co_update": {
+        "co_written_pairs": [
+          {
+            "pair": ["provenance", "storage"],
+            "support": 3,
+            "sites": ["facts/report.rb:prepare:4", "facts/report.rb:checkout:12"]
+          }
+        ],
+        "neglected_updates": [
+          {
+            "pair": ["provenance", "storage"],
+            "support": 3,
+            "has": "storage",
+            "missing": "provenance",
+            "recv": "order",
+            "at": "facts/report.rb:checkout:12",
+            "spans": {
+              "facts/report.rb:checkout:12": [12, 2, 12, 20]
+            }
+          }
+        ]
+      },
+      "predicate_alias": {
+        "alias_clusters": []
+      },
+      "semantic_alias": {
+        "alias_clusters": [
+          {
+            "canon": "storage == READY",
+            "names": ["ready?", "prepared?"],
+            "at": "facts/report.rb:checkout:13",
+            "sites": ["facts/report.rb:checkout:13"],
+            "spans": {
+              "facts/report.rb:checkout:13": [13, 2, 13, 18]
+            }
+          }
+        ],
+        "reification_misses": [
+          {
+            "predicate": "ready?",
+            "raw": "storage == READY",
+            "canon": "storage == READY",
+            "at": "facts/report.rb:checkout:14",
+            "spans": {
+              "facts/report.rb:checkout:14": [14, 2, 14, 22]
+            }
+          }
+        ]
+      },
+      "path_condition": {
+        "neglected": [
+          {
+            "pattern": ["ready", "valid"],
+            "support": 2,
+            "missing": "valid",
+            "action": "ship(order)",
+            "at": "facts/report.rb:checkout:15",
+            "spans": {
+              "facts/report.rb:checkout:15": [15, 2, 15, 22]
+            }
+          }
+        ],
+        "scattered": []
+      },
+      "sequence_mine": {
+        "broken_protocol": [
+          {
+            "pair": ["open", "close"],
+            "support": 4,
+            "confidence": 0.8,
+            "has": "open",
+            "missing": "close",
+            "at": "facts/report.rb:checkout:16",
+            "spans": {
+              "facts/report.rb:checkout:16": [16, 2, 16, 10]
+            }
+          }
+        ]
+      },
+      "implicit_control_flow": {
+        "ordered_protocols": []
+      },
+      "derived_state": [
+        {
+          "file": "facts/report.rb",
+          "defn": "checkout",
+          "derived": "storage",
+          "source": "provenance",
+          "derived_at": 17,
+          "source_reassigned_at": 22,
+          "gap": 5,
+          "at": "facts/report.rb:checkout:17",
+          "spans": {
+            "facts/report.rb:checkout:17": [17, 2, 17, 24]
+          }
+        }
+      ],
+      "inconsistent_rename_clone": [],
+      "flay_similarity": [],
+      "decision_pressure": [
+        {
+          "contract": ".storage",
+          "decisions": 2,
+          "essential": 1,
+          "methods": 1,
+          "sites": ["facts/report.rb:checkout:18"],
+          "spans": {
+            "facts/report.rb:checkout:18": [18, 2, 18, 24]
+          }
+        }
+      ],
+      "redundant_nil_guard": [],
+      "false_simplicity": [
+        {
+          "kind": "hidden_mutation",
+          "detail": "storage=",
+          "support": 1,
+          "scatter": 1,
+          "at": "facts/report.rb:checkout:19",
+          "sites": ["facts/report.rb:checkout:19"],
+          "spans": {
+            "facts/report.rb:checkout:19": [19, 2, 19, 14]
+          }
+        }
+      ],
+      "oversized_predicate": [],
+      "fat_union": {
+        "fat_unions": []
+      },
+      "state_heatmap": [],
+      "state_branch_density": [
+        {
+          "at": "facts/report.rb:checkout:20",
+          "file": "facts/report.rb",
+          "method": "checkout",
+          "decisions": 1,
+          "state_refs": ["storage"],
+          "predicate": "storage.ready?",
+          "score": 1,
+          "sites": ["facts/report.rb:checkout:20"],
+          "spans": {
+            "facts/report.rb:checkout:20": [20, 2, 20, 24]
+          }
+        }
+      ],
+      "temporal_ordering_pressure": [],
+      "weighted_inlined_complexity": [],
+      "locality_drag": [],
+      "function_lcom": [],
+      "operational_discontinuity": []
+    }
+  },
+  "expected": {
+    "convergence": [
+      {
+        "file": "facts/report.rb",
+        "method": "checkout",
+        "detectors": [
+          "Broken Protocols",
+          "Decision Pressure",
+          "Derived-State Staleness",
+          "False Simplicity",
+          "Missing Abstractions",
+          "Neglected Conditions",
+          "Neglected Path Conditions",
+          "Neglected Updates",
+          "Reification Misses",
+          "Semantic Predicate Aliases",
+          "State-Based Branch Density"
+        ],
+        "n_detectors": 11,
+        "score": 24,
+        "findings": 15,
+        "at": "facts/report.rb:checkout:18"
+      }
+    ],
+    "root_clusters": [
+      {
+        "kind": "name",
+        "token": "storage",
+        "detectors": [
+          "Decision Pressure",
+          "Derived-State Staleness",
+          "False Simplicity",
+          "Neglected Updates",
+          "Reification Misses",
+          "Semantic Predicate Aliases",
+          "State-Based Branch Density"
+        ],
+        "n_detectors": 7,
+        "support": 7,
+        "scatter": 1,
+        "score": 17,
+        "fat_union": false,
+        "fix": "single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape",
+        "sites": [
+          "facts/report.rb:checkout:18",
+          "facts/report.rb:checkout:20",
+          "facts/report.rb:checkout:14",
+          "facts/report.rb:checkout:13",
+          "facts/report.rb:checkout:12",
+          "facts/report.rb:checkout:17",
+          "facts/report.rb:checkout:19"
+        ]
+      },
+      {
+        "kind": "name",
+        "token": "ready",
+        "detectors": [
+          "Reification Misses",
+          "Semantic Predicate Aliases",
+          "State-Based Branch Density"
+        ],
+        "n_detectors": 3,
+        "support": 3,
+        "scatter": 1,
+        "score": 9,
+        "fat_union": false,
+        "fix": "reify ONE named predicate/decision and call it everywhere",
+        "sites": [
+          "facts/report.rb:checkout:20",
+          "facts/report.rb:checkout:14",
+          "facts/report.rb:checkout:13"
+        ]
+      },
+      {
+        "kind": "tuple",
+        "token": "ready | valid",
+        "detectors": [
+          "Missing Abstractions",
+          "Neglected Conditions",
+          "Neglected Path Conditions"
+        ],
+        "n_detectors": 3,
+        "support": 3,
+        "scatter": 2,
+        "score": 6,
+        "fat_union": false,
+        "fix": "reify ONE named predicate/decision and call it everywhere",
+        "sites": [
+          "facts/report.rb:checkout:10",
+          "facts/report.rb:refund:30",
+          "facts/report.rb:checkout:11",
+          "facts/report.rb:checkout:15"
+        ]
+      },
+      {
+        "kind": "name",
+        "token": "READY",
+        "detectors": [
+          "Reification Misses",
+          "Semantic Predicate Aliases"
+        ],
+        "n_detectors": 2,
+        "support": 2,
+        "scatter": 1,
+        "score": 6,
+        "fat_union": false,
+        "fix": "reify ONE named predicate/decision and call it everywhere",
+        "sites": [
+          "facts/report.rb:checkout:14",
+          "facts/report.rb:checkout:13"
+        ]
+      },
+      {
+        "kind": "name",
+        "token": "provenance",
+        "detectors": [
+          "Derived-State Staleness",
+          "Neglected Updates"
+        ],
+        "n_detectors": 2,
+        "support": 2,
+        "scatter": 1,
+        "score": 4,
+        "fat_union": false,
+        "fix": "single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape",
+        "sites": [
+          "facts/report.rb:checkout:12",
+          "facts/report.rb:checkout:17"
+        ]
+      },
+      {
+        "kind": "name",
+        "token": "valid",
+        "detectors": [
+          "Neglected Conditions",
+          "Neglected Path Conditions"
+        ],
+        "n_detectors": 2,
+        "support": 2,
+        "scatter": 1,
+        "score": 3,
+        "fat_union": false,
+        "fix": "converging structural debt -- resolve once at the named entity",
+        "sites": [
+          "facts/report.rb:checkout:11",
+          "facts/report.rb:checkout:15"
+        ]
+      }
+    ],
+    "sarif": {
+      "rule_count": 25,
+      "result_count": 8,
+      "rule_ids": [
+        "decomplex.decision-pressure",
+        "decomplex.missing-abstractions",
+        "decomplex.reification-misses",
+        "decomplex.semantic-predicate-aliases",
+        "decomplex.state-based-branch-density",
+        "decomplex.derived-state-staleness",
+        "decomplex.neglected-conditions",
+        "decomplex.neglected-updates"
+      ],
+      "messages": [
+        "Decision Pressure: `.storage` creates 2 eliminable guard decision(s) across 1 method(s)",
+        "Missing Abstractions: guard tuple `ready | valid` repeats in 2 site(s) with scatter=2",
+        "Reification Misses: predicate `ready?` is reinvented inline as `storage == READY`",
+        "Semantic Predicate Aliases: predicate aliases `ready? = prepared?` for `storage == READY`",
+        "State-Based Branch Density: 1 state-based branch decision(s) over `storage`; example predicate `storage.ready?`",
+        "Derived-State Staleness: `storage` derived from `provenance` at line 17; `provenance` reassigned at line 22 but `storage` is not recomputed",
+        "Neglected Conditions: missing condition `valid` from `ready | valid` (support=2)",
+        "Neglected Updates: writes `.storage` but not co-written `.provenance` on receiver `order` (support=3)"
+      ],
+      "locations": [
+        {
+          "uri": "facts/report.rb",
+          "startLine": 18
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 10
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 14
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 13
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 20
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 17
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 11
+        },
+        {
+          "uri": "facts/report.rb",
+          "startLine": 12
+        }
+      ]
+    }
+  }
+}

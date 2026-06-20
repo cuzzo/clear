@@ -1,0 +1,223 @@
+{
+  "detector": "state-mesh",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/state_mesh.rb",
+        "language": "ruby",
+        "state_writes": [
+          {
+            "field": "ready",
+            "receiver": "self",
+            "file": "facts/state_mesh.rb",
+            "function": "first",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              1,
+              11
+            ],
+            "owner": "Fixture"
+          },
+          {
+            "field": "ready",
+            "receiver": "self",
+            "file": "facts/state_mesh.rb",
+            "function": "second",
+            "line": 2,
+            "span": [
+              2,
+              0,
+              2,
+              11
+            ],
+            "owner": "Fixture"
+          }
+        ],
+        "state_reads": [
+          {
+            "field": "ready",
+            "receiver": "self",
+            "file": "facts/state_mesh.rb",
+            "function": "check",
+            "line": 4,
+            "span": [
+              4,
+              0,
+              4,
+              10
+            ],
+            "owner": "Fixture"
+          },
+          {
+            "field": "ready",
+            "receiver": "self",
+            "file": "facts/state_mesh.rb",
+            "function": "report",
+            "line": 5,
+            "span": [
+              5,
+              0,
+              5,
+              10
+            ],
+            "owner": "Fixture"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "fields": {
+      "ready": {
+        "messiness": 16.0,
+        "metrics": {
+          "fix_churn": 1.0,
+          "percentiles": {
+          },
+          "pressure": 2,
+          "re_derivations": 0,
+          "read_scatter": 2,
+          "reads": 2,
+          "receiver_types": 1,
+          "scatter": 4,
+          "write_scatter": 2,
+          "writes": 2
+        },
+        "rank": 1,
+        "re_derivations": [
+
+        ],
+        "readers": [
+          {
+            "defn": "check",
+            "file": "facts/state_mesh.rb",
+            "line": 4,
+            "recv": "self",
+            "span": [
+              4,
+              0,
+              4,
+              10
+            ]
+          },
+          {
+            "defn": "report",
+            "file": "facts/state_mesh.rb",
+            "line": 5,
+            "recv": "self",
+            "span": [
+              5,
+              0,
+              5,
+              10
+            ]
+          }
+        ],
+        "writers": [
+          {
+            "defn": "first",
+            "file": "facts/state_mesh.rb",
+            "line": 1,
+            "recv": "self",
+            "span": [
+              1,
+              0,
+              1,
+              11
+            ]
+          },
+          {
+            "defn": "second",
+            "file": "facts/state_mesh.rb",
+            "line": 2,
+            "recv": "self",
+            "span": [
+              2,
+              0,
+              2,
+              11
+            ]
+          }
+        ]
+      }
+    },
+    "hierarchy": [
+      {
+        "files": [
+          {
+            "defns": [
+              {
+                "fields": {
+                  "read": [
+                    "ready"
+                  ],
+                  "written": [
+
+                  ]
+                },
+                "name": "check",
+                "readers": 1,
+                "writers": 0
+              },
+              {
+                "fields": {
+                  "read": [
+
+                  ],
+                  "written": [
+                    "ready"
+                  ]
+                },
+                "name": "first",
+                "readers": 0,
+                "writers": 1
+              },
+              {
+                "fields": {
+                  "read": [
+                    "ready"
+                  ],
+                  "written": [
+
+                  ]
+                },
+                "name": "report",
+                "readers": 1,
+                "writers": 0
+              },
+              {
+                "fields": {
+                  "read": [
+
+                  ],
+                  "written": [
+                    "ready"
+                  ]
+                },
+                "name": "second",
+                "readers": 0,
+                "writers": 1
+              }
+            ],
+            "name": "state_mesh.rb",
+            "readers": 2,
+            "writers": 2
+          }
+        ],
+        "name": "facts",
+        "readers": 2,
+        "writers": 2
+      }
+    ],
+    "state_mesh": {
+      "custom_fields": null,
+      "min_writes": 2,
+      "total_fields": 1,
+      "total_re_derivations": 0,
+      "total_reads": 2,
+      "total_writes": 2
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "detector": "state-branch-density",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/state_branch.rb",
+        "language": "ruby",
+        "source": "",
+        "lines": [],
+        "root": {
+          "kind": "program",
+          "text": "",
+          "span": [1, 0, 1, 0],
+          "named": true,
+          "field_name": null,
+          "children": []
+        },
+        "normalized_root": {
+          "type": "ROOT",
+          "children": [],
+          "first_lineno": 1,
+          "first_column": 0,
+          "last_lineno": 1,
+          "last_column": 0,
+          "text": ""
+        },
+        "function_defs": [],
+        "owner_defs": [],
+        "call_sites": [],
+        "state_reads": [],
+        "state_writes": [],
+        "decision_sites": [],
+        "branch_decisions": [
+          {
+            "file": "facts/state_branch.rb",
+            "function": "check",
+            "line": 1,
+            "span": [1, 0, 5, 3],
+            "predicate": "if ready",
+            "state_refs": ["ready"]
+          },
+          {
+            "file": "facts/state_branch.rb",
+            "function": "check",
+            "line": 2,
+            "span": [2, 2, 2, 20],
+            "predicate": "ready?",
+            "state_refs": ["ready"]
+          },
+          {
+            "file": "facts/state_branch.rb",
+            "function": "check",
+            "line": 6,
+            "span": [6, 0, 6, 20],
+            "predicate": "unless stale",
+            "state_refs": ["stale"]
+          }
+        ],
+        "dispatch_sites": [],
+        "semantic_effect_sites": [],
+        "local_complexity_scores": {},
+        "predicate_aliases": [],
+        "comparison_uses": []
+      }
+    ]
+  },
+  "expected": [
+    {
+      "at": "facts/state_branch.rb:check:2",
+      "decisions": 2,
+      "file": "facts/state_branch.rb",
+      "method": "check",
+      "predicate": "ready?",
+      "score": 4,
+      "sites": [
+        "facts/state_branch.rb:check:2",
+        "facts/state_branch.rb:check:6"
+      ],
+      "spans": {
+        "facts/state_branch.rb:check:2": [2, 2, 2, 20],
+        "facts/state_branch.rb:check:6": [6, 0, 6, 20]
+      },
+      "state_refs": ["ready", "stale"]
+    }
+  ]
+}

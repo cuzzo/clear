@@ -1,6 +1,6 @@
 use crate::decomplex::syntax::Language;
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -34,7 +34,7 @@ const PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS: &[&str] = &[
     "expression_statement",
 ];
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct RawNode {
     pub kind: String,
     pub text: String,
@@ -226,7 +226,7 @@ pub fn node_text<'a>(node: TreeSitterNode<'_>, source: &'a str) -> &'a str {
     node.utf8_text(source.as_bytes()).unwrap_or("")
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum Child {
     Node(Box<Node>),
     Symbol(String),
@@ -236,7 +236,7 @@ pub enum Child {
     Nil,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Node {
     pub r#type: String,
     pub children: Vec<Child>,

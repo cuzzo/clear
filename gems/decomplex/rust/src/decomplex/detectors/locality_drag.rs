@@ -69,7 +69,7 @@ pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<Locality
     detector.findings()
 }
 
-fn scan_summaries_with_scores(
+pub fn scan_summaries_with_scores(
     summaries: Vec<local_flow::MethodSummary>,
     complexity_scores: BTreeMap<(String, String), LocalComplexityScore>,
 ) -> Vec<LocalityDragRow> {
