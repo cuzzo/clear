@@ -2,7 +2,7 @@ use crate::decomplex::ast::{self, Span};
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -122,18 +122,24 @@ impl Report {
     }
 
     fn alias_clusters(&self) -> Vec<SemanticAliasCluster> {
+        let mut keys = Vec::new();
         let mut by_canon: BTreeMap<String, Vec<&Pred>> = BTreeMap::new();
         for p in &self.preds {
+            if !by_canon.contains_key(&p.canon) {
+                keys.push(p.canon.clone());
+            }
             by_canon.entry(p.canon.clone()).or_default().push(p);
         }
 
         let mut out = Vec::new();
-        for (c, ps) in by_canon {
-            let mut names_set = BTreeSet::new();
+        for c in keys {
+            let ps = by_canon.remove(&c).unwrap();
+            let mut names = Vec::new();
             for p in &ps {
-                names_set.insert(p.name.clone());
+                if !names.contains(&p.name) {
+                    names.push(p.name.clone());
+                }
             }
-            let names: Vec<_> = names_set.into_iter().collect();
             if names.len() < 2 {
                 continue;
             }

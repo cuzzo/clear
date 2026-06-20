@@ -21,6 +21,16 @@ module Decomplex
     ).freeze
 
     class PythonSyntaxAdapter < TreeSitterLanguageAdapter
+      PythonSyntheticStatement = Struct.new(:kind, :children, :text, :start_point, :end_point, keyword_init: true) do
+        def named?
+          true
+        end
+
+        def named_children
+          children.select { |child| child.respond_to?(:named?) && child.named? }
+        end
+      end
+
       FUNCTION_NODE_KINDS = %w[function_definition].freeze
       CALL_NODE_KINDS = %w[call].freeze
       ADJACENT_CALL_NODE_KINDS = %w[attribute identifier].freeze
@@ -79,12 +89,95 @@ module Decomplex
         :public
       end
 
+      def parameter_name(param)
+        name = super
+        return name if name
+
+        python_nested_parameter_identifier(param)&.text
+      end
+
       def call_target(document, node)
         python_adjacent_call_target(node) || super
       end
 
-      def local_methods(document)
+      def state_read_target(node)
+        return nil if python_hidden_assignment_parts(node) || python_annotation_lhs?(node)
+
         super
+      end
+
+      def record_state_write(document, node, stack, out)
+        parts = python_hidden_assignment_parts(node)
+        unless parts
+          super
+          return
+        end
+
+        target = state_target(parts.fetch(:lhs))
+        return unless target
+        target = normalize_target_receiver(target, stack)
+        return if skip_state_write_target?(target)
+
+        out << StateWrite.new(
+          field: target[:field],
+          receiver: target[:receiver],
+          file: document.file,
+          function: current_function(stack),
+          line: line(parts.fetch(:lhs)),
+          span: python_assignment_span(parts.fetch(:lhs), parts.fetch(:rhs)),
+          owner: current_owner(document, stack)
+        )
+      end
+
+      def record_state_param_origin(document, node, stack, out)
+        parts = python_hidden_assignment_parts(node)
+        unless parts
+          super
+          return
+        end
+
+        target = state_target(parts.fetch(:lhs))
+        return unless target
+        target = normalize_target_receiver(target, stack)
+
+        params = current_params(stack)
+        return if params.empty?
+
+        rhs_param_names(parts.fetch(:rhs), params).each do |param|
+          out << StateParamOrigin.new(
+            field: target[:field],
+            receiver: target[:receiver],
+            owner: current_owner(document, stack),
+            param: param,
+            file: document.file,
+            function: current_function(stack),
+            line: line(parts.fetch(:lhs)),
+            span: python_assignment_span(parts.fetch(:lhs), parts.fetch(:rhs))
+          )
+        end
+      end
+
+      def local_methods(document)
+        document.function_defs.map do |function_def|
+          statements = python_function_body_statements(function_def.body, document)
+          local_names = generic_local_names(function_def, statements)
+          local_statements = statements.each_with_index.map do |statement, index|
+            generic_local_statement(statement, index, local_names)
+          end
+          owner = function_def.owner.to_s == file_owner(document.file) ? "(top-level)" : function_def.owner
+
+          LocalMethod.new(
+            id: "#{owner}##{function_def.name}",
+            owner: owner,
+            name: function_def.name,
+            file: function_def.file,
+            line: function_def.line,
+            span: function_def.span,
+            node: function_def.body,
+            statements: local_statements,
+            boundaries: generic_structural_boundaries(document, local_statements)
+          )
+        end
       end
 
       private
@@ -96,12 +189,29 @@ module Decomplex
         node.named_children.find { |child| child.kind == "identifier" }&.text
       end
 
-      def python_function_body_statements(node)
+      def python_nested_parameter_identifier(param)
+        return nil unless ts_node?(param)
+        return nil unless %w[typed_parameter default_parameter].include?(param.kind)
+
+        param.named_children.each do |child|
+          next unless %w[list_splat_pattern dictionary_splat_pattern].include?(child.kind)
+
+          identifier = child.named_children.find { |grandchild| parameter_identifier_node_kinds.include?(grandchild.kind) }
+          return identifier if identifier
+        end
+        nil
+      end
+
+      def python_function_body_statements(node, document)
         body = named_field(node, "body") ||
                node.named_children.find { |child| child.kind == "block" }
         return [] unless body
 
-        body.named_children.reject { |child| child.kind == "comment" }
+        groups = python_statement_child_groups(body)
+        return [] if groups.empty? && body.text.to_s.strip.empty?
+        return [body] if groups.empty?
+
+        groups.map { |children| python_synthetic_statement(document, children) }
       end
 
       def python_adjacent_call_target(node)
@@ -117,6 +227,105 @@ module Decomplex
         }
       rescue StandardError
         nil
+      end
+
+      def assignment_lhs?(node)
+        super || !!python_hidden_assignment_parts(node)
+      end
+
+      def generic_local_write_node?(node)
+        super || python_annotation_lhs?(node)
+      end
+
+      def python_hidden_assignment_parts(node)
+        return nil unless ts_node?(node)
+
+        operator = next_sibling(node)
+        return nil unless operator
+
+        if assignment_operator_tokens.include?(operator.text.to_s)
+          rhs = next_sibling(operator)
+          return { lhs: node, rhs: rhs } if rhs
+        elsif operator.text.to_s == ":"
+          type_node = next_sibling(operator)
+          equal = next_sibling(type_node)
+          rhs = next_sibling(equal)
+          return { lhs: node, rhs: rhs } if equal&.text.to_s == "=" && rhs
+        end
+
+        nil
+      end
+
+      def python_annotation_lhs?(node)
+        return false unless ts_node?(node)
+        return false unless generic_identifier?(node) || field_like_node?(node)
+
+        colon = next_sibling(node)
+        return false unless colon&.text.to_s == ":"
+
+        type_node = next_sibling(colon)
+        equal = next_sibling(type_node)
+        !equal || equal.text.to_s != "="
+      end
+
+      def python_assignment_span(lhs, rhs)
+        [
+          lhs.start_point.row + 1,
+          lhs.start_point.column,
+          rhs.end_point.row + 1,
+          rhs.end_point.column
+        ]
+      end
+
+      def python_statement_child_groups(body)
+        children = body.children.reject { |child| comment_node?(child) }
+        return [] if children.empty?
+
+        groups = []
+        current = []
+        body_column = body.start_point.column
+
+        children.each do |child|
+          if current.any? && python_new_statement_child?(current, child, body_column)
+            groups << current
+            current = []
+          end
+          current << child
+        end
+        groups << current if current.any?
+        groups
+      end
+
+      def python_new_statement_child?(current, child, body_column)
+        return false unless child.start_point.row > current.map { |item| item.end_point.row }.max
+        return false if %w[elif else except finally case].include?(child.kind)
+
+        child.start_point.column <= body_column
+      end
+
+      def python_synthetic_statement(document, children)
+        first = children.first
+        last = children.last
+        PythonSyntheticStatement.new(
+          kind: "python_statement",
+          children: children,
+          text: python_source_slice(document, first.start_point, last.end_point),
+          start_point: first.start_point,
+          end_point: last.end_point
+        )
+      end
+
+      def python_source_slice(document, start_point, end_point)
+        if start_point.row == end_point.row
+          return document.lines[start_point.row].to_s[start_point.column...end_point.column].to_s
+        end
+
+        lines = document.lines[start_point.row..end_point.row].to_a
+        return "" if lines.empty?
+
+        lines[0] = lines[0].to_s[start_point.column..].to_s
+        lines[-1] = lines[-1].to_s[..end_point.column - 1].to_s
+        lines.join
       end
     end
   end

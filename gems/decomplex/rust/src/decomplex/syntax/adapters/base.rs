@@ -495,11 +495,7 @@ pub(crate) trait LanguageProfile {
                 .filter(|child| !self.ignored_statement_node_kinds().contains(&child.kind()))
                 .collect();
         }
-        if statements.len() == 1 {
-            statements.first().copied()
-        } else {
-            None
-        }
+        statements.last().copied()
     }
 
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {

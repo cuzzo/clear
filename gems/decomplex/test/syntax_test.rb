@@ -458,6 +458,66 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_python_adapter_extracts_typed_attribute_assignments
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      class Worker:
+          def __init__(self, items):
+              self.items = items
+              self.cache: dict[str, int] = items
+    PY
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.span] },
+        ["self", "items", [3, 8, 3, 26]]
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.span] },
+        ["self", "cache", [4, 8, 4, 42]]
+      assert_includes doc.state_param_origins.map { |origin| [origin.receiver, origin.field, origin.param, origin.span] },
+        ["self", "items", "items", [3, 8, 3, 26]]
+      assert_includes doc.state_param_origins.map { |origin| [origin.receiver, origin.field, origin.param, origin.span] },
+        ["self", "cache", "items", [4, 8, 4, 42]]
+      assert_empty doc.state_reads
+    end
+  end
+
+  def test_tree_sitter_python_adapter_extracts_typed_splat_parameters
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def reconfigure(*args: Any, **kwargs: Any) -> None:
+          new_console = Console(*args, **kwargs)
+    PY
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+
+      assert_equal %w[args kwargs], doc.function_defs.first.params
+      statement = doc.local_methods.first.statements.first
+      assert_equal %w[args kwargs], statement.reads.to_a.sort
+      assert_equal [["new_console", "args"], ["new_console", "kwargs"]], statement.dependencies
+    end
+  end
+
+  def test_tree_sitter_python_adapter_treats_annotation_only_locals_as_writes
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      def parse_version():
+          version_integers: tuple[int, ...]
+    PY
+      statement = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+                                     .local_methods
+                                     .first
+                                     .statements
+                                     .first
+
+      assert_empty statement.reads
+      assert_equal ["version_integers"], statement.writes.to_a
+    end
+  end
+
   def test_tree_sitter_c_adapter_extracts_functions_branches_and_pointer_state
     grammar = ENV["DECOMPLEX_TS_C_PATH"]
     skip "set DECOMPLEX_TS_C_PATH to run C structural facts test" unless grammar && File.file?(grammar)

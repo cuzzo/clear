@@ -2,7 +2,7 @@ use crate::decomplex::ast::Span;
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -76,11 +76,12 @@ impl Report {
         let mut out = Vec::new();
         for body in keys {
             let ps = by_body.remove(&body).unwrap();
-            let mut names_set = BTreeSet::new();
+            let mut names = Vec::new();
             for p in &ps {
-                names_set.insert(p.name.clone());
+                if !names.contains(&p.name) {
+                    names.push(p.name.clone());
+                }
             }
-            let names: Vec<_> = names_set.into_iter().collect();
             if names.len() < 2 {
                 continue;
             }

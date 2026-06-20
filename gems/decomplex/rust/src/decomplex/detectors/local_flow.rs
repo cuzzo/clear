@@ -73,18 +73,29 @@ pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
     for document in documents {
         let normalized = normalized_local_methods(document);
         if document.language != Language::Ruby {
-            let mut normalized_by_key: BTreeMap<_, _> = normalized
-                .into_iter()
-                .map(|summary| (method_summary_key(&summary), summary))
-                .collect();
-            for raw in raw_local_methods(document) {
-                out.push(
-                    normalized_by_key
-                        .remove(&method_summary_key(&raw))
-                        .unwrap_or(raw),
+            if document.language == Language::Python {
+                let raw = raw_local_methods(document);
+                let raw_keys: BTreeSet<_> = raw.iter().map(method_summary_key).collect();
+                out.extend(raw);
+                out.extend(
+                    normalized
+                        .into_iter()
+                        .filter(|summary| !raw_keys.contains(&method_summary_key(summary))),
                 );
+            } else {
+                let mut normalized_by_key: BTreeMap<_, _> = normalized
+                    .into_iter()
+                    .map(|summary| (method_summary_key(&summary), summary))
+                    .collect();
+                for raw in raw_local_methods(document) {
+                    out.push(
+                        normalized_by_key
+                            .remove(&method_summary_key(&raw))
+                            .unwrap_or(raw),
+                    );
+                }
+                out.extend(normalized_by_key.into_values());
             }
-            out.extend(normalized_by_key.into_values());
             continue;
         }
 
@@ -238,6 +249,10 @@ fn raw_local_reads(
     local_names: &BTreeSet<String>,
     profile: &dyn LanguageProfile,
 ) -> BTreeSet<String> {
+    if raw_nested_local_scope(node, profile) {
+        return BTreeSet::new();
+    }
+
     let mut reads = Vec::new();
     raw_walk_local(node, None, node, profile, &mut |child, parent| {
         let Some(name) = raw_local_identifier_text(child, profile) else {
@@ -248,7 +263,6 @@ fn raw_local_reads(
             && !raw_declaration_name_in_tree(node, child, profile)
             && !raw_declaration_name(child, parent, profile)
             && !raw_member_name(child, parent, profile)
-            && !raw_call_name(child, parent, profile)
         {
             reads.push(name);
         }
@@ -257,6 +271,10 @@ fn raw_local_reads(
 }
 
 fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<String> {
+    if raw_nested_local_scope(node, profile) {
+        return BTreeSet::new();
+    }
+
     let mut writes = textual_local_writes(&ast::normalize_text(&node.text));
     raw_walk_local(node, None, node, profile, &mut |child, parent| {
         if raw_local_write_node(child, parent, profile)
@@ -402,7 +420,13 @@ fn raw_local_identifier_text(node: &RawNode, profile: &dyn LanguageProfile) -> O
     {
         return Some(node.text.clone());
     }
-    if node.named && raw_named_children(node).is_empty() && simple_identifier(&node.text) {
+    if profile
+        .local_identifier_wrapper_node_kinds()
+        .contains(&node.kind.as_str())
+        && node.named
+        && raw_named_children(node).is_empty()
+        && simple_identifier(&node.text)
+    {
         return Some(node.text.clone());
     }
     None

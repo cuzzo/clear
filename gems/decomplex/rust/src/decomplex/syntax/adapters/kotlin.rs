@@ -1,6 +1,8 @@
+use super::super::tree_sitter_adapter::named_children;
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::node_text;
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct KotlinProfile;
 
@@ -29,6 +31,41 @@ impl LanguageProfile for KotlinProfile {
         &["identifier", "simple_identifier"]
     }
 
+    fn function_params(&self, node: Node<'_>, source: &str) -> Vec<String> {
+        let Some(params) = named_children(node)
+            .into_iter()
+            .find(|child| self.parameter_list_node_kinds().contains(&child.kind()))
+        else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        for param in named_children(params) {
+            if let Some(name) = self.parameter_name(param, source) {
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
+    fn parameter_name(&self, param: Node<'_>, source: &str) -> Option<String> {
+        let name = if self
+            .parameter_identifier_node_kinds()
+            .contains(&param.kind())
+        {
+            Some(param)
+        } else {
+            named_children(param).into_iter().find(|child| {
+                self.parameter_identifier_node_kinds()
+                    .contains(&child.kind())
+            })
+        }?;
+        let text = node_text(name, source).to_string();
+        (!text.is_empty() && text != "_").then_some(text)
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["function_body", "statements"]
     }
@@ -42,7 +79,7 @@ impl LanguageProfile for KotlinProfile {
     }
 
     fn identifier_node_kinds(&self) -> &[&str] {
-        &["simple_identifier", "type_identifier"]
+        &["identifier", "simple_identifier", "type_identifier"]
     }
 
     fn assignment_node_kinds(&self) -> &[&str] {
