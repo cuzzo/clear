@@ -1,0 +1,1276 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/decomplex/examples/syntax-facts/go/core.go",
+      "language": "go",
+      "functions": [
+        {
+          "name": "NewGoSyntaxFactsCore",
+          "owner": "core",
+          "line": 32,
+          "span": [
+            32,
+            0,
+            34,
+            1
+          ],
+          "visibility": "public",
+          "params": [
+            "status"
+          ]
+        },
+        {
+          "name": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 36,
+          "span": [
+            36,
+            0,
+            70,
+            1
+          ],
+          "visibility": "public",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ]
+        },
+        {
+          "name": "Ready",
+          "owner": "GoSyntaxFactsCore",
+          "line": 78,
+          "span": [
+            78,
+            0,
+            80,
+            1
+          ],
+          "visibility": "public",
+          "params": []
+        },
+        {
+          "name": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 72,
+          "span": [
+            72,
+            0,
+            76,
+            1
+          ],
+          "visibility": "private",
+          "params": [
+            "name"
+          ]
+        }
+      ],
+      "owners": [
+        {
+          "name": "Account",
+          "kind": "owner",
+          "line": 21,
+          "span": [
+            21,
+            5,
+            24,
+            1
+          ]
+        },
+        {
+          "name": "GoSyntaxFactsCore",
+          "kind": "owner",
+          "line": 26,
+          "span": [
+            26,
+            5,
+            30,
+            1
+          ]
+        },
+        {
+          "name": "Profile",
+          "kind": "owner",
+          "line": 10,
+          "span": [
+            10,
+            5,
+            12,
+            1
+          ]
+        },
+        {
+          "name": "Status",
+          "kind": "owner",
+          "line": 3,
+          "span": [
+            3,
+            5,
+            3,
+            15
+          ]
+        },
+        {
+          "name": "User",
+          "kind": "owner",
+          "line": 14,
+          "span": [
+            14,
+            5,
+            19,
+            1
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "receiver": "self",
+          "message": "audit",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 66,
+          "span": [
+            66,
+            4,
+            66,
+            17
+          ],
+          "conditional": false,
+          "arguments": [
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "audit",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 66,
+          "span": [
+            66,
+            6,
+            66,
+            11
+          ],
+          "conditional": false,
+          "arguments": [
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "audit",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 67,
+          "span": [
+            67,
+            7,
+            67,
+            20
+          ],
+          "conditional": false,
+          "arguments": [
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "audit",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 67,
+          "span": [
+            67,
+            9,
+            67,
+            14
+          ],
+          "conditional": false,
+          "arguments": [
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "callback",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 43,
+          "span": [
+            43,
+            1,
+            43,
+            9
+          ],
+          "conditional": false,
+          "arguments": [
+            "account"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "children",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 62,
+          "span": [
+            62,
+            2,
+            62,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "item"
+          ],
+          "control": "iterates",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "children",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 62,
+          "span": [
+            62,
+            4,
+            62,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "item"
+          ],
+          "control": "iterates",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "defaultCase",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 51,
+          "span": [
+            51,
+            2,
+            51,
+            15
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "defaultCase",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 51,
+          "span": [
+            51,
+            4,
+            51,
+            15
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "escalate",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 47,
+          "span": [
+            47,
+            2,
+            47,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "escalate",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 47,
+          "span": [
+            47,
+            4,
+            47,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "fallback",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 49,
+          "span": [
+            49,
+            2,
+            49,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "fallback",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 49,
+          "span": [
+            49,
+            4,
+            49,
+            12
+          ],
+          "conditional": true,
+          "arguments": [
+            "user"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "println",
+          "function": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 73,
+          "span": [
+            73,
+            1,
+            73,
+            8
+          ],
+          "conditional": false,
+          "arguments": [
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "publish",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 56,
+          "span": [
+            56,
+            2,
+            56,
+            11
+          ],
+          "conditional": true,
+          "arguments": [
+            "Busy"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "publish",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 56,
+          "span": [
+            56,
+            4,
+            56,
+            11
+          ],
+          "conditional": true,
+          "arguments": [
+            "Busy"
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "send",
+          "function": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 74,
+          "span": [
+            74,
+            1,
+            74,
+            7
+          ],
+          "conditional": false,
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "send",
+          "function": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 74,
+          "span": [
+            74,
+            3,
+            74,
+            7
+          ],
+          "conditional": false,
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "control": "always",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "warn",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 58,
+          "span": [
+            58,
+            2,
+            58,
+            8
+          ],
+          "conditional": true,
+          "arguments": [
+            "\"not ready\""
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        },
+        {
+          "receiver": "self",
+          "message": "warn",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 58,
+          "span": [
+            58,
+            4,
+            58,
+            8
+          ],
+          "conditional": true,
+          "arguments": [
+            "\"not ready\""
+          ],
+          "control": "conditional",
+          "safe_navigation": false,
+          "block": false
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "Name",
+          "receiver": "user.Profile",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 41,
+          "span": [
+            41,
+            9,
+            41,
+            26
+          ]
+        },
+        {
+          "field": "Profile",
+          "receiver": "user",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 41,
+          "span": [
+            41,
+            9,
+            41,
+            21
+          ]
+        },
+        {
+          "field": "Ready",
+          "receiver": "user",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 54,
+          "span": [
+            54,
+            24,
+            54,
+            34
+          ]
+        },
+        {
+          "field": "Role",
+          "receiver": "user",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 45,
+          "span": [
+            45,
+            8,
+            45,
+            17
+          ]
+        },
+        {
+          "field": "audit",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 66,
+          "span": [
+            66,
+            4,
+            66,
+            11
+          ]
+        },
+        {
+          "field": "audit",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 67,
+          "span": [
+            67,
+            7,
+            67,
+            14
+          ]
+        },
+        {
+          "field": "children",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 62,
+          "span": [
+            62,
+            2,
+            62,
+            12
+          ]
+        },
+        {
+          "field": "count",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 65,
+          "span": [
+            65,
+            18,
+            65,
+            25
+          ]
+        },
+        {
+          "field": "count",
+          "receiver": "self",
+          "function": "Ready",
+          "owner": "GoSyntaxFactsCore",
+          "line": 79,
+          "span": [
+            79,
+            8,
+            79,
+            15
+          ]
+        },
+        {
+          "field": "defaultCase",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 51,
+          "span": [
+            51,
+            2,
+            51,
+            15
+          ]
+        },
+        {
+          "field": "escalate",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 47,
+          "span": [
+            47,
+            2,
+            47,
+            12
+          ]
+        },
+        {
+          "field": "fallback",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 49,
+          "span": [
+            49,
+            2,
+            49,
+            12
+          ]
+        },
+        {
+          "field": "lookup",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 65,
+          "span": [
+            65,
+            1,
+            65,
+            9
+          ]
+        },
+        {
+          "field": "publish",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 56,
+          "span": [
+            56,
+            2,
+            56,
+            11
+          ]
+        },
+        {
+          "field": "send",
+          "receiver": "self",
+          "function": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 74,
+          "span": [
+            74,
+            1,
+            74,
+            7
+          ]
+        },
+        {
+          "field": "status",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 54,
+          "span": [
+            54,
+            4,
+            54,
+            12
+          ]
+        },
+        {
+          "field": "status",
+          "receiver": "self",
+          "function": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "line": 75,
+          "span": [
+            75,
+            5,
+            75,
+            13
+          ]
+        },
+        {
+          "field": "warn",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 58,
+          "span": [
+            58,
+            2,
+            58,
+            8
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "count",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 55,
+          "span": [
+            55,
+            2,
+            55,
+            14
+          ]
+        },
+        {
+          "field": "lookup",
+          "receiver": "self",
+          "function": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "line": 65,
+          "span": [
+            65,
+            1,
+            65,
+            25
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "kind": "case_dispatch",
+          "members": [
+            "\"guest\"",
+            "\"owner\", \"admin\""
+          ],
+          "function": "Process",
+          "line": 45,
+          "span": [
+            45,
+            1,
+            52,
+            2
+          ],
+          "predicate": "user.Role",
+          "enclosing_span": [
+            45,
+            1,
+            52,
+            2
+          ]
+        },
+        {
+          "kind": "conjunction",
+          "members": [
+            "c.status == Idle",
+            "user.Ready"
+          ],
+          "function": "Process",
+          "line": 54,
+          "span": [
+            54,
+            4,
+            54,
+            34
+          ],
+          "predicate": "c.status == Idle && user.Ready",
+          "enclosing_span": [
+            54,
+            1,
+            59,
+            2
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "Process",
+          "line": 45,
+          "span": [
+            45,
+            1,
+            52,
+            2
+          ],
+          "predicate": "user.Role",
+          "state_refs": [
+            "user.Role"
+          ]
+        },
+        {
+          "function": "Process",
+          "line": 54,
+          "span": [
+            54,
+            1,
+            59,
+            2
+          ],
+          "predicate": "c.status == Idle && user.Ready",
+          "state_refs": [
+            "c.status",
+            "user.Ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "semantic_effects": [
+        {
+          "kind": "hidden_io",
+          "detail": "println",
+          "function": "audit",
+          "line": 73,
+          "span": [
+            73,
+            1,
+            73,
+            8
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "local_complexity": [
+        {
+          "id": "(top-level)#NewGoSyntaxFactsCore",
+          "score": 0.0,
+          "signals": {
+            "early_exits": 2
+          }
+        },
+        {
+          "id": "GoSyntaxFactsCore#Process",
+          "score": 6.1,
+          "signals": {
+            "boolean_ops": 2,
+            "branches": 1,
+            "cases": 2,
+            "early_exits": 2,
+            "loops": 2,
+            "nested": 1
+          }
+        },
+        {
+          "id": "GoSyntaxFactsCore#Ready",
+          "score": 0.0,
+          "signals": {
+            "early_exits": 2
+          }
+        },
+        {
+          "id": "GoSyntaxFactsCore#audit",
+          "score": 0.0,
+          "signals": {}
+        }
+      ],
+      "clone_candidates": [
+        {
+          "method_name": "NewGoSyntaxFactsCore",
+          "node_name": "block",
+          "line": 32,
+          "span": [
+            32,
+            60,
+            34,
+            1
+          ],
+          "mass": 31,
+          "fingerprint": "block({:{ statement_list(return_statement(id expression_list(&:& composite_literal(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(map_type(id [:[ id ]:] id) literal_value({:{ }:}))) }:}))))) }:})",
+          "child_fingerprints": [
+            "statement_list(return_statement(id expression_list(&:& composite_literal(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(map_type(id [:[ id ]:] id) literal_value({:{ }:}))) }:})))))"
+          ],
+          "child_masses": [
+            28
+          ]
+        },
+        {
+          "method_name": "NewGoSyntaxFactsCore",
+          "node_name": "defn",
+          "line": 32,
+          "span": [
+            32,
+            0,
+            34,
+            1
+          ],
+          "mass": 43,
+          "fingerprint": "function_declaration(id id parameter_list((:( parameter_declaration(id id) ):)) pointer_type(*:* id) block({:{ statement_list(return_statement(id expression_list(&:& composite_literal(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(map_type(id [:[ id ]:] id) literal_value({:{ }:}))) }:}))))) }:}))",
+          "child_fingerprints": [
+            "statement_list(return_statement(id expression_list(&:& composite_literal(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(map_type(id [:[ id ]:] id) literal_value({:{ }:}))) }:})))))"
+          ],
+          "child_masses": [
+            28
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "assignment_statement",
+          "line": 38,
+          "span": [
+            38,
+            1,
+            38,
+            10
+          ],
+          "mass": 4,
+          "fingerprint": "assignment_statement(id =:= id)",
+          "child_fingerprints": [
+            "id",
+            "id"
+          ],
+          "child_masses": [
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "assignment_statement",
+          "line": 39,
+          "span": [
+            39,
+            1,
+            39,
+            11
+          ],
+          "mass": 4,
+          "fingerprint": "assignment_statement(id =:= id)",
+          "child_fingerprints": [
+            "id",
+            "id"
+          ],
+          "child_masses": [
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "assignment_statement",
+          "line": 55,
+          "span": [
+            55,
+            2,
+            55,
+            14
+          ],
+          "mass": 7,
+          "fingerprint": "assignment_statement(expression_list(id .:. id) +=:+= lit)",
+          "child_fingerprints": [
+            "expression_list(id .:. id)",
+            "lit"
+          ],
+          "child_masses": [
+            4,
+            1
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "assignment_statement",
+          "line": 65,
+          "span": [
+            65,
+            1,
+            65,
+            25
+          ],
+          "mass": 14,
+          "fingerprint": "assignment_statement(expression_list(selector_expression(id .:. id) [:[ id ]:]) =:= expression_list(id .:. id))",
+          "child_fingerprints": [
+            "expression_list(selector_expression(id .:. id) [:[ id ]:])",
+            "expression_list(id .:. id)"
+          ],
+          "child_masses": [
+            8,
+            4
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "block",
+          "line": 36,
+          "span": [
+            36,
+            94,
+            70,
+            1
+          ],
+          "mass": 235,
+          "fingerprint": "block({:{ statement_list(var_declaration(id var_spec(id ,:, id id =:= expression_list(lit ,:, lit))) assignment_statement(id =:= id) assignment_statement(id =:= id) short_var_declaration(id :=::= expression_list(selector_expression(id .:. id) .:. id)) short_var_declaration(id :=::= expression_list(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(id .:. id)) }:}))) expression_statement(id argument_list((:( id ):))) expression_switch_statement(id selector_expression(id .:. id) {:{ expression_case(id expression_list(interpreted_string_literal(\":\" id \":\") ,:, interpreted_string_literal(\":\" id \":\")) ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) expression_case(id expression_list(\":\" id \":\") ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) default_case(id ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) }:}) if_statement(id binary_expression(binary_expression(selector_expression(id .:. id) ==:== id) &&:&& selector_expression(id .:. id)) block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}) id block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:})) for_statement(id range_clause(expression_list(id ,:, id) :=::= id id) block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})) assignment_statement(expression_list(selector_expression(id .:. id) [:[ id ]:]) =:= expression_list(id .:. id)) go_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) defer_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) return_statement(id id)) }:})",
+          "child_fingerprints": [
+            "statement_list(var_declaration(id var_spec(id ,:, id id =:= expression_list(lit ,:, lit))) assignment_statement(id =:= id) assignment_statement(id =:= id) short_var_declaration(id :=::= expression_list(selector_expression(id .:. id) .:. id)) short_var_declaration(id :=::= expression_list(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(id .:. id)) }:}))) expression_statement(id argument_list((:( id ):))) expression_switch_statement(id selector_expression(id .:. id) {:{ expression_case(id expression_list(interpreted_string_literal(\":\" id \":\") ,:, interpreted_string_literal(\":\" id \":\")) ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) expression_case(id expression_list(\":\" id \":\") ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) default_case(id ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) }:}) if_statement(id binary_expression(binary_expression(selector_expression(id .:. id) ==:== id) &&:&& selector_expression(id .:. id)) block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}) id block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:})) for_statement(id range_clause(expression_list(id ,:, id) :=::= id id) block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})) assignment_statement(expression_list(selector_expression(id .:. id) [:[ id ]:]) =:= expression_list(id .:. id)) go_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) defer_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) return_statement(id id))"
+          ],
+          "child_masses": [
+            232
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "block",
+          "line": 54,
+          "span": [
+            54,
+            35,
+            57,
+            2
+          ],
+          "mass": 20,
+          "fingerprint": "block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})",
+          "child_fingerprints": [
+            "statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))"
+          ],
+          "child_masses": [
+            17
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "block",
+          "line": 57,
+          "span": [
+            57,
+            8,
+            59,
+            2
+          ],
+          "mass": 16,
+          "fingerprint": "block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:})",
+          "child_fingerprints": [
+            "statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):))))"
+          ],
+          "child_masses": [
+            13
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "block",
+          "line": 61,
+          "span": [
+            61,
+            28,
+            63,
+            2
+          ],
+          "mass": 13,
+          "fingerprint": "block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})",
+          "child_fingerprints": [
+            "statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))"
+          ],
+          "child_masses": [
+            10
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "defn",
+          "line": 36,
+          "span": [
+            36,
+            0,
+            70,
+            1
+          ],
+          "mass": 269,
+          "fingerprint": "method_declaration(id parameter_list((:( parameter_declaration(id pointer_type(*:* id)) ):)) id parameter_list((:( parameter_declaration(id id) ,:, parameter_declaration(id slice_type([:[ ]:] id)) ,:, parameter_declaration(id function_type(id parameter_list((:( id ):)))) ):)) id block({:{ statement_list(var_declaration(id var_spec(id ,:, id id =:= expression_list(lit ,:, lit))) assignment_statement(id =:= id) assignment_statement(id =:= id) short_var_declaration(id :=::= expression_list(selector_expression(id .:. id) .:. id)) short_var_declaration(id :=::= expression_list(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(id .:. id)) }:}))) expression_statement(id argument_list((:( id ):))) expression_switch_statement(id selector_expression(id .:. id) {:{ expression_case(id expression_list(interpreted_string_literal(\":\" id \":\") ,:, interpreted_string_literal(\":\" id \":\")) ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) expression_case(id expression_list(\":\" id \":\") ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) default_case(id ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) }:}) if_statement(id binary_expression(binary_expression(selector_expression(id .:. id) ==:== id) &&:&& selector_expression(id .:. id)) block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}) id block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:})) for_statement(id range_clause(expression_list(id ,:, id) :=::= id id) block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})) assignment_statement(expression_list(selector_expression(id .:. id) [:[ id ]:]) =:= expression_list(id .:. id)) go_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) defer_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) return_statement(id id)) }:}))",
+          "child_fingerprints": [
+            "statement_list(var_declaration(id var_spec(id ,:, id id =:= expression_list(lit ,:, lit))) assignment_statement(id =:= id) assignment_statement(id =:= id) short_var_declaration(id :=::= expression_list(selector_expression(id .:. id) .:. id)) short_var_declaration(id :=::= expression_list(id literal_value({:{ keyed_element(id ::: id) ,:, keyed_element(id ::: literal_element(id .:. id)) }:}))) expression_statement(id argument_list((:( id ):))) expression_switch_statement(id selector_expression(id .:. id) {:{ expression_case(id expression_list(interpreted_string_literal(\":\" id \":\") ,:, interpreted_string_literal(\":\" id \":\")) ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) expression_case(id expression_list(\":\" id \":\") ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) default_case(id ::: statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))) }:}) if_statement(id binary_expression(binary_expression(selector_expression(id .:. id) ==:== id) &&:&& selector_expression(id .:. id)) block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}) id block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:})) for_statement(id range_clause(expression_list(id ,:, id) :=::= id id) block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:})) assignment_statement(expression_list(selector_expression(id .:. id) [:[ id ]:]) =:= expression_list(id .:. id)) go_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) defer_statement(id call_expression<audit>(selector_expression(id .:. id) argument_list((:( id ):)))) return_statement(id id))"
+          ],
+          "child_masses": [
+            232
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "for_statement",
+          "line": 61,
+          "span": [
+            61,
+            1,
+            63,
+            2
+          ],
+          "mass": 23,
+          "fingerprint": "for_statement(id range_clause(expression_list(id ,:, id) :=::= id id) block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}))",
+          "child_fingerprints": [
+            "statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))"
+          ],
+          "child_masses": [
+            10
+          ]
+        },
+        {
+          "method_name": "Process",
+          "node_name": "if_statement",
+          "line": 54,
+          "span": [
+            54,
+            1,
+            59,
+            2
+          ],
+          "mass": 52,
+          "fingerprint": "if_statement(id binary_expression(binary_expression(selector_expression(id .:. id) ==:== id) &&:&& selector_expression(id .:. id)) block({:{ statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):)))) }:}) id block({:{ statement_list(expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" interpreted_string_literal_content:not ready \":\") ):)))) }:}))",
+          "child_fingerprints": [
+            "statement_list(assignment_statement(expression_list(id .:. id) +=:+= lit) expression_statement(selector_expression(id .:. id) argument_list((:( id ):))))"
+          ],
+          "child_masses": [
+            17
+          ]
+        },
+        {
+          "method_name": "Ready",
+          "node_name": "block",
+          "line": 78,
+          "span": [
+            78,
+            40,
+            80,
+            1
+          ],
+          "mass": 13,
+          "fingerprint": "block({:{ statement_list(return_statement(id expression_list(selector_expression(id .:. id) >:> lit))) }:})",
+          "child_fingerprints": [
+            "statement_list(return_statement(id expression_list(selector_expression(id .:. id) >:> lit)))"
+          ],
+          "child_masses": [
+            10
+          ]
+        },
+        {
+          "method_name": "Ready",
+          "node_name": "defn",
+          "line": 78,
+          "span": [
+            78,
+            0,
+            80,
+            1
+          ],
+          "mass": 26,
+          "fingerprint": "method_declaration(id parameter_list((:( parameter_declaration(id id) ):)) id parameter_list((:( ):)) id block({:{ statement_list(return_statement(id expression_list(selector_expression(id .:. id) >:> lit))) }:}))",
+          "child_fingerprints": [
+            "statement_list(return_statement(id expression_list(selector_expression(id .:. id) >:> lit)))"
+          ],
+          "child_masses": [
+            10
+          ]
+        },
+        {
+          "method_name": "audit",
+          "node_name": "assignment_statement",
+          "line": 75,
+          "span": [
+            75,
+            1,
+            75,
+            13
+          ],
+          "mass": 7,
+          "fingerprint": "assignment_statement(id =:= expression_list(id .:. id))",
+          "child_fingerprints": [
+            "id",
+            "expression_list(id .:. id)"
+          ],
+          "child_masses": [
+            1,
+            4
+          ]
+        },
+        {
+          "method_name": "audit",
+          "node_name": "block",
+          "line": 72,
+          "span": [
+            72,
+            47,
+            76,
+            1
+          ],
+          "mass": 31,
+          "fingerprint": "block({:{ statement_list(expression_statement(id argument_list((:( id ):))) expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" id \":\") ,:, id ):))) assignment_statement(id =:= expression_list(id .:. id))) }:})",
+          "child_fingerprints": [
+            "statement_list(expression_statement(id argument_list((:( id ):))) expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" id \":\") ,:, id ):))) assignment_statement(id =:= expression_list(id .:. id)))"
+          ],
+          "child_masses": [
+            28
+          ]
+        },
+        {
+          "method_name": "audit",
+          "node_name": "defn",
+          "line": 72,
+          "span": [
+            72,
+            0,
+            76,
+            1
+          ],
+          "mass": 48,
+          "fingerprint": "method_declaration(id parameter_list((:( parameter_declaration(id pointer_type(*:* id)) ):)) id parameter_list((:( parameter_declaration(id id) ):)) block({:{ statement_list(expression_statement(id argument_list((:( id ):))) expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" id \":\") ,:, id ):))) assignment_statement(id =:= expression_list(id .:. id))) }:}))",
+          "child_fingerprints": [
+            "statement_list(expression_statement(id argument_list((:( id ):))) expression_statement(selector_expression(id .:. id) argument_list((:( interpreted_string_literal(\":\" id \":\") ,:, id ):))) assignment_statement(id =:= expression_list(id .:. id)))"
+          ],
+          "child_masses": [
+            28
+          ]
+        }
+      ]
+    }
+  ]
+}
