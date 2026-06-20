@@ -1,9 +1,14 @@
 pub(crate) mod adapters;
+pub(crate) mod calls;
 pub(crate) mod complexity;
 pub mod local_flow;
 pub mod path_condition;
+pub(crate) mod protocols;
+pub(crate) mod raw_tree;
 pub mod redundant_nil_guard;
+pub(crate) mod semantic_effects;
 pub mod tree_sitter_adapter;
+pub(crate) mod visibility;
 
 use crate::decomplex::ast::{Node as NormalizedNode, RawNode, Span};
 use crate::decomplex::parallel;

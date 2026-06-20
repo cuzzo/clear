@@ -11,6 +11,7 @@ mod lua;
 mod php;
 mod python;
 mod ruby;
+mod ruby_data;
 mod rust;
 mod swift;
 mod typescript;

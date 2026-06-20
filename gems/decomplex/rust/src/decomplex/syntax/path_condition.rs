@@ -1,5 +1,8 @@
 use crate::decomplex::ast::{self, normalize_text, Child, Node, RawNode, Span};
 use crate::decomplex::syntax::adapters::{language_profile, LanguageProfile};
+use crate::decomplex::syntax::raw_tree::{
+    child_by_field as raw_child_by_field, named_children as raw_named_children,
+};
 use crate::decomplex::syntax::{Document, Language};
 use anyhow::Result;
 use serde::Serialize;
@@ -558,16 +561,6 @@ fn raw_direct_operator(node: &RawNode) -> Option<String> {
             !child.named && !matches!(text, "(" | ")")
         })
         .map(|child| normalize_text(&child.text))
-}
-
-fn raw_named_children(node: &RawNode) -> Vec<&RawNode> {
-    node.children.iter().filter(|child| child.named).collect()
-}
-
-fn raw_child_by_field<'a>(node: &'a RawNode, field: &str) -> Option<&'a RawNode> {
-    node.children
-        .iter()
-        .find(|child| child.field_name.as_deref() == Some(field))
 }
 
 fn raw_comment_node(node: &RawNode) -> bool {

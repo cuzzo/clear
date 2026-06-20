@@ -4,6 +4,38 @@
 
 The Rust Ruby syntax adapter is too large to support the intended multi-language architecture.
 
+## Implementation Pass: 2026-06-20
+
+Completed generic extractions:
+
+- `syntax/raw_tree.rs`: raw `RawNode` child, field, and sibling helpers.
+- `syntax/protocols.rs`: protocol method-effect construction, local-name traversal, state read/write traversal, protocol path traversal, branch/case path composition, and raw protocol call-target extraction.
+- `syntax/semantic_effects.rs`: semantic-effect row construction, function attribution, context-dependency projection, method-hook effects, external state mutation effects, and structural-effect tree traversal.
+- `syntax/visibility.rs`: generic owner-scoped visibility directive application.
+- `syntax/calls.rs`: call text validation, identifier-shape validation, argument-list extraction, and no-argument call span narrowing.
+
+Additional cleanup:
+
+- `local_flow.rs` and `path_condition.rs` now use shared raw-tree helpers instead of local duplicates.
+- `implicit_control_flow::scan_files` now materializes protocol facts before reading protocol fields.
+
+Verification:
+
+- Rust test suite: passing.
+- `decomplex-rust facts --jobs=8 gems/decomplex/lib/decomplex`: byte-for-byte match against the pre-refactor baseline.
+- `decomplex-rust facts --jobs=8 gems/slopcop`: byte-for-byte match against the pre-refactor baseline.
+
+Size after this pass:
+
+- `syntax/adapters/ruby.rs`: 1,479 LoC after moving protocol/call/effect shape handling into shared declaration-driven infrastructure.
+- `syntax/adapters/ruby_data.rs`: 217 LoC of Ruby grammar tables, protocol/call shapes, semantic-effect declarations, and lexicons.
+- New shared syntax infrastructure: 1,219 LoC total across `calls.rs`, `protocols.rs`, `raw_tree.rs`, `semantic_effects.rs`, and `visibility.rs`.
+
+Remaining risk:
+
+- Ruby is still above the 1,000 LoC warning threshold and well above the <=700 ideal target.
+- The remaining large buckets are mostly Ruby call grammar, Ruby semantic-effect declarations, and Ruby protocol hook decisions. Further reduction should avoid moving Ruby-only code into Ruby-only submodules; the next useful pass should data-drive more of the call grammar and protocol hook surfaces from generic extractor declarations.
+
 Current Rust LoC:
 
 - `syntax/adapters/ruby.rs`: 2,300

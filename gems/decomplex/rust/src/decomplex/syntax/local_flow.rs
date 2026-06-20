@@ -1,5 +1,9 @@
 use crate::decomplex::ast::{self, Child, Node, RawNode, Span};
 use crate::decomplex::syntax::adapters::{language_profile, LanguageProfile};
+use crate::decomplex::syntax::raw_tree::{
+    named_children as raw_named_children, next_sibling as raw_next_sibling,
+    previous_sibling as raw_previous_sibling,
+};
 use crate::decomplex::syntax::{Document, FunctionDef, Language};
 use anyhow::Result;
 use regex::Regex;
@@ -1260,28 +1264,6 @@ fn raw_branch_node(node: &RawNode, profile: &dyn LanguageProfile) -> bool {
 
 fn raw_comment_node(node: &RawNode) -> bool {
     node.kind.to_ascii_lowercase().contains("comment")
-}
-
-fn raw_named_children(node: &RawNode) -> Vec<&RawNode> {
-    node.children.iter().filter(|child| child.named).collect()
-}
-
-fn raw_next_sibling<'a>(node: &RawNode, parent: &'a RawNode) -> Option<&'a RawNode> {
-    let index = parent
-        .children
-        .iter()
-        .position(|child| std::ptr::eq(child, node))?;
-    parent.children.get(index + 1)
-}
-
-fn raw_previous_sibling<'a>(node: &RawNode, parent: &'a RawNode) -> Option<&'a RawNode> {
-    let index = parent
-        .children
-        .iter()
-        .position(|child| std::ptr::eq(child, node))?;
-    index
-        .checked_sub(1)
-        .and_then(|previous| parent.children.get(previous))
 }
 
 fn raw_contains_node(root: &RawNode, target: &RawNode) -> bool {

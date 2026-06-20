@@ -1,119 +1,25 @@
+use super::super::calls;
+use super::super::raw_tree::{
+    first_child_kind as raw_first_child_kind, named_children as raw_named_children,
+    next_sibling_text as raw_next_sibling_text, previous_sibling_text as raw_previous_sibling_text,
+};
 use super::super::tree_sitter_adapter::{
     direct_operator, first_child_kind, first_named_text, named_children, next_sibling_raw_text,
     previous_sibling_raw_text, AssignmentTarget, CallTarget, Target,
 };
+use super::super::visibility;
 use super::super::{
-    CallSite, Document, FunctionDef, Language, ProtocolCall, ProtocolMethodEffect,
+    protocols, semantic_effects, CallSite, Document, FunctionDef, Language, ProtocolMethodEffect,
     ProtocolMethodPath, SemanticEffectSite, StateRead, StateWrite,
 };
-use super::base::{
-    default_clone_candidate_node, normalize_protocol_state, protocol_method_name, LanguageProfile,
-};
+use super::base::{default_clone_candidate_node, normalize_protocol_state, LanguageProfile};
+use super::ruby_data;
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
 use std::collections::BTreeSet;
 use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct RubyProfile;
-
-const RUBY_PROTOCOL_IGNORED_MIDS: &[&str] = &[
-    "abstract!",
-    "alias_method",
-    "any",
-    "attr_accessor",
-    "attr_reader",
-    "attr_writer",
-    "bind",
-    "cast",
-    "checked",
-    "enum",
-    "extend",
-    "final",
-    "include",
-    "interface!",
-    "let",
-    "must",
-    "must_because",
-    "nilable",
-    "override",
-    "overridable",
-    "params",
-    "prepend",
-    "private",
-    "private_class_method",
-    "protected",
-    "public",
-    "require",
-    "require_relative",
-    "requires_ancestor",
-    "sealed!",
-    "sig",
-    "type_member",
-    "type_template",
-    "untyped",
-    "unsafe",
-    "void",
-    "a_kind_of",
-    "after",
-    "around",
-    "before",
-    "be",
-    "be_a",
-    "be_an",
-    "be_empty",
-    "be_falsey",
-    "be_nil",
-    "be_truthy",
-    "change",
-    "contain_exactly",
-    "context",
-    "describe",
-    "eq",
-    "eql",
-    "equal",
-    "expect",
-    "have_attributes",
-    "have_key",
-    "have_received",
-    "it",
-    "match",
-    "not_to",
-    "raise_error",
-    "receive",
-    "subject",
-    "to",
-];
-const RUBY_PROTOCOL_MUTATING_MIDS: &[&str] = &[
-    "<<",
-    "[]=",
-    "add",
-    "append",
-    "clear",
-    "collect!",
-    "compact!",
-    "concat",
-    "declare",
-    "delete",
-    "delete_if",
-    "each_key=",
-    "fill",
-    "filter!",
-    "keep_if",
-    "mark",
-    "merge!",
-    "move",
-    "push",
-    "reject!",
-    "replace",
-    "resolve",
-    "shift",
-    "stamp",
-    "store",
-    "unshift",
-    "update",
-    "write",
-];
-const RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS: &[&str] = &["!", "!=", "!~"];
 
 impl LanguageProfile for RubyProfile {
     fn language(&self) -> Language {
@@ -125,128 +31,119 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn function_node_kinds(&self) -> &[&str] {
-        &["method"]
+        ruby_data::FUNCTION_NODE_KINDS
     }
 
     fn class_owner_node_kinds(&self) -> &[&str] {
-        &["class"]
+        ruby_data::CLASS_OWNER_NODE_KINDS
     }
 
     fn module_owner_node_kinds(&self) -> &[&str] {
-        &["module"]
+        ruby_data::MODULE_OWNER_NODE_KINDS
     }
 
     fn call_node_kinds(&self) -> &[&str] {
-        &["call"]
+        ruby_data::CALL_NODE_KINDS
     }
 
     fn parameter_list_node_kinds(&self) -> &[&str] {
-        &["method_parameters"]
+        ruby_data::PARAMETER_LIST_NODE_KINDS
     }
 
     fn parameter_identifier_node_kinds(&self) -> &[&str] {
-        &["identifier"]
+        ruby_data::PARAMETER_IDENTIFIER_NODE_KINDS
     }
 
     fn function_body_node_kinds(&self) -> &[&str] {
-        &["body_statement", "do_block"]
+        ruby_data::FUNCTION_BODY_NODE_KINDS
     }
 
     fn nested_statement_wrapper_node_kinds(&self) -> &[&str] {
-        &["body_statement"]
+        ruby_data::NESTED_STATEMENT_WRAPPER_NODE_KINDS
     }
 
     fn identifier_node_kinds(&self) -> &[&str] {
-        &["identifier", "constant"]
+        ruby_data::IDENTIFIER_NODE_KINDS
     }
 
     fn assignment_node_kinds(&self) -> &[&str] {
-        &["assignment", "operator_assignment"]
+        ruby_data::ASSIGNMENT_NODE_KINDS
     }
 
     fn indexed_lhs_node_kinds(&self) -> &[&str] {
-        &["element_assignment", "element_reference"]
+        ruby_data::INDEXED_LHS_NODE_KINDS
     }
 
     fn expression_list_node_kinds(&self) -> &[&str] {
-        &["left_assignment_list"]
+        ruby_data::EXPRESSION_LIST_NODE_KINDS
     }
 
     fn assignment_operator_tokens(&self) -> &[&str] {
-        &["=", "+=", "-=", "*=", "/=", "%=", "&&=", "||="]
+        ruby_data::ASSIGNMENT_OPERATOR_TOKENS
     }
 
     fn path_action_node_kinds(&self) -> &[&str] {
-        &["call", "return"]
+        ruby_data::PATH_ACTION_NODE_KINDS
     }
 
     fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
-        &["body_statement"]
+        ruby_data::SIMPLE_ACTION_WRAPPER_NODE_KINDS
     }
 
     fn comparison_node_kinds(&self) -> &[&str] {
-        &["binary"]
+        ruby_data::COMPARISON_NODE_KINDS
     }
 
     fn branch_node_kinds(&self) -> &[&str] {
-        &[
-            "if",
-            "unless",
-            "if_modifier",
-            "unless_modifier",
-            "case",
-            "while",
-            "until",
-            "for",
-        ]
+        ruby_data::BRANCH_NODE_KINDS
     }
 
     fn case_node_kinds(&self) -> &[&str] {
-        &["case"]
+        ruby_data::CASE_NODE_KINDS
     }
 
     fn case_arm_node_kinds(&self) -> &[&str] {
-        &["when"]
+        ruby_data::CASE_ARM_NODE_KINDS
     }
 
     fn case_pattern_node_kinds(&self) -> &[&str] {
-        &["pattern"]
+        ruby_data::CASE_PATTERN_NODE_KINDS
     }
 
     fn case_container_stop_node_kinds(&self) -> &[&str] {
-        &["method", "class", "module"]
+        ruby_data::CASE_CONTAINER_STOP_NODE_KINDS
     }
 
     fn case_subject_skip_node_kinds(&self) -> &[&str] {
-        &["when", "else", "then", "comment"]
+        ruby_data::CASE_SUBJECT_SKIP_NODE_KINDS
     }
 
     fn default_case_patterns(&self) -> &[&str] {
-        &["_", "default", "else"]
+        ruby_data::DEFAULT_CASE_PATTERNS
     }
 
     fn boolean_and_operators(&self) -> &[&str] {
-        &["&&", "and"]
+        ruby_data::BOOLEAN_AND_OPERATORS
     }
 
     fn boolean_container_node_kinds(&self) -> &[&str] {
-        &["binary"]
+        ruby_data::BOOLEAN_CONTAINER_NODE_KINDS
     }
 
     fn boolean_wrapper_node_kinds(&self) -> &[&str] {
-        &["body_statement", "pattern", "argument_list"]
+        ruby_data::BOOLEAN_WRAPPER_NODE_KINDS
     }
 
     fn accessor_call_node_kinds(&self) -> &[&str] {
-        &["call"]
+        ruby_data::ACCESSOR_CALL_NODE_KINDS
     }
 
     fn argument_list_node_kinds(&self) -> &[&str] {
-        &["argument_list"]
+        ruby_data::ARGUMENT_LIST_NODE_KINDS
     }
 
     fn block_argument_node_kinds(&self) -> &[&str] {
-        &["do_block", "block"]
+        ruby_data::BLOCK_ARGUMENT_NODE_KINDS
     }
 
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
@@ -263,9 +160,13 @@ impl LanguageProfile for RubyProfile {
             _ => None,
         }?;
         if target.arguments.is_empty() && !ruby_call_has_block(node) {
-            if let Some(span) =
-                ruby_narrow_no_arg_call_span(node, source, &target.receiver, &target.message)
-            {
+            if let Some(span) = calls::narrow_no_arg_call_span(
+                node,
+                source,
+                &target.receiver,
+                &target.message,
+                true,
+            ) {
                 target.span = Some(span);
             }
         }
@@ -324,7 +225,7 @@ impl LanguageProfile for RubyProfile {
                 .and_then(|parent| (parent.kind() == "call").then_some(parent))
                 .and_then(|parent| ruby_call_target(parent, source))?;
             if target.receiver == "self"
-                && matches!(target.message.as_str(), "private" | "protected" | "public")
+                && ruby_data::VISIBILITY_DIRECTIVES.contains(&target.message.as_str())
             {
                 return Some(target.message);
             }
@@ -333,7 +234,7 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn after_collect_facts(&self, functions: &mut Vec<FunctionDef>, calls: &[CallSite]) {
-        apply_ruby_visibility(functions, calls);
+        visibility::apply_visibility(functions, calls, self);
     }
 
     fn structural_semantic_effect_sites(
@@ -356,42 +257,11 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn protocol_method_effects(&self, document: &Document) -> Vec<ProtocolMethodEffect> {
-        document
-            .function_defs
-            .iter()
-            .map(|function_def| {
-                let (reads, writes) = ruby_protocol_method_access(function_def);
-                ProtocolMethodEffect {
-                    file: function_def.file.clone(),
-                    owner: function_def.owner.clone(),
-                    name: protocol_method_name(&function_def.name),
-                    line: function_def.line,
-                    reads,
-                    writes,
-                }
-            })
-            .collect()
+        protocols::method_effects(document, self)
     }
 
     fn protocol_call_paths(&self, document: &Document) -> Vec<ProtocolMethodPath> {
-        document
-            .function_defs
-            .iter()
-            .flat_map(|function_def| {
-                let statements = ruby_raw_function_body_statements(&function_def.body);
-                let local_names = ruby_protocol_local_names(function_def, &statements);
-                ruby_protocol_paths_for_statements(&statements, &local_names)
-                    .into_iter()
-                    .map(|path| ProtocolMethodPath {
-                        file: function_def.file.clone(),
-                        owner: function_def.owner.clone(),
-                        name: protocol_method_name(&function_def.name),
-                        line: function_def.line,
-                        calls: path.calls,
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+        protocols::call_paths(document, self)
     }
 
     fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
@@ -503,6 +373,154 @@ impl LanguageProfile for RubyProfile {
     }
 }
 
+impl protocols::RawProtocolAdapter for RubyProfile {
+    fn method_body_statements<'a>(&self, body: &'a RawNode) -> Vec<&'a RawNode> {
+        protocols::function_body_statements(
+            body,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_hidden_method_definition,
+            ruby_raw_flat_assignment_statement,
+            ruby_raw_hidden_modifier_if,
+            ruby_raw_heredoc_body,
+        )
+    }
+
+    fn local_bindings(&self, node: &RawNode) -> Vec<String> {
+        protocols::local_bindings(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_simple_call_text,
+            ruby_raw_flat_assignment_statement,
+        )
+    }
+
+    fn nested_boundary(&self, node: &RawNode) -> bool {
+        protocols::nested_boundary(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn assignment_parts<'a>(
+        &self,
+        node: &'a RawNode,
+    ) -> Option<(&'a RawNode, Option<&'a RawNode>)> {
+        protocols::assignment_parts(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_flat_assignment_statement,
+        )
+    }
+
+    fn operator_assignment_parts<'a>(
+        &self,
+        node: &'a RawNode,
+    ) -> Option<(&'a RawNode, Option<&'a RawNode>)> {
+        protocols::operator_assignment_parts(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn state_target(&self, node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
+        ruby_protocol_state_target(node, local_names)
+    }
+
+    fn direct_state_read(&self, node: &RawNode) -> Option<String> {
+        ruby_data::PROTOCOL_SHAPE
+            .direct_state_read_kinds
+            .contains(&node.kind.as_str())
+            .then(|| normalize_protocol_state(&node.text))
+    }
+
+    fn collect_call_state(
+        &self,
+        node: &RawNode,
+        local_names: &BTreeSet<String>,
+        reads: &mut BTreeSet<String>,
+        writes: &mut BTreeSet<String>,
+    ) {
+        ruby_protocol_collect_call_state(node, local_names, reads, writes);
+    }
+
+    fn bare_state_reader(
+        &self,
+        node: &RawNode,
+        parent: Option<&RawNode>,
+        local_names: &BTreeSet<String>,
+    ) -> Option<String> {
+        if node.kind != "identifier" {
+            return None;
+        }
+        ruby_protocol_bare_reader(node, parent, local_names)
+            .then(|| normalize_protocol_state(&node.text))
+    }
+
+    fn branch_node(&self, node: &RawNode) -> bool {
+        protocols::branch_node(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_hidden_modifier_if,
+        )
+    }
+
+    fn case_node(&self, node: &RawNode) -> bool {
+        protocols::case_node(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn path_condition<'a>(&self, node: &'a RawNode) -> Option<&'a RawNode> {
+        protocols::path_condition(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_hidden_modifier_if,
+        )
+    }
+
+    fn then_body<'a>(&self, node: &'a RawNode) -> Option<&'a RawNode> {
+        protocols::then_body(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_hidden_modifier_if,
+        )
+    }
+
+    fn else_body<'a>(&self, node: &'a RawNode) -> Option<&'a RawNode> {
+        protocols::else_body(
+            node,
+            &ruby_data::PROTOCOL_SHAPE,
+            ruby_raw_hidden_modifier_if,
+        )
+    }
+
+    fn case_subject<'a>(&self, node: &'a RawNode) -> Option<&'a RawNode> {
+        protocols::case_subject(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn case_branch_bodies<'a>(&self, node: &'a RawNode) -> Vec<&'a RawNode> {
+        protocols::case_branch_bodies(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn statement_body<'a>(&self, node: &'a RawNode) -> Option<Vec<&'a RawNode>> {
+        protocols::statement_body(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn path_child_nodes<'a>(&self, node: &'a RawNode) -> Vec<&'a RawNode> {
+        protocols::path_child_nodes(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+
+    fn internal_call(&self, node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
+        ruby_protocol_internal_call(node, local_names)
+    }
+
+    fn terminal_node(&self, node: &RawNode) -> bool {
+        protocols::terminal_node(node, &ruby_data::PROTOCOL_SHAPE)
+    }
+}
+
+impl visibility::VisibilityAdapter for RubyProfile {
+    fn visibility_call(&self, call: &CallSite) -> bool {
+        ruby_visibility_call(call)
+    }
+
+    fn visibility_arg_name(&self, argument: &str) -> String {
+        ruby_visibility_arg_name(argument)
+    }
+}
+
 fn ruby_state_assignment_node(node: &RawNode) -> bool {
     if !matches!(node.kind.as_str(), "assignment" | "operator_assignment") {
         return false;
@@ -544,113 +562,30 @@ fn inline_def_name(node: Node<'_>, source: &str) -> Option<String> {
 }
 
 fn ruby_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
-    let receiver = node.child_by_field_name("receiver");
-    let method = node.child_by_field_name("method");
-    let message = method
-        .map(|method| node_text(method, source).to_string())
-        .or_else(|| first_named_text(node, source, &["identifier", "constant"]))
-        .or_else(|| {
+    calls::receiver_message_call_target(
+        node,
+        source,
+        &ruby_data::CALL_SHAPE,
+        |node, source, receiver, _method| {
             let text = normalize_text(node_text(node, source));
             (receiver.is_none() && ruby_simple_call_text(&text)).then_some(text)
-        })?;
-    let arguments = if ruby_require_message(&message) {
-        ruby_require_argument_texts(node, source)
-    } else {
-        ruby_argument_texts(node, source)
-    };
-
-    let mut target = CallTarget::new(
-        receiver
-            .map(|receiver| normalize_text(node_text(receiver, source)))
-            .unwrap_or_else(|| "self".to_string()),
-        message,
-        arguments,
-    );
-    if target.arguments.is_empty() && !ruby_call_has_block(node) {
-        if let (Some(receiver), Some(method)) = (receiver, method) {
-            let receiver_span = span(receiver);
-            let method_span = span(method);
-            target.span = Some([
-                receiver_span[0],
-                receiver_span[1],
-                method_span[2],
-                method_span[3],
-            ]);
-        }
-    }
-    target.safe_navigation = ruby_safe_navigation_call(node, source);
-    Some(target)
-}
-
-fn apply_ruby_visibility(functions: &mut [FunctionDef], calls: &[CallSite]) {
-    let mut owners = functions
-        .iter()
-        .map(|function| function.owner.clone())
-        .collect::<Vec<_>>();
-    owners.sort();
-    owners.dedup();
-
-    for owner in owners {
-        let function_indices = functions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, function)| (function.owner == owner).then_some(index))
-            .collect::<Vec<_>>();
-        let call_indices = calls
-            .iter()
-            .enumerate()
-            .filter_map(|(index, call)| {
-                (call.owner == owner && ruby_visibility_call(call)).then_some(index)
-            })
-            .collect::<Vec<_>>();
-
-        let mut visibility = "public".to_string();
-        let mut events = Vec::new();
-        events.extend(
-            function_indices
-                .iter()
-                .map(|index| (functions[*index].line, 1_u8, *index)),
-        );
-        events.extend(
-            call_indices
-                .iter()
-                .map(|index| (calls[*index].line, 0_u8, *index)),
-        );
-        events.sort();
-
-        for (_, kind, index) in events {
-            if kind == 1 {
-                if functions[index].visibility.is_none() {
-                    functions[index].visibility = Some(if functions[index].name.contains('.') {
-                        "public".to_string()
-                    } else {
-                        visibility.clone()
-                    });
-                }
+        },
+        |node, source, message| {
+            if ruby_require_message(message) {
+                ruby_require_argument_texts(node, source)
             } else {
-                let call = &calls[index];
-                if call.arguments.is_empty() {
-                    visibility = call.message.clone();
-                } else {
-                    for argument in &call.arguments {
-                        let name = ruby_visibility_arg_name(argument);
-                        for function_index in function_indices.iter().rev() {
-                            if functions[*function_index].name == name {
-                                functions[*function_index].visibility = Some(call.message.clone());
-                                break;
-                            }
-                        }
-                    }
-                }
+                ruby_argument_texts(node, source)
             }
-        }
-    }
+        },
+        ruby_safe_navigation_call,
+        ruby_call_has_block,
+    )
 }
 
 fn ruby_visibility_call(call: &CallSite) -> bool {
     call.function == "(top-level)"
         && call.receiver == "self"
-        && matches!(call.message.as_str(), "public" | "protected" | "private")
+        && ruby_data::VISIBILITY_DIRECTIVES.contains(&call.message.as_str())
 }
 
 fn ruby_visibility_identifier_call_target<'tree>(
@@ -658,7 +593,7 @@ fn ruby_visibility_identifier_call_target<'tree>(
     source: &str,
 ) -> Option<CallTarget<'tree>> {
     let message = node_text(node, source);
-    if !matches!(message, "private" | "protected" | "public") {
+    if !ruby_data::VISIBILITY_DIRECTIVES.contains(&message) {
         return None;
     }
     let parent = node.parent()?;
@@ -726,7 +661,7 @@ fn ruby_bare_body_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<
 
     let message = node_text(node, source).trim().to_string();
     if !ruby_simple_call_text(&message)
-        || matches!(message.as_str(), "true" | "false" | "nil" | "self")
+        || ruby_data::BARE_BODY_NON_CALL_MESSAGES.contains(&message.as_str())
     {
         return None;
     }
@@ -780,11 +715,7 @@ fn ruby_proc_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallT
     let receiver = node
         .child_by_field_name("receiver")
         .or_else(|| named_children(node).into_iter().next())?;
-    let args = node.child_by_field_name("arguments").or_else(|| {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "argument_list")
-    })?;
+    let args = calls::argument_list_node(node, "argument_list")?;
     let mut target = CallTarget::new(
         normalize_text(node_text(receiver, source)),
         "call".to_string(),
@@ -799,40 +730,10 @@ fn ruby_proc_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallT
 }
 
 fn ruby_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
-    let args = node.child_by_field_name("arguments").or_else(|| {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "argument_list")
-    });
-    let Some(args) = args else {
-        return Vec::new();
-    };
-    if let Some(arguments) = ruby_inline_def_argument_texts(args, source) {
-        return arguments;
-    }
-    if let Some(arguments) = ruby_single_command_call_argument_texts(args, source) {
-        return arguments;
-    }
-    let values = named_children(args)
-        .into_iter()
-        .map(|child| ruby_argument_text(child, args, source))
-        .collect::<Vec<_>>();
-    if !values.is_empty() {
-        return values;
-    }
-
-    let mut text = node_text(args, source).trim().to_string();
-    if text.starts_with('(') && text.ends_with(')') && text.len() >= 2 {
-        text = text[1..text.len() - 1].to_string();
-    }
-    text.split(',')
-        .map(normalize_text)
-        .filter(|arg| !arg.is_empty())
-        .collect()
-}
-
-fn ruby_argument_text(node: Node<'_>, _args: Node<'_>, source: &str) -> String {
-    normalize_text(node_text(node, source))
+    calls::argument_texts(node, source, "argument_list", |args, source| {
+        ruby_inline_def_argument_texts(args, source)
+            .or_else(|| ruby_single_command_call_argument_texts(args, source))
+    })
 }
 
 fn ruby_single_command_call_argument_texts(args: Node<'_>, source: &str) -> Option<Vec<String>> {
@@ -852,12 +753,7 @@ fn ruby_single_command_call_argument_texts(args: Node<'_>, source: &str) -> Opti
 }
 
 fn ruby_require_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
-    let args = node.child_by_field_name("arguments").or_else(|| {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "argument_list")
-    });
-    let Some(args) = args else {
+    let Some(args) = calls::argument_list_node(node, "argument_list") else {
         return Vec::new();
     };
     let children = named_children(args);
@@ -941,26 +837,27 @@ fn ruby_structural_semantic_effect_sites(
     let file_name = file.to_string_lossy().to_string();
     let mut out = Vec::new();
     out.extend(ruby_global_context_effects(source, state_reads));
-    out.extend(ruby_state_mutation_effects(state_writes));
-    out.extend(ruby_method_hook_effects(functions));
-    ruby_collect_structural_effect_nodes(root, source, &file_name, functions, &mut out);
+    out.extend(semantic_effects::external_state_mutation_effects(
+        state_writes,
+    ));
+    out.extend(semantic_effects::method_hook_effects(
+        functions,
+        ruby_data::METHOD_HOOKS,
+    ));
+    out.extend(semantic_effects::collect_structural_effect_nodes(
+        root,
+        source,
+        &file_name,
+        functions,
+        ruby_structural_effect_for_node,
+    ));
     out
 }
 
 fn ruby_global_context_effects(source: &str, state_reads: &[StateRead]) -> Vec<SemanticEffectSite> {
-    state_reads
-        .iter()
-        .filter(|read| read.field.starts_with('$'))
-        .filter(|read| !ruby_global_assignment_read(source, read))
-        .map(|read| SemanticEffectSite {
-            kind: "context_dependency".to_string(),
-            detail: read.field.clone(),
-            file: read.file.clone(),
-            function: read.function.clone(),
-            line: read.line,
-            span: read.span,
-        })
-        .collect()
+    semantic_effects::state_read_context_dependencies(state_reads, |read| {
+        read.field.starts_with('$') && !ruby_global_assignment_read(source, read)
+    })
 }
 
 fn ruby_global_assignment_read(source: &str, read: &StateRead) -> bool {
@@ -976,82 +873,21 @@ fn ruby_global_assignment_read(source: &str, read: &StateRead) -> bool {
         .starts_with('=')
 }
 
-fn ruby_state_mutation_effects(state_writes: &[StateWrite]) -> Vec<SemanticEffectSite> {
-    state_writes
-        .iter()
-        .filter(|write| write.receiver != "self")
-        .filter(|write| !write.field.starts_with('@') && !write.field.starts_with('$'))
-        .map(|write| SemanticEffectSite {
-            kind: "hidden_mutation".to_string(),
-            detail: format!("{}=", write.field),
-            file: write.file.clone(),
-            function: write.function.clone(),
-            line: write.line,
-            span: write.span,
-        })
-        .collect()
-}
-
-fn ruby_method_hook_effects(functions: &[FunctionDef]) -> Vec<SemanticEffectSite> {
-    functions
-        .iter()
-        .filter_map(|function| {
-            let name = function
-                .name
-                .split('.')
-                .last()
-                .unwrap_or(function.name.as_str());
-            matches!(name, "method_missing" | "respond_to_missing?").then(|| SemanticEffectSite {
-                kind: "metaprogramming".to_string(),
-                detail: format!("def {name}"),
-                file: function.file.clone(),
-                function: function.name.clone(),
-                line: function.line,
-                span: function.span,
-            })
-        })
-        .collect()
-}
-
-fn ruby_collect_structural_effect_nodes(
-    node: Node<'_>,
-    source: &str,
-    file: &str,
-    functions: &[FunctionDef],
-    out: &mut Vec<SemanticEffectSite>,
-) {
-    out.extend(ruby_structural_effect_for_node(
-        node, source, file, functions,
-    ));
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        ruby_collect_structural_effect_nodes(child, source, file, functions, out);
-    }
-}
-
 fn ruby_structural_effect_for_node(
     node: Node<'_>,
     source: &str,
     file: &str,
     functions: &[FunctionDef],
 ) -> Vec<SemanticEffectSite> {
+    if let Some(effect) = semantic_effects::static_node_effect(
+        node,
+        file,
+        functions,
+        ruby_data::STATIC_SEMANTIC_EFFECTS,
+    ) {
+        return vec![effect];
+    }
     match node.kind() {
-        "yield" => vec![ruby_semantic_effect_site(
-            node,
-            source,
-            file,
-            functions,
-            "dynamic_dispatch",
-            "yield",
-        )],
-        "subshell" => vec![ruby_semantic_effect_site(
-            node,
-            source,
-            file,
-            functions,
-            "hidden_io",
-            "backtick",
-        )],
         "singleton_class" => ruby_singleton_class_effect(node, source, file, functions),
         "element_reference" => ruby_element_reference_effect(node, source, file, functions),
         "assignment" => ruby_assignment_effects(node, source, file, functions),
@@ -1073,9 +909,8 @@ fn ruby_singleton_class_effect(
     if node_text(receiver, source) == "self" {
         return Vec::new();
     }
-    vec![ruby_semantic_effect_site(
+    vec![semantic_effects::site(
         node,
-        source,
         file,
         functions,
         "metaprogramming",
@@ -1095,9 +930,8 @@ fn ruby_element_reference_effect(
     if node_text(receiver, source) != "ENV" {
         return Vec::new();
     }
-    vec![ruby_semantic_effect_site(
+    vec![semantic_effects::site(
         node,
-        source,
         file,
         functions,
         "context_dependency",
@@ -1119,9 +953,8 @@ fn ruby_assignment_effects(
     };
     let mut out = Vec::new();
     if lhs.kind() == "global_variable" {
-        out.push(ruby_semantic_effect_site(
+        out.push(semantic_effects::site(
             node,
-            source,
             file,
             functions,
             "context_dependency",
@@ -1134,9 +967,8 @@ fn ruby_assignment_effects(
             .map(|receiver| node_text(receiver, source) != "ENV")
             .unwrap_or(true)
         {
-            out.push(ruby_semantic_effect_site(
+            out.push(semantic_effects::site(
                 node,
-                source,
                 file,
                 functions,
                 "hidden_mutation",
@@ -1149,7 +981,7 @@ fn ruby_assignment_effects(
 
 fn ruby_operator_assignment_effect(
     node: Node<'_>,
-    source: &str,
+    _source: &str,
     file: &str,
     functions: &[FunctionDef],
 ) -> Vec<SemanticEffectSite> {
@@ -1159,9 +991,8 @@ fn ruby_operator_assignment_effect(
     if ruby_local_operator_assignment_lhs(lhs) {
         return Vec::new();
     }
-    vec![ruby_semantic_effect_site(
+    vec![semantic_effects::site(
         node,
-        source,
         file,
         functions,
         "hidden_mutation",
@@ -1181,58 +1012,20 @@ fn ruby_local_operator_assignment_lhs(lhs: Option<Node<'_>>) -> bool {
 
 fn ruby_binary_effect(
     node: Node<'_>,
-    source: &str,
+    _source: &str,
     file: &str,
     functions: &[FunctionDef],
 ) -> Vec<SemanticEffectSite> {
     if direct_operator(node) != "<<" {
         return Vec::new();
     }
-    vec![ruby_semantic_effect_site(
+    vec![semantic_effects::site(
         node,
-        source,
         file,
         functions,
         "hidden_mutation",
         "<<",
     )]
-}
-
-fn ruby_semantic_effect_site(
-    node: Node<'_>,
-    _source: &str,
-    file: &str,
-    functions: &[FunctionDef],
-    kind: &str,
-    detail: &str,
-) -> SemanticEffectSite {
-    let site_span = span(node);
-    SemanticEffectSite {
-        kind: kind.to_string(),
-        detail: detail.to_string(),
-        file: file.to_string(),
-        function: ruby_effect_function(functions, site_span),
-        line: site_span[0],
-        span: site_span,
-    }
-}
-
-fn ruby_effect_function(functions: &[FunctionDef], site_span: [usize; 4]) -> String {
-    functions
-        .iter()
-        .filter(|function| span_contains(function.span, site_span))
-        .min_by_key(|function| span_width(function.span))
-        .map(|function| function.name.clone())
-        .unwrap_or_else(|| "(top-level)".to_string())
-}
-
-fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
-    (outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]))
-        && (outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]))
-}
-
-fn span_width(span: [usize; 4]) -> usize {
-    span[2].saturating_sub(span[0]) * 10_000 + span[3].saturating_sub(span[1])
 }
 
 fn ruby_safe_navigation_call(node: Node<'_>, source: &str) -> bool {
@@ -1244,7 +1037,7 @@ fn ruby_safe_navigation_call(node: Node<'_>, source: &str) -> bool {
 }
 
 fn ruby_simple_call_text(text: &str) -> bool {
-    ruby_identifier_like(text.trim(), true)
+    calls::identifier_like(text.trim(), true)
 }
 
 fn ruby_bare_call_identifier(node: Node<'_>, source: &str) -> bool {
@@ -1301,118 +1094,6 @@ fn ruby_bare_call_identifier(node: Node<'_>, source: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Clone)]
-struct RubyProtocolPath {
-    calls: Vec<ProtocolCall>,
-    terminal: bool,
-}
-
-fn ruby_protocol_method_access(function_def: &FunctionDef) -> (Vec<String>, Vec<String>) {
-    let statements = ruby_raw_function_body_statements(&function_def.body);
-    let local_names = ruby_protocol_local_names(function_def, &statements);
-    let mut reads = BTreeSet::new();
-    let mut writes = BTreeSet::new();
-    ruby_protocol_collect_state_access(
-        &function_def.body,
-        None,
-        &local_names,
-        &mut reads,
-        &mut writes,
-        true,
-    );
-    (reads.into_iter().collect(), writes.into_iter().collect())
-}
-
-fn ruby_protocol_local_names(
-    function_def: &FunctionDef,
-    statements: &[&RawNode],
-) -> BTreeSet<String> {
-    let mut local_names = BTreeSet::new();
-    local_names.extend(function_def.params.iter().cloned());
-    for statement in statements {
-        ruby_protocol_collect_local_names(statement, &mut local_names, true);
-    }
-    local_names
-}
-
-fn ruby_protocol_collect_state_access(
-    node: &RawNode,
-    parent: Option<&RawNode>,
-    local_names: &BTreeSet<String>,
-    reads: &mut BTreeSet<String>,
-    writes: &mut BTreeSet<String>,
-    root: bool,
-) {
-    if !root && ruby_protocol_nested_boundary(node) {
-        return;
-    }
-
-    if ruby_raw_flat_assignment_statement(node) {
-        let children = raw_named_children(node);
-        if let Some(lhs) = children.first() {
-            ruby_protocol_record_write(lhs, writes, local_names);
-        }
-        if let Some(rhs) = children.get(1) {
-            ruby_protocol_collect_state_access(rhs, Some(node), local_names, reads, writes, false);
-        }
-        return;
-    }
-
-    match node.kind.as_str() {
-        "assignment" => {
-            let children = raw_named_children(node);
-            if let Some(lhs) = children.first() {
-                ruby_protocol_record_write(lhs, writes, local_names);
-            }
-            if let Some(rhs) = children.get(1) {
-                ruby_protocol_collect_state_access(
-                    rhs,
-                    Some(node),
-                    local_names,
-                    reads,
-                    writes,
-                    false,
-                );
-            }
-            return;
-        }
-        "operator_assignment" => {
-            let children = raw_named_children(node);
-            if let Some(lhs) = children.first() {
-                if let Some(state) = ruby_protocol_state_target(lhs, local_names) {
-                    reads.insert(state.clone());
-                    writes.insert(state);
-                }
-            }
-            if let Some(rhs) = children.get(1) {
-                ruby_protocol_collect_state_access(
-                    rhs,
-                    Some(node),
-                    local_names,
-                    reads,
-                    writes,
-                    false,
-                );
-            }
-            return;
-        }
-        "instance_variable" => {
-            reads.insert(normalize_protocol_state(&node.text));
-        }
-        "call" => ruby_protocol_collect_call_state(node, local_names, reads, writes),
-        "identifier" => {
-            if ruby_protocol_bare_reader(node, parent, local_names) {
-                reads.insert(normalize_protocol_state(&node.text));
-            }
-        }
-        _ => {}
-    }
-
-    for child in &node.children {
-        ruby_protocol_collect_state_access(child, Some(node), local_names, reads, writes, false);
-    }
-}
-
 fn ruby_protocol_collect_call_state(
     node: &RawNode,
     local_names: &BTreeSet<String>,
@@ -1425,7 +1106,7 @@ fn ruby_protocol_collect_call_state(
     if target.receiver == "self"
         && target.arguments.is_empty()
         && !ruby_protocol_mutating_mid(&target.message)
-        && !RUBY_PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
+        && !ruby_data::PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
     {
         reads.insert(normalize_protocol_state(&target.message));
     }
@@ -1433,16 +1114,6 @@ fn ruby_protocol_collect_call_state(
         if let Some(token) = ruby_protocol_receiver_state_token(&target.receiver, local_names) {
             writes.insert(token);
         }
-    }
-}
-
-fn ruby_protocol_record_write(
-    lhs: &RawNode,
-    writes: &mut BTreeSet<String>,
-    local_names: &BTreeSet<String>,
-) {
-    if let Some(state) = ruby_protocol_state_target(lhs, local_names) {
-        writes.insert(state);
     }
 }
 
@@ -1491,155 +1162,12 @@ fn ruby_protocol_receiver_state_token(
     }
 }
 
-fn ruby_protocol_paths_for_statements(
-    statements: &[&RawNode],
-    local_names: &BTreeSet<String>,
-) -> Vec<RubyProtocolPath> {
-    let mut paths = vec![ruby_protocol_empty_path()];
-    for statement in statements {
-        let statement_paths = ruby_protocol_paths_for(statement, local_names);
-        paths = ruby_protocol_combine_path_lists(&paths, &statement_paths);
-    }
-    paths
-}
-
-fn ruby_protocol_paths_for(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> Vec<RubyProtocolPath> {
-    if ruby_protocol_nested_boundary(node) {
-        return vec![ruby_protocol_empty_path()];
-    }
-    if ruby_raw_if_node(node) {
-        return ruby_protocol_branch_paths(node, local_names);
-    }
-    if ruby_raw_case_node(node) {
-        return ruby_protocol_case_paths(node, local_names);
-    }
-
-    let children = ruby_protocol_child_nodes(node);
-    let child_paths = children
-        .iter()
-        .fold(vec![ruby_protocol_empty_path()], |paths, child| {
-            ruby_protocol_combine_path_lists(&paths, &ruby_protocol_paths_for(child, local_names))
-        });
-    let Some(mid) = ruby_protocol_internal_call(node, local_names) else {
-        return ruby_protocol_terminalize(node, child_paths);
-    };
-    let call_path = RubyProtocolPath {
-        calls: vec![ruby_protocol_raw_call(mid, node)],
-        terminal: false,
-    };
-    ruby_protocol_terminalize(
-        node,
-        ruby_protocol_combine_path_lists(&[call_path], &child_paths),
-    )
-}
-
-fn ruby_protocol_terminalize(
-    node: &RawNode,
-    paths: Vec<RubyProtocolPath>,
-) -> Vec<RubyProtocolPath> {
-    if matches!(
-        node.kind.as_str(),
-        "return" | "break" | "next" | "redo" | "retry"
-    ) {
-        paths
-            .into_iter()
-            .map(|path| RubyProtocolPath {
-                calls: path.calls,
-                terminal: true,
-            })
-            .collect()
-    } else {
-        paths
-    }
-}
-
-fn ruby_protocol_branch_paths(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> Vec<RubyProtocolPath> {
-    let condition_paths = ruby_raw_path_condition(node)
-        .map(|condition| ruby_protocol_paths_for(condition, local_names))
-        .unwrap_or_else(|| vec![ruby_protocol_empty_path()]);
-    let then_paths = ruby_protocol_body_paths(ruby_raw_then_body(node), local_names);
-    let else_paths = ruby_raw_else_body(node)
-        .map(|body| ruby_protocol_body_paths(Some(body), local_names))
-        .unwrap_or_else(|| vec![ruby_protocol_empty_path()]);
-    let alternatives = then_paths.into_iter().chain(else_paths).collect::<Vec<_>>();
-    ruby_protocol_combine_path_lists(&condition_paths, &alternatives)
-}
-
-fn ruby_protocol_case_paths(
-    node: &RawNode,
-    local_names: &BTreeSet<String>,
-) -> Vec<RubyProtocolPath> {
-    let subject_paths = raw_named_children(node)
-        .first()
-        .filter(|first| !matches!(first.kind.as_str(), "when" | "else"))
-        .map(|subject| ruby_protocol_paths_for(subject, local_names))
-        .unwrap_or_else(|| vec![ruby_protocol_empty_path()]);
-    let branch_paths = raw_named_children(node)
-        .into_iter()
-        .filter(|child| matches!(child.kind.as_str(), "when" | "else"))
-        .flat_map(|child| ruby_protocol_body_paths(Some(child), local_names))
-        .collect::<Vec<_>>();
-    let alternatives = if branch_paths.is_empty() {
-        vec![ruby_protocol_empty_path()]
-    } else {
-        branch_paths
-    };
-    ruby_protocol_combine_path_lists(&subject_paths, &alternatives)
-}
-
-fn ruby_protocol_body_paths(
-    node: Option<&RawNode>,
-    local_names: &BTreeSet<String>,
-) -> Vec<RubyProtocolPath> {
-    let Some(node) = node else {
-        return vec![ruby_protocol_empty_path()];
-    };
-    if matches!(
-        node.kind.as_str(),
-        "then" | "else" | "body_statement" | "block" | "block_body"
-    ) {
-        return ruby_protocol_paths_for_statements(
-            &raw_named_children(node)
-                .into_iter()
-                .filter(|child| child.kind != "comment")
-                .collect::<Vec<_>>(),
-            local_names,
-        );
-    }
-    ruby_protocol_paths_for(node, local_names)
-}
-
-fn ruby_protocol_child_nodes(node: &RawNode) -> Vec<&RawNode> {
-    if ruby_protocol_nested_boundary(node) {
-        return Vec::new();
-    }
-    match node.kind.as_str() {
-        "call" => raw_named_children(node)
-            .into_iter()
-            .filter(|child| matches!(child.kind.as_str(), "argument_list" | "block" | "do_block"))
-            .collect(),
-        "assignment" | "operator_assignment" => {
-            raw_named_children(node).into_iter().skip(1).collect()
-        }
-        _ => raw_named_children(node)
-            .into_iter()
-            .filter(|child| child.kind != "comment")
-            .collect(),
-    }
-}
-
 fn ruby_protocol_internal_call(node: &RawNode, local_names: &BTreeSet<String>) -> Option<String> {
     let target = if node.kind == "call" {
         ruby_raw_call_target(node)
     } else if node.kind == "identifier" && ruby_protocol_bare_internal_identifier(node, local_names)
     {
-        Some(RubyRawCallTarget {
+        Some(protocols::RawCallTarget {
             receiver: "self".to_string(),
             message: node.text.clone(),
             arguments: Vec::new(),
@@ -1651,159 +1179,26 @@ fn ruby_protocol_internal_call(node: &RawNode, local_names: &BTreeSet<String>) -
         return None;
     }
     if local_names.contains(&target.message)
-        || RUBY_PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
+        || ruby_data::PROTOCOL_IGNORED_MIDS.contains(&target.message.as_str())
     {
         return None;
     }
     Some(target.message)
 }
 
-fn ruby_protocol_raw_call(mid: String, node: &RawNode) -> ProtocolCall {
-    ProtocolCall {
-        mid,
-        file: String::new(),
-        owner: String::new(),
-        defn: String::new(),
-        line: node.span[0],
-        span: node.span,
-    }
-}
-
-fn ruby_protocol_combine_path_lists(
-    left_paths: &[RubyProtocolPath],
-    right_paths: &[RubyProtocolPath],
-) -> Vec<RubyProtocolPath> {
-    let mut out = Vec::new();
-    for left in left_paths {
-        if left.terminal {
-            out.push(left.clone());
-            continue;
-        }
-        for right in right_paths {
-            let mut calls = left.calls.clone();
-            calls.extend(right.calls.clone());
-            out.push(RubyProtocolPath {
-                calls,
-                terminal: right.terminal,
-            });
-        }
-    }
-    out.into_iter().take(64).collect()
-}
-
-fn ruby_protocol_empty_path() -> RubyProtocolPath {
-    RubyProtocolPath {
-        calls: Vec::new(),
-        terminal: false,
-    }
-}
-
 fn ruby_protocol_mutating_mid(mid: &str) -> bool {
-    !RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS.contains(&mid)
-        && (RUBY_PROTOCOL_MUTATING_MIDS.contains(&mid) || mid.ends_with('!'))
+    !ruby_data::PROTOCOL_NON_MUTATING_OPERATOR_MIDS.contains(&mid)
+        && (ruby_data::PROTOCOL_MUTATING_MIDS.contains(&mid) || mid.ends_with('!'))
 }
 
 fn ruby_protocol_bare_internal_identifier(node: &RawNode, local_names: &BTreeSet<String>) -> bool {
     ruby_simple_call_text(&node.text)
         && !local_names.contains(&node.text)
-        && !RUBY_PROTOCOL_IGNORED_MIDS.contains(&node.text.as_str())
+        && !ruby_data::PROTOCOL_IGNORED_MIDS.contains(&node.text.as_str())
 }
 
-struct RubyRawCallTarget {
-    receiver: String,
-    message: String,
-    arguments: Vec<String>,
-}
-
-fn ruby_raw_call_target(node: &RawNode) -> Option<RubyRawCallTarget> {
-    if node.kind != "call" {
-        return None;
-    }
-    let receiver = raw_child_by_field(node, "receiver").map(|child| normalize_text(&child.text));
-    let method = raw_child_by_field(node, "method")
-        .map(|child| child.text.clone())
-        .or_else(|| {
-            raw_named_children(node)
-                .first()
-                .filter(|child| matches!(child.kind.as_str(), "identifier" | "constant"))
-                .map(|child| child.text.clone())
-        })?;
-    Some(RubyRawCallTarget {
-        receiver: receiver.unwrap_or_else(|| "self".to_string()),
-        message: method,
-        arguments: ruby_raw_argument_texts(node),
-    })
-}
-
-fn ruby_raw_argument_texts(node: &RawNode) -> Vec<String> {
-    let Some(args) = raw_child_by_field(node, "arguments").or_else(|| {
-        raw_named_children(node)
-            .into_iter()
-            .find(|child| child.kind == "argument_list")
-    }) else {
-        return Vec::new();
-    };
-    let values = raw_named_children(args)
-        .into_iter()
-        .map(|child| normalize_text(&child.text))
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>();
-    if !values.is_empty() {
-        return values;
-    }
-    let text = args
-        .text
-        .trim()
-        .trim_start_matches('(')
-        .trim_end_matches(')')
-        .to_string();
-    text.split(',')
-        .map(normalize_text)
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn ruby_raw_function_body_statements(node: &RawNode) -> Vec<&RawNode> {
-    let Some(body) = ruby_raw_method_body_wrapper(node) else {
-        return Vec::new();
-    };
-    let named = raw_named_children(body)
-        .into_iter()
-        .filter(|child| child.kind != "comment")
-        .collect::<Vec<_>>();
-    if named.is_empty() && body.text.trim().is_empty() {
-        return Vec::new();
-    }
-    if ruby_raw_if_node(body)
-        || ruby_raw_case_node(body)
-        || ruby_raw_flat_assignment_statement(body)
-    {
-        return vec![body];
-    }
-    if named.is_empty() || ruby_raw_heredoc_body(&named) {
-        return vec![body];
-    }
-    named
-}
-
-fn ruby_raw_method_body_wrapper(node: &RawNode) -> Option<&RawNode> {
-    match node.kind.as_str() {
-        "method" | "singleton_method" | "argument_list" => raw_named_children(node)
-            .into_iter()
-            .rev()
-            .find(|child| child.kind == "body_statement"),
-        "body_statement" => {
-            if ruby_raw_hidden_method_definition(node) {
-                raw_named_children(node)
-                    .into_iter()
-                    .rev()
-                    .find(|child| child.kind == "body_statement")
-            } else {
-                Some(node)
-            }
-        }
-        _ => None,
-    }
+fn ruby_raw_call_target(node: &RawNode) -> Option<protocols::RawCallTarget> {
+    protocols::raw_call_target(node, &ruby_data::RAW_CALL_SHAPE)
 }
 
 fn ruby_raw_heredoc_body(named: &[&RawNode]) -> bool {
@@ -1825,59 +1220,6 @@ fn ruby_raw_flat_assignment_statement(node: &RawNode) -> bool {
         && raw_named_children(node).len() >= 2
 }
 
-fn ruby_raw_if_node(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "if" | "unless" | "if_modifier" | "unless_modifier"
-    ) || (matches!(
-        node.kind.as_str(),
-        "expression_statement" | "block" | "body_statement"
-    ) && matches!(raw_first_child_kind(node).as_deref(), Some("if" | "unless")))
-}
-
-fn ruby_raw_case_node(node: &RawNode) -> bool {
-    node.kind == "case"
-        || (matches!(
-            node.kind.as_str(),
-            "body_statement" | "block_body" | "argument_list"
-        ) && raw_first_child_kind(node).as_deref() == Some("case"))
-}
-
-fn ruby_raw_path_condition(node: &RawNode) -> Option<&RawNode> {
-    if matches!(node.kind.as_str(), "if_modifier" | "unless_modifier")
-        || ruby_raw_hidden_modifier_if(node)
-    {
-        raw_named_children(node).into_iter().last()
-    } else {
-        raw_named_children(node).into_iter().next()
-    }
-}
-
-fn ruby_raw_then_body(node: &RawNode) -> Option<&RawNode> {
-    if matches!(node.kind.as_str(), "if_modifier" | "unless_modifier")
-        || ruby_raw_hidden_modifier_if(node)
-    {
-        raw_named_children(node).into_iter().next()
-    } else {
-        raw_named_children(node)
-            .into_iter()
-            .find(|child| child.kind == "then")
-            .or_else(|| raw_named_children(node).into_iter().nth(1))
-    }
-}
-
-fn ruby_raw_else_body(node: &RawNode) -> Option<&RawNode> {
-    if matches!(node.kind.as_str(), "if_modifier" | "unless_modifier")
-        || ruby_raw_hidden_modifier_if(node)
-    {
-        return None;
-    }
-    raw_named_children(node)
-        .into_iter()
-        .find(|child| matches!(child.kind.as_str(), "else" | "elsif"))
-        .or_else(|| raw_named_children(node).into_iter().nth(2))
-}
-
 fn ruby_raw_hidden_modifier_if(node: &RawNode) -> bool {
     if node.kind != "body_statement" {
         return false;
@@ -1893,35 +1235,6 @@ fn ruby_raw_hidden_method_definition(node: &RawNode) -> bool {
     node.kind == "body_statement" && matches!(raw_first_child_kind(node).as_deref(), Some("def"))
 }
 
-fn ruby_protocol_collect_local_names(
-    node: &RawNode,
-    local_names: &mut BTreeSet<String>,
-    root: bool,
-) {
-    if !root && ruby_protocol_nested_boundary(node) {
-        return;
-    }
-    if matches!(node.kind.as_str(), "assignment" | "operator_assignment")
-        || ruby_raw_flat_assignment_statement(node)
-    {
-        if let Some(lhs) = raw_named_children(node).first() {
-            if lhs.kind == "identifier" && ruby_simple_call_text(&lhs.text) {
-                local_names.insert(lhs.text.clone());
-            }
-        }
-    }
-    if matches!(node.kind.as_str(), "block_parameters" | "method_parameters") {
-        for child in raw_named_children(node) {
-            if child.kind == "identifier" && ruby_simple_call_text(&child.text) {
-                local_names.insert(child.text.clone());
-            }
-        }
-    }
-    for child in &node.children {
-        ruby_protocol_collect_local_names(child, local_names, false);
-    }
-}
-
 fn ruby_protocol_bare_reader(
     node: &RawNode,
     parent: Option<&RawNode>,
@@ -1930,7 +1243,7 @@ fn ruby_protocol_bare_reader(
     let name = node.text.as_str();
     if !ruby_simple_call_text(name)
         || local_names.contains(name)
-        || RUBY_PROTOCOL_IGNORED_MIDS.contains(&name)
+        || ruby_data::PROTOCOL_IGNORED_MIDS.contains(&name)
     {
         return false;
     }
@@ -1984,56 +1297,6 @@ fn ruby_protocol_declaration_name(node: &RawNode, parent: &RawNode) -> bool {
     node.kind == "identifier" && parent.kind == "method_parameters"
 }
 
-fn ruby_protocol_nested_boundary(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "class" | "module" | "method" | "singleton_method" | "lambda"
-    ) || (node.kind == "body_statement"
-        && matches!(
-            raw_first_child_kind(node).as_deref(),
-            Some("def" | "class" | "module")
-        ))
-}
-
-fn raw_named_children(node: &RawNode) -> Vec<&RawNode> {
-    node.children.iter().filter(|child| child.named).collect()
-}
-
-fn raw_child_by_field<'a>(node: &'a RawNode, field: &str) -> Option<&'a RawNode> {
-    node.children
-        .iter()
-        .find(|child| child.field_name.as_deref() == Some(field))
-}
-
-fn raw_first_child_kind(node: &RawNode) -> Option<String> {
-    node.children.first().map(|child| child.kind.clone())
-}
-
-fn raw_next_sibling_text(node: &RawNode, parent: &RawNode) -> Option<String> {
-    let index = raw_child_index(node, parent)?;
-    parent
-        .children
-        .get(index + 1)
-        .map(|sibling| sibling.text.clone())
-}
-
-fn raw_previous_sibling_text(node: &RawNode, parent: &RawNode) -> Option<String> {
-    let index = raw_child_index(node, parent)?;
-    index
-        .checked_sub(1)
-        .and_then(|previous| parent.children.get(previous))
-        .map(|sibling| sibling.text.clone())
-}
-
-fn raw_child_index(node: &RawNode, parent: &RawNode) -> Option<usize> {
-    parent.children.iter().position(|child| {
-        child.kind == node.kind
-            && child.text == node.text
-            && child.span == node.span
-            && child.named == node.named
-    })
-}
-
 fn ruby_declaration_name(node: Node<'_>, parent: Node<'_>, source: &str) -> bool {
     if matches!(
         parent.kind(),
@@ -2076,21 +1339,13 @@ fn ruby_single_command_argument_call(node: Node<'_>, source: &str) -> bool {
 }
 
 fn ruby_require_message(message: &str) -> bool {
-    matches!(message, "require" | "require_relative")
+    ruby_data::REQUIRE_MESSAGES.contains(&message)
 }
 
 fn ruby_embedded_text_node(node: Node<'_>) -> bool {
     let mut current = Some(node);
     while let Some(node) = current {
-        if matches!(
-            node.kind(),
-            "string"
-                | "string_content"
-                | "heredoc_body"
-                | "simple_symbol"
-                | "symbol"
-                | "delimited_symbol"
-        ) {
+        if ruby_data::EMBEDDED_TEXT_NODE_KINDS.contains(&node.kind()) {
             return true;
         }
         current = node.parent();
@@ -2098,90 +1353,14 @@ fn ruby_embedded_text_node(node: Node<'_>) -> bool {
     false
 }
 
-fn ruby_narrow_no_arg_call_span(
-    node: Node<'_>,
-    source: &str,
-    receiver: &str,
-    message: &str,
-) -> Option<[usize; 4]> {
-    if message.is_empty() || message == "[]" || message == "[]=" {
-        return None;
-    }
-    let needle = if receiver == "self" {
-        message.to_string()
-    } else {
-        format!("{receiver}.{message}")
-    };
-    let node_span = span(node);
-    if let Some(line_text) = source.lines().nth(node_span[0].saturating_sub(1)) {
-        if let Some(start) = line_text.find(&needle) {
-            let end = start + needle.chars().count();
-            return Some([node_span[0], start, node_span[0], end]);
-        }
-    }
-    let text = node_text(node, source);
-    let offset = text.find(&needle)?;
-    if text[..offset].contains('\n') || needle.contains('\n') {
-        return None;
-    }
-    let mut start = node_span[1] + text[..offset].chars().count();
-    let end = start + needle.chars().count();
-    if start == node_span[1]
-        && (previous_sibling_raw_text(node).as_deref() == Some("!")
-            || node
-                .start_byte()
-                .checked_sub(1)
-                .and_then(|index| source.as_bytes().get(index))
-                .copied()
-                == Some(b'!'))
-    {
-        start += 1;
-    }
-    Some([node_span[0], start, node_span[0], end])
-}
-
 fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
-    if invalid_call_text(&target.message) {
+    if calls::invalid_message_text(&target.message) {
         return false;
     }
     if matches!(target.message.as_str(), "[]" | "[]=") {
         return true;
     }
-    ruby_identifier_like(target.message.as_str(), false)
-}
-
-fn invalid_call_text(text: &str) -> bool {
-    text.chars()
-        .any(|ch| matches!(ch, '"' | '\'' | '\n' | '\r'))
-}
-
-fn ruby_identifier_like(text: &str, lowercase_start: bool) -> bool {
-    let mut chars = text.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if lowercase_start {
-        if !(first == '_' || first.is_ascii_lowercase()) {
-            return false;
-        }
-    } else if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-
-    let mut saw_suffix = false;
-    for ch in chars {
-        if matches!(ch, '!' | '?' | '=') {
-            if saw_suffix {
-                return false;
-            }
-            saw_suffix = true;
-            continue;
-        }
-        if saw_suffix || !(ch == '_' || ch.is_ascii_alphanumeric()) {
-            return false;
-        }
-    }
-    true
+    calls::identifier_like(target.message.as_str(), false)
 }
 
 fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
