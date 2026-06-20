@@ -10,7 +10,6 @@ use super::base::{
     default_clone_candidate_node, normalize_protocol_state, protocol_method_name, LanguageProfile,
 };
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
-use regex::Regex;
 use std::collections::BTreeSet;
 use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
@@ -432,14 +431,14 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        let target = ruby_state_variable_target(node, source)
+            .or_else(|| self.default_state_read_target(node, source))?;
         if ruby_direct_flat_map_block_statement(node, source) {
             return None;
         }
         if ruby_sorbet_signature_payload_node(node, source) {
             return None;
         }
-        let target = ruby_state_variable_target(node, source)
-            .or_else(|| self.default_state_read_target(node, source))?;
         if ruby_chained_element_predicate_read_target(&target) {
             return None;
         }
@@ -1245,9 +1244,7 @@ fn ruby_safe_navigation_call(node: Node<'_>, source: &str) -> bool {
 }
 
 fn ruby_simple_call_text(text: &str) -> bool {
-    Regex::new(r"^[a-z_]\w*[!?=]?$")
-        .unwrap()
-        .is_match(text.trim())
+    ruby_identifier_like(text.trim(), true)
 }
 
 fn ruby_bare_call_identifier(node: Node<'_>, source: &str) -> bool {
@@ -2150,9 +2147,7 @@ fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
     if matches!(target.message.as_str(), "[]" | "[]=") {
         return true;
     }
-    Regex::new(r"^[A-Za-z_]\w*[!?=]?$")
-        .unwrap()
-        .is_match(target.message.as_str())
+    ruby_identifier_like(target.message.as_str(), false)
 }
 
 fn invalid_call_text(text: &str) -> bool {
@@ -2160,11 +2155,43 @@ fn invalid_call_text(text: &str) -> bool {
         .any(|ch| matches!(ch, '"' | '\'' | '\n' | '\r'))
 }
 
+fn ruby_identifier_like(text: &str, lowercase_start: bool) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if lowercase_start {
+        if !(first == '_' || first.is_ascii_lowercase()) {
+            return false;
+        }
+    } else if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    let mut saw_suffix = false;
+    for ch in chars {
+        if matches!(ch, '!' | '?' | '=') {
+            if saw_suffix {
+                return false;
+            }
+            saw_suffix = true;
+            continue;
+        }
+        if saw_suffix || !(ch == '_' || ch.is_ascii_alphanumeric()) {
+            return false;
+        }
+    }
+    true
+}
+
 fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
+    if !matches!(node.kind(), "instance_variable" | "global_variable") {
+        return None;
+    }
     if ruby_embedded_text_node(node) {
         return None;
     }
-    matches!(node.kind(), "instance_variable" | "global_variable").then(|| Target {
+    Some(Target {
         receiver: "self".to_string(),
         field: node_text(node, source).to_string(),
     })

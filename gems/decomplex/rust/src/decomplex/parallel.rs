@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 
 static JOBS_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
+const DEFAULT_MAX_JOBS: usize = 8;
 
 pub fn set_jobs_for_process(jobs: Option<usize>) -> Result<()> {
     let Some(jobs) = jobs else {
@@ -27,6 +28,7 @@ pub fn job_count() -> usize {
         .unwrap_or_else(|| {
             thread::available_parallelism()
                 .map(usize::from)
+                .map(|jobs| jobs.min(DEFAULT_MAX_JOBS))
                 .unwrap_or(1)
         })
         .max(1)

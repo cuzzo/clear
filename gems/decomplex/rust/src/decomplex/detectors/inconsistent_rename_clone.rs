@@ -48,7 +48,13 @@ pub fn scan_files(
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<InconsistentRenameCloneRow> {
-    let blocks = local_flow::scan_documents(documents)
+    scan_summaries(local_flow::scan_documents(documents))
+}
+
+pub fn scan_summaries(
+    summaries: Vec<local_flow::MethodSummary>,
+) -> Vec<InconsistentRenameCloneRow> {
+    let blocks = summaries
         .into_iter()
         .filter_map(|method| block_from_method(&method))
         .collect::<Vec<_>>();

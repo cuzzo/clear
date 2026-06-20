@@ -371,6 +371,12 @@ pub struct ProtocolMethodPath {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ProtocolFacts {
+    pub(crate) method_effects: Vec<ProtocolMethodEffect>,
+    pub(crate) call_paths: Vec<ProtocolMethodPath>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CloneCandidate {
     pub(crate) file: String,
     pub(crate) line: usize,
@@ -401,6 +407,36 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
 
 pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document>> {
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
+}
+
+pub(crate) fn materialize_protocol_facts(documents: &mut [Document]) -> Result<()> {
+    let facts = parallel::map_ordered(documents, |document| Ok(protocol_facts(document)))?;
+    for (document, facts) in documents.iter_mut().zip(facts) {
+        document.protocol_method_effects = facts.method_effects;
+        document.protocol_call_paths = facts.call_paths;
+    }
+    Ok(())
+}
+
+pub(crate) fn protocol_facts(document: &Document) -> ProtocolFacts {
+    ProtocolFacts {
+        method_effects: protocol_method_effects(document),
+        call_paths: protocol_call_paths(document),
+    }
+}
+
+pub(crate) fn protocol_method_effects(document: &Document) -> Vec<ProtocolMethodEffect> {
+    if !document.protocol_method_effects.is_empty() {
+        return document.protocol_method_effects.clone();
+    }
+    adapters::language_profile(document.language).protocol_method_effects(document)
+}
+
+pub(crate) fn protocol_call_paths(document: &Document) -> Vec<ProtocolMethodPath> {
+    if !document.protocol_call_paths.is_empty() {
+        return document.protocol_call_paths.clone();
+    }
+    adapters::language_profile(document.language).protocol_call_paths(document)
 }
 
 pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {

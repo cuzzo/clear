@@ -8,7 +8,7 @@ use super::super::{
     ProtocolMethodPath, SemanticEffectSite, StateRead, StateWrite,
 };
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
@@ -1036,14 +1036,18 @@ pub(crate) trait LanguageProfile {
     }
 
     fn assignment_lhs_node(&self, node: Node<'_>) -> bool {
+        if !super::super::tree_sitter_adapter::next_sibling_raw_text(node)
+            .map(|token| self.assignment_operator_tokens().contains(&token.as_str()))
+            .unwrap_or(false)
+        {
+            return false;
+        }
         if super::super::tree_sitter_adapter::previous_sibling_raw_text(node).as_deref()
             == Some(":")
         {
             return false;
         }
-        super::super::tree_sitter_adapter::next_sibling_raw_text(node)
-            .map(|token| self.assignment_operator_tokens().contains(&token.as_str()))
-            .unwrap_or(false)
+        true
     }
 
     fn parenthesized_wrapper(&self, node: Node<'_>) -> bool {
@@ -1283,6 +1287,7 @@ pub(crate) trait LanguageProfile {
     fn clone_candidates(&self, document: &Document) -> Vec<CloneCandidate> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
+        let mut fingerprint_cache = HashMap::new();
 
         for function in &document.function_defs {
             let candidate = clone_candidate_for(
@@ -1291,6 +1296,7 @@ pub(crate) trait LanguageProfile {
                 &function.body,
                 Some("defn"),
                 Some(function.name.as_str()),
+                &mut fingerprint_cache,
             );
             clone_add_candidate(&mut out, &mut seen, candidate);
         }
@@ -1299,7 +1305,8 @@ pub(crate) trait LanguageProfile {
         document.root.walk(&mut nodes);
         for node in nodes {
             if self.clone_candidate_node(node) {
-                let candidate = clone_candidate_for(self, document, node, None, None);
+                let candidate =
+                    clone_candidate_for(self, document, node, None, None, &mut fingerprint_cache);
                 clone_add_candidate(&mut out, &mut seen, candidate);
             }
         }
@@ -1307,6 +1314,7 @@ pub(crate) trait LanguageProfile {
         out
     }
 
+    #[cfg(test)]
     fn clone_fingerprint(&self, node: &RawNode) -> (String, usize) {
         clone_fingerprint_for_profile(self, node, &mut HashSet::new())
     }
@@ -1352,8 +1360,10 @@ fn clone_candidate_for<P: LanguageProfile + ?Sized>(
     node: &RawNode,
     node_name: Option<&str>,
     function_name: Option<&str>,
+    fingerprint_cache: &mut HashMap<usize, (String, usize)>,
 ) -> Option<CloneCandidate> {
-    let (fingerprint, mass) = profile.clone_fingerprint(node);
+    let (fingerprint, mass) =
+        clone_fingerprint_for_profile_cached(profile, node, &mut HashSet::new(), fingerprint_cache);
     if fingerprint.is_empty() {
         return None;
     }
@@ -1364,7 +1374,12 @@ fn clone_candidate_for<P: LanguageProfile + ?Sized>(
     let mut child_fingerprints = Vec::new();
     let mut child_masses = Vec::new();
     for child in children {
-        let (child_fp, child_mass) = profile.clone_fingerprint(child);
+        let (child_fp, child_mass) = clone_fingerprint_for_profile_cached(
+            profile,
+            child,
+            &mut HashSet::new(),
+            fingerprint_cache,
+        );
         if !child_fp.is_empty() && child_mass > 0 {
             child_fingerprints.push(child_fp);
             child_masses.push(child_mass);
@@ -1488,6 +1503,7 @@ fn inferred_assignment_type(node: Node<'_>, source: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn clone_fingerprint_for_profile<P: LanguageProfile + ?Sized>(
     profile: &P,
     node: &RawNode,
@@ -1531,6 +1547,59 @@ fn clone_fingerprint_for_profile<P: LanguageProfile + ?Sized>(
     out
 }
 
+fn clone_fingerprint_for_profile_cached<P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &RawNode,
+    active: &mut HashSet<String>,
+    cache: &mut HashMap<usize, (String, usize)>,
+) -> (String, usize) {
+    let cache_key = clone_node_ptr(node);
+    if let Some(cached) = cache.get(&cache_key) {
+        return cached.clone();
+    }
+
+    let active_key = clone_node_key(node);
+    if active.contains(&active_key) || node.kind == "comment" {
+        return (String::new(), 0);
+    }
+    active.insert(active_key.clone());
+    let out =
+        if CLONE_CALL_KINDS.contains(&node.kind.as_str()) && clone_call_message(node).is_some() {
+            clone_fingerprint_call_cached(profile, node, active, cache)
+        } else if node.children.is_empty() {
+            let token = clone_terminal_token(node);
+            if token.is_empty() {
+                (String::new(), 0)
+            } else {
+                (token, 1)
+            }
+        } else {
+            let mut child_parts = Vec::new();
+            let mut mass = 1;
+            for child in profile.clone_fingerprint_children(node) {
+                let (child_fp, child_mass) = profile
+                    .clone_child_fingerprint(node, child)
+                    .unwrap_or_else(|| {
+                        clone_fingerprint_for_profile_cached(profile, child, active, cache)
+                    });
+                if child_fp.is_empty() {
+                    continue;
+                }
+                child_parts.push(child_fp);
+                mass += child_mass;
+            }
+            if child_parts.is_empty() {
+                (clone_terminal_token(node), 1)
+            } else {
+                (format!("{}({})", node.kind, child_parts.join(" ")), mass)
+            }
+        };
+    active.remove(&active_key);
+    cache.insert(cache_key, out.clone());
+    out
+}
+
+#[cfg(test)]
 fn clone_fingerprint_call<P: LanguageProfile + ?Sized>(
     profile: &P,
     node: &RawNode,
@@ -1543,6 +1612,31 @@ fn clone_fingerprint_call<P: LanguageProfile + ?Sized>(
         let (child_fp, child_mass) = profile
             .clone_child_fingerprint(node, child)
             .unwrap_or_else(|| clone_fingerprint_for_profile(profile, child, active));
+        if child_fp.is_empty() {
+            continue;
+        }
+        child_parts.push(child_fp);
+        mass += child_mass;
+    }
+    (
+        format!("{}<{}>({})", node.kind, message, child_parts.join(" ")),
+        mass,
+    )
+}
+
+fn clone_fingerprint_call_cached<P: LanguageProfile + ?Sized>(
+    profile: &P,
+    node: &RawNode,
+    active: &mut HashSet<String>,
+    cache: &mut HashMap<usize, (String, usize)>,
+) -> (String, usize) {
+    let message = clone_call_message(node).unwrap_or_default();
+    let mut child_parts = Vec::new();
+    let mut mass = 1;
+    for child in profile.clone_fingerprint_children(node) {
+        let (child_fp, child_mass) = profile
+            .clone_child_fingerprint(node, child)
+            .unwrap_or_else(|| clone_fingerprint_for_profile_cached(profile, child, active, cache));
         if child_fp.is_empty() {
             continue;
         }
@@ -1802,6 +1896,10 @@ fn clone_node_key(node: &RawNode) -> String {
         node.span[3],
         node.text.len()
     )
+}
+
+fn clone_node_ptr(node: &RawNode) -> usize {
+    node as *const RawNode as usize
 }
 
 fn snake_case_type_name(type_str: &str) -> String {

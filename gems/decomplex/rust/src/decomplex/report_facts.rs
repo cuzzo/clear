@@ -14,8 +14,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 pub const FORMAT: &str = "decomplex.report-facts.v1";
 
@@ -112,28 +114,45 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
         bail!("facts requires at least one supported source file");
     }
 
-    let documents = parallel::map_ordered(files, |file| {
+    let profile = rust_profile_enabled();
+    let total_started = Instant::now();
+    let parse_started = Instant::now();
+    let mut documents = parallel::map_ordered(files, |file| {
         syntax::parse_file(file.path.clone(), file.language)
     })?;
+    profile_phase(profile, "parse", parse_started.elapsed());
+    let protocol_started = Instant::now();
+    syntax::materialize_protocol_facts(&mut documents)?;
+    profile_phase(profile, "protocol_facts", protocol_started.elapsed());
+    let shared_started = Instant::now();
     let shared = SharedFacts::new(&documents);
+    profile_phase(profile, "shared_facts", shared_started.elapsed());
+    let group_started = Instant::now();
     let mut groups: BTreeMap<Language, Vec<Document>> = BTreeMap::new();
     for document in documents {
         groups.entry(document.language).or_default().push(document);
     }
+    profile_phase(profile, "group_documents", group_started.elapsed());
 
+    let detectors_started = Instant::now();
     let detectors = collect_detector_facts(&groups, &shared, options)?;
+    profile_phase(profile, "detectors", detectors_started.elapsed());
 
+    let assemble_started = Instant::now();
     let mut reported_files = files
         .iter()
         .map(|file| file.path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
     reported_files.sort();
-
-    Ok(json!({
+    let output = json!({
         "format": FORMAT,
         "files": reported_files,
         "detectors": detectors,
-    }))
+    });
+    profile_phase(profile, "assemble_json", assemble_started.elapsed());
+    profile_phase(profile, "facts_total", total_started.elapsed());
+
+    Ok(output)
 }
 
 fn collect_detector_facts(
@@ -141,152 +160,225 @@ fn collect_detector_facts(
     shared: &SharedFacts,
     options: &Options,
 ) -> Result<Map<String, Value>> {
-    if parallel::job_count() <= 1 {
-        return collect_detector_facts_sequential(groups, shared, options);
+    let tasks = detector_tasks(groups, shared, options);
+    let jobs = parallel::job_count();
+    if jobs <= 1 {
+        return run_detector_tasks_sequential(tasks);
     }
 
+    run_detector_tasks_parallel(tasks, jobs)
+}
+
+type DetectorTask<'a> = (
+    &'static str,
+    Box<dyn Fn() -> Result<Value> + Send + Sync + 'a>,
+);
+
+fn detector_tasks<'a>(
+    groups: &'a BTreeMap<Language, Vec<Document>>,
+    shared: &'a SharedFacts,
+    options: &'a Options,
+) -> Vec<DetectorTask<'a>> {
+    let mut tasks: Vec<DetectorTask<'a>> = Vec::new();
+    macro_rules! detector_task {
+        ($name:expr, $body:expr) => {{
+            tasks.push(($name, Box::new(move || -> Result<Value> { $body })));
+        }};
+    }
+
+    detector_task!("miner", {
+        merge_object_reports(
+            groups,
+            &["missing_abstractions", "neglected_conditions"],
+            |documents| json_value(miner::scan_documents(documents)),
+        )
+    });
+    detector_task!("co_update", {
+        merge_object_reports(
+            groups,
+            &["co_written_pairs", "neglected_updates"],
+            |documents| json_value(co_update::scan_documents(documents)),
+        )
+    });
+    detector_task!("predicate_alias", {
+        merge_object_reports(groups, &["alias_clusters"], |documents| {
+            json_value(predicate_alias::scan_documents(documents))
+        })
+    });
+    detector_task!("semantic_alias", {
+        json_value(shared.semantic_aliases.clone())
+    });
+    detector_task!("path_condition", {
+        merge_object_reports(groups, &["neglected", "scattered"], |documents| {
+            json_value(path_condition::scan_documents(documents))
+        })
+    });
+    detector_task!("sequence_mine", {
+        merge_object_reports(groups, &["broken"], |documents| {
+            json_value(sequence_mine::scan_documents(documents))
+        })
+        .map(rename_broken_protocol)
+    });
+    detector_task!("implicit_control_flow", {
+        merge_object_reports(groups, &["ordered_protocols"], |documents| {
+            json_value(implicit_control_flow::scan_documents(documents))
+        })
+    });
+    detector_task!("derived_state", {
+        merge_array_reports(groups, |documents| {
+            json_value(derived_state::scan_summaries(
+                local_summaries_for_documents(&shared.local_summaries, documents),
+            ))
+        })
+    });
+    detector_task!("inconsistent_rename_clone", {
+        merge_array_reports(groups, |documents| {
+            json_value(inconsistent_rename_clone::scan_summaries(
+                local_summaries_for_documents(&shared.local_summaries, documents),
+            ))
+        })
+    });
+    detector_task!("flay_similarity", {
+        merge_array_reports(groups, |documents| {
+            json_value(flay_similarity::scan_documents(
+                documents,
+                options.mass,
+                options.fuzzy,
+            ))
+        })
+    });
+    detector_task!("decision_pressure", {
+        merge_array_reports(groups, |documents| {
+            json_value(decision_pressure::scan_documents_with_summaries(
+                documents,
+                local_summaries_for_documents(&shared.local_summaries, documents),
+            ))
+        })
+    });
+    detector_task!("redundant_nil_guard", {
+        merge_array_reports(groups, |documents| {
+            json_value(redundant_nil_guard::scan_documents(documents))
+        })
+    });
+    detector_task!("false_simplicity", {
+        merge_array_reports(groups, |documents| {
+            json_value(false_simplicity::scan_documents(documents))
+        })
+    });
+    detector_task!("oversized_predicate", {
+        Ok(merge_object_reports(groups, &["findings"], |documents| {
+            json_value(oversized_predicate::scan_documents(documents))
+        })?
+        .get("findings")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new())))
+    });
+    detector_task!("fat_union", {
+        merge_object_reports(groups, &["fat_unions"], |documents| {
+            json_value(fat_union::scan_documents(documents))
+        })
+    });
+    detector_task!("state_heatmap", {
+        state_heatmap_findings_for_groups(groups, &shared.semantic_aliases)
+    });
+    detector_task!("state_branch_density", {
+        merge_array_reports(groups, |documents| {
+            json_value(state_branch_density::scan_documents(documents))
+        })
+    });
+    detector_task!("temporal_ordering_pressure", {
+        merge_array_reports(groups, |documents| {
+            json_value(temporal_ordering_pressure::scan_documents(documents))
+        })
+    });
+    detector_task!("weighted_inlined_complexity", {
+        merge_array_reports(groups, |documents| {
+            json_value(
+                weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
+                    documents,
+                    local_summaries_for_documents(&shared.local_summaries, documents),
+                ),
+            )
+        })
+    });
+    detector_task!("locality_drag", {
+        json_value(locality_drag::scan_summaries_with_scores(
+            shared.local_summaries.clone(),
+            shared.local_complexity_scores.clone(),
+        ))
+    });
+    detector_task!("function_lcom", {
+        json_value(function_lcom::scan_summaries(
+            shared.local_summaries.clone(),
+        ))
+    });
+    detector_task!("operational_discontinuity", {
+        json_value(operational_discontinuity::scan_summaries(
+            shared.local_summaries.clone(),
+        ))
+    });
+    tasks
+}
+
+fn run_detector_tasks_parallel(
+    tasks: Vec<DetectorTask<'_>>,
+    jobs: usize,
+) -> Result<Map<String, Value>> {
+    let worker_count = jobs.min(tasks.len());
+    let next_index = AtomicUsize::new(0);
     let (tx, rx) = mpsc::channel();
     thread::scope(|scope| {
-        macro_rules! spawn_detector {
-            ($name:expr, $body:expr) => {{
-                let tx = tx.clone();
-                scope.spawn(move || {
-                    let result: Result<Value> = (|| $body)();
-                    let _ = tx.send(($name.to_string(), result));
-                });
-            }};
+        for _ in 0..worker_count {
+            let tx = tx.clone();
+            let next_index = &next_index;
+            let tasks = &tasks;
+            scope.spawn(move || loop {
+                let index = next_index.fetch_add(1, Ordering::Relaxed);
+                if index >= tasks.len() {
+                    break;
+                }
+                let (name, task) = &tasks[index];
+                let started = Instant::now();
+                let result = task();
+                if tx.send((index, *name, started.elapsed(), result)).is_err() {
+                    break;
+                }
+            });
         }
-
-        spawn_detector!("miner", {
-            merge_object_reports(
-                groups,
-                &["missing_abstractions", "neglected_conditions"],
-                |documents| json_value(miner::scan_documents(documents)),
-            )
-        });
-        spawn_detector!("co_update", {
-            merge_object_reports(
-                groups,
-                &["co_written_pairs", "neglected_updates"],
-                |documents| json_value(co_update::scan_documents(documents)),
-            )
-        });
-        spawn_detector!("predicate_alias", {
-            merge_object_reports(groups, &["alias_clusters"], |documents| {
-                json_value(predicate_alias::scan_documents(documents))
-            })
-        });
-        spawn_detector!("semantic_alias", {
-            json_value(shared.semantic_aliases.clone())
-        });
-        spawn_detector!("path_condition", {
-            merge_object_reports(groups, &["neglected", "scattered"], |documents| {
-                json_value(path_condition::scan_documents(documents))
-            })
-        });
-        spawn_detector!("sequence_mine", {
-            merge_object_reports(groups, &["broken"], |documents| {
-                json_value(sequence_mine::scan_documents(documents))
-            })
-            .map(rename_broken_protocol)
-        });
-        spawn_detector!("implicit_control_flow", {
-            merge_object_reports(groups, &["ordered_protocols"], |documents| {
-                json_value(implicit_control_flow::scan_documents(documents))
-            })
-        });
-        spawn_detector!("derived_state", {
-            merge_array_reports(groups, |documents| {
-                json_value(derived_state::scan_documents(documents))
-            })
-        });
-        spawn_detector!("inconsistent_rename_clone", {
-            merge_array_reports(groups, |documents| {
-                json_value(inconsistent_rename_clone::scan_documents(documents))
-            })
-        });
-        spawn_detector!("flay_similarity", {
-            merge_array_reports(groups, |documents| {
-                json_value(flay_similarity::scan_documents(
-                    documents,
-                    options.mass,
-                    options.fuzzy,
-                ))
-            })
-        });
-        spawn_detector!("decision_pressure", {
-            merge_array_reports(groups, |documents| {
-                json_value(decision_pressure::scan_documents(documents))
-            })
-        });
-        spawn_detector!("redundant_nil_guard", {
-            merge_array_reports(groups, |documents| {
-                json_value(redundant_nil_guard::scan_documents(documents))
-            })
-        });
-        spawn_detector!("false_simplicity", {
-            merge_array_reports(groups, |documents| {
-                json_value(false_simplicity::scan_documents(documents))
-            })
-        });
-        spawn_detector!("oversized_predicate", {
-            Ok(merge_object_reports(groups, &["findings"], |documents| {
-                json_value(oversized_predicate::scan_documents(documents))
-            })?
-            .get("findings")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new())))
-        });
-        spawn_detector!("fat_union", {
-            merge_object_reports(groups, &["fat_unions"], |documents| {
-                json_value(fat_union::scan_documents(documents))
-            })
-        });
-        spawn_detector!("state_heatmap", {
-            state_heatmap_findings_for_groups(groups, &shared.semantic_aliases)
-        });
-        spawn_detector!("state_branch_density", {
-            merge_array_reports(groups, |documents| {
-                json_value(state_branch_density::scan_documents(documents))
-            })
-        });
-        spawn_detector!("temporal_ordering_pressure", {
-            merge_array_reports(groups, |documents| {
-                json_value(temporal_ordering_pressure::scan_documents(documents))
-            })
-        });
-        spawn_detector!("weighted_inlined_complexity", {
-            merge_array_reports(groups, |documents| {
-                json_value(weighted_inlined_cognitive_complexity::scan_documents(
-                    documents,
-                ))
-            })
-        });
-        spawn_detector!("locality_drag", {
-            json_value(locality_drag::scan_summaries_with_scores(
-                shared.local_summaries.clone(),
-                shared.local_complexity_scores.clone(),
-            ))
-        });
-        spawn_detector!("function_lcom", {
-            json_value(function_lcom::scan_summaries(
-                shared.local_summaries.clone(),
-            ))
-        });
-        spawn_detector!("operational_discontinuity", {
-            json_value(operational_discontinuity::scan_summaries(
-                shared.local_summaries.clone(),
-            ))
-        });
         drop(tx);
     });
 
+    let mut results = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
+    for (index, name, elapsed, result) in rx {
+        results[index] = Some((name, elapsed, result));
+    }
+
+    collect_detector_task_results(
+        results
+            .into_iter()
+            .map(|row| row.expect("detector task did not return a result")),
+    )
+}
+
+fn run_detector_tasks_sequential(tasks: Vec<DetectorTask<'_>>) -> Result<Map<String, Value>> {
+    collect_detector_task_results(tasks.into_iter().map(|(name, task)| {
+        let started = Instant::now();
+        let result = task();
+        (name, started.elapsed(), result)
+    }))
+}
+
+fn collect_detector_task_results(
+    results: impl IntoIterator<Item = (&'static str, Duration, Result<Value>)>,
+) -> Result<Map<String, Value>> {
+    let profile = rust_profile_enabled();
     let mut detectors = Map::new();
     let mut first_error = None;
-    for (name, result) in rx {
+    for (name, elapsed, result) in results {
+        profile_phase(profile, &format!("detector.{name}"), elapsed);
         match result {
             Ok(value) => {
-                detectors.insert(name, value);
+                detectors.insert(name.to_string(), value);
             }
             Err(error) => {
                 if first_error.is_none() {
@@ -301,156 +393,18 @@ fn collect_detector_facts(
     Ok(detectors)
 }
 
-fn collect_detector_facts_sequential(
-    groups: &BTreeMap<Language, Vec<Document>>,
-    shared: &SharedFacts,
-    options: &Options,
-) -> Result<Map<String, Value>> {
-    let mut detectors = Map::new();
-    detectors.insert(
-        "miner".to_string(),
-        merge_object_reports(
-            groups,
-            &["missing_abstractions", "neglected_conditions"],
-            |documents| json_value(miner::scan_documents(documents)),
-        )?,
-    );
-    detectors.insert(
-        "co_update".to_string(),
-        merge_object_reports(
-            groups,
-            &["co_written_pairs", "neglected_updates"],
-            |documents| json_value(co_update::scan_documents(documents)),
-        )?,
-    );
-    detectors.insert(
-        "predicate_alias".to_string(),
-        merge_object_reports(groups, &["alias_clusters"], |documents| {
-            json_value(predicate_alias::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "semantic_alias".to_string(),
-        json_value(shared.semantic_aliases.clone())?,
-    );
-    detectors.insert(
-        "path_condition".to_string(),
-        merge_object_reports(groups, &["neglected", "scattered"], |documents| {
-            json_value(path_condition::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "sequence_mine".to_string(),
-        merge_object_reports(groups, &["broken"], |documents| {
-            json_value(sequence_mine::scan_documents(documents))
-        })
-        .map(rename_broken_protocol)?,
-    );
-    detectors.insert(
-        "implicit_control_flow".to_string(),
-        merge_object_reports(groups, &["ordered_protocols"], |documents| {
-            json_value(implicit_control_flow::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "derived_state".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(derived_state::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "inconsistent_rename_clone".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(inconsistent_rename_clone::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "flay_similarity".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(flay_similarity::scan_documents(
-                documents,
-                options.mass,
-                options.fuzzy,
-            ))
-        })?,
-    );
-    detectors.insert(
-        "decision_pressure".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(decision_pressure::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "redundant_nil_guard".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(redundant_nil_guard::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "false_simplicity".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(false_simplicity::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "oversized_predicate".to_string(),
-        merge_object_reports(groups, &["findings"], |documents| {
-            json_value(oversized_predicate::scan_documents(documents))
-        })?
-        .get("findings")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new())),
-    );
-    detectors.insert(
-        "fat_union".to_string(),
-        merge_object_reports(groups, &["fat_unions"], |documents| {
-            json_value(fat_union::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "state_heatmap".to_string(),
-        state_heatmap_findings_for_groups(groups, &shared.semantic_aliases)?,
-    );
-    detectors.insert(
-        "state_branch_density".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(state_branch_density::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "temporal_ordering_pressure".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(temporal_ordering_pressure::scan_documents(documents))
-        })?,
-    );
-    detectors.insert(
-        "weighted_inlined_complexity".to_string(),
-        merge_array_reports(groups, |documents| {
-            json_value(weighted_inlined_cognitive_complexity::scan_documents(
-                documents,
-            ))
-        })?,
-    );
-    detectors.insert(
-        "locality_drag".to_string(),
-        json_value(locality_drag::scan_summaries_with_scores(
-            shared.local_summaries.clone(),
-            shared.local_complexity_scores.clone(),
-        ))?,
-    );
-    detectors.insert(
-        "function_lcom".to_string(),
-        json_value(function_lcom::scan_summaries(
-            shared.local_summaries.clone(),
-        ))?,
-    );
-    detectors.insert(
-        "operational_discontinuity".to_string(),
-        json_value(operational_discontinuity::scan_summaries(
-            shared.local_summaries.clone(),
-        ))?,
-    );
-    Ok(detectors)
+fn rust_profile_enabled() -> bool {
+    std::env::var_os("DECOMPLEX_RUST_PROFILE").is_some()
+}
+
+fn profile_phase(enabled: bool, phase: &str, elapsed: Duration) {
+    if enabled {
+        eprintln!(
+            "decomplex-rust-profile\t{}\t{:.6}",
+            phase,
+            elapsed.as_secs_f64()
+        );
+    }
 }
 
 fn local_complexity_scores(
@@ -464,6 +418,21 @@ fn local_complexity_scores(
                 .iter()
                 .map(|(id, score)| ((document.file.clone(), id.clone()), score.clone()))
         })
+        .collect()
+}
+
+fn local_summaries_for_documents(
+    summaries: &[local_flow::MethodSummary],
+    documents: &[Document],
+) -> Vec<local_flow::MethodSummary> {
+    let files = documents
+        .iter()
+        .map(|document| document.file.as_str())
+        .collect::<BTreeSet<_>>();
+    summaries
+        .iter()
+        .filter(|summary| files.contains(summary.file.as_str()))
+        .cloned()
         .collect()
 }
 

@@ -6,7 +6,8 @@ use std::path::PathBuf;
 pub const FORMAT: &str = "decomplex.syntax-facts.v1";
 
 pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
-    let documents = syntax::parse_files(files, language)?;
+    let mut documents = syntax::parse_files(files, language)?;
+    syntax::materialize_protocol_facts(&mut documents)?;
     Ok(json!({
         "format": FORMAT,
         "documents": documents.iter().map(project_document).collect::<Vec<_>>(),
@@ -14,6 +15,8 @@ pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
 }
 
 pub fn project_document(document: &Document) -> Value {
+    let protocol_method_effects = syntax::protocol_method_effects(document);
+    let protocol_call_paths = syntax::protocol_call_paths(document);
     json!({
         "file": logical_file(&document.file),
         "language": document.language.as_str(),
@@ -133,14 +136,14 @@ pub fn project_document(document: &Document) -> Value {
             "line": site.line,
             "span": site.span,
         })).collect()),
-        "protocol_method_effects": sorted(document.protocol_method_effects.iter().map(|effect| json!({
+        "protocol_method_effects": sorted(protocol_method_effects.iter().map(|effect| json!({
             "owner": effect.owner,
             "name": effect.name,
             "line": effect.line,
             "reads": effect.reads,
             "writes": effect.writes,
         })).collect()),
-        "protocol_call_paths": sorted(document.protocol_call_paths.iter().map(|path| json!({
+        "protocol_call_paths": sorted(protocol_call_paths.iter().map(|path| json!({
             "owner": path.owner,
             "name": path.name,
             "line": path.line,

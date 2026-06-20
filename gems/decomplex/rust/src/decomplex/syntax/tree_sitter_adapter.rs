@@ -13,10 +13,21 @@ use anyhow::{Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tree_sitter::{Node, Parser};
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
+    let profile = rust_profile_enabled();
+    let total_started = Instant::now();
+    let file_label = file.to_string_lossy().to_string();
+    let parsed_started = Instant::now();
     let parsed = ParsedDocument::parse(file, language)?;
+    profile_parse_phase(
+        profile,
+        &file_label,
+        "read_tree_sitter",
+        parsed_started.elapsed(),
+    );
     let mut function_defs = Vec::new();
     let mut owner_defs = Vec::new();
     let mut call_sites = Vec::new();
@@ -35,9 +46,17 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let mut seen_decisions = HashSet::new();
     let mut context = ContextState::new(file_owner(&parsed.file));
     if language == Language::Ruby {
+        let started = Instant::now();
         context.immutable_readers = ruby_immutable_struct_readers(&parsed.source);
+        profile_parse_phase(
+            profile,
+            &file_label,
+            "ruby_immutable_readers",
+            started.elapsed(),
+        );
     }
 
+    let started = Instant::now();
     collect_facts(
         parsed.tree.root_node(),
         &parsed.source,
@@ -60,6 +79,8 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut seen_calls,
         &mut seen_decisions,
     );
+    profile_parse_phase(profile, &file_label, "collect_facts", started.elapsed());
+    let started = Instant::now();
     collect_implicit_state_accesses(
         parsed.tree.root_node(),
         &parsed.source,
@@ -73,7 +94,21 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut seen_reads,
         &mut seen_writes,
     );
+    profile_parse_phase(
+        profile,
+        &file_label,
+        "collect_implicit_state_accesses",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     language_profile(language).after_collect_facts(&mut function_defs, &call_sites);
+    profile_parse_phase(
+        profile,
+        &file_label,
+        "after_collect_facts",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     collect_dispatch_sites(
         parsed.tree.root_node(),
         &parsed.source,
@@ -83,9 +118,30 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &call_sites,
         &mut dispatch_sites,
     );
+    profile_parse_phase(
+        profile,
+        &file_label,
+        "collect_dispatch_sites",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     collect_equality_dispatch_sites(&comparison_uses, &call_sites, &mut dispatch_sites);
+    profile_parse_phase(
+        profile,
+        &file_label,
+        "collect_equality_dispatch_sites",
+        started.elapsed(),
+    );
     let profile = language_profile(language);
+    let started = Instant::now();
     let mut semantic_effect_sites = semantic_effect_sites_from_calls(language, &call_sites);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "semantic_effects_from_calls",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     semantic_effect_sites.extend(profile.structural_semantic_effect_sites(
         parsed.tree.root_node(),
         &parsed.source,
@@ -94,17 +150,62 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &state_reads,
         &state_writes,
     ));
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "structural_semantic_effects",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     dedup_semantic_effect_sites(&mut semantic_effect_sites);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "dedup_semantic_effects",
+        started.elapsed(),
+    );
+    let started = Instant::now();
     let local_complexity_scores =
         local_complexity_scores(&parsed.file.to_string_lossy(), &function_defs);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "local_complexity_scores",
+        started.elapsed(),
+    );
 
-    let mut document = Document {
+    let started = Instant::now();
+    let lines = parsed.source.lines().map(ToString::to_string).collect();
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "lines",
+        started.elapsed(),
+    );
+    let started = Instant::now();
+    let root = RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "raw_root",
+        started.elapsed(),
+    );
+    let started = Instant::now();
+    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "normalized_root",
+        started.elapsed(),
+    );
+
+    let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source: parsed.source.clone(),
-        lines: parsed.source.lines().map(ToString::to_string).collect(),
-        root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
-        normalized_root: normalize_tree(parsed.tree.root_node(), &parsed.source, language),
+        lines,
+        root,
+        normalized_root,
         function_defs,
         owner_defs,
         call_sites,
@@ -123,9 +224,28 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         protocol_method_effects: Vec::new(),
         protocol_call_paths: Vec::new(),
     };
-    document.protocol_method_effects = profile.protocol_method_effects(&document);
-    document.protocol_call_paths = profile.protocol_call_paths(&document);
+    profile_parse_phase(
+        rust_profile_enabled(),
+        &file_label,
+        "parse_file_total",
+        total_started.elapsed(),
+    );
     Ok(document)
+}
+
+fn rust_profile_enabled() -> bool {
+    std::env::var_os("DECOMPLEX_RUST_PROFILE").is_some()
+}
+
+fn profile_parse_phase(enabled: bool, file: &str, phase: &str, elapsed: Duration) {
+    if enabled {
+        eprintln!(
+            "decomplex-rust-parse-profile\t{}\t{}\t{:.6}",
+            phase,
+            file,
+            elapsed.as_secs_f64()
+        );
+    }
 }
 
 struct ParsedDocument {

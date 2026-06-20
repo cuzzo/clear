@@ -4,7 +4,7 @@ use crate::decomplex::syntax::{Document, FunctionDef, Language};
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -366,10 +366,11 @@ fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<S
     if profile.language() == Language::Python {
         writes.extend(raw_python_with_alias_names(node, profile));
     }
+    let assignment_lhs_writes = raw_assignment_lhs_write_nodes(node, profile);
     raw_walk_local(node, None, node, profile, &mut |child, parent| {
         if raw_local_write_node(child, parent, profile)
             || raw_declaration_name_in_tree(node, child, profile)
-            || raw_assignment_lhs_write_in_tree(node, child, profile)
+            || assignment_lhs_writes.contains(&raw_node_key(child))
         {
             if let Some(name) = raw_local_identifier_text(child, profile) {
                 writes.push(name);
@@ -974,31 +975,109 @@ fn raw_assignment_lhs_read_in_tree(
         .any(|child| raw_assignment_lhs_read_in_tree(child, target, profile))
 }
 
-fn raw_assignment_lhs_write_in_tree(
-    root: &RawNode,
-    target: &RawNode,
+fn raw_assignment_lhs_write_nodes(root: &RawNode, profile: &dyn LanguageProfile) -> HashSet<usize> {
+    let mut out = HashSet::new();
+    raw_collect_assignment_lhs_write_nodes(root, profile, &mut out);
+    out
+}
+
+fn raw_collect_assignment_lhs_write_nodes(
+    node: &RawNode,
     profile: &dyn LanguageProfile,
-) -> bool {
+    out: &mut HashSet<usize>,
+) {
     if profile
         .deferred_statement_node_kinds()
-        .contains(&root.kind.as_str())
+        .contains(&node.kind.as_str())
     {
-        return false;
+        return;
     }
     if profile
         .assignment_node_kinds()
-        .contains(&root.kind.as_str())
-        || (profile.language() == Language::Ruby && raw_assignment_statement(root, profile))
+        .contains(&node.kind.as_str())
+        || (profile.language() == Language::Ruby && raw_assignment_statement(node, profile))
     {
-        if let Some(lhs) = raw_named_children(root).first() {
-            if raw_assignment_lhs_write_target(lhs, target, profile) {
-                return true;
-            }
+        if let Some(lhs) = raw_named_children(node).first() {
+            raw_collect_assignment_lhs_write_targets(lhs, profile, out);
         }
     }
-    root.children
-        .iter()
-        .any(|child| raw_assignment_lhs_write_in_tree(child, target, profile))
+    for child in &node.children {
+        raw_collect_assignment_lhs_write_nodes(child, profile, out);
+    }
+}
+
+fn raw_collect_assignment_lhs_write_targets(
+    lhs: &RawNode,
+    profile: &dyn LanguageProfile,
+    out: &mut HashSet<usize>,
+) {
+    if profile.language() == Language::Ruby && lhs.kind == "element_reference" {
+        return;
+    }
+    if raw_indexed_lhs_node(lhs, profile) {
+        if let Some(object) = raw_named_children(lhs).first() {
+            raw_collect_assignment_lhs_write_targets(object, profile, out);
+        }
+        return;
+    }
+    if raw_field_like_node(lhs, profile) {
+        raw_collect_member_receiver_targets(lhs, profile, out);
+        return;
+    }
+    if raw_local_identifier_text(lhs, profile).is_some() {
+        out.insert(raw_node_key(lhs));
+        return;
+    }
+    if profile
+        .expression_list_node_kinds()
+        .contains(&lhs.kind.as_str())
+    {
+        for child in raw_named_children(lhs) {
+            raw_collect_assignment_lhs_write_targets(child, profile, out);
+        }
+        return;
+    }
+    for child in &lhs.children {
+        raw_collect_local_identifier_nodes(child, profile, out);
+    }
+}
+
+fn raw_node_key(node: &RawNode) -> usize {
+    node as *const RawNode as usize
+}
+
+fn raw_collect_member_receiver_targets(
+    node: &RawNode,
+    profile: &dyn LanguageProfile,
+    out: &mut HashSet<usize>,
+) {
+    let Some(receiver) = raw_named_children(node).first().copied() else {
+        return;
+    };
+    if raw_local_identifier_text(receiver, profile).is_some() {
+        out.insert(raw_node_key(receiver));
+        return;
+    }
+    if raw_indexed_lhs_node(receiver, profile) || raw_field_like_node(receiver, profile) {
+        raw_collect_member_receiver_targets(receiver, profile, out);
+        return;
+    }
+    for child in raw_named_children(receiver) {
+        raw_collect_member_receiver_targets(child, profile, out);
+    }
+}
+
+fn raw_collect_local_identifier_nodes(
+    node: &RawNode,
+    profile: &dyn LanguageProfile,
+    out: &mut HashSet<usize>,
+) {
+    if raw_local_identifier_text(node, profile).is_some() {
+        out.insert(raw_node_key(node));
+    }
+    for child in &node.children {
+        raw_collect_local_identifier_nodes(child, profile, out);
+    }
 }
 
 fn raw_assignment_lhs_read_target(
@@ -1030,44 +1109,6 @@ fn raw_assignment_lhs_read_target(
         return raw_named_children(lhs)
             .into_iter()
             .any(|child| raw_assignment_lhs_read_target(child, target, profile));
-    }
-    raw_contains_node(lhs, target)
-}
-
-fn raw_assignment_lhs_write_target(
-    lhs: &RawNode,
-    target: &RawNode,
-    profile: &dyn LanguageProfile,
-) -> bool {
-    if profile.language() == Language::Ruby && lhs.kind == "element_reference" {
-        return false;
-    }
-    if raw_indexed_lhs_node(lhs, profile) {
-        return raw_named_children(lhs)
-            .first()
-            .map(|object| raw_assignment_lhs_write_target(object, target, profile))
-            .unwrap_or(false);
-    }
-    if raw_field_like_node(lhs, profile) {
-        return raw_member_receiver_target(lhs, target, profile);
-    }
-    if let Some(lhs_name) = raw_local_identifier_text(lhs, profile) {
-        return std::ptr::eq(lhs, target)
-            || (raw_contains_node(lhs, target)
-                && raw_local_identifier_text(target, profile)
-                    .map(|target_name| target_name == lhs_name)
-                    .unwrap_or(false));
-    }
-    if profile
-        .expression_list_node_kinds()
-        .contains(&lhs.kind.as_str())
-    {
-        if raw_named_children(lhs).is_empty() && raw_local_identifier_text(lhs, profile).is_some() {
-            return std::ptr::eq(lhs, target);
-        }
-        return raw_named_children(lhs)
-            .into_iter()
-            .any(|child| raw_assignment_lhs_write_target(child, target, profile));
     }
     raw_contains_node(lhs, target)
 }
