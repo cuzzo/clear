@@ -10,6 +10,7 @@ use super::{
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use crate::decomplex::syntax::complexity::local_complexity_scores;
 use anyhow::{Context, Result};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,35 @@ use std::time::{Duration, Instant};
 use tree_sitter::{Node, Parser};
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
+    parse_file_with_options(
+        file,
+        language,
+        ParseOptions {
+            normalized_root: true,
+        },
+    )
+}
+
+pub(crate) fn parse_file_for_report(file: PathBuf, language: Language) -> Result<Document> {
+    parse_file_with_options(
+        file,
+        language,
+        ParseOptions {
+            normalized_root: language_profile(language).report_requires_normalized_root(),
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct ParseOptions {
+    normalized_root: bool,
+}
+
+fn parse_file_with_options(
+    file: PathBuf,
+    language: Language,
+    options: ParseOptions,
+) -> Result<Document> {
     let profile = rust_profile_enabled();
     let total_started = Instant::now();
     let file_label = file.to_string_lossy().to_string();
@@ -191,7 +221,11 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         started.elapsed(),
     );
     let started = Instant::now();
-    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    let normalized_root = if options.normalized_root {
+        normalize_tree(parsed.tree.root_node(), &parsed.source, language)
+    } else {
+        empty_normalized_root()
+    };
     profile_parse_phase(
         rust_profile_enabled(),
         &file_label,
@@ -202,7 +236,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
-        source: parsed.source.clone(),
+        source: String::new(),
         lines,
         root,
         normalized_root,
@@ -231,6 +265,18 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         total_started.elapsed(),
     );
     Ok(document)
+}
+
+fn empty_normalized_root() -> crate::decomplex::ast::Node {
+    crate::decomplex::ast::Node {
+        r#type: "ROOT".to_string(),
+        children: Vec::new(),
+        first_lineno: 1,
+        first_column: 0,
+        last_lineno: 1,
+        last_column: 0,
+        text: String::new(),
+    }
 }
 
 fn rust_profile_enabled() -> bool {
@@ -345,25 +391,16 @@ fn collect_facts(
     seen_calls: &mut HashSet<String>,
     seen_decisions: &mut HashSet<String>,
 ) {
-    let next_context = push_control_context(
-        node,
-        push_function_context(
-            node,
-            push_owner_context(node, source, context, language),
-            source,
-            language,
-        ),
-        source,
-        language,
-    );
-    record_function_def(node, source, file, language, &next_context, function_defs);
-    record_owner_def(node, source, file, language, &next_context, owner_defs);
+    let next_context = node_context(node, source, language, context);
+    let next_context = next_context.as_ref();
+    record_function_def(node, source, file, language, next_context, function_defs);
+    record_owner_def(node, source, file, language, next_context, owner_defs);
     record_call_site(
         node,
         source,
         file,
         language,
-        &next_context,
+        next_context,
         call_sites,
         seen_calls,
     );
@@ -372,7 +409,7 @@ fn collect_facts(
         source,
         file,
         language,
-        &next_context,
+        next_context,
         state_declarations,
     );
     record_state_read(
@@ -380,7 +417,7 @@ fn collect_facts(
         source,
         file,
         language,
-        &next_context,
+        next_context,
         state_reads,
         seen_reads,
     );
@@ -389,7 +426,7 @@ fn collect_facts(
         source,
         file,
         language,
-        &next_context,
+        next_context,
         state_writes,
         seen_writes,
     );
@@ -398,28 +435,21 @@ fn collect_facts(
         source,
         file,
         language,
-        &next_context,
+        next_context,
         decision_sites,
         seen_decisions,
     );
-    record_branch_decision(
-        node,
-        source,
-        file,
-        language,
-        &next_context,
-        branch_decisions,
-    );
-    record_branch_arm(node, source, file, language, &next_context, branch_arms);
+    record_branch_decision(node, source, file, language, next_context, branch_decisions);
+    record_branch_arm(node, source, file, language, next_context, branch_arms);
     record_predicate_alias(
         node,
         source,
         file,
         language,
-        &next_context,
+        next_context,
         predicate_aliases,
     );
-    record_comparison_use(node, source, file, language, &next_context, comparison_uses);
+    record_comparison_use(node, source, file, language, next_context, comparison_uses);
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -428,7 +458,7 @@ fn collect_facts(
             source,
             file,
             language,
-            &next_context,
+            next_context,
             function_defs,
             owner_defs,
             call_sites,
@@ -579,30 +609,13 @@ fn collect_dispatch_sites(
     call_sites: &[CallSite],
     out: &mut Vec<DispatchSite>,
 ) {
-    let next_context = push_control_context(
-        node,
-        push_function_context(
-            node,
-            push_owner_context(node, source, context, language),
-            source,
-            language,
-        ),
-        source,
-        language,
-    );
-    record_dispatch_site(node, source, file, language, &next_context, call_sites, out);
+    let next_context = node_context(node, source, language, context);
+    let next_context = next_context.as_ref();
+    record_dispatch_site(node, source, file, language, next_context, call_sites, out);
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_dispatch_sites(
-            child,
-            source,
-            file,
-            language,
-            &next_context,
-            call_sites,
-            out,
-        );
+        collect_dispatch_sites(child, source, file, language, next_context, call_sites, out);
     }
 }
 
@@ -1481,17 +1494,8 @@ fn local_declaration_index_for_node(
     context: &ContextState,
     out: &mut BTreeMap<(String, String), BTreeSet<String>>,
 ) {
-    let next_context = push_control_context(
-        node,
-        push_function_context(
-            node,
-            push_owner_context(node, source, context, language),
-            source,
-            language,
-        ),
-        source,
-        language,
-    );
+    let next_context = node_context(node, source, language, context);
+    let next_context = next_context.as_ref();
     let profile = language_profile(language);
     if local_variable_declarator(profile, node) {
         let owner = next_context.current_owner();
@@ -1507,7 +1511,7 @@ fn local_declaration_index_for_node(
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        local_declaration_index_for_node(child, source, language, &next_context, out);
+        local_declaration_index_for_node(child, source, language, next_context, out);
     }
 }
 
@@ -1692,71 +1696,129 @@ fn push_decision_site(out: &mut Vec<DecisionSite>, seen: &mut HashSet<String>, s
     }
 }
 
-fn push_owner_context(
+fn node_context<'a>(
     node: Node<'_>,
     source: &str,
-    context: &ContextState,
     language: Language,
-) -> ContextState {
+    context: &'a ContextState,
+) -> Cow<'a, ContextState> {
     let profile = language_profile(language);
-    let Some(owner) = profile
-        .owner_name_from_declaration(node, source)
-        .or_else(|| profile.receiver_convention_owner_name(node, source))
-    else {
-        return context.clone();
+    let owner = if possible_owner_context_node(profile, node) {
+        profile
+            .owner_name_from_declaration(node, source)
+            .or_else(|| profile.receiver_convention_owner_name(node, source))
+    } else {
+        None
     };
-    let parent_owner = context.owner.clone();
-    let full_owner = if let Some(parent) = parent_owner {
-        if parent != owner && !owner.contains("::") {
-            format!("{parent}::{owner}")
+    let function = if possible_function_context_node(profile, node) {
+        profile.function_name(node, source)
+    } else {
+        None
+    };
+    let control = if possible_control_context_node(node) {
+        profile.control_context(node, source)
+    } else {
+        None
+    };
+
+    if owner.is_none() && function.is_none() && control.is_none() {
+        return Cow::Borrowed(context);
+    }
+
+    let mut next = context.clone();
+    if let Some(owner) = owner {
+        let full_owner = if let Some(parent) = next.owner.clone() {
+            if parent != owner && !owner.contains("::") {
+                format!("{parent}::{owner}")
+            } else {
+                owner
+            }
         } else {
             owner
+        };
+        next.owner = Some(full_owner);
+    }
+
+    if let Some(function) = function {
+        let owner = next.current_owner();
+        next.function = Some(function);
+        next.function_line = Some(line(node));
+        next.owner = Some(owner);
+        next.receiver = profile.function_receiver_name(node, source);
+        next.locals = profile.function_params(node, source).into_iter().collect();
+        next.param_types = if language == Language::Ruby {
+            ruby_sig_param_types(source, line(node))
+        } else {
+            BTreeMap::new()
+        };
+        if let Some(receiver) = &next.receiver {
+            next.locals.insert(receiver.clone());
         }
-    } else {
-        owner
-    };
-    let mut next = context.clone();
-    next.owner = Some(full_owner);
-    next
+    }
+
+    if let Some(control) = control {
+        next.controls.push(control);
+    }
+
+    Cow::Owned(next)
 }
 
-fn push_function_context(
-    node: Node<'_>,
-    mut context: ContextState,
-    source: &str,
-    language: Language,
-) -> ContextState {
-    let profile = language_profile(language);
-    let Some(function) = profile.function_name(node, source) else {
-        return context;
-    };
-    let owner = context.current_owner();
-    context.function = Some(function);
-    context.function_line = Some(line(node));
-    context.owner = Some(owner);
-    context.receiver = profile.function_receiver_name(node, source);
-    context.locals = profile.function_params(node, source).into_iter().collect();
-    context.param_types = if language == Language::Ruby {
-        ruby_sig_param_types(source, line(node))
-    } else {
-        BTreeMap::new()
-    };
-    if let Some(receiver) = &context.receiver {
-        context.locals.insert(receiver.clone());
-    }
-    context
+fn possible_function_context_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.function_node_kinds().contains(&node.kind())
+        || node.kind() == "singleton_method"
+        || matches!(node.kind(), "body_statement" | "argument_list")
+            && first_child_kind(node) == Some("def")
 }
 
-fn push_control_context(
-    node: Node<'_>,
-    mut context: ContextState,
-    source: &str,
-    language: Language,
-) -> ContextState {
-    if let Some(control) = language_profile(language).control_context(node, source) {
-        context.controls.push(control);
-    }
-    context
+fn possible_owner_context_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.class_owner_node_kinds().contains(&node.kind())
+        || profile.module_owner_node_kinds().contains(&node.kind())
+        || profile.generic_owner_node_kinds().contains(&node.kind())
+        || profile.impl_owner_node_kinds().contains(&node.kind())
+        || profile.struct_owner_node_kinds().contains(&node.kind())
+        || possible_function_context_node(profile, node)
+        || profile.first_argument_receiver() && possible_function_context_node(profile, node)
+        || node.kind() == "body_statement"
+            && matches!(first_child_kind(node), Some("class" | "module"))
+}
+
+fn possible_control_context_node(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "while"
+            | "until"
+            | "for"
+            | "do_block"
+            | "while_statement"
+            | "until_statement"
+            | "for_statement"
+            | "for_in_statement"
+            | "enhanced_for_statement"
+            | "foreach_statement"
+            | "for_range_loop"
+            | "for_expression"
+            | "loop_expression"
+            | "if"
+            | "unless"
+            | "if_modifier"
+            | "unless_modifier"
+            | "case"
+            | "if_statement"
+            | "if_expression"
+            | "case_statement"
+            | "switch_statement"
+            | "switch_expression"
+            | "match_statement"
+            | "match_expression"
+            | "when_expression"
+            | "expression_switch_statement"
+            | "expression_statement"
+            | "labeled_statement"
+            | "body_statement"
+            | "block"
+            | "statements"
+            | "statement_list"
+    )
 }
 
 fn record_call_site(
@@ -1866,13 +1928,12 @@ fn record_state_read(
     seen: &mut HashSet<String>,
 ) {
     let profile = language_profile(language);
-    if profile.assignment_lhs_node(node) {
-        return;
-    }
-
     let Some(target) = profile.state_read_target(node, source) else {
         return;
     };
+    if profile.assignment_lhs_node(node) {
+        return;
+    }
     let target = normalize_target_receiver(target, context);
     if namespace_receiver(&target.receiver)
         || constant_like_state_ref(&target.receiver, &target.field)
@@ -1961,23 +2022,14 @@ fn collect_implicit_state_accesses_for_node(
     seen_reads: &mut HashSet<String>,
     seen_writes: &mut HashSet<String>,
 ) {
-    let next_context = push_control_context(
-        node,
-        push_function_context(
-            node,
-            push_owner_context(node, source, context, language),
-            source,
-            language,
-        ),
-        source,
-        language,
-    );
+    let next_context = node_context(node, source, language, context);
+    let next_context = next_context.as_ref();
     record_implicit_state_access(
         node,
         source,
         file,
         language,
-        &next_context,
+        next_context,
         declared,
         locals,
         params,
@@ -1994,7 +2046,7 @@ fn collect_implicit_state_accesses_for_node(
             source,
             file,
             language,
-            &next_context,
+            next_context,
             declared,
             locals,
             params,
@@ -2106,13 +2158,12 @@ fn record_state_write(
     seen: &mut HashSet<String>,
 ) {
     let profile = language_profile(language);
-    if profile.skip_state_write_node(node) {
-        return;
-    }
-
     let Some(assignment) = profile.assignment_target(node) else {
         return;
     };
+    if profile.skip_state_write_node(node) {
+        return;
+    }
     let Some(target) = profile.state_target(assignment.lhs, source) else {
         return;
     };

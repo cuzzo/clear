@@ -61,36 +61,37 @@ pub fn scan_documents(documents: &[Document]) -> Vec<LocalityDragRow> {
                 .map(|(id, score)| ((document.file.clone(), id.clone()), score.clone()))
         })
         .collect();
-    scan_summaries_with_scores(summaries, complexity_scores)
+    scan_summaries_with_scores(&summaries, &complexity_scores)
 }
 
-pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<LocalityDragRow> {
-    let mut detector = LocalityDrag::new(summaries, BTreeMap::new());
+pub fn scan_summaries(summaries: &[local_flow::MethodSummary]) -> Vec<LocalityDragRow> {
+    let complexity_scores = BTreeMap::new();
+    let mut detector = LocalityDrag::new(summaries, &complexity_scores);
     detector.findings()
 }
 
 pub fn scan_summaries_with_scores(
-    summaries: Vec<local_flow::MethodSummary>,
-    complexity_scores: BTreeMap<(String, String), LocalComplexityScore>,
+    summaries: &[local_flow::MethodSummary],
+    complexity_scores: &BTreeMap<(String, String), LocalComplexityScore>,
 ) -> Vec<LocalityDragRow> {
     let mut detector = LocalityDrag::new(summaries, complexity_scores);
     detector.findings()
 }
 
-struct LocalityDrag {
-    summaries: Vec<local_flow::MethodSummary>,
+struct LocalityDrag<'a> {
+    summaries: &'a [local_flow::MethodSummary],
     min_unrelated_statements: usize,
     min_gap_lines: usize,
     min_local_complexity: f64,
     min_score: isize,
     max_findings_per_method: usize,
-    complexity_scores: BTreeMap<(String, String), LocalComplexityScore>,
+    complexity_scores: &'a BTreeMap<(String, String), LocalComplexityScore>,
 }
 
-impl LocalityDrag {
+impl<'a> LocalityDrag<'a> {
     fn new(
-        summaries: Vec<local_flow::MethodSummary>,
-        complexity_scores: BTreeMap<(String, String), LocalComplexityScore>,
+        summaries: &'a [local_flow::MethodSummary],
+        complexity_scores: &'a BTreeMap<(String, String), LocalComplexityScore>,
     ) -> Self {
         Self {
             summaries,
@@ -283,14 +284,14 @@ impl LocalityDrag {
             .count()
     }
 
-    fn classify_gap_statements<'a>(
+    fn classify_gap_statements<'m>(
         &self,
         name: &str,
         definition: &local_flow::Statement,
-        gap: &'a [&local_flow::Statement],
+        gap: &'m [&local_flow::Statement],
     ) -> (
-        Vec<&'a local_flow::Statement>,
-        Vec<&'a local_flow::Statement>,
+        Vec<&'m local_flow::Statement>,
+        Vec<&'m local_flow::Statement>,
     ) {
         let mut related_names = BTreeSet::new();
         related_names.insert(name.to_string());
@@ -338,12 +339,12 @@ impl LocalityDrag {
             .collect()
     }
 
-    fn boundary_crossings<'a>(
+    fn boundary_crossings<'m>(
         &self,
-        summary: &'a local_flow::MethodSummary,
+        summary: &'m local_flow::MethodSummary,
         definition_index: usize,
         use_index: usize,
-    ) -> Vec<&'a local_flow::Boundary> {
+    ) -> Vec<&'m local_flow::Boundary> {
         summary
             .boundaries
             .iter()

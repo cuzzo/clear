@@ -931,7 +931,7 @@ fn run_detector_on_fact_input(
             } else {
                 Ok(json!(decision_pressure::scan_documents_with_summaries(
                     documents,
-                    input.local_methods.clone()
+                    &input.local_methods
                 )))
             }
         }
@@ -963,9 +963,7 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 Ok(json!(derived_state::scan_documents(documents)))
             } else {
-                Ok(json!(derived_state::scan_summaries(
-                    input.local_methods.clone()
-                )))
+                Ok(json!(derived_state::scan_summaries(&input.local_methods)))
             }
         }
         "implicit-control-flow" | "ordered-protocol-mine" => {
@@ -980,7 +978,7 @@ fn run_detector_on_fact_input(
                 Ok(json!(
                     weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
                         documents,
-                        input.local_methods.clone()
+                        &input.local_methods
                     )
                 ))
             }
@@ -989,9 +987,10 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 Ok(json!(locality_drag::scan_documents(documents)))
             } else {
+                let scores = complexity_scores(documents);
                 Ok(json!(locality_drag::scan_summaries_with_scores(
-                    input.local_methods.clone(),
-                    complexity_scores(documents)
+                    &input.local_methods,
+                    &scores
                 )))
             }
         }
@@ -1000,7 +999,7 @@ fn run_detector_on_fact_input(
                 Ok(json!(operational_discontinuity::scan_documents(documents)))
             } else {
                 Ok(json!(operational_discontinuity::scan_summaries(
-                    input.local_methods.clone()
+                    &input.local_methods
                 )))
             }
         }
@@ -1013,9 +1012,7 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 Ok(json!(function_lcom::scan_documents(documents)))
             } else {
-                Ok(json!(function_lcom::scan_summaries(
-                    input.local_methods.clone()
-                )))
+                Ok(json!(function_lcom::scan_summaries(&input.local_methods)))
             }
         }
         "false-simplicity" => Ok(json!(false_simplicity::scan_documents(documents))),

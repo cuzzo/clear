@@ -33,27 +33,28 @@ struct Component {
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<FunctionLcomRow>> {
     let summaries = local_flow::scan_files(files, language)?;
-    Ok(scan_summaries(summaries))
+    Ok(scan_summaries(&summaries))
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<FunctionLcomRow> {
-    scan_summaries(local_flow::scan_documents(documents))
+    let summaries = local_flow::scan_documents(documents);
+    scan_summaries(&summaries)
 }
 
-pub fn scan_summaries(summaries: Vec<local_flow::MethodSummary>) -> Vec<FunctionLcomRow> {
+pub fn scan_summaries(summaries: &[local_flow::MethodSummary]) -> Vec<FunctionLcomRow> {
     FunctionLcom::new(summaries).findings()
 }
 
-struct FunctionLcom {
-    summaries: Vec<local_flow::MethodSummary>,
+struct FunctionLcom<'a> {
+    summaries: &'a [local_flow::MethodSummary],
     min_components: usize,
     min_locals: usize,
     min_statements: usize,
     min_score: usize,
 }
 
-impl FunctionLcom {
-    fn new(summaries: Vec<local_flow::MethodSummary>) -> Self {
+impl<'a> FunctionLcom<'a> {
+    fn new(summaries: &'a [local_flow::MethodSummary]) -> Self {
         Self {
             summaries,
             min_components: 2,
@@ -153,10 +154,10 @@ impl FunctionLcom {
         })
     }
 
-    fn pre_terminal_statements<'a>(
+    fn pre_terminal_statements<'m>(
         &self,
-        summary: &'a local_flow::MethodSummary,
-    ) -> &'a [local_flow::Statement] {
+        summary: &'m local_flow::MethodSummary,
+    ) -> &'m [local_flow::Statement] {
         if summary.statements.len() <= 1 {
             &[]
         } else {

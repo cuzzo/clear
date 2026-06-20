@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SemanticAliasReport {
@@ -86,9 +87,11 @@ fn canon(text: &str) -> String {
     t = t.strip_prefix('@').unwrap_or(&t).to_string();
 
     // Ruby: t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
-    let re =
+    static RECEIVER_PREFIX: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RECEIVER_PREFIX.get_or_init(|| {
         regex::Regex::new(r"^[A-Za-z_]\w*(?:\([^)]*\))?\.(?P<rest>[A-Za-z_]\w*\s*(?:==|!=|\.))")
-            .unwrap();
+            .expect("semantic-alias receiver prefix regex")
+    });
     t = re.replace(&t, "$rest").to_string();
 
     t.split_whitespace().collect::<Vec<_>>().join(" ")

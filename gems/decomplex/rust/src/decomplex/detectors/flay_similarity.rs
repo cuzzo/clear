@@ -87,16 +87,16 @@ impl Scanner {
     }
 
     fn type2_findings(&self, candidates: &[CloneCandidate]) -> Vec<SimilarityFinding> {
-        let mut groups: HashMap<&str, Vec<CloneCandidate>> = HashMap::new();
+        let mut groups: HashMap<&str, Vec<&CloneCandidate>> = HashMap::new();
         for candidate in candidates {
             groups
                 .entry(candidate.fingerprint.as_str())
                 .or_default()
-                .push(candidate.clone());
+                .push(candidate);
         }
         let mut out = Vec::new();
         for cluster in groups.values() {
-            let cluster = uniq_sites(cluster.clone());
+            let cluster = uniq_sites(cluster.iter().copied());
             if cluster.len() < 2 {
                 continue;
             }
@@ -122,25 +122,21 @@ impl Scanner {
         if self.fuzzy == 0 {
             return Vec::new();
         }
-        let mut groups: HashMap<String, Vec<(CloneCandidate, usize)>> = HashMap::new();
+        let mut groups: HashMap<String, Vec<(&CloneCandidate, usize)>> = HashMap::new();
         for candidate in candidates {
             for (signature, signature_mass) in self.fuzzy_signatures(candidate) {
                 if signature_mass >= self.effective_mass_floor() {
                     groups
                         .entry(signature)
                         .or_default()
-                        .push((candidate.clone(), signature_mass));
+                        .push((candidate, signature_mass));
                 }
             }
         }
 
         let mut best_by_key: BTreeMap<String, SimilarityFinding> = BTreeMap::new();
         for rows in groups.values() {
-            let cluster = uniq_sites(
-                rows.iter()
-                    .map(|(candidate, _)| candidate.clone())
-                    .collect(),
-            );
+            let cluster = uniq_sites(rows.iter().map(|(candidate, _)| *candidate));
             if cluster.len() < 2 {
                 continue;
             }
@@ -182,11 +178,14 @@ impl Scanner {
 
     fn finding_for(
         &self,
-        cluster: &[CloneCandidate],
+        cluster: &[&CloneCandidate],
         clone_type: &str,
         mass: usize,
     ) -> SimilarityFinding {
-        let mut sites = cluster.iter().map(site_for).collect::<Vec<_>>();
+        let mut sites = cluster
+            .iter()
+            .map(|candidate| site_for(candidate))
+            .collect::<Vec<_>>();
         sites.sort();
         SimilarityFinding {
             at: sites.first().cloned().unwrap_or_default(),
@@ -206,7 +205,7 @@ impl Scanner {
         }
     }
 
-    fn spans_for(&self, cluster: &[CloneCandidate]) -> BTreeMap<String, Span> {
+    fn spans_for(&self, cluster: &[&CloneCandidate]) -> BTreeMap<String, Span> {
         let mut spans = BTreeMap::new();
         for candidate in cluster {
             let value = if candidate.node_name == "defn" {
@@ -271,7 +270,9 @@ impl Scanner {
     }
 }
 
-fn uniq_sites(candidates: Vec<CloneCandidate>) -> Vec<CloneCandidate> {
+fn uniq_sites<'a>(
+    candidates: impl IntoIterator<Item = &'a CloneCandidate>,
+) -> Vec<&'a CloneCandidate> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for candidate in candidates {
@@ -286,7 +287,7 @@ fn uniq_sites(candidates: Vec<CloneCandidate>) -> Vec<CloneCandidate> {
     out
 }
 
-fn most_common_node(cluster: &[CloneCandidate]) -> String {
+fn most_common_node(cluster: &[&CloneCandidate]) -> String {
     let mut order = Vec::new();
     let mut tally: HashMap<&str, usize> = HashMap::new();
     for candidate in cluster {

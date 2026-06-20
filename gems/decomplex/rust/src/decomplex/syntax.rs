@@ -410,6 +410,10 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     tree_sitter_adapter::parse_file(file, language)
 }
 
+pub(crate) fn parse_file_for_report(file: PathBuf, language: Language) -> Result<Document> {
+    tree_sitter_adapter::parse_file_for_report(file, language)
+}
+
 pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document>> {
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
 }

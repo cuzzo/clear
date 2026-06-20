@@ -31,12 +31,13 @@ pub fn scan_files(
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveComplexityRow> {
-    scan_documents_with_summaries(documents, local_flow::scan_documents(documents))
+    let summaries = local_flow::scan_documents(documents);
+    scan_documents_with_summaries(documents, &summaries)
 }
 
 pub fn scan_documents_with_summaries(
     documents: &[Document],
-    summaries: Vec<local_flow::MethodSummary>,
+    summaries: &[local_flow::MethodSummary],
 ) -> Vec<WeightedInlinedCognitiveComplexityRow> {
     let topology_report = structural_topology::scan_documents(documents);
     let topology = structural_topology::Graph::new(topology_report.methods, topology_report.edges);
@@ -70,8 +71,8 @@ pub fn scan_documents_with_summaries(
             LocalScore {
                 id,
                 owner,
-                name: summary.name,
-                file: summary.file,
+                name: summary.name.clone(),
+                file: summary.file.clone(),
                 line: summary.line,
                 span: summary.span,
                 score: score.score,

@@ -30,6 +30,10 @@ impl LanguageProfile for RubyProfile {
         tree_sitter_ruby::LANGUAGE.into()
     }
 
+    fn report_requires_normalized_root(&self) -> bool {
+        false
+    }
+
     fn function_node_kinds(&self) -> &[&str] {
         ruby_data::FUNCTION_NODE_KINDS
     }

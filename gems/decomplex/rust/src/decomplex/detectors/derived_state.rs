@@ -34,10 +34,11 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DerivedSt
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<DerivedStateRow> {
-    scan_summaries(local_flow::scan_documents(documents))
+    let summaries = local_flow::scan_documents(documents);
+    scan_summaries(&summaries)
 }
 
-pub fn scan_summaries(summaries: Vec<MethodSummary>) -> Vec<DerivedStateRow> {
+pub fn scan_summaries(summaries: &[MethodSummary]) -> Vec<DerivedStateRow> {
     let mut out = summaries
         .iter()
         .flat_map(|method| analyze_method(method))

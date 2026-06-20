@@ -1,4 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, RawNode, Span};
+use crate::decomplex::parallel;
 use crate::decomplex::syntax::adapters::{language_profile, LanguageProfile};
 use crate::decomplex::syntax::raw_tree::{
     named_children as raw_named_children, next_sibling as raw_next_sibling,
@@ -87,19 +88,29 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSum
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
-    let mut out = Vec::new();
-    for document in documents {
-        let normalized = normalized_local_methods(document);
-        let raw = raw_local_methods(document);
-        let raw_keys: BTreeSet<_> = raw.iter().map(method_summary_key).collect();
-        out.extend(raw);
-        out.extend(
-            normalized
-                .into_iter()
-                .filter(|summary| !raw_keys.contains(&method_summary_key(summary))),
-        );
+    if documents.len() > 1 && parallel::job_count() > 1 {
+        return parallel::map_ordered(documents, |document| {
+            Ok(local_methods_for_document(document))
+        })
+        .expect("local-flow worker failed")
+        .into_iter()
+        .flatten()
+        .collect();
     }
-    out
+
+    documents
+        .iter()
+        .flat_map(local_methods_for_document)
+        .collect()
+}
+
+fn local_methods_for_document(document: &Document) -> Vec<MethodSummary> {
+    let raw = raw_local_methods(document);
+    if !raw.is_empty() {
+        return raw;
+    }
+
+    normalized_local_methods(document)
 }
 
 pub fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
@@ -147,10 +158,6 @@ fn normalized_local_methods(document: &Document) -> Vec<MethodSummary> {
     detector.scan(&document.normalized_root)
 }
 
-fn method_summary_key(summary: &MethodSummary) -> (String, String, usize) {
-    (summary.file.clone(), summary.id.clone(), summary.line)
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MethodMetadata {
     owner: String,
@@ -188,9 +195,7 @@ fn raw_method_summary(
         file: function.file.clone(),
         line: function.line,
         span: function.span,
-        node: normalized_node_for_span(&document.normalized_root, function.span)
-            .cloned()
-            .unwrap_or_else(|| fallback_node_from_raw(&function.body)),
+        node: fallback_node_from_raw(&function.body),
         raw_node: Some(function.body.clone()),
         boundaries: raw_structural_boundaries(document, &statements),
         statements,
@@ -1272,22 +1277,6 @@ fn raw_contains_node(root: &RawNode, target: &RawNode) -> bool {
             .children
             .iter()
             .any(|child| raw_contains_node(child, target))
-}
-
-fn normalized_node_for_span(root: &Node, span: Span) -> Option<&Node> {
-    if [
-        root.first_lineno,
-        root.first_column,
-        root.last_lineno,
-        root.last_column,
-    ] == span
-    {
-        return Some(root);
-    }
-    root.children
-        .iter()
-        .filter_map(ast::node)
-        .find_map(|child| normalized_node_for_span(child, span))
 }
 
 fn fallback_node_from_raw(raw: &RawNode) -> Node {

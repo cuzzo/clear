@@ -133,6 +133,10 @@ pub(crate) trait LanguageProfile {
     fn language(&self) -> Language;
     fn grammar(&self) -> TreeSitterLanguage;
 
+    fn report_requires_normalized_root(&self) -> bool {
+        true
+    }
+
     fn function_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }

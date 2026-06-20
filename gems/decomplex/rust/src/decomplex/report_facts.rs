@@ -10,6 +10,7 @@ use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,10 +74,26 @@ struct SharedFacts {
 
 impl SharedFacts {
     fn new(documents: &[Document]) -> Self {
+        let profile = rust_profile_enabled();
         thread::scope(|scope| {
-            let local_summaries = scope.spawn(|| local_flow::scan_documents(documents));
-            let local_complexity_scores = scope.spawn(|| local_complexity_scores(documents));
-            let semantic_aliases = scope.spawn(|| semantic_alias::scan_documents(documents));
+            let local_summaries = scope.spawn(|| {
+                let started = Instant::now();
+                let result = local_flow::scan_documents(documents);
+                profile_phase(profile, "shared.local_summaries", started.elapsed());
+                result
+            });
+            let local_complexity_scores = scope.spawn(|| {
+                let started = Instant::now();
+                let result = local_complexity_scores(documents);
+                profile_phase(profile, "shared.local_complexity_scores", started.elapsed());
+                result
+            });
+            let semantic_aliases = scope.spawn(|| {
+                let started = Instant::now();
+                let result = semantic_alias::scan_documents(documents);
+                profile_phase(profile, "shared.semantic_aliases", started.elapsed());
+                result
+            });
             Self {
                 local_summaries: local_summaries.join().expect("local-flow facts worker"),
                 local_complexity_scores: local_complexity_scores
@@ -118,7 +135,7 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
     let total_started = Instant::now();
     let parse_started = Instant::now();
     let mut documents = parallel::map_ordered(files, |file| {
-        syntax::parse_file(file.path.clone(), file.language)
+        syntax::parse_file_for_report(file.path.clone(), file.language)
     })?;
     profile_phase(profile, "parse", parse_started.elapsed());
     let protocol_started = Instant::now();
@@ -226,15 +243,15 @@ fn detector_tasks<'a>(
     });
     detector_task!("derived_state", {
         merge_array_reports(groups, |documents| {
-            json_value(derived_state::scan_summaries(
-                local_summaries_for_documents(&shared.local_summaries, documents),
-            ))
+            let summaries = local_summaries_for_documents(&shared.local_summaries, documents);
+            json_value(derived_state::scan_summaries(summaries.as_ref()))
         })
     });
     detector_task!("inconsistent_rename_clone", {
         merge_array_reports(groups, |documents| {
+            let summaries = local_summaries_for_documents(&shared.local_summaries, documents);
             json_value(inconsistent_rename_clone::scan_summaries(
-                local_summaries_for_documents(&shared.local_summaries, documents),
+                summaries.as_ref(),
             ))
         })
     });
@@ -249,9 +266,10 @@ fn detector_tasks<'a>(
     });
     detector_task!("decision_pressure", {
         merge_array_reports(groups, |documents| {
+            let summaries = local_summaries_for_documents(&shared.local_summaries, documents);
             json_value(decision_pressure::scan_documents_with_summaries(
                 documents,
-                local_summaries_for_documents(&shared.local_summaries, documents),
+                summaries.as_ref(),
             ))
         })
     });
@@ -293,28 +311,27 @@ fn detector_tasks<'a>(
     });
     detector_task!("weighted_inlined_complexity", {
         merge_array_reports(groups, |documents| {
+            let summaries = local_summaries_for_documents(&shared.local_summaries, documents);
             json_value(
                 weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
                     documents,
-                    local_summaries_for_documents(&shared.local_summaries, documents),
+                    summaries.as_ref(),
                 ),
             )
         })
     });
     detector_task!("locality_drag", {
         json_value(locality_drag::scan_summaries_with_scores(
-            shared.local_summaries.clone(),
-            shared.local_complexity_scores.clone(),
+            &shared.local_summaries,
+            &shared.local_complexity_scores,
         ))
     });
     detector_task!("function_lcom", {
-        json_value(function_lcom::scan_summaries(
-            shared.local_summaries.clone(),
-        ))
+        json_value(function_lcom::scan_summaries(&shared.local_summaries))
     });
     detector_task!("operational_discontinuity", {
         json_value(operational_discontinuity::scan_summaries(
-            shared.local_summaries.clone(),
+            &shared.local_summaries,
         ))
     });
     tasks
@@ -421,19 +438,28 @@ fn local_complexity_scores(
         .collect()
 }
 
-fn local_summaries_for_documents(
-    summaries: &[local_flow::MethodSummary],
+fn local_summaries_for_documents<'a>(
+    summaries: &'a [local_flow::MethodSummary],
     documents: &[Document],
-) -> Vec<local_flow::MethodSummary> {
+) -> Cow<'a, [local_flow::MethodSummary]> {
     let files = documents
         .iter()
         .map(|document| document.file.as_str())
         .collect::<BTreeSet<_>>();
-    summaries
+    if summaries
         .iter()
-        .filter(|summary| files.contains(summary.file.as_str()))
-        .cloned()
-        .collect()
+        .all(|summary| files.contains(summary.file.as_str()))
+    {
+        return Cow::Borrowed(summaries);
+    }
+
+    Cow::Owned(
+        summaries
+            .iter()
+            .filter(|summary| files.contains(summary.file.as_str()))
+            .cloned()
+            .collect(),
+    )
 }
 
 fn merge_object_reports<F>(

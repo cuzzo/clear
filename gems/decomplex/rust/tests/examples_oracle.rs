@@ -450,7 +450,7 @@ fn run_detector_on_fact_input(
             } else {
                 value(decision_pressure::scan_documents_with_summaries(
                     documents,
-                    input.local_methods.clone(),
+                    &input.local_methods,
                 ))
             }
         }
@@ -476,7 +476,7 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 value(derived_state::scan_documents(documents))
             } else {
-                value(derived_state::scan_summaries(input.local_methods.clone()))
+                value(derived_state::scan_summaries(&input.local_methods))
             }
         }
         "implicit-control-flow" | "ordered-protocol-mine" => {
@@ -491,7 +491,7 @@ fn run_detector_on_fact_input(
                 value(
                     weighted_inlined_cognitive_complexity::scan_documents_with_summaries(
                         documents,
-                        input.local_methods.clone(),
+                        &input.local_methods,
                     ),
                 )
             }
@@ -500,9 +500,10 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 value(locality_drag::scan_documents(documents))
             } else {
+                let scores = complexity_scores(documents);
                 value(locality_drag::scan_summaries_with_scores(
-                    input.local_methods.clone(),
-                    complexity_scores(documents),
+                    &input.local_methods,
+                    &scores,
                 ))
             }
         }
@@ -511,7 +512,7 @@ fn run_detector_on_fact_input(
                 value(operational_discontinuity::scan_documents(documents))
             } else {
                 value(operational_discontinuity::scan_summaries(
-                    input.local_methods.clone(),
+                    &input.local_methods,
                 ))
             }
         }
@@ -525,7 +526,7 @@ fn run_detector_on_fact_input(
             if input.local_methods.is_empty() {
                 value(function_lcom::scan_documents(documents))
             } else {
-                value(function_lcom::scan_summaries(input.local_methods.clone()))
+                value(function_lcom::scan_summaries(&input.local_methods))
             }
         }
         "false-simplicity" => value(false_simplicity::scan_documents(documents)),

@@ -46,30 +46,29 @@ pub fn scan_files(
     language: Language,
 ) -> Result<Vec<OperationalDiscontinuityRow>> {
     let summaries = local_flow::scan_files(files, language)?;
-    Ok(scan_summaries(summaries))
+    Ok(scan_summaries(&summaries))
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<OperationalDiscontinuityRow> {
-    scan_summaries(local_flow::scan_documents(documents))
+    let summaries = local_flow::scan_documents(documents);
+    scan_summaries(&summaries)
 }
 
-pub fn scan_summaries(
-    summaries: Vec<local_flow::MethodSummary>,
-) -> Vec<OperationalDiscontinuityRow> {
+pub fn scan_summaries(summaries: &[local_flow::MethodSummary]) -> Vec<OperationalDiscontinuityRow> {
     let detector = OperationalDiscontinuity::new(summaries);
     detector.findings()
 }
 
-struct OperationalDiscontinuity {
-    summaries: Vec<local_flow::MethodSummary>,
+struct OperationalDiscontinuity<'a> {
+    summaries: &'a [local_flow::MethodSummary],
     min_dead: usize,
     min_new: usize,
     max_continuing: usize,
     min_score: isize,
 }
 
-impl OperationalDiscontinuity {
-    fn new(summaries: Vec<local_flow::MethodSummary>) -> Self {
+impl<'a> OperationalDiscontinuity<'a> {
+    fn new(summaries: &'a [local_flow::MethodSummary]) -> Self {
         Self {
             summaries,
             min_dead: 2,
