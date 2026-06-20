@@ -1,9 +1,6 @@
-#[path = "../decomplex/mod.rs"]
-mod decomplex;
-
 use anyhow::{bail, Result};
-use decomplex::ast::{self, Child, Node};
-use decomplex::syntax::Language;
+use decomplex_rust::decomplex::ast::{self, Child, Node};
+use decomplex_rust::decomplex::syntax::Language;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;

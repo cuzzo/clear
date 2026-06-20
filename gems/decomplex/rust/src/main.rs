@@ -1,17 +1,15 @@
-mod decomplex;
-
 use anyhow::{bail, Context, Result};
-use decomplex::detectors::{
+use decomplex_rust::decomplex::detectors::{
     co_update, decision_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
     redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
     structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
-use decomplex::parallel;
-use decomplex::report::Report;
-use decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
-use decomplex::syntax::{Document, Language, LocalComplexityScore};
+use decomplex_rust::decomplex::parallel;
+use decomplex_rust::decomplex::report::Report;
+use decomplex_rust::decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
+use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Read;

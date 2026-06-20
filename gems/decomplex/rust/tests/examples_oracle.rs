@@ -120,6 +120,10 @@ fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
             .get("expected")
             .cloned()
             .with_context(|| format!("{} missing expected", fixture.display()))?;
+        let expected_markdown = fs::read_to_string(fixture.with_extension("md"))
+            .with_context(|| format!("{} missing markdown oracle", fixture.display()))?
+            .trim_end()
+            .to_string();
         let report = Report::from_facts(facts)
             .with_context(|| format!("failed to build report from {}", fixture.display()))?;
         let actual = project_report(&report);
@@ -130,6 +134,15 @@ fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
                 fixture.display(),
                 expected,
                 actual
+            ));
+        }
+        let markdown = report.to_markdown().trim_end().to_string();
+        if markdown != expected_markdown {
+            failures.push(format!(
+                "{} markdown\nexpected: {}\nactual:   {}",
+                fixture.display(),
+                expected_markdown,
+                markdown
             ));
         }
     }

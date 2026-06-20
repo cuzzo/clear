@@ -28,9 +28,11 @@ class ReportFactsOracleTest < Minitest::Test
     fixture = JSON.parse(File.read(fixture_path))
     facts = fixture.fetch("input")
     expected = fixture.fetch("expected")
+    expected_markdown = expected_markdown_for(fixture_path)
 
     ruby_report = Decomplex::Report.from_facts(JSON.generate(facts))
     assert_equal expected, project_report(ruby_report), "ruby #{fixture_path}"
+    assert_equal expected_markdown, ruby_report.to_markdown.rstrip, "markdown ruby #{fixture_path}"
 
     skip "cargo is not available" unless rust_available?
 
@@ -45,7 +47,7 @@ class ReportFactsOracleTest < Minitest::Test
         "render-report", "--input", file.path, "--format", "sarif"
       ))
 
-      assert_equal ruby_report.to_markdown.rstrip, rust_markdown.rstrip, "markdown #{fixture_path}"
+      assert_equal expected_markdown, rust_markdown.rstrip, "markdown rust #{fixture_path}"
       assert_equal JSON.parse(ruby_report.to_sarif), rust_sarif, "sarif #{fixture_path}"
     end
   end
@@ -56,6 +58,13 @@ class ReportFactsOracleTest < Minitest::Test
       "root_clusters" => json_safe(report.root_clusters),
       "sarif" => compact_sarif(report)
     }
+  end
+
+  def expected_markdown_for(fixture_path)
+    markdown_path = fixture_path.sub(/\.json\z/, ".md")
+    assert File.file?(markdown_path), "missing markdown oracle #{markdown_path}"
+
+    File.read(markdown_path).rstrip
   end
 
   def compact_sarif(report)

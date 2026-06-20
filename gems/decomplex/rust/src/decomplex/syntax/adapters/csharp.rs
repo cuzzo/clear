@@ -77,10 +77,6 @@ impl LanguageProfile for CSharpProfile {
         &["variable_declaration"]
     }
 
-    fn declarator_node_kinds(&self) -> &[&str] {
-        &["variable_declaration", "variable_declarator"]
-    }
-
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
     }

@@ -37,7 +37,6 @@ struct MethodEffect {
 #[derive(Clone, Debug)]
 struct Call {
     mid: String,
-    file: String,
     line: usize,
     span: Span,
     reads: Vec<String>,
@@ -94,7 +93,6 @@ fn sequences_for_document(document: &Document, effect_index: &EffectIndex) -> Ve
                     let effect = effect_index.effect_for(&function_def.owner, &mid);
                     Call {
                         mid,
-                        file: call.file.clone(),
                         line: call.line,
                         span: call.span,
                         reads: effect.map(|e| e.reads.clone()).unwrap_or_default(),

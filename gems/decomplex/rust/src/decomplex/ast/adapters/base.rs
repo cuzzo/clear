@@ -1,7 +1,7 @@
 use super::super::{
-    bare_identifier_text, bracketed, case_arm_descendant, concatenated_string_node,
-    concatenated_string_target, descendant, direct_binary_operator, element_reference_shape,
-    function_kind, identifier_kind_name, named_children, node_text, question_colon_ternary_parts,
+    bracketed, case_arm_descendant, concatenated_string_node, concatenated_string_target,
+    descendant, direct_binary_operator, element_reference_shape, function_kind,
+    identifier_kind_name, named_children, node_text, question_colon_ternary_parts,
     raw_named_children, ruby_exception_constant_text, statement_block_wrapper, TernaryParts,
     ARRAY_LITERAL_NODE_KINDS, ARRAY_LITERAL_WRAPPER_KINDS, BOOLEAN_EXPRESSION_KINDS,
     CASE_ARGUMENT_WHEN_KINDS, CASE_ELSE_KINDS, CASE_NODE_KINDS, COMPARISON_EXPRESSION_KINDS,
@@ -706,10 +706,6 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         )
     }
 
-    fn identifier_text_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
-        false
-    }
-
     fn local_identifier_text(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
         None
     }
@@ -928,10 +924,6 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
-    fn single_assignment_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
-        false
-    }
-
     fn member_read_excluded(&self, _node: TreeSitterNode<'_>) -> bool {
         false
     }
@@ -1014,10 +1006,6 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             .find(|child| super::super::CASE_DEFAULT_PATTERN_KINDS.contains(&child.kind()))
             .map(|pattern| node_text(pattern, source).trim() == "_")
             .unwrap_or(false)
-    }
-
-    fn bare_identifier_text(&self, text: &str) -> bool {
-        bare_identifier_text(text)
     }
 
     fn descendant<'tree>(

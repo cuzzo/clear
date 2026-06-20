@@ -6,7 +6,6 @@ use super::super::{CallSite, FunctionDef, Language};
 use super::base::LanguageProfile;
 use crate::decomplex::ast::{node_text, normalize_text, span};
 use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet};
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct RubyProfile;
@@ -293,25 +292,6 @@ impl LanguageProfile for RubyProfile {
 
     fn skip_state_write_target(&self, target: &Target) -> bool {
         target.field == "[]" || target.field.starts_with('$')
-    }
-
-    fn method_param_types(&self, lines: &[String]) -> BTreeMap<String, BTreeMap<String, String>> {
-        ruby_method_param_types(lines)
-    }
-
-    fn immutable_struct_readers(&self, lines: &[String]) -> BTreeMap<String, BTreeSet<String>> {
-        ruby_immutable_struct_readers(lines)
-    }
-
-    fn immutable_struct_reader_types(
-        &self,
-        lines: &[String],
-    ) -> BTreeMap<String, BTreeMap<String, String>> {
-        ruby_immutable_struct_reader_types(lines)
-    }
-
-    fn type_aliases(&self, lines: &[String]) -> BTreeMap<String, String> {
-        ruby_type_aliases(lines)
     }
 }
 
@@ -908,117 +888,4 @@ fn ruby_case_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {
         out.push(pending_plain.join(", "));
     }
     out
-}
-
-fn ruby_immutable_struct_readers(lines: &[String]) -> BTreeMap<String, BTreeSet<String>> {
-    let mut readers = BTreeMap::new();
-    let mut class_stack = Vec::new();
-    let class_struct_re =
-        Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
-    let const_re = Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\b").unwrap();
-    let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
-
-    for line in lines {
-        if let Some(caps) = class_struct_re.captures(line) {
-            class_stack.push(caps[1].to_string());
-            continue;
-        }
-        if !class_stack.is_empty() {
-            if let Some(caps) = const_re.captures(line) {
-                readers
-                    .entry(class_stack.last().unwrap().clone())
-                    .or_insert_with(BTreeSet::new)
-                    .insert(caps[1].to_string());
-                continue;
-            }
-        }
-        if end_re.is_match(line) {
-            class_stack.pop();
-        }
-    }
-    readers
-}
-
-fn ruby_immutable_struct_reader_types(
-    lines: &[String],
-) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut reader_types = BTreeMap::new();
-    let mut class_stack = Vec::new();
-    let class_struct_re =
-        Regex::new(r"^\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b").unwrap();
-    let const_type_re =
-        Regex::new(r"^\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
-            .unwrap();
-    let end_re = Regex::new(r"^\s*end\s*(?:#.*)?$").unwrap();
-
-    for line in lines {
-        if let Some(caps) = class_struct_re.captures(line) {
-            class_stack.push(caps[1].to_string());
-            continue;
-        }
-        if !class_stack.is_empty() {
-            if let Some(caps) = const_type_re.captures(line) {
-                reader_types
-                    .entry(class_stack.last().unwrap().clone())
-                    .or_insert_with(BTreeMap::new)
-                    .insert(caps[1].to_string(), caps[2].to_string());
-                continue;
-            }
-        }
-        if end_re.is_match(line) {
-            class_stack.pop();
-        }
-    }
-    reader_types
-}
-
-fn ruby_type_aliases(lines: &[String]) -> BTreeMap<String, String> {
-    let mut aliases = BTreeMap::new();
-    let type_alias_re =
-        Regex::new(r"^\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}")
-            .unwrap();
-    let const_alias_re = Regex::new(r"^\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b").unwrap();
-
-    for line in lines {
-        if let Some(caps) = type_alias_re.captures(line) {
-            aliases.insert(caps[1].to_string(), caps[2].to_string());
-        } else if let Some(caps) = const_alias_re.captures(line) {
-            aliases.insert(caps[1].to_string(), caps[2].to_string());
-        }
-    }
-    aliases
-}
-
-fn ruby_method_param_types(lines: &[String]) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut types_by_method = BTreeMap::new();
-    let mut pending_sig = String::new();
-    let def_re = Regex::new(r"^\s*def\s+([A-Za-z_]\w*[!?=]?)(?:\s|\(|$)").unwrap();
-
-    for line in lines {
-        if ruby_pending_sig_active(line, &pending_sig) {
-            pending_sig.push_str(line);
-        }
-        if let Some(caps) = def_re.captures(line) {
-            types_by_method.insert(caps[1].to_string(), ruby_sig_param_types(&pending_sig));
-            pending_sig.clear();
-        }
-    }
-    types_by_method
-}
-
-fn ruby_pending_sig_active(line: &str, pending_sig: &str) -> bool {
-    !pending_sig.is_empty() || line.trim().starts_with("sig")
-}
-
-fn ruby_sig_param_types(sig_source: &str) -> BTreeMap<String, String> {
-    let params_re = Regex::new(r"params\s*\((.*?)\)").unwrap();
-    let param_pair_re =
-        Regex::new(r"([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)").unwrap();
-    let mut params = BTreeMap::new();
-    if let Some(p_caps) = params_re.captures(sig_source) {
-        for pair in param_pair_re.captures_iter(&p_caps[1]) {
-            params.insert(pair[1].to_string(), pair[2].to_string());
-        }
-    }
-    params
 }

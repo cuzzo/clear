@@ -5,7 +5,7 @@ use super::super::tree_sitter_adapter::{
 };
 use super::super::{CallSite, CloneCandidate, Document, FunctionDef, Language};
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::HashSet;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) const EMPTY_NODE_KINDS: &[&str] = &[];
@@ -194,10 +194,6 @@ pub(crate) trait LanguageProfile {
     }
 
     fn assignment_operator_tokens(&self) -> &[&str] {
-        EMPTY_NODE_KINDS
-    }
-
-    fn declarator_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 
@@ -1042,25 +1038,6 @@ pub(crate) trait LanguageProfile {
                 .trim_start_matches("->")
                 .to_string(),
         )
-    }
-
-    fn method_param_types(&self, _lines: &[String]) -> BTreeMap<String, BTreeMap<String, String>> {
-        BTreeMap::new()
-    }
-
-    fn immutable_struct_readers(&self, _lines: &[String]) -> BTreeMap<String, BTreeSet<String>> {
-        BTreeMap::new()
-    }
-
-    fn immutable_struct_reader_types(
-        &self,
-        _lines: &[String],
-    ) -> BTreeMap<String, BTreeMap<String, String>> {
-        BTreeMap::new()
-    }
-
-    fn type_aliases(&self, _lines: &[String]) -> BTreeMap<String, String> {
-        BTreeMap::new()
     }
 
     fn clone_candidates(&self, document: &Document) -> Vec<CloneCandidate> {

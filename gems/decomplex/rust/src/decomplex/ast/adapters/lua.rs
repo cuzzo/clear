@@ -332,11 +332,6 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         named_children(target)
     }
 
-    fn identifier_text_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        matches!(node.kind(), "variable_list" | "expression_list")
-            && self.bare_identifier_text(node_text(node, source))
-    }
-
     fn member_assignment_target(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         if node.kind() != "variable_list" {
             return false;
@@ -441,18 +436,6 @@ impl AstNormalizationAdapter for LuaAstAdapter {
 
     fn single_assignment_block_child(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         lua_single_assignment_block_child(node, source)
-    }
-
-    fn single_assignment_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        if node.kind() != "assignment_statement" {
-            return false;
-        }
-        let Some(parent) = node.parent() else {
-            return false;
-        };
-        parent.kind() == "block"
-            && node_text(parent, source) == node_text(node, source)
-            && raw_named_children(parent).len() == 1
     }
 
     fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {

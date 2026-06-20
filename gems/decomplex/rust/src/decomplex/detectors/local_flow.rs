@@ -105,7 +105,6 @@ fn normalized_local_methods(document: &Document) -> Vec<MethodSummary> {
     let mut detector = LocalFlow::new(
         document.file.clone(),
         document.lines.clone(),
-        document.language,
         method_metadata(document),
     );
     detector.scan(&document.normalized_root)
@@ -1154,7 +1153,6 @@ fn fallback_node_from_raw(raw: &RawNode) -> Node {
 struct LocalFlow {
     file: String,
     lines: Vec<String>,
-    language: Language,
     methods_by_span: BTreeMap<Span, MethodMetadata>,
 }
 
@@ -1162,13 +1160,11 @@ impl LocalFlow {
     fn new(
         file: String,
         lines: Vec<String>,
-        language: Language,
         methods_by_span: BTreeMap<Span, MethodMetadata>,
     ) -> Self {
         Self {
             file,
             lines,
-            language,
             methods_by_span,
         }
     }
