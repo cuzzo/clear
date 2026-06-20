@@ -131,6 +131,14 @@ module Decomplex
         super || (node.kind == "expression_list" && node.children.any? { |child| !child.named? && child.text == "[" })
       end
 
+      def suppress_field_receiver_lhs_reads?
+        true
+      end
+
+      def field_assignment_writes_receiver?
+        true
+      end
+
       private
 
       def boolean_container?(node)

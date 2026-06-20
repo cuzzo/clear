@@ -1,4 +1,5 @@
 pub(crate) mod adapters;
+pub(crate) mod complexity;
 pub mod tree_sitter_adapter;
 
 use crate::decomplex::ast::{Node as NormalizedNode, RawNode, Span};
@@ -107,6 +108,8 @@ pub struct Document {
     pub decision_sites: Vec<DecisionSite>,
     pub branch_decisions: Vec<BranchDecision>,
     pub dispatch_sites: Vec<DispatchSite>,
+    pub semantic_effect_sites: Vec<SemanticEffectSite>,
+    pub local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
     pub predicate_aliases: Vec<PredicateAlias>,
     pub comparison_uses: Vec<ComparisonUse>,
 }
@@ -211,6 +214,22 @@ pub struct DispatchSite {
     pub function: String,
     pub line: usize,
     pub span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SemanticEffectSite {
+    pub kind: String,
+    pub detail: String,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LocalComplexityScore {
+    pub score: f64,
+    pub signals: BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

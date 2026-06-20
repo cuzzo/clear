@@ -281,6 +281,7 @@ fn raw_local_reads(
             && !raw_declaration_name_in_tree(node, child, profile)
             && !raw_declaration_name(child, parent, profile)
             && !raw_member_name(child, parent, profile)
+            && !raw_keyed_element_key(child, parent, profile)
         {
             reads.push(name);
         }
@@ -841,6 +842,12 @@ fn raw_assignment_lhs_read_in_tree(
     profile: &dyn LanguageProfile,
 ) -> bool {
     if profile
+        .deferred_statement_node_kinds()
+        .contains(&root.kind.as_str())
+    {
+        return false;
+    }
+    if profile
         .assignment_node_kinds()
         .contains(&root.kind.as_str())
     {
@@ -860,6 +867,12 @@ fn raw_assignment_lhs_write_in_tree(
     target: &RawNode,
     profile: &dyn LanguageProfile,
 ) -> bool {
+    if profile
+        .deferred_statement_node_kinds()
+        .contains(&root.kind.as_str())
+    {
+        return false;
+    }
     if profile
         .assignment_node_kinds()
         .contains(&root.kind.as_str())
@@ -887,8 +900,12 @@ fn raw_assignment_lhs_read_target(
         return profile.suppress_field_receiver_lhs_reads()
             && raw_member_receiver_target(lhs, target, profile);
     }
-    if raw_local_identifier_text(lhs, profile).is_some() {
-        return std::ptr::eq(lhs, target);
+    if let Some(lhs_name) = raw_local_identifier_text(lhs, profile) {
+        return std::ptr::eq(lhs, target)
+            || (raw_contains_node(lhs, target)
+                && raw_local_identifier_text(target, profile)
+                    .map(|target_name| target_name == lhs_name)
+                    .unwrap_or(false));
     }
     if profile
         .expression_list_node_kinds()
@@ -912,17 +929,18 @@ fn raw_assignment_lhs_write_target(
     if raw_indexed_lhs_node(lhs, profile) {
         return raw_named_children(lhs)
             .first()
-            .map(|object| {
-                !raw_field_like_node(object, profile)
-                    && raw_assignment_lhs_write_target(object, target, profile)
-            })
+            .map(|object| raw_assignment_lhs_write_target(object, target, profile))
             .unwrap_or(false);
     }
     if raw_field_like_node(lhs, profile) {
         return raw_member_receiver_target(lhs, target, profile);
     }
-    if raw_local_identifier_text(lhs, profile).is_some() {
-        return std::ptr::eq(lhs, target);
+    if let Some(lhs_name) = raw_local_identifier_text(lhs, profile) {
+        return std::ptr::eq(lhs, target)
+            || (raw_contains_node(lhs, target)
+                && raw_local_identifier_text(target, profile)
+                    .map(|target_name| target_name == lhs_name)
+                    .unwrap_or(false));
     }
     if profile
         .expression_list_node_kinds()
@@ -975,8 +993,20 @@ fn raw_member_receiver_target(
     if raw_local_identifier_text(receiver, profile).is_some() {
         return std::ptr::eq(receiver, target);
     }
+    if raw_indexed_lhs_node(receiver, profile) {
+        return raw_named_children(receiver)
+            .first()
+            .map(|object| raw_member_receiver_target(object, target, profile))
+            .unwrap_or(false);
+    }
     if raw_field_like_node(receiver, profile) {
         return raw_member_receiver_target(receiver, target, profile);
+    }
+    if raw_named_children(receiver)
+        .into_iter()
+        .any(|child| raw_member_receiver_target(child, target, profile))
+    {
+        return true;
     }
     false
 }
@@ -1009,6 +1039,29 @@ fn raw_call_name(node: &RawNode, parent: Option<&RawNode>, profile: &dyn Languag
         && raw_named_children(parent)
             .first()
             .map(|callee| std::ptr::eq(*callee, node))
+            .unwrap_or(false)
+}
+
+fn raw_keyed_element_key(
+    node: &RawNode,
+    parent: Option<&RawNode>,
+    profile: &dyn LanguageProfile,
+) -> bool {
+    let Some(parent) = parent else {
+        return false;
+    };
+    if !profile
+        .keyed_element_node_kinds()
+        .contains(&parent.kind.as_str())
+    {
+        return false;
+    }
+    raw_named_children(parent)
+        .first()
+        .map(|key| std::ptr::eq(*key, node))
+        .unwrap_or(false)
+        || raw_next_sibling(node, parent)
+            .map(|sibling| !sibling.named && sibling.text == ":")
             .unwrap_or(false)
 }
 

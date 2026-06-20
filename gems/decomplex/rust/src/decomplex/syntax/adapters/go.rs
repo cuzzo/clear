@@ -214,6 +214,14 @@ impl LanguageProfile for GoProfile {
         &["expression_list"]
     }
 
+    fn keyed_element_node_kinds(&self) -> &[&str] {
+        &["keyed_element"]
+    }
+
+    fn deferred_statement_node_kinds(&self) -> &[&str] {
+        &["defer_statement"]
+    }
+
     fn suppress_field_receiver_lhs_reads(&self) -> bool {
         true
     }

@@ -1,4 +1,4 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::semantic_alias;
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
@@ -168,22 +168,13 @@ pub fn scan_documents_with_semantic_aliases_and_min_writes(
     semantic_aliases: &semantic_alias::SemanticAliasReport,
     min_writes: usize,
 ) -> StateMeshReport {
-    let mut src_map = BTreeMap::new();
-    for document in documents {
-        src_map.insert(
-            document.file.clone(),
-            (document.normalized_root.clone(), document.lines.clone()),
-        );
-    }
-
-    let mut sm = StateMesh::new(src_map, min_writes);
+    let mut sm = StateMesh::new(min_writes);
     sm.load_document_facts(documents);
     sm.find_re_derivations(semantic_aliases);
     sm.to_json_graph()
 }
 
 struct StateMesh {
-    src_map: BTreeMap<String, (Node, Vec<String>)>,
     min_writes: usize,
     custom_fields: Option<Vec<String>>,
     writes: Vec<Write>,
@@ -192,25 +183,14 @@ struct StateMesh {
 }
 
 impl StateMesh {
-    fn new(src_map: BTreeMap<String, (Node, Vec<String>)>, min_writes: usize) -> Self {
+    fn new(min_writes: usize) -> Self {
         Self {
-            src_map,
             min_writes,
             custom_fields: None,
             writes: Vec::new(),
             reads: Vec::new(),
             re_derivations: Vec::new(),
         }
-    }
-
-    fn run(&mut self, semantic_aliases: &semantic_alias::SemanticAliasReport) {
-        self.discover_fields();
-        if self.known_field_norms().is_empty() {
-            return;
-        }
-
-        self.find_reads();
-        self.find_re_derivations(semantic_aliases);
     }
 
     fn load_document_facts(&mut self, documents: &[Document]) {
@@ -254,215 +234,6 @@ impl StateMesh {
                 }
             }
         }
-    }
-
-    fn discover_fields(&mut self) {
-        let files: Vec<_> = self.src_map.keys().cloned().collect();
-        for file in files {
-            let (root, lines) = self.src_map.get(&file).unwrap();
-            let mut writes = Vec::new();
-            self.walk_writes(root, lines, &Vec::new(), &file, &mut writes);
-            self.writes.extend(writes);
-        }
-    }
-
-    fn walk_writes(
-        &self,
-        node: &Node,
-        lines: &[String],
-        defstack: &[String],
-        file: &str,
-        out: &mut Vec<Write>,
-    ) {
-        let mut next_defstack = defstack.to_vec();
-        match node.r#type.as_str() {
-            "CLASS" | "MODULE" | "DEFN" => {
-                if let Some(Child::Symbol(name)) = node.children.first() {
-                    next_defstack.push(name.clone());
-                }
-            }
-            "DEFS" => {
-                if let Some(Child::Symbol(name)) = node.children.get(1) {
-                    next_defstack.push(name.clone());
-                }
-            }
-            "ATTRASGN" => {
-                if let (Some(recv), Some(Child::Symbol(msg))) = (
-                    node.children.get(0).and_then(ast::node),
-                    node.children.get(1),
-                ) {
-                    if msg != "[]=" {
-                        let attr = msg.trim_end_matches('=').to_string();
-                        let norm = self.normalize(&attr);
-                        out.push(Write {
-                            attr,
-                            norm,
-                            recv: self.recv_slice(Some(recv), lines),
-                            file: file.to_string(),
-                            defn: next_defstack
-                                .last()
-                                .cloned()
-                                .unwrap_or_else(|| "(top-level)".to_string()),
-                            line: node.first_lineno,
-                            span: [
-                                node.first_lineno,
-                                node.first_column,
-                                node.last_lineno,
-                                node.last_column,
-                            ],
-                        });
-                    }
-                }
-            }
-            "IASGN" => {
-                if let Some(Child::String(attr)) = node.children.first() {
-                    let norm = self.normalize(attr);
-                    out.push(Write {
-                        attr: attr.clone(),
-                        norm,
-                        recv: "self".to_string(),
-                        file: file.to_string(),
-                        defn: next_defstack
-                            .last()
-                            .cloned()
-                            .unwrap_or_else(|| "(top-level)".to_string()),
-                        line: node.first_lineno,
-                        span: [
-                            node.first_lineno,
-                            node.first_column,
-                            node.last_lineno,
-                            node.last_column,
-                        ],
-                    });
-                }
-            }
-            _ => {}
-        }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk_writes(child, lines, &next_defstack, file, out);
-        }
-    }
-
-    fn find_reads(&mut self) {
-        let field_norms = self.known_field_norms();
-        let files: Vec<_> = self.src_map.keys().cloned().collect();
-        for file in files {
-            let (root, lines) = self.src_map.get(&file).unwrap();
-            let mut reads = Vec::new();
-            self.walk_reads(root, lines, &Vec::new(), &file, &field_norms, &mut reads);
-            self.reads.extend(reads);
-        }
-    }
-
-    fn walk_reads(
-        &self,
-        node: &Node,
-        lines: &[String],
-        defstack: &[String],
-        file: &str,
-        field_norms: &BTreeSet<String>,
-        out: &mut Vec<Read>,
-    ) {
-        let mut next_defstack = defstack.to_vec();
-        match node.r#type.as_str() {
-            "CLASS" | "MODULE" | "DEFN" => {
-                if let Some(Child::Symbol(name)) = node.children.first() {
-                    next_defstack.push(name.clone());
-                }
-            }
-            "DEFS" => {
-                if let Some(Child::Symbol(name)) = node.children.get(1) {
-                    next_defstack.push(name.clone());
-                }
-            }
-            "CALL" | "OPCALL" | "FCALL" | "VCALL" => {
-                let recv = if node.r#type == "CALL" || node.r#type == "OPCALL" {
-                    node.children.get(0).and_then(ast::node)
-                } else {
-                    None
-                };
-                let mid = if node.r#type == "CALL" || node.r#type == "OPCALL" {
-                    node.children.get(1)
-                } else {
-                    node.children.get(0)
-                };
-                let args = if node.r#type == "CALL" || node.r#type == "OPCALL" {
-                    node.children.get(2)
-                } else {
-                    node.children.get(1)
-                };
-
-                if let Some(Child::Symbol(name)) = mid {
-                    if args.is_none()
-                        || matches!(args, Some(Child::Nil))
-                        || self.is_empty_list(args)
-                    {
-                        if field_norms.contains(name) {
-                            self.push_read(
-                                Read {
-                                    attr: name.clone(),
-                                    norm: name.clone(),
-                                    recv: self.recv_slice(recv, lines),
-                                    file: file.to_string(),
-                                    defn: next_defstack
-                                        .last()
-                                        .cloned()
-                                        .unwrap_or_else(|| "(top-level)".to_string()),
-                                    line: node.first_lineno,
-                                    span: [
-                                        node.first_lineno,
-                                        node.first_column,
-                                        node.last_lineno,
-                                        node.last_column,
-                                    ],
-                                },
-                                out,
-                            );
-                        }
-                    }
-                }
-            }
-            "IVAR" => {
-                if let Some(Child::String(name)) = node.children.first() {
-                    let norm = self.normalize(name);
-                    if field_norms.contains(&norm) {
-                        self.push_read(
-                            Read {
-                                attr: name.clone(),
-                                norm,
-                                recv: "self".to_string(),
-                                file: file.to_string(),
-                                defn: next_defstack
-                                    .last()
-                                    .cloned()
-                                    .unwrap_or_else(|| "(top-level)".to_string()),
-                                line: node.first_lineno,
-                                span: [
-                                    node.first_lineno,
-                                    node.first_column,
-                                    node.last_lineno,
-                                    node.last_column,
-                                ],
-                            },
-                            out,
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk_reads(child, lines, &next_defstack, file, field_norms, out);
-        }
-    }
-
-    fn push_read(&self, read: Read, out: &mut Vec<Read>) {
-        if self.write_target_read(&read) {
-            return;
-        }
-        out.push(read);
     }
 
     fn write_target_read(&self, read: &Read) -> bool {
@@ -816,21 +587,5 @@ impl StateMesh {
             norms.extend(custom.clone());
         }
         norms
-    }
-
-    fn recv_slice(&self, node: Option<&Node>, lines: &[String]) -> String {
-        let Some(node) = node else {
-            return "?".to_string();
-        };
-        ast::slice(node, lines)
-    }
-
-    fn is_empty_list(&self, args: Option<&Child>) -> bool {
-        if let Some(Child::Node(node)) = args {
-            if node.r#type == "LIST" {
-                return node.children.iter().all(|c| matches!(c, Child::Nil));
-            }
-        }
-        false
     }
 }

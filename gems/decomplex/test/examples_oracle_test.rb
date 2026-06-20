@@ -180,8 +180,11 @@ class ExamplesOracleTest < Minitest::Test
     when "local-flow"
       Array(output).map do |method|
         {
-          "statement_count" => Array(method["statements"]).size,
-          "boundary_count" => Array(method["boundaries"]).size
+          "method" => method["name"],
+          "statements" => Array(method["statements"]).map do |statement|
+            pick(statement, %w[reads writes dependencies co_uses])
+          end,
+          "boundaries" => rows(method["boundaries"], %w[before_index after_index kind])
         }
       end
     when "structural-topology"

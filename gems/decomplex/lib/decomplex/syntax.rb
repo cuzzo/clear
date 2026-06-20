@@ -806,6 +806,10 @@ module Decomplex
         if (name = generic_local_identifier_text(lhs))
           return [name]
         end
+        if field_assignment_writes_receiver? && field_like_node?(lhs)
+          receiver = lhs.named_children.first
+          return collect_generic_assignment_lhs_names(receiver)
+        end
         return [] if generic_identifier?(lhs)
         return [] if generic_member_name?(lhs)
         return [lhs.text] if simple_identifier_text?(lhs.text)
@@ -864,7 +868,13 @@ module Decomplex
           return
         end
 
-        return if field_like_node?(lhs)
+        if field_like_node?(lhs)
+          if suppress_field_receiver_lhs_reads?
+            receiver = lhs.named_children.first
+            collect_generic_assignment_lhs_read_target_keys(receiver, keys)
+          end
+          return
+        end
 
         if generic_identifier?(lhs) || generic_local_identifier_text(lhs)
           keys << node_key(lhs)
@@ -893,7 +903,13 @@ module Decomplex
           return
         end
 
-        return if field_like_node?(lhs)
+        if field_like_node?(lhs)
+          return unless field_assignment_writes_receiver?
+
+          receiver = lhs.named_children.first
+          collect_generic_assignment_lhs_target_keys(receiver, keys)
+          return
+        end
 
         if generic_identifier?(lhs) || generic_local_identifier_text(lhs)
           keys << node_key(lhs)
@@ -918,7 +934,10 @@ module Decomplex
           return lhs.named_children.any? { |child| generic_assignment_lhs_read_target?(child, target) }
         end
 
-        return false if field_like_node?(lhs)
+        if field_like_node?(lhs)
+          return suppress_field_receiver_lhs_reads? &&
+                 generic_assignment_lhs_read_target?(lhs.named_children.first, target)
+        end
 
         return lhs == target if generic_identifier?(lhs)
 
@@ -927,6 +946,14 @@ module Decomplex
 
       def indexed_lhs_node?(node)
         ts_node?(node) && indexed_lhs_node_kinds.include?(node.kind)
+      end
+
+      def suppress_field_receiver_lhs_reads?
+        false
+      end
+
+      def field_assignment_writes_receiver?
+        false
       end
 
       def ts_node_contains?(root, target)

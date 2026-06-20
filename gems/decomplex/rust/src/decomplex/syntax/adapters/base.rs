@@ -346,6 +346,14 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn keyed_element_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn deferred_statement_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn suppress_field_receiver_lhs_reads(&self) -> bool {
         false
     }
