@@ -1,6 +1,5 @@
 {
   "detector": "state-branch-density",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

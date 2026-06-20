@@ -160,6 +160,14 @@ pub fn scan_documents_with_semantic_aliases(
     documents: &[Document],
     semantic_aliases: &semantic_alias::SemanticAliasReport,
 ) -> StateMeshReport {
+    scan_documents_with_semantic_aliases_and_min_writes(documents, semantic_aliases, 2)
+}
+
+pub fn scan_documents_with_semantic_aliases_and_min_writes(
+    documents: &[Document],
+    semantic_aliases: &semantic_alias::SemanticAliasReport,
+    min_writes: usize,
+) -> StateMeshReport {
     let mut src_map = BTreeMap::new();
     for document in documents {
         src_map.insert(
@@ -168,7 +176,7 @@ pub fn scan_documents_with_semantic_aliases(
         );
     }
 
-    let mut sm = StateMesh::new(src_map);
+    let mut sm = StateMesh::new(src_map, min_writes);
     sm.run(semantic_aliases);
     sm.to_json_graph()
 }
@@ -183,10 +191,10 @@ struct StateMesh {
 }
 
 impl StateMesh {
-    fn new(src_map: BTreeMap<String, (Node, Vec<String>)>) -> Self {
+    fn new(src_map: BTreeMap<String, (Node, Vec<String>)>, min_writes: usize) -> Self {
         Self {
             src_map,
-            min_writes: 2,
+            min_writes,
             custom_fields: None,
             writes: Vec::new(),
             reads: Vec::new(),
@@ -347,10 +355,39 @@ impl StateMesh {
                         || self.is_empty_list(args)
                     {
                         if field_norms.contains(name) {
-                            out.push(Read {
+                            self.push_read(
+                                Read {
+                                    attr: name.clone(),
+                                    norm: name.clone(),
+                                    recv: self.recv_slice(recv, lines),
+                                    file: file.to_string(),
+                                    defn: next_defstack
+                                        .last()
+                                        .cloned()
+                                        .unwrap_or_else(|| "(top-level)".to_string()),
+                                    line: node.first_lineno,
+                                    span: [
+                                        node.first_lineno,
+                                        node.first_column,
+                                        node.last_lineno,
+                                        node.last_column,
+                                    ],
+                                },
+                                out,
+                            );
+                        }
+                    }
+                }
+            }
+            "IVAR" => {
+                if let Some(Child::String(name)) = node.children.first() {
+                    let norm = self.normalize(name);
+                    if field_norms.contains(&norm) {
+                        self.push_read(
+                            Read {
                                 attr: name.clone(),
-                                norm: name.clone(),
-                                recv: self.recv_slice(recv, lines),
+                                norm,
+                                recv: "self".to_string(),
                                 file: file.to_string(),
                                 defn: next_defstack
                                     .last()
@@ -363,32 +400,9 @@ impl StateMesh {
                                     node.last_lineno,
                                     node.last_column,
                                 ],
-                            });
-                        }
-                    }
-                }
-            }
-            "IVAR" => {
-                if let Some(Child::String(name)) = node.children.first() {
-                    let norm = self.normalize(name);
-                    if field_norms.contains(&norm) {
-                        out.push(Read {
-                            attr: name.clone(),
-                            norm,
-                            recv: "self".to_string(),
-                            file: file.to_string(),
-                            defn: next_defstack
-                                .last()
-                                .cloned()
-                                .unwrap_or_else(|| "(top-level)".to_string()),
-                            line: node.first_lineno,
-                            span: [
-                                node.first_lineno,
-                                node.first_column,
-                                node.last_lineno,
-                                node.last_column,
-                            ],
-                        });
+                            },
+                            out,
+                        );
                     }
                 }
             }
@@ -398,6 +412,25 @@ impl StateMesh {
         for child in node.children.iter().filter_map(ast::node) {
             self.walk_reads(child, lines, &next_defstack, file, field_norms, out);
         }
+    }
+
+    fn push_read(&self, read: Read, out: &mut Vec<Read>) {
+        if self.write_target_read(&read) {
+            return;
+        }
+        out.push(read);
+    }
+
+    fn write_target_read(&self, read: &Read) -> bool {
+        self.writes.iter().any(|write| {
+            write.file == read.file
+                && write.defn == read.defn
+                && write.recv == read.recv
+                && (write.attr == read.attr || write.norm == read.norm)
+                && write.line == read.line
+                && write.span[0] == read.span[0]
+                && write.span[1] == read.span[1]
+        })
     }
 
     fn find_re_derivations(&mut self, semantic_aliases: &semantic_alias::SemanticAliasReport) {

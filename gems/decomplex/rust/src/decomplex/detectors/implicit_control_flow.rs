@@ -175,10 +175,7 @@ pub fn scan_documents(documents: &[Document]) -> ImplicitControlFlowReport {
     let effect_index = EffectIndex::build_documents(documents);
     let mut sequences = Vec::new();
     for document in documents {
-        let mut miner =
-            ImplicitControlFlow::new(document.file.clone(), document.lines.clone(), &effect_index);
-        miner.walk(&document.normalized_root, &Vec::new());
-        sequences.extend(miner.sequences);
+        sequences.extend(sequences_for_document(document, &effect_index));
     }
 
     let report = Report::new(sequences);
@@ -186,6 +183,68 @@ pub fn scan_documents(documents: &[Document]) -> ImplicitControlFlowReport {
         ordered_protocols: report.ordered_protocols(1),
         order_drift: report.drift(4, 0.75),
     }
+}
+
+fn sequences_for_document(document: &Document, effect_index: &EffectIndex) -> Vec<MethodSequence> {
+    document
+        .function_defs
+        .iter()
+        .filter_map(|function_def| {
+            let defn = protocol_method_name(&function_def.name);
+            let calls = document
+                .call_sites
+                .iter()
+                .filter(|call| {
+                    call.owner == function_def.owner
+                        && call.function == function_def.name
+                        && call.receiver == "self"
+                })
+                .map(|call| {
+                    let mid = protocol_method_name(&call.message);
+                    let effect = effect_index.effect_for(&function_def.owner, &mid);
+                    Call {
+                        mid,
+                        file: call.file.clone(),
+                        line: call.line,
+                        span: call.span,
+                        reads: effect.map(|e| e.reads.clone()).unwrap_or_default(),
+                        writes: effect.map(|e| e.writes.clone()).unwrap_or_default(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if calls
+                .iter()
+                .filter(|call| !call.reads.is_empty() || !call.writes.is_empty())
+                .count()
+                < 2
+            {
+                return None;
+            }
+
+            Some(MethodSequence {
+                file: function_def.file.clone(),
+                owner: function_def.owner.clone(),
+                defn,
+                line: function_def.line,
+                calls,
+            })
+        })
+        .collect()
+}
+
+fn protocol_method_name(name: &str) -> String {
+    name.split(['.', ':'])
+        .filter(|part| !part.is_empty())
+        .last()
+        .unwrap_or(name)
+        .to_string()
+}
+
+fn normalize_protocol_state(name: &str) -> String {
+    name.trim_start_matches('@')
+        .trim_end_matches('=')
+        .to_string()
 }
 
 struct ImplicitControlFlow<'a> {
@@ -502,10 +561,36 @@ impl EffectIndex {
     fn build_documents(documents: &[Document]) -> Self {
         let mut effects = Vec::new();
         for document in documents {
-            effects.extend(
-                EffectCollector::new(document.file.clone(), document.lines.clone())
-                    .scan(&document.normalized_root),
-            );
+            for function_def in &document.function_defs {
+                let mut reads = document
+                    .state_reads
+                    .iter()
+                    .filter(|read| {
+                        read.owner == function_def.owner && read.function == function_def.name
+                    })
+                    .map(|read| normalize_protocol_state(&read.field))
+                    .collect::<Vec<_>>();
+                reads.sort();
+                reads.dedup();
+
+                let mut writes = document
+                    .state_writes
+                    .iter()
+                    .filter(|write| {
+                        write.owner == function_def.owner && write.function == function_def.name
+                    })
+                    .map(|write| normalize_protocol_state(&write.field))
+                    .collect::<Vec<_>>();
+                writes.sort();
+                writes.dedup();
+
+                effects.push(MethodEffect {
+                    owner: function_def.owner.clone(),
+                    name: protocol_method_name(&function_def.name),
+                    reads,
+                    writes,
+                });
+            }
         }
         Self::from_effects(effects)
     }

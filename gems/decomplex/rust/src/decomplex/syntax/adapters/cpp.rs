@@ -29,6 +29,10 @@ impl LanguageProfile for CppProfile {
         &["parameter_list"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier", "field_identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["compound_statement"]
     }

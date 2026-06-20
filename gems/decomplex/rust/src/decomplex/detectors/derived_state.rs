@@ -1,4 +1,5 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
+use crate::decomplex::ast::Span;
+use crate::decomplex::detectors::local_flow::{self, MethodSummary, Statement};
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
@@ -24,6 +25,7 @@ struct Asgn {
     deps: Vec<String>,
     line: usize,
     span: Span,
+    statement_index: usize,
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DerivedStateRow>> {
@@ -32,116 +34,57 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DerivedSt
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<DerivedStateRow> {
-    let mut out = Vec::new();
-    for document in documents {
-        let detector = DerivedState::new(document.file.clone(), document.lines.clone());
-        detector.each_method(&document.normalized_root, &mut |file, defn, stmts| {
-            out.extend(analyze(file, defn, stmts));
-        });
-    }
+    let mut out = local_flow::scan_documents(documents)
+        .iter()
+        .flat_map(|method| analyze_method(method))
+        .collect::<Vec<_>>();
     out.sort_by(|a, b| b.gap.cmp(&a.gap));
     out
 }
 
-struct DerivedState {
-    file: String,
-    #[allow(dead_code)]
-    lines: Vec<String>,
+fn analyze_method(method: &MethodSummary) -> Vec<DerivedStateRow> {
+    analyze(&method.file, &method.name, &assignments(method))
 }
 
-impl DerivedState {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines }
-    }
-
-    fn each_method(&self, node: &Node, blk: &mut dyn FnMut(&str, &str, &[&Node])) {
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                blk(&self.file, name, &ast::body_stmts(node));
-            }
-        }
-        for child in node.children.iter().filter_map(ast::node) {
-            self.each_method(child, blk);
-        }
-    }
-}
-
-const BRANCH_RHS: &[&str] = &[
-    "IF", "CASE", "CASE2", "CASE3", "AND", "OR", "WHILE", "UNTIL", "RESCUE", "ENSURE",
-];
-
-fn lasgns<'a>(stmts: &'a [&'a Node]) -> Vec<&'a Node> {
-    let mut acc = Vec::new();
-    for s in stmts {
-        walk_lasgns(s, &mut acc);
-    }
-    acc
-}
-
-fn walk_lasgns<'a>(n: &'a Node, acc: &mut Vec<&'a Node>) {
-    if n.r#type == "LASGN" {
-        acc.push(n);
-        if let Some(val) = n.children.get(1).and_then(ast::node) {
-            if BRANCH_RHS.contains(&val.r#type.as_str()) {
-                // branch-local RHS: do not flatten its inner assignments
-            } else {
-                for child in n.children.iter().filter_map(ast::node) {
-                    walk_lasgns(child, acc);
-                }
-            }
-        }
-    } else {
-        for child in n.children.iter().filter_map(ast::node) {
-            walk_lasgns(child, acc);
-        }
-    }
-}
-
-fn lvars(node: &Node, acc: &mut Vec<String>) {
-    if matches!(
-        node.r#type.as_str(),
-        "BRACKETED_ARGUMENT_LIST" | "bracketed_argument_list"
-    ) {
-        return;
-    }
-    if node.r#type == "LVAR" {
-        if let Some(Child::String(name)) = node.children.first() {
-            acc.push(name.clone());
-        }
-    }
-    for child in node.children.iter().filter_map(ast::node) {
-        lvars(child, acc);
-    }
-}
-
-fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
-    let asgns: Vec<_> = lasgns(stmts)
+fn assignments(method: &MethodSummary) -> Vec<Asgn> {
+    method
+        .statements
         .iter()
-        .filter_map(|n| {
-            let name = match n.children.first() {
-                Some(Child::String(name)) => name.clone(),
-                _ => return None,
-            };
-            let mut deps = Vec::new();
-            if let Some(val) = n.children.get(1).and_then(ast::node) {
-                lvars(val, &mut deps);
-            }
-            let mut deps: Vec<_> = deps
-                .into_iter()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            deps.sort();
-            Some(Asgn {
-                name,
-                deps,
-                line: n.first_lineno,
-                span: [n.first_lineno, n.first_column, n.last_lineno, n.last_column],
-            })
+        .flat_map(|statement| {
+            statement
+                .writes
+                .iter()
+                .map(|name| Asgn {
+                    name: name.clone(),
+                    deps: dependencies_for(statement, name),
+                    line: statement.line,
+                    span: statement.span,
+                    statement_index: statement.index,
+                })
+                .collect::<Vec<_>>()
         })
-        .collect();
+        .collect()
+}
 
+fn dependencies_for(statement: &Statement, name: &str) -> Vec<String> {
+    let mut deps: Vec<_> = statement
+        .dependencies
+        .iter()
+        .filter_map(|(left, right)| {
+            if left == name {
+                Some(right.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    deps.sort();
+    deps
+}
+
+fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
     let mut out = Vec::new();
     for (i, b) in asgns.iter().enumerate() {
         if b.deps.is_empty() {
@@ -154,14 +97,17 @@ fn analyze(file: &str, defn: &str, stmts: &[&Node]) -> Vec<DerivedStateRow> {
             }
 
             // a reassigned strictly after b's definition?
-            let reasn = asgns.iter().skip(i + 1).find(|x| &x.name == a);
+            let reasn = asgns
+                .iter()
+                .skip(i + 1)
+                .find(|x| &x.name == a && x.statement_index > b.statement_index);
             let Some(reasn) = reasn else { continue };
 
             // b recomputed at or after a's reassignment?
             let recomputed = asgns
                 .iter()
                 .skip(i + 1)
-                .any(|x| &x.name == &b.name && x.line >= reasn.line);
+                .any(|x| &x.name == &b.name && x.statement_index >= reasn.statement_index);
             if recomputed {
                 continue;
             }

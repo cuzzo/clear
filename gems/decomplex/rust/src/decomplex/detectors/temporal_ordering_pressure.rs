@@ -1,5 +1,5 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, Language, StateRead, StateWrite};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,8 +43,12 @@ pub fn scan_files(
 pub fn scan_documents(documents: &[Document]) -> Vec<TemporalOrderingPressureRow> {
     let mut rows = Vec::new();
     for document in documents {
-        let mut detector =
-            TemporalOrderingPressure::new(document.file.clone(), document.lines.clone());
+        let mut detector = TemporalOrderingPressure::new(
+            document.file.clone(),
+            document.lines.clone(),
+            document.state_reads.clone(),
+            document.state_writes.clone(),
+        );
         rows.extend(detector.scan(&document.normalized_root));
     }
     rows.sort_by(|a, b| {
@@ -60,11 +64,23 @@ pub fn scan_documents(documents: &[Document]) -> Vec<TemporalOrderingPressureRow
 struct TemporalOrderingPressure {
     file: String,
     lines: Vec<String>,
+    state_reads: Vec<StateRead>,
+    state_writes: Vec<StateWrite>,
 }
 
 impl TemporalOrderingPressure {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines }
+    fn new(
+        file: String,
+        lines: Vec<String>,
+        state_reads: Vec<StateRead>,
+        state_writes: Vec<StateWrite>,
+    ) -> Self {
+        Self {
+            file,
+            lines,
+            state_reads,
+            state_writes,
+        }
     }
 
     fn scan(&mut self, root: &Node) -> Vec<TemporalOrderingPressureRow> {
@@ -80,13 +96,13 @@ impl TemporalOrderingPressure {
         out: &mut Vec<TemporalOrderingPressureRow>,
     ) {
         if matches!(node.r#type.as_str(), "CLASS" | "MODULE") {
-            let owner = self.owner_name(node);
-            let methods = self.owner_methods(node);
+            let owner = self.full_owner_name(owners, node);
+            let methods = self.owner_methods(node, &owner);
             if let Some(row) = self.pressure_row(&owner, &methods) {
                 out.push(row);
             }
             let mut next_owners = owners.to_vec();
-            next_owners.push(owner);
+            next_owners.push(self.owner_segment(node));
             for child in node.children.iter().filter_map(ast::node) {
                 self.walk_owners(child, &next_owners, out);
             }
@@ -97,7 +113,13 @@ impl TemporalOrderingPressure {
         }
     }
 
-    fn owner_name(&self, node: &Node) -> String {
+    fn full_owner_name(&self, owners: &[String], node: &Node) -> String {
+        let mut next = owners.to_vec();
+        next.push(self.owner_segment(node));
+        next.join("::")
+    }
+
+    fn owner_segment(&self, node: &Node) -> String {
         let name = ast::slice(
             node.children.first().and_then(ast::node).unwrap_or(node),
             &self.lines,
@@ -109,7 +131,7 @@ impl TemporalOrderingPressure {
         }
     }
 
-    fn owner_methods(&self, owner_node: &Node) -> Vec<MethodState> {
+    fn owner_methods(&self, owner_node: &Node, owner: &str) -> Vec<MethodState> {
         let Some(body) = self.owner_body(owner_node) else {
             return Vec::new();
         };
@@ -132,14 +154,15 @@ impl TemporalOrderingPressure {
                     visibility = name.clone();
                 }
             } else if matches!(stmt.r#type.as_str(), "DEFN" | "DEFS") {
-                methods.push(self.method_state(stmt, &visibility));
+                methods.push(self.method_state(stmt, &visibility, owner));
             }
         }
         methods
     }
 
     fn owner_body<'a>(&self, owner_node: &'a Node) -> Option<&'a Node> {
-        let scope = owner_node.children.get(2).and_then(ast::node)?;
+        let scope_index = if owner_node.r#type == "CLASS" { 2 } else { 1 };
+        let scope = owner_node.children.get(scope_index).and_then(ast::node)?;
         if scope.r#type != "SCOPE" {
             return None;
         }
@@ -155,11 +178,7 @@ impl TemporalOrderingPressure {
         false
     }
 
-    fn method_state(&self, defn_node: &Node, visibility: &str) -> MethodState {
-        let mut reads = Vec::new();
-        let mut writes = Vec::new();
-        self.collect_state_access(defn_node, &mut reads, &mut writes);
-
+    fn method_state(&self, defn_node: &Node, visibility: &str, owner: &str) -> MethodState {
         let name_index = if defn_node.r#type == "DEFS" { 1 } else { 0 };
         let name = defn_node
             .children
@@ -170,18 +189,8 @@ impl TemporalOrderingPressure {
             })
             .unwrap_or_else(|| "(anonymous)".to_string());
 
-        let mut reads: Vec<_> = reads
-            .into_iter()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let mut writes: Vec<_> = writes
-            .into_iter()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        reads.sort();
-        writes.sort();
+        let reads = self.state_reads_for(owner, &name);
+        let writes = self.state_writes_for(owner, &name);
 
         MethodState {
             name,
@@ -198,23 +207,22 @@ impl TemporalOrderingPressure {
         }
     }
 
-    fn collect_state_access(&self, node: &Node, reads: &mut Vec<String>, writes: &mut Vec<String>) {
-        match node.r#type.as_str() {
-            "IASGN" => {
-                if let Some(Child::String(name)) = node.children.first() {
-                    writes.push(name.clone());
-                }
-            }
-            "IVAR" => {
-                if let Some(Child::String(name)) = node.children.first() {
-                    reads.push(name.clone());
-                }
-            }
-            _ => {}
-        }
-        for child in node.children.iter().filter_map(ast::node) {
-            self.collect_state_access(child, reads, writes);
-        }
+    fn state_reads_for(&self, owner: &str, function: &str) -> Vec<String> {
+        sorted_unique(
+            self.state_reads
+                .iter()
+                .filter(|read| read.owner == owner && read.function == function)
+                .map(|read| read.field.clone()),
+        )
+    }
+
+    fn state_writes_for(&self, owner: &str, function: &str) -> Vec<String> {
+        sorted_unique(
+            self.state_writes
+                .iter()
+                .filter(|write| write.owner == owner && write.function == function)
+                .map(|write| write.field.clone()),
+        )
     }
 
     fn pressure_row(
@@ -302,4 +310,10 @@ impl TemporalOrderingPressure {
     fn factorial_label(&self, n: usize) -> String {
         format!("{}!", n)
     }
+}
+
+fn sorted_unique(values: impl Iterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<_> = values.collect::<BTreeSet<_>>().into_iter().collect();
+    out.sort();
+    out
 }

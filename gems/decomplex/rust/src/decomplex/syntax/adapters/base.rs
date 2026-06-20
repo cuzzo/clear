@@ -1,9 +1,9 @@
 use super::super::tree_sitter_adapter::{
     first_named_child, first_named_child_except, first_named_child_with_kind, first_named_text,
     named_children, normalize_type_owner, previous_sibling_text, strip_assignment_suffix,
-    AssignmentTarget, Target,
+    AssignmentTarget, CallTarget, Target,
 };
-use super::super::{CloneCandidate, Document, Language};
+use super::super::{CallSite, CloneCandidate, Document, FunctionDef, Language};
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tree_sitter::{Language as TreeSitterLanguage, Node};
@@ -121,6 +121,9 @@ const CLONE_CALL_KINDS: &[&str] = &[
     "method_invocation",
     "invocation_expression",
 ];
+const NOISE_MESSAGES: &[&str] = &[
+    "!", "!=", "==", "===", "<", "<=", ">", ">=", "[]", "[]=", "to_s", "inspect", "class",
+];
 
 pub(crate) trait LanguageProfile {
     fn language(&self) -> Language;
@@ -155,6 +158,14 @@ pub(crate) trait LanguageProfile {
     }
 
     fn parameter_list_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        self.identifier_node_kinds()
+    }
+
+    fn inline_parameter_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 
@@ -258,6 +269,19 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn argument_list_node_kinds(&self) -> &[&str] {
+        &[
+            "argument_list",
+            "arguments",
+            "call_suffix",
+            "value_arguments",
+        ]
+    }
+
+    fn block_argument_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn navigation_suffix_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -281,6 +305,32 @@ pub(crate) trait LanguageProfile {
     fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
         self.default_function_name(node, source)
     }
+
+    fn function_visibility(&self, _node: Node<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
+    fn function_params(&self, node: Node<'_>, source: &str) -> Vec<String> {
+        let param_nodes = if let Some(params) = self.function_parameter_list(node) {
+            named_children(params)
+        } else {
+            named_children(node)
+                .into_iter()
+                .filter(|child| self.inline_parameter_node_kinds().contains(&child.kind()))
+                .collect()
+        };
+        let mut out = Vec::new();
+        for param in param_nodes {
+            if let Some(name) = self.parameter_name(param, source) {
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
+    fn after_collect_facts(&self, _functions: &mut Vec<FunctionDef>, _calls: &[CallSite]) {}
 
     fn default_function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
         if !self.function_node_kinds().contains(&node.kind()) {
@@ -316,6 +366,16 @@ pub(crate) trait LanguageProfile {
 
     fn generated_prelude(&self, _node: Node<'_>, _source: &str) -> bool {
         false
+    }
+
+    fn control_context(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if generic_loop_context(node, source) {
+            Some("iterates".to_string())
+        } else if generic_branch_context(node, source) {
+            Some("conditional".to_string())
+        } else {
+            None
+        }
     }
 
     fn normalize_source_text(&self, text: &str) -> String {
@@ -404,13 +464,169 @@ pub(crate) trait LanguageProfile {
         }
     }
 
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        if self.call_node_kinds().contains(&node.kind()) {
+            self.default_call_target(node, source)
+        } else {
+            None
+        }
+    }
+
+    fn default_call_target<'tree>(
+        &self,
+        node: Node<'tree>,
+        source: &str,
+    ) -> Option<CallTarget<'tree>> {
+        let callee = if self.field_like_node_kinds().contains(&node.kind()) {
+            node
+        } else {
+            node.child_by_field_name("function")
+                .or_else(|| node.child_by_field_name("callee"))
+                .or_else(|| first_named_child(node))?
+        };
+        if callee.kind() == "builtin_function" || node_text(callee, source).starts_with('@') {
+            return None;
+        }
+
+        let (receiver, message) = self.target_from_callee(callee, source)?;
+        Some(CallTarget::new(
+            receiver,
+            message,
+            self.call_argument_texts(node, source),
+        ))
+    }
+
+    fn target_from_callee(&self, callee: Node<'_>, source: &str) -> Option<(String, String)> {
+        if self.field_like_node_kinds().contains(&callee.kind()) {
+            let object = callee
+                .child_by_field_name("object")
+                .or_else(|| callee.child_by_field_name("receiver"))
+                .or_else(|| callee.child_by_field_name("operand"))
+                .or_else(|| callee.child_by_field_name("value"))
+                .or_else(|| callee.child_by_field_name("expression"))
+                .or_else(|| first_named_child_except(callee, "navigation_suffix"))?;
+            let field = callee
+                .child_by_field_name("field")
+                .or_else(|| callee.child_by_field_name("property"))
+                .or_else(|| callee.child_by_field_name("name"))
+                .or_else(|| callee.child_by_field_name("suffix"))
+                .or_else(|| first_named_child_with_kind(callee, "navigation_suffix"))
+                .or_else(|| named_children(callee).into_iter().last())?;
+            let field_text = self.member_field_text(field, source)?;
+            return Some((
+                normalize_text(node_text(object, source))
+                    .trim_start_matches('*')
+                    .to_string(),
+                field_text,
+            ));
+        }
+
+        if self.identifier_node_kinds().contains(&callee.kind()) {
+            return Some(("self".to_string(), node_text(callee, source).to_string()));
+        }
+
+        let text = normalize_text(node_text(callee, source));
+        if text.is_empty() {
+            return None;
+        }
+        let parts = text.split('.').collect::<Vec<_>>();
+        if parts.len() > 1 {
+            Some((
+                parts[..parts.len() - 1].join("."),
+                parts[parts.len() - 1].to_string(),
+            ))
+        } else {
+            Some(("self".to_string(), text))
+        }
+    }
+
+    fn call_argument_texts(&self, node: Node<'_>, source: &str) -> Vec<String> {
+        self.call_argument_nodes(node)
+            .into_iter()
+            .map(|argument| normalize_text(node_text(argument, source)))
+            .collect()
+    }
+
+    fn call_argument_nodes<'tree>(&self, node: Node<'tree>) -> Vec<Node<'tree>> {
+        if let Some(args) = node.child_by_field_name("arguments").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| self.argument_list_node_kinds().contains(&child.kind()))
+        }) {
+            return named_children(args);
+        }
+        if !self.call_node_kinds().contains(&node.kind()) {
+            return Vec::new();
+        }
+
+        let callee = node
+            .child_by_field_name("function")
+            .or_else(|| node.child_by_field_name("callee"))
+            .or_else(|| first_named_child(node));
+        named_children(node)
+            .into_iter()
+            .filter(|child| Some(*child) != callee)
+            .collect()
+    }
+
+    fn call_has_block(&self, node: Node<'_>) -> bool {
+        named_children(node)
+            .into_iter()
+            .any(|child| self.block_argument_node_kinds().contains(&child.kind()))
+    }
+
+    fn noise_call(&self, target: &CallTarget<'_>) -> bool {
+        let message = target.message.as_str();
+        let receiver = target.receiver.as_str();
+        message.is_empty()
+            || NOISE_MESSAGES.contains(&message)
+            || message.starts_with('@')
+            || matches!(receiver, "std" | "builtin" | "build_options")
+            || receiver.starts_with("std.")
+            || receiver.starts_with("builtin.")
+            || receiver.starts_with("build_options.")
+    }
+
     fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
         self.default_state_target(lhs, source)
+    }
+
+    fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        self.default_state_read_target(node, source)
+    }
+
+    fn default_state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        if self.accessor_call_node_kinds().contains(&node.kind()) {
+            let receiver = node.child_by_field_name("receiver")?;
+            let method = node.child_by_field_name("method")?;
+            let field = node_text(method, source);
+            if node.child_by_field_name("arguments").is_some() || NOISE_MESSAGES.contains(&field) {
+                return None;
+            }
+            return Some(Target {
+                receiver: normalize_text(node_text(receiver, source)),
+                field: field.to_string(),
+            });
+        }
+
+        let target = self.default_state_target(node, source)?;
+        if NOISE_MESSAGES.contains(&target.field.as_str()) {
+            None
+        } else {
+            Some(target)
+        }
     }
 
     fn default_state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
         if previous_sibling_text(lhs, source).as_deref() == Some(":") {
             return None;
+        }
+
+        if self.expression_list_node_kinds().contains(&lhs.kind()) {
+            let children = named_children(lhs);
+            if children.len() == 1 {
+                return self.default_state_target(children[0], source);
+            }
         }
 
         if self.accessor_call_node_kinds().contains(&lhs.kind()) {
@@ -571,6 +787,68 @@ pub(crate) trait LanguageProfile {
             pending.extend(children);
         }
         None
+    }
+
+    fn function_parameter_list<'tree>(&self, node: Node<'tree>) -> Option<Node<'tree>> {
+        let declarator = node.child_by_field_name("declarator");
+        declarator
+            .and_then(|declarator| declarator.child_by_field_name("parameters"))
+            .or_else(|| node.child_by_field_name("parameters"))
+            .or_else(|| {
+                named_children(node)
+                    .into_iter()
+                    .find(|child| self.parameter_list_node_kinds().contains(&child.kind()))
+            })
+            .or_else(|| {
+                declarator.and_then(|declarator| {
+                    named_children(declarator)
+                        .into_iter()
+                        .find(|child| self.parameter_list_node_kinds().contains(&child.kind()))
+                })
+            })
+    }
+
+    fn parameter_name(&self, param: Node<'_>, source: &str) -> Option<String> {
+        let name = if self
+            .parameter_identifier_node_kinds()
+            .contains(&param.kind())
+        {
+            Some(param)
+        } else {
+            param
+                .child_by_field_name("name")
+                .or_else(|| {
+                    named_children(param)
+                        .into_iter()
+                        .filter(|child| {
+                            self.parameter_identifier_node_kinds()
+                                .contains(&child.kind())
+                        })
+                        .last()
+                })
+                .or_else(|| self.descendant_parameter_name(param))
+        }?;
+        let text = self.normalize_parameter_name(node_text(name, source));
+        (!text.is_empty() && text != "_").then_some(text)
+    }
+
+    fn descendant_parameter_name<'tree>(&self, node: Node<'tree>) -> Option<Node<'tree>> {
+        let mut found = None;
+        let mut stack = named_children(node);
+        while let Some(current) = stack.pop() {
+            if self
+                .parameter_identifier_node_kinds()
+                .contains(&current.kind())
+            {
+                found = Some(current);
+            }
+            stack.extend(named_children(current));
+        }
+        found
+    }
+
+    fn normalize_parameter_name(&self, text: &str) -> String {
+        text.to_string()
     }
 
     fn impl_owner_name(&self, node: Node<'_>, source: &str) -> Option<String> {
@@ -1025,6 +1303,67 @@ fn clone_method_span_for<'a>(
         .function_defs
         .iter()
         .find(|function| function.span[0] <= line_no && line_no <= function.span[2])
+}
+
+fn generic_loop_context(node: Node<'_>, source: &str) -> bool {
+    matches!(
+        node.kind(),
+        "while"
+            | "until"
+            | "for"
+            | "do_block"
+            | "while_statement"
+            | "until_statement"
+            | "for_statement"
+            | "for_in_statement"
+            | "enhanced_for_statement"
+            | "foreach_statement"
+            | "for_range_loop"
+            | "for_expression"
+            | "loop_expression"
+    ) || matches!(node.kind(), "expression_statement" | "labeled_statement")
+        && normalize_text(node_text(node, source))
+            .trim_start()
+            .starts_with("for ")
+}
+
+fn generic_branch_context(node: Node<'_>, source: &str) -> bool {
+    if matches!(
+        node.kind(),
+        "if" | "unless"
+            | "if_modifier"
+            | "unless_modifier"
+            | "case"
+            | "if_statement"
+            | "if_expression"
+            | "case_statement"
+            | "switch_statement"
+            | "switch_expression"
+            | "match_statement"
+            | "match_expression"
+            | "when_expression"
+            | "expression_switch_statement"
+    ) {
+        return true;
+    }
+
+    let first_token_is_branch = matches!(
+        node.kind(),
+        "body_statement" | "block" | "statements" | "statement_list"
+    ) && {
+        let mut cursor = node.walk();
+        let result = node
+            .children(&mut cursor)
+            .next()
+            .map(|child| matches!(child.kind(), "if" | "unless" | "case"))
+            .unwrap_or(false);
+        result
+    };
+    first_token_is_branch
+        || node.kind() == "expression_statement"
+            && normalize_text(node_text(node, source))
+                .trim_start()
+                .starts_with("if ")
 }
 
 fn clone_node_key(node: &RawNode) -> String {

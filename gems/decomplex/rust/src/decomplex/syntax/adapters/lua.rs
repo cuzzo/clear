@@ -22,6 +22,10 @@ impl LanguageProfile for LuaProfile {
         &["parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block"]
     }
@@ -59,11 +63,11 @@ impl LanguageProfile for LuaProfile {
     }
 
     fn expression_list_node_kinds(&self) -> &[&str] {
-        &["expression_list"]
+        &["expression_list", "variable_list"]
     }
 
     fn field_like_node_kinds(&self) -> &[&str] {
-        &["dot_index_expression", "variable_list"]
+        &["dot_index_expression"]
     }
 
     fn generated_prelude(&self, node: Node<'_>, source: &str) -> bool {

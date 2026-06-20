@@ -1,6 +1,5 @@
 {
   "detector": "implicit-control-flow",
-  "engine": "ruby",
   "options": {
   },
   "expected": {

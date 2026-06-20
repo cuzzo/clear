@@ -25,6 +25,10 @@ impl LanguageProfile for KotlinProfile {
         &["function_value_parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier", "simple_identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["function_body", "statements"]
     }

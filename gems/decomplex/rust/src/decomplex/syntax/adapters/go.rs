@@ -25,6 +25,10 @@ impl LanguageProfile for GoProfile {
         &["parameter_list"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier", "field_identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block", "statement_list"]
     }
@@ -43,6 +47,10 @@ impl LanguageProfile for GoProfile {
 
     fn assignment_node_kinds(&self) -> &[&str] {
         &["assignment_statement", "short_var_declaration"]
+    }
+
+    fn expression_list_node_kinds(&self) -> &[&str] {
+        &["expression_list"]
     }
 
     fn assignment_operator_tokens(&self) -> &[&str] {

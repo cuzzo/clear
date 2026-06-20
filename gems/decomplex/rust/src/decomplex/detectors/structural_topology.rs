@@ -1,9 +1,10 @@
-use crate::decomplex::ast::{self, Node, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::ast::{RawNode, Span};
+use crate::decomplex::syntax::adapters::language_profile;
+use crate::decomplex::syntax::{self, CallSite, Document, FunctionDef, Language};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct StructuralTopologyReport {
@@ -36,13 +37,6 @@ pub struct Edge {
     pub confidence: String,
 }
 
-const VISIBILITY_MIDS: &[&str] = &["public", "protected", "private"];
-const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
-const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
-const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
-const CONDITIONAL_TYPES: &[&str] = &["IF", "UNLESS", "CASE", "CASE2"];
-const ITERATION_TYPES: &[&str] = &["ITER", "FOR", "WHILE", "UNTIL"];
-
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StructuralTopologyReport> {
     let documents = syntax::parse_files(files, language)?;
     Ok(scan_documents(&documents))
@@ -50,16 +44,27 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<StructuralTop
 
 pub fn scan_documents(documents: &[Document]) -> StructuralTopologyReport {
     let mut methods = Vec::new();
-
     for document in documents {
-        let mut mc = MethodCollector::new(document.file.clone(), document.lines.clone());
-        methods.extend(mc.scan(&document.normalized_root));
+        methods.extend(methods_for_document(document));
     }
 
+    let method_by_id = methods
+        .iter()
+        .map(|method| (method.id.clone(), method.clone()))
+        .collect::<BTreeMap<_, _>>();
+
     let mut edges = Vec::new();
+    let mut seen = BTreeSet::new();
     for document in documents {
-        let mut ec = EdgeCollector::new(document.file.clone(), document.lines.clone(), &methods);
-        edges.extend(ec.scan(&document.normalized_root));
+        for edge in edges_for_document(document, &method_by_id) {
+            if seen.insert((
+                edge.caller.clone(),
+                edge.callee.clone(),
+                edge.r#type.clone(),
+            )) {
+                edges.push(edge);
+            }
+        }
     }
 
     StructuralTopologyReport { methods, edges }
@@ -128,436 +133,190 @@ impl Graph {
     }
 }
 
-struct MethodCollector {
-    file: String,
-    lines: Vec<String>,
+fn methods_for_document(document: &Document) -> Vec<Method> {
+    document
+        .function_defs
+        .iter()
+        .map(|function| method_for_function(document, function))
+        .collect()
 }
 
-impl MethodCollector {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines }
-    }
-
-    fn scan(&mut self, root: &Node) -> Vec<Method> {
-        let mut out = Vec::new();
-        out.extend(
-            self.methods_from_statements(&self.top_level_statements(root), &self.top_level_owner()),
-        );
-        self.walk(root, &Vec::new(), &mut out);
-        out
-    }
-
-    fn walk(&self, node: &Node, owners: &[String], out: &mut Vec<Method>) {
-        if OWNER_TYPES.contains(&node.r#type.as_str()) {
-            let owner = self.full_owner_name(owners, node);
-            out.extend(self.owner_methods(node, &owner));
-            let mut next_owners = owners.to_vec();
-            next_owners.push(self.owner_segment(node));
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, &next_owners, out);
-            }
-        } else {
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, owners, out);
-            }
-        }
-    }
-
-    fn owner_methods(&self, owner_node: &Node, owner: &str) -> Vec<Method> {
-        let Some(body) = self.owner_body(owner_node) else {
-            return Vec::new();
-        };
-        self.methods_from_statements(&self.owner_statements(body), owner)
-    }
-
-    fn methods_from_statements(&self, stmts: &[&Node], owner: &str) -> Vec<Method> {
-        let mut methods = Vec::new();
-        let mut visibility = "public".to_string();
-        for stmt in stmts {
-            if self.bare_visibility_marker(stmt) {
-                visibility = ast::child_to_string(stmt.children.get(0)).unwrap_or_default();
-            } else if self.visibility_call(stmt) {
-                visibility = self.handle_visibility_call(stmt, owner, &visibility, &mut methods);
-            } else if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
-                methods.push(self.method_record(stmt, owner, &visibility));
-            }
-        }
-        methods
-    }
-
-    fn handle_visibility_call(
-        &self,
-        stmt: &Node,
-        owner: &str,
-        current_visibility: &str,
-        methods: &mut Vec<Method>,
-    ) -> String {
-        let vis = ast::child_to_string(stmt.children.get(0)).unwrap_or_default();
-        if let Some(args) = stmt.children.get(1).and_then(ast::node) {
-            for arg in args.children.iter().filter_map(ast::node) {
-                if METHOD_TYPES.contains(&arg.r#type.as_str()) {
-                    methods.push(self.method_record(arg, owner, &vis));
-                } else if let Some(name) = self.literal_method_name(arg) {
-                    if let Some(m) = methods.iter_mut().rev().find(|m| m.name == name) {
-                        m.visibility = vis.clone();
-                    }
-                }
-            }
-        }
-        current_visibility.to_string()
-    }
-
-    fn owner_body<'a>(&self, owner_node: &'a Node) -> Option<&'a Node> {
-        let scope_index = if owner_node.r#type == "CLASS" { 2 } else { 1 };
-        let scope = owner_node.children.get(scope_index).and_then(ast::node)?;
-        if scope.r#type != "SCOPE" {
-            return None;
-        }
-        scope.children.get(2).and_then(ast::node)
-    }
-
-    fn owner_statements<'a>(&self, body: &'a Node) -> Vec<&'a Node> {
-        if body.r#type == "BLOCK" {
-            body.children.iter().filter_map(ast::node).collect()
-        } else {
-            vec![body]
-        }
-    }
-
-    fn top_level_statements<'a>(&self, root: &'a Node) -> Vec<&'a Node> {
-        root.children
-            .iter()
-            .filter_map(ast::node)
-            .flat_map(|c| {
-                if c.r#type == "BLOCK" {
-                    c.children.iter().filter_map(ast::node).collect()
-                } else {
-                    vec![c]
-                }
-            })
-            .collect()
-    }
-
-    fn bare_visibility_marker(&self, node: &Node) -> bool {
-        node.r#type == "VCALL"
-            && VISIBILITY_MIDS.contains(
-                &ast::child_to_string(node.children.get(0))
-                    .unwrap_or_default()
-                    .as_str(),
-            )
-    }
-
-    fn visibility_call(&self, node: &Node) -> bool {
-        node.r#type == "FCALL"
-            && VISIBILITY_MIDS.contains(
-                &ast::child_to_string(node.children.get(0))
-                    .unwrap_or_default()
-                    .as_str(),
-            )
-    }
-
-    fn literal_method_name(&self, node: &Node) -> Option<String> {
-        match node.r#type.as_str() {
-            "LIT" | "STR" | "DSTR" => ast::child_to_string(node.children.get(0)),
-            _ => None,
-        }
-    }
-
-    fn method_record(&self, node: &Node, owner: &str, visibility: &str) -> Method {
-        let name = self.method_name(node);
-        Method {
-            id: format!("{}#{}", owner, name),
-            owner: owner.to_string(),
-            name: name.clone(),
-            file: self.file.clone(),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-            visibility: if node.r#type == "DEFS" {
-                "public".to_string()
-            } else {
-                visibility.to_string()
-            },
-        }
-    }
-
-    fn method_name(&self, node: &Node) -> String {
-        if node.r#type == "DEFS" {
-            let receiver = node.children.get(0).and_then(ast::node);
-            let prefix = if let Some(r) = receiver {
-                if r.r#type == "SELF" {
-                    "self".to_string()
-                } else {
-                    ast::slice(r, &self.lines)
-                }
-            } else {
-                "?".to_string()
-            };
-            format!(
-                "{}.{}",
-                prefix,
-                ast::child_to_string(node.children.get(1)).unwrap_or_else(|| "?".to_string())
-            )
-        } else {
-            ast::child_to_string(node.children.get(0)).unwrap_or_else(|| "?".to_string())
-        }
-    }
-
-    fn full_owner_name(&self, owners: &[String], node: &Node) -> String {
-        let mut next = owners.to_vec();
-        next.push(self.owner_segment(node));
-        next.join("::")
-    }
-
-    fn owner_segment(&self, node: &Node) -> String {
-        let text = ast::slice(
-            node.children.first().and_then(ast::node).unwrap_or(node),
-            &self.lines,
-        );
-        if text.is_empty() {
-            "(anonymous)".to_string()
-        } else {
-            text
-        }
-    }
-
-    fn top_level_owner(&self) -> String {
-        format!("(top-level:{})", self.file)
+fn method_for_function(document: &Document, function: &FunctionDef) -> Method {
+    let owner = top_level_owner_for(document, &function.owner, function.span);
+    Method {
+        id: format!("{}#{}", owner, function.name),
+        owner,
+        name: function.name.clone(),
+        file: function.file.clone(),
+        line: function.line,
+        span: function.span,
+        visibility: function
+            .visibility
+            .clone()
+            .unwrap_or_else(|| "public".to_string()),
     }
 }
 
-struct EdgeCollector {
-    file: String,
-    lines: Vec<String>,
-    method_by_id: BTreeMap<String, Method>,
+fn edges_for_document(document: &Document, method_by_id: &BTreeMap<String, Method>) -> Vec<Edge> {
+    document
+        .call_sites
+        .iter()
+        .filter_map(|call| edge_for_call(document, method_by_id, call))
+        .collect()
 }
 
-impl EdgeCollector {
-    fn new(file: String, lines: Vec<String>, methods: &[Method]) -> Self {
-        let mut map = BTreeMap::new();
-        for m in methods {
-            map.insert(m.id.clone(), m.clone());
-        }
-        Self {
-            file,
-            lines,
-            method_by_id: map,
-        }
+fn edge_for_call(
+    document: &Document,
+    method_by_id: &BTreeMap<String, Method>,
+    call: &CallSite,
+) -> Option<Edge> {
+    if call.receiver != "self" {
+        return None;
     }
 
-    fn scan(&mut self, root: &Node) -> Vec<Edge> {
-        let mut out = Vec::new();
-        let top_level_methods: Vec<_> = self
-            .top_level_statements(root)
-            .into_iter()
-            .filter(|s| METHOD_TYPES.contains(&s.r#type.as_str()))
+    let owner = top_level_owner_for(document, &call.owner, call.span);
+    let caller = method_by_id.get(&format!("{}#{}", owner, call.function))?;
+    let callee_name = scoped_name(caller, &call.message);
+    let callee = method_by_id.get(&format!("{}#{}", owner, callee_name))?;
+    if caller.id == callee.id {
+        return None;
+    }
+
+    Some(Edge {
+        caller: caller.id.clone(),
+        callee: callee.id.clone(),
+        caller_name: caller.name.clone(),
+        callee_name: callee.name.clone(),
+        file: call.file.clone(),
+        line: call.line,
+        span: call.span,
+        r#type: edge_type(call.control.as_deref()),
+        kind: call_kind(document, call.span),
+        confidence: "high".to_string(),
+    })
+}
+
+fn scoped_name(caller: &Method, message: &str) -> String {
+    if caller.name.starts_with("self.") {
+        format!("self.{message}")
+    } else {
+        message.to_string()
+    }
+}
+
+fn edge_type(control: Option<&str>) -> String {
+    match control {
+        Some("conditional" | "iterates") => control.unwrap().to_string(),
+        _ => "always".to_string(),
+    }
+}
+
+fn call_kind(document: &Document, span: Span) -> String {
+    if source_text(&document.lines, span)
+        .trim_start()
+        .starts_with("self.")
+    {
+        "direct_self".to_string()
+    } else {
+        "bare_internal".to_string()
+    }
+}
+
+fn source_text(lines: &[String], span: Span) -> String {
+    let [first_line, first_column, last_line, last_column] = span;
+    if first_line == 0 || last_line == 0 || first_line > lines.len() || last_line > lines.len() {
+        return String::new();
+    }
+    if first_line == last_line {
+        return lines[first_line - 1]
+            .chars()
+            .skip(first_column)
+            .take(last_column.saturating_sub(first_column))
             .collect();
-        for m_node in top_level_methods {
-            let id = format!("(top-level:{})#{}", self.file, self.method_name(m_node));
-            if let Some(m) = self.method_by_id.get(&id) {
-                self.collect_calls(m_node, m, &Vec::new(), &mut out);
-            }
-        }
-        self.walk(root, &Vec::new(), &mut out);
-        out
     }
 
-    fn walk(&self, node: &Node, owners: &[String], out: &mut Vec<Edge>) {
-        if OWNER_TYPES.contains(&node.r#type.as_str()) {
-            let owner = self.full_owner_name(owners, node);
-            for m_node in self.owner_methods(node) {
-                let id = format!("{}#{}", owner, self.method_name(m_node));
-                if let Some(m) = self.method_by_id.get(&id) {
-                    self.collect_calls(m_node, m, &Vec::new(), out);
-                }
-            }
-            let mut next_owners = owners.to_vec();
-            next_owners.push(self.owner_segment(node));
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, &next_owners, out);
-            }
-        } else {
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, owners, out);
-            }
-        }
+    let mut parts = Vec::new();
+    parts.push(lines[first_line - 1].chars().skip(first_column).collect());
+    for line in lines
+        .iter()
+        .take(last_line.saturating_sub(1))
+        .skip(first_line)
+    {
+        parts.push(line.clone());
     }
+    parts.push(lines[last_line - 1].chars().take(last_column).collect());
+    parts.join("")
+}
 
-    fn collect_calls(
-        &self,
-        node: &Node,
-        caller: &Method,
-        context_stack: &[String],
-        out: &mut Vec<Edge>,
-    ) {
-        if SKIP_NESTED_TYPES.contains(&node.r#type.as_str())
-            && !METHOD_TYPES.contains(&node.r#type.as_str())
-        {
-            return;
-        }
-
-        let mut next_context = context_stack.to_vec();
-        if CONDITIONAL_TYPES.contains(&node.r#type.as_str()) {
-            next_context.push("conditional".to_string())
-        }
-        if ITERATION_TYPES.contains(&node.r#type.as_str()) {
-            next_context.push("iterates".to_string())
-        }
-
-        if let Some(edge) = self.internal_edge(node, caller, &next_context) {
-            if edge.caller != edge.callee {
-                out.push(edge)
-            }
-        }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.collect_calls(child, caller, &next_context, out);
-        }
-    }
-
-    fn internal_edge(
-        &self,
-        node: &Node,
-        caller: &Method,
-        context_stack: &[String],
-    ) -> Option<Edge> {
-        let call = self.internal_call_name(node, caller)?;
-        let id = format!("{}#{}", caller.owner, call.name);
-        let callee = self.method_by_id.get(&id)?;
-
-        Some(Edge {
-            caller: caller.id.clone(),
-            callee: callee.id.clone(),
-            caller_name: caller.name.clone(),
-            callee_name: callee.name.clone(),
-            file: self.file.clone(),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-            r#type: context_stack
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "always".to_string()),
-            kind: call.kind,
-            confidence: "high".to_string(),
-        })
-    }
-
-    fn internal_call_name(&self, node: &Node, caller: &Method) -> Option<InternalCallName> {
-        match node.r#type.as_str() {
-            "FCALL" | "VCALL" => Some(InternalCallName {
-                name: self.scoped_name(
-                    caller,
-                    &ast::child_to_string(node.children.get(0)).unwrap_or_default(),
-                ),
-                kind: "bare_internal".to_string(),
-            }),
-            "CALL" | "OPCALL" => {
-                let recv = node.children.get(0).and_then(ast::node)?;
-                if recv.r#type != "SELF" {
-                    return None;
-                }
-                let mid = ast::child_to_string(node.children.get(1))?;
-                Some(InternalCallName {
-                    name: self.scoped_name(caller, &mid),
-                    kind: "direct_self".to_string(),
-                })
-            }
-            _ => None,
-        }
-    }
-
-    fn scoped_name(&self, caller: &Method, mid: &str) -> String {
-        if caller.name.starts_with("self.") {
-            format!("self.{}", mid)
-        } else {
-            mid.to_string()
-        }
-    }
-
-    // Reuse helpers from MethodCollector
-    fn top_level_statements<'a>(&self, root: &'a Node) -> Vec<&'a Node> {
-        root.children
-            .iter()
-            .filter_map(ast::node)
-            .flat_map(|c| {
-                if c.r#type == "BLOCK" {
-                    c.children.iter().filter_map(ast::node).collect()
-                } else {
-                    vec![c]
-                }
-            })
-            .collect()
-    }
-    fn method_name(&self, node: &Node) -> String {
-        if node.r#type == "DEFS" {
-            let receiver = node.children.get(0).and_then(ast::node);
-            let prefix = if let Some(r) = receiver {
-                if r.r#type == "SELF" {
-                    "self".to_string()
-                } else {
-                    ast::slice(r, &self.lines)
-                }
-            } else {
-                "?".to_string()
-            };
-            format!(
-                "{}.{}",
-                prefix,
-                ast::child_to_string(node.children.get(1)).unwrap_or_else(|| "?".to_string())
-            )
-        } else {
-            ast::child_to_string(node.children.get(0)).unwrap_or_else(|| "?".to_string())
-        }
-    }
-    fn owner_methods<'a>(&self, owner_node: &'a Node) -> Vec<&'a Node> {
-        let Some(body) = self.owner_body(owner_node) else {
-            return Vec::new();
-        };
-        self.owner_statements(body)
-    }
-    fn owner_body<'a>(&self, owner_node: &'a Node) -> Option<&'a Node> {
-        let scope_index = if owner_node.r#type == "CLASS" { 2 } else { 1 };
-        let scope = owner_node.children.get(scope_index).and_then(ast::node)?;
-        if scope.r#type != "SCOPE" {
-            return None;
-        }
-        scope.children.get(2).and_then(ast::node)
-    }
-    fn owner_statements<'a>(&self, body: &'a Node) -> Vec<&'a Node> {
-        if body.r#type == "BLOCK" {
-            body.children.iter().filter_map(ast::node).collect()
-        } else {
-            vec![body]
-        }
-    }
-    fn full_owner_name(&self, owners: &[String], node: &Node) -> String {
-        let mut next = owners.to_vec();
-        next.push(self.owner_segment(node));
-        next.join("::")
-    }
-    fn owner_segment(&self, node: &Node) -> String {
-        let text = ast::slice(
-            node.children.first().and_then(ast::node).unwrap_or(node),
-            &self.lines,
-        );
-        if text.is_empty() {
-            "(anonymous)".to_string()
-        } else {
-            text
-        }
+fn top_level_owner_for(document: &Document, owner: &str, span: Span) -> String {
+    if owner != file_owner(&document.file) || enclosed_by_matching_owner(document, owner, span) {
+        owner.to_string()
+    } else {
+        format!("(top-level:{})", document.file)
     }
 }
 
-struct InternalCallName {
-    name: String,
-    kind: String,
+fn file_owner(file: &str) -> String {
+    Path::new(file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("(file)")
+        .to_string()
+}
+
+fn enclosed_by_matching_owner(document: &Document, owner: &str, span: Span) -> bool {
+    let profile = language_profile(document.language);
+    let mut nodes = Vec::new();
+    document.root.walk(&mut nodes);
+    nodes.into_iter().any(|node| {
+        raw_owner_name(profile, node).as_deref() == Some(owner) && encloses(node.span, span)
+    })
+}
+
+fn raw_owner_name(
+    profile: &dyn crate::decomplex::syntax::adapters::LanguageProfile,
+    node: &RawNode,
+) -> Option<String> {
+    let owner_kind = profile
+        .class_owner_node_kinds()
+        .contains(&node.kind.as_str())
+        || profile
+            .module_owner_node_kinds()
+            .contains(&node.kind.as_str())
+        || profile
+            .generic_owner_node_kinds()
+            .contains(&node.kind.as_str())
+        || profile
+            .struct_owner_node_kinds()
+            .contains(&node.kind.as_str())
+        || profile
+            .impl_owner_node_kinds()
+            .contains(&node.kind.as_str());
+    let hidden_ruby_owner = node.kind == "body_statement"
+        && node
+            .children
+            .first()
+            .map(|child| matches!(child.kind.as_str(), "class" | "module"))
+            .unwrap_or(false);
+    if !owner_kind && !hidden_ruby_owner {
+        return None;
+    }
+
+    node.children
+        .iter()
+        .find(|child| {
+            child.named
+                && matches!(
+                    child.kind.as_str(),
+                    "identifier" | "constant" | "type_identifier" | "field_identifier"
+                )
+        })
+        .map(|child| child.text.clone())
+}
+
+fn encloses(outer: Span, inner: Span) -> bool {
+    let starts_before = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]);
+    let ends_after = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]);
+    starts_before && ends_after
 }

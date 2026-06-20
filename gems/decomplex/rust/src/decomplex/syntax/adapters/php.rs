@@ -27,6 +27,10 @@ impl LanguageProfile for PhpProfile {
         &["formal_parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["name", "variable_name", "simple_parameter"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["compound_statement", "declaration_list"]
     }
@@ -106,6 +110,10 @@ impl LanguageProfile for PhpProfile {
 
     fn normalize_source_text(&self, text: &str) -> String {
         normalize_text(&php_normalize_source(text))
+    }
+
+    fn normalize_parameter_name(&self, text: &str) -> String {
+        php_identifier_text_value(text)
     }
 
     fn function_name(&self, node: Node<'_>, source: &str) -> Option<String> {

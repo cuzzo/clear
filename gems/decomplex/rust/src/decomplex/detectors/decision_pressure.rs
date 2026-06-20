@@ -1,9 +1,12 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::ast::Span;
+use crate::decomplex::detectors::local_flow::{self, MethodSummary};
+use crate::decomplex::syntax::{self, CallSite, Document, Language};
 use anyhow::Result;
+use regex::Regex;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 const GUARD_MIDS: &[&str] = &[
     "is_a?",
@@ -45,256 +48,218 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<DecisionP
 pub fn scan_documents(documents: &[Document]) -> Vec<DecisionPressureRow> {
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
+    let methods = local_flow::scan_documents(documents);
+    let assignment_maps = build_assignment_maps(&methods);
+    let methods_by_file = methods_by_file(&methods);
 
     for document in documents {
-        let mut detector = DecisionPressure::new(document.file.clone(), document.lines.clone());
-        detector.walk(&document.normalized_root, &Vec::new(), &BTreeMap::new());
-        guard.extend(detector.guard_hits);
-        dispatch.extend(detector.dispatch_hits);
+        for call in &document.call_sites {
+            if call.receiver.is_empty() {
+                continue;
+            }
+            let empty = BTreeMap::new();
+            let assignment_map = assignment_maps
+                .get(&(call.file.clone(), call.function.clone()))
+                .unwrap_or(&empty);
+            if eliminable_guard(call) {
+                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
+                    guard.push(hit(contract, call));
+                }
+            } else if essential_dispatch(call) {
+                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
+                    dispatch.push(hit(contract, call));
+                }
+            }
+        }
+
+        if let Some(methods) = methods_by_file.get(&document.file) {
+            guard.extend(rescue_nil_hits(document, methods, &assignment_maps));
+        }
     }
+
+    let mut seen = BTreeSet::new();
+    guard.retain(|hit| {
+        seen.insert((
+            hit.contract.clone(),
+            hit.file.clone(),
+            hit.defn.clone(),
+            hit.line,
+        ))
+    });
 
     Report::new(guard, dispatch).ranked()
 }
 
-struct DecisionPressure {
-    file: String,
-    lines: Vec<String>,
-    guard_hits: Vec<Hit>,
-    dispatch_hits: Vec<Hit>,
+fn eliminable_guard(call: &CallSite) -> bool {
+    GUARD_MIDS.contains(&call.message.as_str()) || call.safe_navigation
 }
 
-impl DecisionPressure {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self {
-            file,
-            lines,
-            guard_hits: Vec::new(),
-            dispatch_hits: Vec::new(),
+fn essential_dispatch(call: &CallSite) -> bool {
+    call.message.ends_with('?')
+}
+
+fn hit(contract: String, call: &CallSite) -> Hit {
+    Hit {
+        contract,
+        file: call.file.clone(),
+        defn: call.function.clone(),
+        line: call.line,
+        span: call.span,
+    }
+}
+
+fn build_assignment_maps(
+    methods: &[MethodSummary],
+) -> BTreeMap<(String, String), BTreeMap<String, String>> {
+    methods
+        .iter()
+        .map(|method| {
+            (
+                (method.file.clone(), method.name.clone()),
+                local_contract_assignments(method),
+            )
+        })
+        .collect()
+}
+
+fn methods_by_file<'a>(methods: &'a [MethodSummary]) -> BTreeMap<String, Vec<&'a MethodSummary>> {
+    let mut out: BTreeMap<String, Vec<&MethodSummary>> = BTreeMap::new();
+    for method in methods {
+        out.entry(method.file.clone()).or_default().push(method);
+    }
+    out
+}
+
+fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for statement in &method.statements {
+        if statement.writes.len() != 1 {
+            continue;
+        }
+        let name = statement.writes.iter().next().unwrap();
+        if map.contains_key(name) {
+            continue;
+        }
+        if let Some(source) = local_contract_source(name, &statement.source) {
+            map.insert(name.clone(), source);
         }
     }
+    map.into_iter()
+        .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0).map(|c| (name, c)))
+        .collect()
+}
 
-    fn walk(&mut self, node: &Node, defstack: &[String], asgmap: &BTreeMap<String, Node>) {
-        let mut next_defstack = defstack.to_vec();
-        let mut next_asgmap = asgmap.clone();
+fn local_contract_source(name: &str, source: &str) -> Option<String> {
+    let pattern = format!(
+        r"(?s)\b{}\b\s*(?::=|=)\s*(.+?)\s*;?\s*$",
+        regex::escape(name)
+    );
+    let assignment = Regex::new(&pattern).ok()?;
+    let rhs = assignment.captures(source)?.get(1)?.as_str().trim();
+    static CONDITIONAL_SOURCE: OnceLock<Regex> = OnceLock::new();
+    let conditional =
+        CONDITIONAL_SOURCE.get_or_init(|| Regex::new(r"\s(?:if|unless|rescue)\s|\?|:").unwrap());
+    if conditional.is_match(rhs) {
+        None
+    } else {
+        Some(rhs.to_string())
+    }
+}
 
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                next_defstack.push(name.clone());
+fn rescue_nil_hits(
+    document: &Document,
+    methods: &[&MethodSummary],
+    assignment_maps: &BTreeMap<(String, String), BTreeMap<String, String>>,
+) -> Vec<Hit> {
+    let mut out = Vec::new();
+    for method in methods {
+        let empty = BTreeMap::new();
+        let assignment_map = assignment_maps
+            .get(&(method.file.clone(), method.name.clone()))
+            .unwrap_or(&empty);
+        for statement in &method.statements {
+            if !statement.source.contains("rescue nil") {
+                continue;
             }
-            next_asgmap = self.build_asgmap(node);
-        }
-
-        self.record_decision(node, &next_defstack, &next_asgmap);
-        self.record_rescue_nil(node, &next_defstack, &next_asgmap);
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk(child, &next_defstack, &next_asgmap);
-        }
-    }
-
-    fn build_asgmap(&self, defn_node: &Node) -> BTreeMap<String, Node> {
-        let mut map = BTreeMap::new();
-        let mut stack = ast::body_stmts(defn_node);
-        stack.reverse();
-
-        while let Some(node) = stack.pop() {
-            if node.r#type == "LASGN" {
-                if let Some(Child::String(name)) = node.children.get(0) {
-                    if let Some(src) = node.children.get(1).and_then(ast::node) {
-                        if !map.contains_key(name) && self.simple_source(src) {
-                            map.insert(name.clone(), src.clone());
-                        }
-                    }
-                }
-            }
-            for child in node.children.iter().filter_map(ast::node).rev() {
-                stack.push(child);
-            }
-        }
-        map
-    }
-
-    fn simple_source(&self, n: &Node) -> bool {
-        match n.r#type.as_str() {
-            "IVAR" => true,
-            "CALL" | "QCALL" => {
-                let recv = n.children.get(0).and_then(ast::node);
-                let mid = n.children.get(1).and_then(|c| match c {
-                    Child::Symbol(s) => Some(s),
-                    _ => None,
-                });
-                let args = n.children.get(2);
-                recv.is_some()
-                    && (args.is_none()
-                        || matches!(args, Some(Child::Nil))
-                        || mid.map(|s| s.as_str()) == Some("[]"))
-            }
-            _ => false,
+            let Some(call) = document.call_sites.iter().find(|candidate| {
+                candidate.function == method.name && inside_span(candidate.span, statement.span)
+            }) else {
+                continue;
+            };
+            let Some(contract) = contract_of(&call_expression(call), assignment_map, 0) else {
+                continue;
+            };
+            out.push(Hit {
+                contract,
+                file: method.file.clone(),
+                defn: method.name.clone(),
+                line: statement.line,
+                span: statement.span,
+            });
         }
     }
+    out
+}
 
-    fn hit(&self, contract: String, defstack: &[String], node: &Node) -> Hit {
-        Hit {
-            contract,
-            file: self.file.clone(),
-            defn: defstack
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "(top-level)".to_string()),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-        }
+fn contract_of(
+    receiver: &str,
+    assignment_map: &BTreeMap<String, String>,
+    depth: usize,
+) -> Option<String> {
+    let source = receiver.trim();
+    if source.is_empty() || depth >= 8 {
+        return None;
     }
 
-    fn record_decision(
-        &mut self,
-        node: &Node,
-        defstack: &[String],
-        asgmap: &BTreeMap<String, Node>,
-    ) {
-        if !matches!(node.r#type.as_str(), "CALL" | "QCALL") {
-            return;
-        }
+    if let Some(mapped) = assignment_map.get(source) {
+        return Some(mapped.clone());
+    }
+    if source.starts_with('@') {
+        return Some(source.to_string());
+    }
 
-        let recv = node.children.get(0).and_then(ast::node);
-        let mid = node.children.get(1).and_then(|c| match c {
-            Child::Symbol(s) => Some(s),
-            _ => None,
-        });
-        let _args = node.children.get(2);
+    static INDEX_SOURCE: OnceLock<Regex> = OnceLock::new();
+    let index_source =
+        INDEX_SOURCE.get_or_init(|| Regex::new(r"^(?:[A-Za-z_]\w*|self)\s*\[(.+)\]$").unwrap());
+    if let Some(captures) = index_source.captures(source) {
+        return Some(format!("[{}]", captures[1].trim()));
+    }
 
-        let Some(recv) = recv else { return };
-        let Some(mid) = mid else { return };
+    static LOCAL_SOURCE: OnceLock<Regex> = OnceLock::new();
+    let local_source = LOCAL_SOURCE.get_or_init(|| Regex::new(r"^[A-Za-z_]\w*$").unwrap());
+    if local_source.is_match(source) {
+        return Some("~local".to_string());
+    }
 
-        let guard =
-            (node.r#type == "CALL" && GUARD_MIDS.contains(&mid.as_str())) || node.r#type == "QCALL";
-        if guard {
-            if let Some(c) = self.contract_of(recv, asgmap, 0) {
-                self.guard_hits.push(self.hit(c, defstack, node));
-            }
-            return;
-        }
-
-        if node.r#type == "CALL" && mid.ends_with('?') {
-            if let Some(c) = self.contract_of(recv, asgmap, 0) {
-                self.dispatch_hits.push(self.hit(c, defstack, node));
+    if source.contains('.') {
+        let mut member = source.split('.').last().unwrap_or("").to_string();
+        if let Some(index) = member.find('(') {
+            if member.ends_with(')') {
+                member.truncate(index);
             }
         }
-    }
-
-    fn record_rescue_nil(
-        &mut self,
-        node: &Node,
-        defstack: &[String],
-        asgmap: &BTreeMap<String, Node>,
-    ) {
-        if node.r#type != "RESCUE" {
-            return;
-        }
-
-        let body = node.children.get(0).and_then(ast::node);
-        let resb = node.children.get(1).and_then(ast::node);
-
-        let Some(resb) = resb else { return };
-        if resb.r#type != "RESBODY" {
-            return;
-        };
-        if !matches!(resb.children.get(0), None | Some(Child::Nil)) {
-            return;
-        };
-
-        let handler = resb.children.get(1);
-        let nil_handler = matches!(handler, None | Some(Child::Nil))
-            || handler
-                .and_then(ast::node)
-                .map(|n| n.r#type == "NIL")
-                .unwrap_or(false);
-        if !nil_handler {
-            return;
-        };
-
-        let Some(body) = body else { return };
-        if !matches!(body.r#type.as_str(), "CALL" | "QCALL") {
-            return;
-        };
-
-        if let Some(c) = self.contract_of(body, asgmap, 0) {
-            self.guard_hits.push(self.hit(c, defstack, node));
-        }
-    }
-
-    fn contract_of(
-        &self,
-        n: &Node,
-        asgmap: &BTreeMap<String, Node>,
-        depth: usize,
-    ) -> Option<String> {
-        if depth >= 8 {
+        if TRANSIENT_NOARG_MIDS.contains(&member.as_str()) || member.is_empty() {
             return None;
         }
-
-        match n.r#type.as_str() {
-            "LVAR" | "DVAR" => {
-                if let Some(Child::String(nm)) = n.children.first() {
-                    if let Some(src) = asgmap.get(nm) {
-                        return self.contract_of(src, asgmap, depth + 1);
-                    } else {
-                        return Some("~local".to_string());
-                    }
-                }
-                None
-            }
-            "IVAR" => {
-                if let Some(Child::String(attr)) = n.children.first() {
-                    return Some(attr.clone());
-                }
-                None
-            }
-            "CALL" | "QCALL" => {
-                let recv = n.children.get(0).and_then(ast::node);
-                let mid = n.children.get(1).and_then(|c| match c {
-                    Child::Symbol(s) => Some(s),
-                    _ => None,
-                })?;
-                let args = n.children.get(2);
-
-                if mid == "[]" {
-                    let key = if let Some(Child::Node(node)) = args {
-                        node.children
-                            .iter()
-                            .filter(|c| !matches!(c, Child::Nil))
-                            .next()
-                    } else {
-                        None
-                    };
-                    let kt = match key {
-                        Some(Child::Node(k)) => ast::slice(k, &self.lines),
-                        _ => "nil".to_string(), // Simplified key.inspect
-                    };
-                    Some(format!("[{}]", kt))
-                } else if (args.is_none() || matches!(args, Some(Child::Nil)))
-                    && recv.is_some()
-                    && !TRANSIENT_NOARG_MIDS.contains(&mid.as_str())
-                {
-                    Some(format!(".{}", mid))
-                } else {
-                    None
-                }
-            }
-            "VCALL" => {
-                if let Some(Child::Symbol(name)) = n.children.first() {
-                    return Some(format!(".{}", name));
-                }
-                None
-            }
-            _ => None,
-        }
+        return Some(format!(".{member}"));
     }
+
+    None
+}
+
+fn call_expression(call: &CallSite) -> String {
+    [call.receiver.as_str(), call.message.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn inside_span(inner: Span, outer: Span) -> bool {
+    let starts_after_or_at =
+        (inner[0] > outer[0]) || (inner[0] == outer[0] && inner[1] >= outer[1]);
+    let ends_before_or_at = (inner[2] < outer[2]) || (inner[2] == outer[2] && inner[3] <= outer[3]);
+    starts_after_or_at && ends_before_or_at
 }
 
 struct Report {

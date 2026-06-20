@@ -1,6 +1,5 @@
 {
   "detector": "weighted-inlined-complexity",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

@@ -1,6 +1,5 @@
 {
   "detector": "decision-pressure",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

@@ -1,6 +1,5 @@
 {
   "detector": "flay-similarity",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

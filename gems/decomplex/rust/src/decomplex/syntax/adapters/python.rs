@@ -25,6 +25,10 @@ impl LanguageProfile for PythonProfile {
         &["parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block"]
     }

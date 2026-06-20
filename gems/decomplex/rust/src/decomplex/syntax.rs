@@ -100,6 +100,8 @@ pub struct Document {
     pub root: RawNode,
     pub normalized_root: NormalizedNode,
     pub function_defs: Vec<FunctionDef>,
+    pub call_sites: Vec<CallSite>,
+    pub state_reads: Vec<StateRead>,
     pub state_writes: Vec<StateWrite>,
     pub decision_sites: Vec<DecisionSite>,
     pub predicate_aliases: Vec<PredicateAlias>,
@@ -114,10 +116,39 @@ pub struct FunctionDef {
     pub line: usize,
     pub span: Span,
     pub body: RawNode,
+    pub visibility: Option<String>,
+    pub params: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CallSite {
+    pub receiver: String,
+    pub message: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub line: usize,
+    pub span: Span,
+    pub conditional: bool,
+    pub arguments: Vec<String>,
+    pub control: Option<String>,
+    pub safe_navigation: bool,
+    pub block: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct StateWrite {
+    pub field: String,
+    pub receiver: String,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
+    pub owner: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StateRead {
     pub field: String,
     pub receiver: String,
     pub file: String,

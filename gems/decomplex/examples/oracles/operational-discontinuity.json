@@ -1,6 +1,5 @@
 {
   "detector": "operational-discontinuity",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

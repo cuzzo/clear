@@ -25,6 +25,14 @@ impl LanguageProfile for SwiftProfile {
         &["function_value_parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["simple_identifier"]
+    }
+
+    fn inline_parameter_node_kinds(&self) -> &[&str] {
+        &["parameter"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["function_body", "statements"]
     }
@@ -39,6 +47,10 @@ impl LanguageProfile for SwiftProfile {
 
     fn assignment_node_kinds(&self) -> &[&str] {
         &["assignment"]
+    }
+
+    fn expression_list_node_kinds(&self) -> &[&str] {
+        &["directly_assignable_expression"]
     }
 
     fn assignment_operator_tokens(&self) -> &[&str] {
@@ -100,6 +112,6 @@ impl LanguageProfile for SwiftProfile {
     }
 
     fn field_like_node_kinds(&self) -> &[&str] {
-        &["navigation_expression", "directly_assignable_expression"]
+        &["navigation_expression"]
     }
 }

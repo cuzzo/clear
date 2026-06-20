@@ -9,11 +9,11 @@ use decomplex::detectors::{
     structural_topology, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use decomplex::parallel;
-use decomplex::report_facts::{self, Options as ReportFactsOptions};
+use decomplex::report::Report;
+use decomplex::report_facts::{self, Options as ReportFactsOptions, VcsFilter};
 use decomplex::syntax::Language;
-use std::io::Write;
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command as ProcessCommand, Stdio};
 
 fn main() -> Result<()> {
     let worker = std::thread::Builder::new()
@@ -255,7 +255,16 @@ fn run() -> Result<()> {
         } => {
             let facts = report_facts::collect(&targets, &options)
                 .with_context(|| "failed to collect report facts")?;
-            render_report_with_ruby(&facts, &format, output.as_ref())?;
+            render_report(&facts, &format, output.as_ref())?;
+        }
+        Command::RenderReport {
+            input,
+            from_stdin,
+            format,
+            output,
+        } => {
+            let facts = read_facts(input.as_ref(), from_stdin)?;
+            render_report(&facts, &format, output.as_ref())?;
         }
     }
     Ok(())
@@ -402,6 +411,12 @@ enum Command {
         output: Option<PathBuf>,
         jobs: Option<usize>,
     },
+    RenderReport {
+        input: Option<PathBuf>,
+        from_stdin: bool,
+        format: String,
+        output: Option<PathBuf>,
+    },
 }
 
 impl Command {
@@ -434,6 +449,7 @@ impl Command {
             | Self::FatUnion { jobs, .. }
             | Self::Facts { jobs, .. }
             | Self::Report { jobs, .. } => *jobs,
+            Self::RenderReport { .. } => None,
         }
     }
 }
@@ -467,6 +483,15 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 format: args.format,
                 output: args.output,
                 jobs: args.jobs,
+            })
+        }
+        "render-report" => {
+            let args = parse_render_report_args(cursor.collect())?;
+            Ok(Command::RenderReport {
+                input: args.input,
+                from_stdin: args.from_stdin,
+                format: args.format,
+                output: args.output,
             })
         }
         "state-writes" => {
@@ -796,6 +821,53 @@ struct ReportFactsArgs {
     format: String,
 }
 
+struct RenderReportArgs {
+    input: Option<PathBuf>,
+    from_stdin: bool,
+    output: Option<PathBuf>,
+    format: String,
+}
+
+fn parse_render_report_args(args: Vec<String>) -> Result<RenderReportArgs> {
+    let mut input = None;
+    let mut from_stdin = false;
+    let mut output = None;
+    let mut format = "markdown".to_string();
+    let mut cursor = args.into_iter();
+    while let Some(arg) = cursor.next() {
+        if arg == "--from-stdin" {
+            from_stdin = true;
+        } else if arg == "--input" {
+            input = Some(PathBuf::from(
+                cursor.next().with_context(|| "--input requires a value")?,
+            ));
+        } else if let Some(value) = arg.strip_prefix("--input=") {
+            input = Some(PathBuf::from(value));
+        } else if arg == "--output" {
+            output = Some(PathBuf::from(
+                cursor.next().with_context(|| "--output requires a value")?,
+            ));
+        } else if let Some(value) = arg.strip_prefix("--output=") {
+            output = Some(PathBuf::from(value));
+        } else if arg == "--format" {
+            format = cursor.next().with_context(|| "--format requires a value")?;
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            format = value.to_string();
+        } else {
+            bail!("unknown render-report argument: {arg}");
+        }
+    }
+    if input.is_none() && !from_stdin {
+        bail!("render-report requires facts JSON on stdin or --input=FILE");
+    }
+    Ok(RenderReportArgs {
+        input,
+        from_stdin,
+        output,
+        format,
+    })
+}
+
 fn parse_report_facts_args(args: Vec<String>, allow_format: bool) -> Result<ReportFactsArgs> {
     let mut options = ReportFactsOptions::default();
     let mut targets = Vec::new();
@@ -859,6 +931,12 @@ fn parse_report_facts_args(args: Vec<String>, allow_format: bool) -> Result<Repo
             options.fuzzy = value
                 .parse()
                 .with_context(|| "--fuzzy must be an integer")?;
+        } else if arg == "--vcs" {
+            options.vcs = Some(parse_vcs_filter(
+                cursor.next().with_context(|| "--vcs requires a value")?,
+            )?);
+        } else if let Some(value) = arg.strip_prefix("--vcs=") {
+            options.vcs = Some(parse_vcs_filter(value.to_string())?);
         } else {
             targets.push(PathBuf::from(arg));
         }
@@ -882,57 +960,38 @@ fn write_json(value: &serde_json::Value, output: Option<&PathBuf>) -> Result<()>
     Ok(())
 }
 
-fn render_report_with_ruby(
-    facts: &serde_json::Value,
-    format: &str,
-    output: Option<&PathBuf>,
-) -> Result<()> {
-    let mut command = ruby_renderer_command();
-    command
-        .arg("render-report")
-        .arg("--from-stdin")
-        .arg(format!("--format={format}"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    if let Some(path) = output {
-        command.arg(format!("--output={}", path.display()));
+fn read_facts(input: Option<&PathBuf>, from_stdin: bool) -> Result<serde_json::Value> {
+    let payload = if let Some(path) = input {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?
+    } else if from_stdin {
+        let mut payload = String::new();
+        std::io::stdin()
+            .read_to_string(&mut payload)
+            .with_context(|| "failed to read facts JSON from stdin")?;
+        payload
+    } else {
+        bail!("render-report requires facts JSON on stdin or --input=FILE");
+    };
+    if payload.trim().is_empty() {
+        bail!("render-report requires facts JSON on stdin or --input=FILE");
     }
-
-    let mut child = command
-        .spawn()
-        .with_context(|| "failed to start Ruby decomplex renderer")?;
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .with_context(|| "failed to open Ruby renderer stdin")?;
-        stdin.write_all(serde_json::to_string(facts)?.as_bytes())?;
-    }
-    let status = child
-        .wait()
-        .with_context(|| "failed to wait for Ruby decomplex renderer")?;
-    if !status.success() {
-        bail!("Ruby decomplex renderer failed with status {status}");
-    }
-    Ok(())
+    serde_json::from_str(&payload).with_context(|| "failed to parse report facts JSON")
 }
 
-fn ruby_renderer_command() -> ProcessCommand {
-    if let Ok(program) = std::env::var("DECOMPLEX_RUBY_RENDERER") {
-        if !program.trim().is_empty() {
-            return ProcessCommand::new(program);
-        }
+fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBuf>) -> Result<()> {
+    let report = Report::from_facts(facts)?;
+    let text = match format {
+        "markdown" | "md" => report.to_markdown(),
+        "sarif" | "json" => report.to_sarif(),
+        _ => bail!("unsupported report format: {format}"),
+    };
+    if let Some(path) = output {
+        std::fs::write(path, text)?;
+    } else {
+        println!("{text}");
     }
-
-    let mut command = ProcessCommand::new("ruby");
-    command.arg(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("exe")
-            .join("decomplex"),
-    );
-    command
+    Ok(())
 }
 
 fn parse_language_files_and_jobs(
@@ -960,6 +1019,13 @@ fn parse_language_files_and_jobs(
         }
     }
     Ok((language, files, jobs))
+}
+
+fn parse_vcs_filter(value: String) -> Result<VcsFilter> {
+    match value.as_str() {
+        "git" => Ok(VcsFilter::Git),
+        _ => bail!("unsupported --vcs value: {value}"),
+    }
 }
 
 fn parse_jobs(value: String) -> Result<usize> {
@@ -996,5 +1062,20 @@ mod tests {
             "a.rb".to_string(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn parses_git_vcs_filter_for_facts() {
+        let command = parse_args(vec![
+            "facts".to_string(),
+            "--vcs=git".to_string(),
+            "src".to_string(),
+        ])
+        .expect("command");
+
+        match command {
+            Command::Facts { options, .. } => assert_eq!(options.vcs, Some(VcsFilter::Git)),
+            _ => panic!("expected facts command"),
+        }
     }
 }

@@ -10,9 +10,10 @@ use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 
@@ -30,12 +31,18 @@ const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
     "node_modules",
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VcsFilter {
+    Git,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub language: Option<Language>,
     pub excludes: Vec<String>,
     pub mass: usize,
     pub fuzzy: usize,
+    pub vcs: Option<VcsFilter>,
 }
 
 impl Default for Options {
@@ -45,6 +52,7 @@ impl Default for Options {
             excludes: Vec::new(),
             mass: DEFAULT_MASS,
             fuzzy: DEFAULT_FUZZY,
+            vcs: None,
         }
     }
 }
@@ -88,6 +96,9 @@ pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Ve
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path);
+    if options.vcs == Some(VcsFilter::Git) && !files.is_empty() {
+        retain_git_tracked_files(&mut files)?;
+    }
     Ok(files)
 }
 
@@ -500,7 +511,11 @@ fn state_heatmap_findings_for_groups(
 ) -> Result<Value> {
     let mut rows = Vec::new();
     for documents in groups.values() {
-        let report = state_mesh::scan_documents_with_semantic_aliases(documents, semantic_aliases);
+        let report = state_mesh::scan_documents_with_semantic_aliases_and_min_writes(
+            documents,
+            semantic_aliases,
+            1,
+        );
         rows.extend(state_heatmap_findings(&report));
     }
     Ok(Value::Array(rows))
@@ -558,6 +573,94 @@ fn language_counts(files: &[SourceFile]) -> BTreeMap<String, usize> {
             .or_insert(0) += 1;
     }
     counts
+}
+
+fn retain_git_tracked_files(files: &mut Vec<SourceFile>) -> Result<()> {
+    let tracked = git_tracked_paths_for_files(files)?;
+    files.retain(|file| tracked.contains(&normalize_path(&file.path)));
+    Ok(())
+}
+
+fn git_tracked_paths_for_files(files: &[SourceFile]) -> Result<HashSet<PathBuf>> {
+    let mut tracked = HashSet::new();
+    for root in git_roots_for_files(files)? {
+        for path in git_ls_files(&root)? {
+            tracked.insert(path);
+        }
+    }
+    Ok(tracked)
+}
+
+fn git_roots_for_files(files: &[SourceFile]) -> Result<BTreeSet<PathBuf>> {
+    let current_root = git_root_for_dir(&std::env::current_dir()?).ok();
+    if let Some(root) = current_root {
+        let root = normalize_path(&root);
+        if files
+            .iter()
+            .all(|file| normalize_path(&file.path).starts_with(&root))
+        {
+            return Ok(BTreeSet::from([root]));
+        }
+    }
+
+    let mut roots = BTreeSet::new();
+    for file in files {
+        let dir = file.path.parent().unwrap_or_else(|| Path::new("."));
+        let root = git_root_for_dir(dir).with_context(|| {
+            format!(
+                "--vcs=git requires {} to be inside a Git work tree",
+                file.path.display()
+            )
+        })?;
+        roots.insert(normalize_path(&root));
+    }
+    Ok(roots)
+}
+
+fn git_root_for_dir(dir: &Path) -> Result<PathBuf> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .with_context(|| format!("failed to run git rev-parse in {}", dir.display()))?;
+    if !output.status.success() {
+        bail!("git rev-parse failed in {}", dir.display());
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .with_context(|| format!("git rev-parse output was not UTF-8 in {}", dir.display()))?;
+    Ok(PathBuf::from(stdout.trim()))
+}
+
+fn git_ls_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z"])
+        .output()
+        .with_context(|| format!("failed to run git ls-files in {}", root.display()))?;
+    if !output.status.success() {
+        bail!("git ls-files failed in {}", root.display());
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .with_context(|| format!("git ls-files output was not UTF-8 in {}", root.display()))?;
+    Ok(stdout
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| normalize_path(&root.join(path)))
+        .collect())
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        }
+    })
 }
 
 fn expand_target(target: &Path, options: &Options, out: &mut Vec<SourceFile>) -> Result<()> {
@@ -631,4 +734,45 @@ fn excluded_path(path: &Path, options: &Options) -> bool {
             text == pattern || text.ends_with(&format!("/{pattern}")) || text.contains(&pattern)
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn git_vcs_filter_keeps_only_tracked_source_files() {
+        let dir = TempDir::new().expect("tempdir");
+        run_git(dir.path(), &["init"]);
+
+        let tracked = dir.path().join("tracked.rb");
+        let untracked = dir.path().join("untracked.rb");
+        fs::write(&tracked, "def tracked\nend\n").expect("write tracked");
+        fs::write(&untracked, "def untracked\nend\n").expect("write untracked");
+        run_git(dir.path(), &["add", "tracked.rb"]);
+
+        let options = Options {
+            vcs: Some(VcsFilter::Git),
+            ..Options::default()
+        };
+        let files =
+            collect_source_files(&[dir.path().to_path_buf()], &options).expect("source files");
+        let names = files
+            .iter()
+            .map(|file| file.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["tracked.rb"]);
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .expect("git command");
+        assert!(status.success(), "git {:?} failed", args);
+    }
 }

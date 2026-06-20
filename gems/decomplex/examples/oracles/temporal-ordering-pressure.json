@@ -1,6 +1,5 @@
 {
   "detector": "temporal-ordering-pressure",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

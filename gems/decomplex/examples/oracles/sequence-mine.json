@@ -1,6 +1,5 @@
 {
   "detector": "sequence-mine",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

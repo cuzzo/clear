@@ -109,9 +109,6 @@ impl PathCondition {
                     self.walk(b_node, &next_defstack, &next_guards);
                 }
 
-                if let Some(cond_node) = cond {
-                    self.walk(cond_node, &next_defstack, guards);
-                }
                 return;
             }
             "CALL" | "FCALL" | "VCALL" | "ATTRASGN" | "LASGN" | "IASGN" | "OPCALL" => {

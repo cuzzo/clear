@@ -1,6 +1,5 @@
 {
   "detector": "inconsistent-rename-clone",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

@@ -1,6 +1,5 @@
 {
   "detector": "oversized-predicate",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

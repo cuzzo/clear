@@ -1,6 +1,5 @@
 {
   "detector": "fat-union",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

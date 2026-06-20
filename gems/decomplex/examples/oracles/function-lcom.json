@@ -1,6 +1,5 @@
 {
   "detector": "function-lcom",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

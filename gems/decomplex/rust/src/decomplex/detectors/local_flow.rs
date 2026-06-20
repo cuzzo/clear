@@ -1,9 +1,9 @@
 use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, FunctionDef, Language};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LocalFlowRow {
@@ -51,6 +51,14 @@ const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
 const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN"];
+const STATEMENT_CONTAINER_TYPES: &[&str] = &[
+    "BLOCK",
+    "COMPOUND_STATEMENT",
+    "DECLARATION_LIST",
+    "FUNCTION_BODY",
+    "HASH",
+    "STATEMENTS",
+];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSummary>> {
     let documents = syntax::parse_files(files, language)?;
@@ -64,24 +72,39 @@ pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
             document.file.clone(),
             document.lines.clone(),
             document.language,
+            method_metadata(document),
         );
         out.extend(detector.scan(&document.normalized_root));
     }
     out
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MethodMetadata {
+    owner: String,
+    name: String,
+    params: BTreeSet<String>,
+}
+
 struct LocalFlow {
     file: String,
     lines: Vec<String>,
     language: Language,
+    methods_by_line: BTreeMap<usize, MethodMetadata>,
 }
 
 impl LocalFlow {
-    fn new(file: String, lines: Vec<String>, language: Language) -> Self {
+    fn new(
+        file: String,
+        lines: Vec<String>,
+        language: Language,
+        methods_by_line: BTreeMap<usize, MethodMetadata>,
+    ) -> Self {
         Self {
             file,
             lines,
             language,
+            methods_by_line,
         }
     }
 
@@ -95,13 +118,13 @@ impl LocalFlow {
         if OWNER_TYPES.contains(&node.r#type.as_str()) {
             let owner = self.full_owner_name(owners, node);
             for method in self.owner_methods(node) {
-                out.push(self.method_summary(method, &owner));
+                out.push(self.method_summary(method, Some(&owner)));
             }
             let mut next_owners = owners.to_vec();
             next_owners.push(self.owner_segment(node));
             self.collect_nested_owners(node, &next_owners, out);
         } else if METHOD_TYPES.contains(&node.r#type.as_str()) && owners.is_empty() {
-            out.push(self.method_summary(node, "(top-level)"));
+            out.push(self.method_summary(node, None));
         } else {
             for child in node.children.iter().filter_map(ast::node) {
                 self.collect_methods(child, owners, out);
@@ -123,16 +146,26 @@ impl LocalFlow {
         }
     }
 
-    fn method_summary(&self, node: &Node, owner: &str) -> MethodSummary {
-        let statements: Vec<_> = ast::body_stmts(node)
+    fn method_summary(&self, node: &Node, owner_hint: Option<&str>) -> MethodSummary {
+        let metadata = self.methods_by_line.get(&node.first_lineno);
+        let owner = metadata
+            .map(|item| item.owner.as_str())
+            .or(owner_hint)
+            .unwrap_or("(top-level)");
+        let name = metadata
+            .map(|item| item.name.clone())
+            .unwrap_or_else(|| self.method_name(node));
+        let statement_nodes = ast::body_stmts(node);
+        let local_names = self.local_names(&statement_nodes, metadata);
+        let statements: Vec<_> = statement_nodes
             .iter()
             .enumerate()
-            .map(|(index, stmt)| self.statement_summary(stmt, index))
+            .map(|(index, stmt)| self.statement_summary(stmt, index, &local_names))
             .collect();
         MethodSummary {
-            id: format!("{}#{}", owner, self.method_name(node)),
+            id: format!("{}#{}", owner, name),
             owner: owner.to_string(),
-            name: self.method_name(node),
+            name,
             file: self.file.clone(),
             line: node.first_lineno,
             span: [
@@ -147,7 +180,14 @@ impl LocalFlow {
         }
     }
 
-    fn statement_summary(&self, node: &Node, index: usize) -> Statement {
+    fn statement_summary(
+        &self,
+        node: &Node,
+        index: usize,
+        local_names: &BTreeSet<String>,
+    ) -> Statement {
+        let reads = self.local_reads(node, local_names);
+        let writes = self.local_writes(node);
         Statement {
             index,
             line: node.first_lineno,
@@ -159,11 +199,23 @@ impl LocalFlow {
                 node.last_column,
             ],
             source: ast::slice(node, &self.lines),
-            reads: self.local_reads(node),
-            writes: self.local_writes(node),
-            dependencies: self.assignment_dependencies(node),
-            co_uses: self.co_use_edges(node),
+            dependencies: self.assignment_dependencies(node, local_names),
+            co_uses: self.co_use_edges(node, local_names),
+            reads,
+            writes,
         }
+    }
+
+    fn local_names(
+        &self,
+        statements: &[&Node],
+        metadata: Option<&MethodMetadata>,
+    ) -> BTreeSet<String> {
+        let mut names = metadata.map(|item| item.params.clone()).unwrap_or_default();
+        for statement in statements {
+            names.extend(self.local_writes(statement));
+        }
+        names
     }
 
     fn structural_boundaries(&self, statements: &[Statement]) -> Vec<Boundary> {
@@ -221,7 +273,7 @@ impl LocalFlow {
             return Vec::new();
         };
 
-        let stmts = if body.r#type == "BLOCK" {
+        let stmts = if statement_container(body) {
             body.children
                 .iter()
                 .filter_map(ast::node)
@@ -325,12 +377,14 @@ impl LocalFlow {
         }
     }
 
-    fn local_reads(&self, node: &Node) -> BTreeSet<String> {
+    fn local_reads(&self, node: &Node, local_names: &BTreeSet<String>) -> BTreeSet<String> {
         let mut reads = Vec::new();
         self.walk_local(node, &mut |child| {
             if LOCAL_READ_TYPES.contains(&child.r#type.as_str()) {
                 if let Some(name) = local_read_name(child) {
-                    reads.push(name);
+                    if local_names.contains(&name) {
+                        reads.push(name);
+                    }
                 }
             }
         });
@@ -349,13 +403,17 @@ impl LocalFlow {
         writes.into_iter().collect()
     }
 
-    fn assignment_dependencies(&self, node: &Node) -> Vec<(String, String)> {
+    fn assignment_dependencies(
+        &self,
+        node: &Node,
+        local_names: &BTreeSet<String>,
+    ) -> Vec<(String, String)> {
         let mut deps = Vec::new();
         self.walk_local(node, &mut |child| {
             if LOCAL_WRITE_TYPES.contains(&child.r#type.as_str()) {
                 if let Some(Child::String(lhs)) = child.children.first() {
                     if let Some(rhs) = child.children.get(1).and_then(ast::node) {
-                        for read in self.local_reads(rhs) {
+                        for read in self.local_reads(rhs, local_names) {
                             if lhs != &read {
                                 deps.push((lhs.clone(), read));
                             }
@@ -369,8 +427,8 @@ impl LocalFlow {
         deps
     }
 
-    fn co_use_edges(&self, node: &Node) -> Vec<(String, String)> {
-        let reads: Vec<_> = self.local_reads(node).into_iter().collect();
+    fn co_use_edges(&self, node: &Node, local_names: &BTreeSet<String>) -> Vec<(String, String)> {
+        let reads: Vec<_> = self.local_reads(node, local_names).into_iter().collect();
         let mut out = Vec::new();
         for i in 0..reads.len() {
             for j in i + 1..reads.len() {
@@ -397,6 +455,40 @@ fn local_read_name(node: &Node) -> Option<String> {
         Some(Child::Nil) => Some(String::new()),
         _ => None,
     }
+}
+
+fn method_metadata(document: &Document) -> BTreeMap<usize, MethodMetadata> {
+    document
+        .function_defs
+        .iter()
+        .map(|function| (function.line, metadata_for_function(document, function)))
+        .collect()
+}
+
+fn metadata_for_function(document: &Document, function: &FunctionDef) -> MethodMetadata {
+    let owner = if function.owner == file_owner(&document.file) {
+        "(top-level)".to_string()
+    } else {
+        function.owner.clone()
+    };
+    MethodMetadata {
+        owner,
+        name: function.name.clone(),
+        params: function.params.iter().cloned().collect(),
+    }
+}
+
+fn file_owner(file: &str) -> String {
+    Path::new(file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("(file)")
+        .to_string()
+}
+
+fn statement_container(node: &Node) -> bool {
+    STATEMENT_CONTAINER_TYPES.contains(&node.r#type.as_str())
 }
 
 struct RawBoundary {

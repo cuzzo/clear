@@ -1,6 +1,5 @@
 {
   "detector": "structural-topology",
-  "engine": "ruby",
   "options": {
   },
   "expected": {

@@ -1,6 +1,5 @@
 {
   "detector": "locality-drag",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

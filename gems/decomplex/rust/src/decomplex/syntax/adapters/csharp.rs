@@ -25,6 +25,10 @@ impl LanguageProfile for CSharpProfile {
         &["parameter_list"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block", "declaration_list"]
     }

@@ -305,10 +305,28 @@ pub fn body_stmts(defn_node: &Node) -> Vec<&Node> {
     let Some(body) = scope.children.get(2).and_then(node) else {
         return Vec::new();
     };
-    if body.r#type == "BLOCK" {
-        body.children.iter().filter_map(node).collect()
-    } else {
-        vec![body]
+    statement_nodes(body)
+}
+
+fn statement_nodes(body: &Node) -> Vec<&Node> {
+    match body.r#type.as_str() {
+        "BLOCK" | "COMPOUND_STATEMENT" | "DECLARATION_LIST" | "FUNCTION_BODY" | "HASH"
+        | "STATEMENTS" => body.children.iter().filter_map(node).collect(),
+        "RESCUE" | "ENSURE" => {
+            let mut out = Vec::new();
+            if let Some(primary) = body.children.first().and_then(node) {
+                out.extend(statement_nodes(primary));
+            }
+            out.extend(
+                body.children
+                    .iter()
+                    .skip(1)
+                    .filter_map(node)
+                    .filter(|child| child.r#type != "SCOPE"),
+            );
+            out
+        }
+        _ => vec![body],
     }
 }
 

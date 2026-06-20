@@ -20,7 +20,7 @@ pub struct ResultReport {
 }
 
 const LIMIT: usize = 3;
-const PREDICATE_NODES: &[&str] = &["IF", "WHILE", "UNTIL"];
+const PREDICATE_NODES: &[&str] = &["IF", "UNLESS", "WHILE", "UNTIL"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ResultReport> {
     let documents = syntax::parse_files(files, language)?;
@@ -84,8 +84,9 @@ impl OversizedPredicate {
         let cond = node.children.get(0).and_then(ast::node);
         let Some(cond) = cond else { return };
 
-        let atoms = self.condition_atoms(cond);
-        if atoms.len() <= self.limit {
+        let predicate = ast::slice(cond, &self.lines);
+        let atoms_text = self.condition_atoms(&predicate);
+        if atoms_text.len() <= self.limit {
             return;
         }
 
@@ -101,37 +102,24 @@ impl OversizedPredicate {
             ],
         );
 
-        let atoms_text: Vec<String> = atoms
-            .into_iter()
-            .map(|a| ast::slice(a, &self.lines))
-            .collect();
-
         self.findings.push(OversizedPredicateRow {
             at,
             count: atoms_text.len(),
-            predicate: ast::slice(cond, &self.lines),
+            predicate,
             atoms: atoms_text,
             spans,
         });
     }
 
-    fn condition_atoms<'a>(&self, node: &'a Node) -> Vec<&'a Node> {
-        match node.r#type.as_str() {
-            "AND" | "OR" => node
-                .children
-                .iter()
-                .filter_map(ast::node)
-                .flat_map(|child| self.condition_atoms(child))
-                .collect(),
-            "NOT" => {
-                if let Some(child) = node.children.get(0).and_then(ast::node) {
-                    self.condition_atoms(child)
-                } else {
-                    vec![node]
-                }
-            }
-            _ => vec![node],
-        }
+    fn condition_atoms(&self, predicate: &str) -> Vec<String> {
+        predicate
+            .split("&&")
+            .flat_map(|part| part.split("||"))
+            .flat_map(|part| part.split(" and "))
+            .flat_map(|part| part.split(" or "))
+            .map(|atom| atom.replace(['(', ')'], "").trim().to_string())
+            .filter(|atom| !atom.is_empty())
+            .collect()
     }
 
     fn predicate_helper(&self, name: &str) -> bool {

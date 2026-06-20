@@ -21,6 +21,10 @@ impl LanguageProfile for ZigProfile {
         &["parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block", "block_expression"]
     }
@@ -34,7 +38,7 @@ impl LanguageProfile for ZigProfile {
     }
 
     fn assignment_node_kinds(&self) -> &[&str] {
-        &["assignment_expression"]
+        &["assignment_expression", "variable_declaration"]
     }
 
     fn assignment_operator_tokens(&self) -> &[&str] {

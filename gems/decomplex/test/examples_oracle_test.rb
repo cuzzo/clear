@@ -7,6 +7,7 @@ require_relative "../lib/decomplex/detector_runner"
 class ExamplesOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples", __dir__)
   ORACLE_DIR = File.join(EXAMPLES_ROOT, "oracles")
+  ENGINES = Decomplex::DetectorRunner::ENGINES.freeze
   SOURCE_EXTENSIONS = Decomplex::Syntax.supported_exts.freeze
   LOCATION_KEYS = %w[
     at boundaries boundary_crossings component_lines defn examples file
@@ -23,6 +24,12 @@ class ExamplesOracleTest < Minitest::Test
     refute_empty ORACLE_PATHS
   end
 
+  def test_shared_oracles_are_engine_agnostic
+    pinned = ORACLE_PATHS.select { |path| JSON.parse(File.read(path)).key?("engine") }
+
+    assert_empty pinned, "shared example oracles must not pin detector engines:\n#{pinned.join("\n")}"
+  end
+
   def test_each_detector_has_one_fixture_per_language
     languages = FIXTURE_PATHS.map { |path| File.basename(File.dirname(path)) }.uniq.sort
     detectors = ORACLE_PATHS.map { |path| File.basename(path, ".json") }.sort
@@ -36,19 +43,19 @@ class ExamplesOracleTest < Minitest::Test
     end
   end
 
-  FIXTURE_PATHS.each_with_index do |fixture_path, index|
+  FIXTURE_PATHS.product(ENGINES).each_with_index do |(fixture_path, engine), index|
     language = File.basename(File.dirname(fixture_path))
     detector = File.basename(fixture_path, File.extname(fixture_path))
-    method_name = "test_#{index}_#{language}_#{detector.tr("-", "_")}_matches_shared_oracle"
+    method_name = "test_#{index}_#{engine}_#{language}_#{detector.tr("-", "_")}_matches_shared_oracle"
 
     define_method(method_name) do
-      assert_fixture_matches_shared_oracle(fixture_path)
+      assert_fixture_matches_shared_oracle(fixture_path, engine)
     end
   end
 
   private
 
-  def assert_fixture_matches_shared_oracle(fixture_path)
+  def assert_fixture_matches_shared_oracle(fixture_path, engine)
     detector = File.basename(fixture_path, File.extname(fixture_path))
     oracle_path = File.join(ORACLE_DIR, "#{detector}.json")
 
@@ -63,12 +70,12 @@ class ExamplesOracleTest < Minitest::Test
       Decomplex::DetectorRunner.canonical_json(
         oracle.fetch("detector"),
         [fixture_path],
-        engine: oracle.fetch("engine", "ruby"),
+        engine: engine,
         **options
       )
     )
 
-    assert_equal expected, project_detector_output(detector, actual)
+    assert_equal expected, project_detector_output(detector, actual), "#{engine} #{fixture_path}"
   end
 
   def symbolize_options(options)

@@ -1,6 +1,5 @@
 {
   "detector": "semantic-alias",
-  "engine": "ruby",
   "options": {
   },
   "expected": {

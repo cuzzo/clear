@@ -1,5 +1,5 @@
-use crate::decomplex::ast::{self, Child, Node, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::ast::Span;
+use crate::decomplex::syntax::{self, CallSite, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,9 +38,28 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<BrokenProtoco
 pub fn scan_documents(documents: &[Document]) -> BrokenProtocolReport {
     let mut calls = Vec::new();
     for document in documents {
-        let mut sm = SequenceMine::new(document.file.clone(), document.lines.clone());
-        sm.walk(&document.normalized_root, &Vec::new());
-        calls.extend(sm.calls);
+        for call in &document.call_sites {
+            let mid = call.message.to_string();
+            for nested_mid in nested_protocol_events(call, document) {
+                calls.push(Call {
+                    mid: nested_mid,
+                    file: call.file.clone(),
+                    defn: call.function.clone(),
+                    line: call.line,
+                    span: call.span,
+                });
+            }
+
+            if protocol_event(call, &mid) {
+                calls.push(Call {
+                    mid,
+                    file: call.file.clone(),
+                    defn: call.function.clone(),
+                    line: call.line,
+                    span: call.span,
+                });
+            }
+        }
     }
     Report::new(calls).findings()
 }
@@ -180,82 +199,89 @@ const ZERO_ARG_ACTION_PREFIXES: &[&str] = &[
     "write",
 ];
 
-struct SequenceMine {
-    file: String,
-    #[allow(dead_code)]
-    lines: Vec<String>,
-    calls: Vec<Call>,
+fn protocol_event(call: &CallSite, mid: &str) -> bool {
+    !ignored_mid(mid) && !passive_reader_call(call, mid)
 }
 
-impl SequenceMine {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self {
-            file,
-            lines,
-            calls: Vec::new(),
-        }
+fn passive_reader_call(call: &CallSite, mid: &str) -> bool {
+    if zero_arg_action_name(mid) {
+        return false;
     }
 
-    fn walk(&mut self, node: &Node, defstack: &[String]) {
-        let mut next_defstack = defstack.to_vec();
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
-            let name_index = if node.r#type == "DEFS" { 1 } else { 0 };
-            if let Some(Child::Symbol(name)) = node.children.get(name_index) {
-                next_defstack.push(name.clone());
-            }
-        }
+    call.arguments.is_empty()
+}
 
-        if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "VCALL") {
-            if let Some(mid) = self.call_mid(node) {
-                if self.protocol_event(node, &mid) {
-                    self.calls.push(Call {
-                        mid,
-                        file: self.file.clone(),
-                        defn: next_defstack
-                            .last()
-                            .cloned()
-                            .unwrap_or_else(|| "(top-level)".to_string()),
-                        line: node.first_lineno,
-                        span: [
-                            node.first_lineno,
-                            node.first_column,
-                            node.last_lineno,
-                            node.last_column,
-                        ],
-                    });
-                }
-            }
-        }
-
-        for child in node.children.iter().filter_map(ast::node) {
-            self.walk(child, &next_defstack);
-        }
+fn nested_protocol_events(call: &CallSite, document: &Document) -> Vec<String> {
+    if !ignored_mid(&call.message) {
+        return Vec::new();
     }
 
-    fn protocol_event(&self, node: &Node, mid: &str) -> bool {
-        !ignored_mid(mid) && !self.passive_reader_call(node, mid)
-    }
-
-    fn passive_reader_call(&self, node: &Node, mid: &str) -> bool {
-        if zero_arg_action_name(mid) {
-            return false;
-        }
-
-        match node.r#type.as_str() {
-            "CALL" => no_args(node.children.get(2)),
-            "VCALL" => true,
-            "FCALL" => no_args(node.children.get(1)),
-            _ => false,
+    let mut candidates = call.arguments.clone();
+    candidates.extend(
+        source_text(&document.lines, call.span)
+            .split(|ch: char| !(ch == '_' || ch == '!' || ch == '?' || ch.is_ascii_alphanumeric()))
+            .filter_map(protocol_word),
+    );
+    let mut out = Vec::new();
+    for candidate in candidates {
+        if !out.contains(&candidate) && !ignored_mid(&candidate) && zero_arg_action_name(&candidate)
+        {
+            out.push(candidate);
         }
     }
+    out
+}
 
-    fn call_mid(&self, node: &Node) -> Option<String> {
-        match node.r#type.as_str() {
-            "CALL" => ast::child_to_string(node.children.get(1)),
-            "FCALL" | "VCALL" => ast::child_to_string(node.children.get(0)),
-            _ => None,
+fn protocol_word(text: &str) -> Option<String> {
+    let word = text.trim();
+    if word.is_empty() {
+        return None;
+    }
+    let mut chars = word.chars();
+    let first = chars.next()?;
+    if !(first == '_' || first.is_ascii_lowercase()) {
+        return None;
+    }
+    if !chars.all(|ch| ch == '_' || ch == '!' || ch == '?' || ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(word.to_string())
+}
+
+fn source_text(lines: &[String], span: Span) -> String {
+    let [first_line, first_column, last_line, last_column] = span;
+    if first_line == 0 || last_line == 0 {
+        return String::new();
+    }
+    if first_line == last_line {
+        return lines
+            .get(first_line - 1)
+            .and_then(|line| line.get(first_column..last_column))
+            .unwrap_or("")
+            .to_string();
+    }
+
+    let mut parts = Vec::new();
+    parts.push(
+        lines
+            .get(first_line - 1)
+            .and_then(|line| line.get(first_column..))
+            .unwrap_or("")
+            .to_string(),
+    );
+    for line_index in first_line..last_line.saturating_sub(1) {
+        if let Some(line) = lines.get(line_index) {
+            parts.push(line.clone());
         }
     }
+    parts.push(
+        lines
+            .get(last_line - 1)
+            .and_then(|line| line.get(..last_column))
+            .unwrap_or("")
+            .to_string(),
+    );
+    parts.join("")
 }
 
 struct PairSupport {
@@ -385,10 +411,6 @@ fn zero_arg_action_name(mid: &str) -> bool {
         || ZERO_ARG_ACTION_PREFIXES
             .iter()
             .any(|prefix| mid == *prefix || mid.starts_with(&format!("{prefix}_")))
-}
-
-fn no_args(child: Option<&Child>) -> bool {
-    child.is_none() || matches!(child, Some(Child::Nil))
 }
 
 fn unique_mids(calls: &[Call]) -> Vec<String> {

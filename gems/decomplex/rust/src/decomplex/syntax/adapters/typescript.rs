@@ -25,6 +25,10 @@ impl LanguageProfile for TypeScriptProfile {
         &["formal_parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["statement_block"]
     }

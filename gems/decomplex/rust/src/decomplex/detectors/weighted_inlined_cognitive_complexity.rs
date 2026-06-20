@@ -1,5 +1,5 @@
-use crate::decomplex::ast::{self, Node, Span};
-use crate::decomplex::detectors::structural_topology;
+use crate::decomplex::ast::{self, Node, RawNode, Span};
+use crate::decomplex::detectors::{local_flow, structural_topology};
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde::Serialize;
@@ -33,25 +33,29 @@ pub fn scan_files(
 pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveComplexityRow> {
     let topology_report = structural_topology::scan_documents(documents);
     let topology = structural_topology::Graph::new(topology_report.methods, topology_report.edges);
-
-    let mut bodies = Vec::new();
-    for document in documents {
-        let mut collector = MethodBodyCollector::new(document.file.clone(), document.lines.clone());
-        bodies.extend(collector.scan(&document.normalized_root));
-    }
+    let raw_scores = raw_complexity_scores(documents);
 
     let mut scores = BTreeMap::new();
-    for body in bodies {
-        let score = LocalScorer::new().score(&body.node);
+    for summary in local_flow::scan_documents(documents) {
+        let owner = if summary.owner == "(top-level)" {
+            format!("(top-level:{})", summary.file)
+        } else {
+            summary.owner.clone()
+        };
+        let id = format!("{}#{}", owner, summary.name);
+        let score = raw_scores
+            .get(&(summary.file.clone(), summary.line, summary.name.clone()))
+            .cloned()
+            .unwrap_or_else(|| LocalScorer::new().score(&summary.node));
         scores.insert(
-            body.id.clone(),
+            id.clone(),
             LocalScore {
-                id: body.id,
-                owner: body.owner,
-                name: body.name,
-                file: body.file,
-                line: body.line,
-                span: body.span,
+                id,
+                owner,
+                name: summary.name,
+                file: summary.file,
+                line: summary.line,
+                span: summary.span,
                 score: score.score,
                 signals: score.signals,
             },
@@ -62,14 +66,17 @@ pub fn scan_documents(documents: &[Document]) -> Vec<WeightedInlinedCognitiveCom
     analyzer.findings()
 }
 
-struct MethodBody {
-    id: String,
-    owner: String,
-    name: String,
-    file: String,
-    line: usize,
-    span: Span,
-    node: Node,
+fn raw_complexity_scores(documents: &[Document]) -> BTreeMap<(String, usize, String), ScoreResult> {
+    let mut out = BTreeMap::new();
+    for document in documents {
+        for function in &document.function_defs {
+            out.insert(
+                (function.file.clone(), function.line, function.name.clone()),
+                LocalScorer::new().score_raw(&function.body),
+            );
+        }
+    }
+    out
 }
 
 struct LocalScore {
@@ -94,7 +101,6 @@ struct Contribution {
     chain: Vec<String>,
 }
 
-const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
 const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
 const BRANCH_TYPES: &[&str] = &["IF", "UNLESS"];
@@ -104,185 +110,9 @@ const RESCUE_TYPES: &[&str] = &["RESCUE", "RESBODY"];
 const EARLY_EXIT_TYPES: &[&str] = &["RETURN", "BREAK", "NEXT", "REDO", "RETRY"];
 const BOOLEAN_TYPES: &[&str] = &["AND", "OR"];
 
-struct MethodBodyCollector {
-    file: String,
-    lines: Vec<String>,
-}
-
-impl MethodBodyCollector {
-    fn new(file: String, lines: Vec<String>) -> Self {
-        Self { file, lines }
-    }
-
-    fn scan(&mut self, root: &Node) -> Vec<MethodBody> {
-        let mut out = Vec::new();
-        for m_node in self.top_level_methods(root) {
-            out.push(self.method_body(m_node, &self.top_level_owner()));
-        }
-        self.walk(root, &Vec::new(), &mut out);
-        out
-    }
-
-    fn top_level_methods<'a>(&self, root: &'a Node) -> Vec<&'a Node> {
-        self.top_level_statements(root)
-            .into_iter()
-            .filter(|s| METHOD_TYPES.contains(&s.r#type.as_str()))
-            .collect()
-    }
-
-    fn walk<'a>(&self, node: &'a Node, owners: &[String], out: &mut Vec<MethodBody>) {
-        if OWNER_TYPES.contains(&node.r#type.as_str()) {
-            let owner = self.full_owner_name(owners, node);
-            for m_node in self.owner_methods(node) {
-                out.push(self.method_body(m_node, &owner));
-            }
-            let mut next_owners = owners.to_vec();
-            next_owners.push(self.owner_segment(node));
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, &next_owners, out);
-            }
-        } else {
-            for child in node.children.iter().filter_map(ast::node) {
-                self.walk(child, owners, out);
-            }
-        }
-    }
-
-    fn owner_methods<'a>(&self, owner_node: &'a Node) -> Vec<&'a Node> {
-        let Some(body) = self.owner_body(owner_node) else {
-            return Vec::new();
-        };
-        self.owner_statements(body)
-            .into_iter()
-            .flat_map(|stmt| {
-                if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
-                    vec![stmt]
-                } else if self.visibility_call(stmt) {
-                    self.inline_methods(stmt)
-                } else {
-                    vec![]
-                }
-            })
-            .collect()
-    }
-
-    fn method_body(&self, node: &Node, owner: &str) -> MethodBody {
-        let name = self.method_name(node);
-        MethodBody {
-            id: format!("{}#{}", owner, name),
-            owner: owner.to_string(),
-            name,
-            file: self.file.clone(),
-            line: node.first_lineno,
-            span: [
-                node.first_lineno,
-                node.first_column,
-                node.last_lineno,
-                node.last_column,
-            ],
-            node: node.clone(),
-        }
-    }
-
-    fn inline_methods<'a>(&self, stmt: &'a Node) -> Vec<&'a Node> {
-        let Some(args) = stmt.children.get(1).and_then(ast::node) else {
-            return Vec::new();
-        };
-        args.children
-            .iter()
-            .filter_map(ast::node)
-            .filter(|arg| METHOD_TYPES.contains(&arg.r#type.as_str()))
-            .collect()
-    }
-
-    fn owner_body<'a>(&self, owner_node: &'a Node) -> Option<&'a Node> {
-        let scope_index = if owner_node.r#type == "CLASS" { 2 } else { 1 };
-        let scope = owner_node.children.get(scope_index).and_then(ast::node)?;
-        if scope.r#type != "SCOPE" {
-            return None;
-        }
-        scope.children.get(2).and_then(ast::node)
-    }
-
-    fn owner_statements<'a>(&self, body: &'a Node) -> Vec<&'a Node> {
-        if body.r#type == "BLOCK" {
-            body.children.iter().filter_map(ast::node).collect()
-        } else {
-            vec![body]
-        }
-    }
-
-    fn top_level_statements<'a>(&self, root: &'a Node) -> Vec<&'a Node> {
-        root.children
-            .iter()
-            .filter_map(ast::node)
-            .flat_map(|c| {
-                if c.r#type == "BLOCK" {
-                    c.children.iter().filter_map(ast::node).collect()
-                } else {
-                    vec![c]
-                }
-            })
-            .collect()
-    }
-
-    fn visibility_call(&self, node: &Node) -> bool {
-        node.r#type == "FCALL"
-            && matches!(
-                ast::child_to_string(node.children.get(0))
-                    .unwrap_or_default()
-                    .as_str(),
-                "public" | "protected" | "private"
-            )
-    }
-
-    fn method_name(&self, node: &Node) -> String {
-        if node.r#type == "DEFS" {
-            let receiver = node.children.get(0).and_then(ast::node);
-            let prefix = if let Some(r) = receiver {
-                if r.r#type == "SELF" {
-                    "self".to_string()
-                } else {
-                    ast::slice(r, &self.lines)
-                }
-            } else {
-                "?".to_string()
-            };
-            format!(
-                "{}.{}",
-                prefix,
-                ast::child_to_string(node.children.get(1)).unwrap_or_else(|| "?".to_string())
-            )
-        } else {
-            ast::child_to_string(node.children.get(0)).unwrap_or_else(|| "?".to_string())
-        }
-    }
-
-    fn full_owner_name(&self, owners: &[String], node: &Node) -> String {
-        let mut next = owners.to_vec();
-        next.push(self.owner_segment(node));
-        next.join("::")
-    }
-
-    fn owner_segment(&self, node: &Node) -> String {
-        let text = ast::slice(
-            node.children.first().and_then(ast::node).unwrap_or(node),
-            &self.lines,
-        );
-        if text.is_empty() {
-            "(anonymous)".to_string()
-        } else {
-            text
-        }
-    }
-
-    fn top_level_owner(&self) -> String {
-        format!("(top-level:{})", self.file)
-    }
-}
-
 pub struct LocalScorer {}
 
+#[derive(Clone)]
 pub struct ScoreResult {
     pub score: f64,
     pub signals: BTreeMap<String, usize>,
@@ -297,6 +127,14 @@ impl LocalScorer {
         let mut signals = BTreeMap::new();
         ScoreResult {
             score: self.round(self.score_node(method_node, 0, &mut signals)),
+            signals,
+        }
+    }
+
+    pub fn score_raw(&self, method_node: &RawNode) -> ScoreResult {
+        let mut signals = BTreeMap::new();
+        ScoreResult {
+            score: self.round(self.score_raw_node(method_node, 0, &mut signals)),
             signals,
         }
     }
@@ -478,12 +316,223 @@ impl LocalScorer {
     }
 
     fn branch_cost(&self, nesting: usize) -> f64 {
-        1.0 + (nesting as f64)
+        1.1 + (nesting as f64)
     }
 
     fn round(&self, value: f64) -> f64 {
         (value * 10.0).round() / 10.0
     }
+
+    fn score_raw_node(
+        &self,
+        node: &RawNode,
+        nesting: usize,
+        signals: &mut BTreeMap<String, usize>,
+    ) -> f64 {
+        if raw_skip_nested(node) {
+            return 0.0;
+        }
+
+        if raw_branch(node) {
+            *signals.entry("branches".to_string()).or_insert(0) += 1;
+            if nesting > 0 {
+                *signals.entry("nested".to_string()).or_insert(0) += 1;
+            }
+            return self.branch_cost(nesting)
+                + self.raw_predicate_cost(raw_condition_node(node), signals)
+                + self.score_raw_children(node, nesting + 1, signals);
+        }
+
+        if raw_loop(node) {
+            *signals.entry("loops".to_string()).or_insert(0) += 1;
+            if nesting > 0 {
+                *signals.entry("nested".to_string()).or_insert(0) += 1;
+            }
+            return self.branch_cost(nesting) + self.score_raw_children(node, nesting + 1, signals);
+        }
+
+        if raw_case(node) {
+            *signals.entry("cases".to_string()).or_insert(0) += 1;
+            return 0.5 + self.score_raw_children(node, nesting + 1, signals);
+        }
+
+        if raw_rescue(node) {
+            *signals.entry("rescues".to_string()).or_insert(0) += 1;
+            return self.branch_cost(nesting) + self.score_raw_children(node, nesting + 1, signals);
+        }
+
+        if raw_early_exit(node) {
+            *signals.entry("early_exits".to_string()).or_insert(0) += 1;
+            let exit_cost = if nesting > 0 {
+                0.5 + (nesting as f64 * 0.25)
+            } else {
+                0.0
+            };
+            return exit_cost + self.score_raw_children(node, nesting, signals);
+        }
+
+        if raw_boolean_node(node) {
+            *signals.entry("boolean_ops".to_string()).or_insert(0) += 1;
+            return 0.25 + self.score_raw_children(node, nesting, signals);
+        }
+
+        self.score_raw_children(node, nesting, signals)
+    }
+
+    fn score_raw_children(
+        &self,
+        node: &RawNode,
+        nesting: usize,
+        signals: &mut BTreeMap<String, usize>,
+    ) -> f64 {
+        node.children
+            .iter()
+            .map(|child| self.score_raw_node(child, nesting, signals))
+            .sum()
+    }
+
+    fn raw_predicate_cost(
+        &self,
+        node: Option<&RawNode>,
+        signals: &mut BTreeMap<String, usize>,
+    ) -> f64 {
+        let Some(node) = node else { return 0.0 };
+        let bools = raw_boolean_count(node);
+        *signals.entry("boolean_ops".to_string()).or_insert(0) += bools;
+        (bools as f64) * 0.5
+    }
+}
+
+fn raw_skip_nested(node: &RawNode) -> bool {
+    matches!(node.kind.as_str(), "class" | "module" | "lambda")
+}
+
+fn raw_branch(node: &RawNode) -> bool {
+    (matches!(
+        node.kind.as_str(),
+        "if" | "unless" | "if_statement" | "if_expression" | "if_modifier" | "unless_modifier"
+    ) && !node.named_children().is_empty())
+        || raw_hidden_if(node)
+        || raw_modifier_if(node)
+}
+
+fn raw_hidden_if(node: &RawNode) -> bool {
+    if node.kind == "expression_statement" && node.text.trim_start().starts_with("if ") {
+        return true;
+    }
+    matches!(
+        node.kind.as_str(),
+        "body_statement" | "block" | "statements" | "statement_list"
+    ) && node
+        .children
+        .first()
+        .map(|child| !child.named && matches!(child.kind.as_str(), "if" | "unless"))
+        .unwrap_or(false)
+}
+
+fn raw_modifier_if(node: &RawNode) -> bool {
+    if matches!(node.kind.as_str(), "if_modifier" | "unless_modifier") {
+        return true;
+    }
+    if node.kind != "body_statement" {
+        return false;
+    }
+    let mut seen_named = false;
+    node.children.iter().any(|child| {
+        seen_named |= child.named;
+        seen_named && !child.named && matches!(child.kind.as_str(), "if" | "unless")
+    })
+}
+
+fn raw_loop(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "while"
+            | "until"
+            | "while_statement"
+            | "for"
+            | "for_statement"
+            | "for_in_statement"
+            | "do_block"
+    ) || raw_hidden_loop(node)
+        || (node.kind == "expression_statement"
+            && starts_with_any(node.text.trim_start(), &["for", "while", "loop"]))
+        || (node.kind == "labeled_statement" && node.text.trim_start().starts_with("for "))
+}
+
+fn raw_hidden_loop(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "body_statement" | "block" | "statements" | "statement_list"
+    ) && node
+        .children
+        .first()
+        .map(|child| !child.named && matches!(child.kind.as_str(), "for" | "while" | "loop"))
+        .unwrap_or(false)
+}
+
+fn starts_with_any(text: &str, words: &[&str]) -> bool {
+    words
+        .iter()
+        .any(|word| text == *word || text.starts_with(&format!("{word} ")))
+}
+
+fn raw_case(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "case" | "switch_statement" | "switch_expression" | "match_statement" | "match_expression"
+    ) || (node.kind == "expression_statement" && node.text.trim_start().starts_with("match "))
+}
+
+fn raw_rescue(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "rescue" | "rescue_modifier" | "rescue_clause" | "rescue_body"
+    )
+}
+
+fn raw_early_exit(node: &RawNode) -> bool {
+    (node.named || node.kind == "return")
+        && matches!(
+            node.kind.as_str(),
+            "return"
+                | "break"
+                | "next"
+                | "redo"
+                | "retry"
+                | "return_statement"
+                | "break_statement"
+                | "continue_statement"
+        )
+}
+
+fn raw_boolean_node(node: &RawNode) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "binary"
+            | "binary_expression"
+            | "boolean_operator"
+            | "conjunction_expression"
+            | "disjunction_expression"
+    ) && node
+        .children
+        .iter()
+        .any(|child| !child.named && matches!(child.text.as_str(), "&&" | "||" | "and" | "or"))
+}
+
+fn raw_condition_node(node: &RawNode) -> Option<&RawNode> {
+    if raw_modifier_if(node) {
+        return node.named_children().last().copied();
+    }
+    if node.kind == "body_statement" {
+        return node.named_children().first().copied();
+    }
+    node.named_children().first().copied()
+}
+
+fn raw_boolean_count(node: &RawNode) -> usize {
+    let own = usize::from(raw_boolean_node(node));
+    own + node.children.iter().map(raw_boolean_count).sum::<usize>()
 }
 
 struct Analyzer {

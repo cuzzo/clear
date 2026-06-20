@@ -1,6 +1,7 @@
 use super::{
     adapters::{language_profile, LanguageProfile},
-    ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias, StateWrite,
+    CallSite, ComparisonUse, DecisionSite, Document, FunctionDef, Language, PredicateAlias,
+    StateRead, StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use anyhow::{Context, Result};
@@ -12,11 +13,15 @@ use tree_sitter::{Node, Parser};
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let parsed = ParsedDocument::parse(file, language)?;
     let mut function_defs = Vec::new();
+    let mut call_sites = Vec::new();
+    let mut state_reads = Vec::new();
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
     let mut predicate_aliases = Vec::new();
     let mut comparison_uses = Vec::new();
     let mut seen_writes = HashSet::new();
+    let mut seen_reads = HashSet::new();
+    let mut seen_calls = HashSet::new();
     let mut seen_decisions = HashSet::new();
     let context = ContextState::new(file_owner(&parsed.file));
 
@@ -27,13 +32,18 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         language,
         &context,
         &mut function_defs,
+        &mut call_sites,
+        &mut state_reads,
         &mut state_writes,
         &mut decision_sites,
         &mut predicate_aliases,
         &mut comparison_uses,
         &mut seen_writes,
+        &mut seen_reads,
+        &mut seen_calls,
         &mut seen_decisions,
     );
+    language_profile(language).after_collect_facts(&mut function_defs, &call_sites);
 
     Ok(Document {
         file: parsed.file.to_string_lossy().to_string(),
@@ -43,6 +53,8 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
         normalized_root: normalize_tree(parsed.tree.root_node(), &parsed.source, language),
         function_defs,
+        call_sites,
+        state_reads,
         state_writes,
         decision_sites,
         predicate_aliases,
@@ -76,7 +88,9 @@ struct ContextState {
     file_owner: String,
     owner: Option<String>,
     function: Option<String>,
+    function_line: Option<usize>,
     pub receiver: Option<String>,
+    controls: Vec<String>,
 }
 
 impl ContextState {
@@ -85,7 +99,9 @@ impl ContextState {
             file_owner,
             owner: None,
             function: None,
+            function_line: None,
             receiver: None,
+            controls: Vec::new(),
         }
     }
 
@@ -100,6 +116,19 @@ impl ContextState {
             .clone()
             .unwrap_or_else(|| "(top-level)".to_string())
     }
+
+    fn current_control(&self) -> String {
+        self.controls
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "always".to_string())
+    }
+
+    fn conditional_context(&self) -> bool {
+        self.controls
+            .iter()
+            .any(|control| matches!(control.as_str(), "conditional" | "iterates"))
+    }
 }
 
 fn collect_facts(
@@ -109,20 +138,47 @@ fn collect_facts(
     language: Language,
     context: &ContextState,
     function_defs: &mut Vec<FunctionDef>,
+    call_sites: &mut Vec<CallSite>,
+    state_reads: &mut Vec<StateRead>,
     state_writes: &mut Vec<StateWrite>,
     decision_sites: &mut Vec<DecisionSite>,
     predicate_aliases: &mut Vec<PredicateAlias>,
     comparison_uses: &mut Vec<ComparisonUse>,
     seen_writes: &mut HashSet<String>,
+    seen_reads: &mut HashSet<String>,
+    seen_calls: &mut HashSet<String>,
     seen_decisions: &mut HashSet<String>,
 ) {
-    let next_context = push_function_context(
+    let next_context = push_control_context(
         node,
-        push_owner_context(node, source, context, language),
+        push_function_context(
+            node,
+            push_owner_context(node, source, context, language),
+            source,
+            language,
+        ),
         source,
         language,
     );
     record_function_def(node, source, file, language, &next_context, function_defs);
+    record_call_site(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        call_sites,
+        seen_calls,
+    );
+    record_state_read(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        state_reads,
+        seen_reads,
+    );
     record_state_write(
         node,
         source,
@@ -153,11 +209,15 @@ fn collect_facts(
             language,
             &next_context,
             function_defs,
+            call_sites,
+            state_reads,
             state_writes,
             decision_sites,
             predicate_aliases,
             comparison_uses,
             seen_writes,
+            seen_reads,
+            seen_calls,
             seen_decisions,
         );
     }
@@ -181,6 +241,8 @@ fn record_function_def(
         line: line(node),
         span: span(node),
         body: RawNode::from_tree_sitter(node, source),
+        visibility: language_profile(language).function_visibility(node, source),
+        params: language_profile(language).function_params(node, source),
     };
     let key = (
         function.file.clone(),
@@ -432,9 +494,132 @@ fn push_function_context(
     };
     let owner = context.current_owner();
     context.function = Some(function);
+    context.function_line = Some(line(node));
     context.owner = Some(owner);
     context.receiver = profile.function_receiver_name(node, source);
     context
+}
+
+fn push_control_context(
+    node: Node<'_>,
+    mut context: ContextState,
+    source: &str,
+    language: Language,
+) -> ContextState {
+    if let Some(control) = language_profile(language).control_context(node, source) {
+        context.controls.push(control);
+    }
+    context
+}
+
+fn record_call_site(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<CallSite>,
+    seen: &mut HashSet<String>,
+) {
+    let profile = language_profile(language);
+    let Some(mut target) = profile.call_target(node, source) else {
+        return;
+    };
+    normalize_call_receiver(&mut target, context);
+    if profile.noise_call(&target) {
+        return;
+    }
+
+    let source_node = target.source_node.unwrap_or(node);
+    if target.receiver == "self"
+        && target.message == context.current_function()
+        && context.function_line == Some(line(source_node))
+    {
+        return;
+    }
+    let file_name = file.to_string_lossy().to_string();
+    let owner = context.current_owner();
+    let function = context.current_function();
+    let mut call_span = target.span.unwrap_or_else(|| span(source_node));
+    if target.message.ends_with('?') && call_span[0] == call_span[2] {
+        if let Some(line_text) = source.lines().nth(call_span[0].saturating_sub(1)) {
+            if line_text.as_bytes().get(call_span[1]).copied() == Some(b'!') {
+                call_span[1] += 1;
+            }
+        }
+    }
+    let key = format!(
+        "{}\0{}\0{}\0{:?}\0{}\0{}",
+        file_name, owner, function, call_span, target.receiver, target.message
+    );
+    if !seen.insert(key) {
+        return;
+    }
+
+    out.push(CallSite {
+        receiver: target.receiver,
+        message: target.message,
+        file: file_name,
+        function,
+        owner,
+        line: line(source_node),
+        span: call_span,
+        conditional: context.conditional_context(),
+        arguments: target.arguments,
+        control: Some(context.current_control()),
+        safe_navigation: target.safe_navigation,
+        block: target.block || profile.call_has_block(source_node),
+    });
+}
+
+fn record_state_read(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<StateRead>,
+    seen: &mut HashSet<String>,
+) {
+    let profile = language_profile(language);
+    if profile.assignment_lhs_node(node) {
+        return;
+    }
+
+    let Some(target) = profile.state_read_target(node, source) else {
+        return;
+    };
+    let target = normalize_target_receiver(target, context);
+    if namespace_receiver(&target.receiver) {
+        return;
+    }
+
+    let file_name = file.to_string_lossy().to_string();
+    let owner = context.current_owner();
+    let function = context.current_function();
+    let line = line(node);
+    let key = format!(
+        "{}\0{}\0{}\0{:?}\0{}\0{}",
+        file_name,
+        owner,
+        function,
+        span(node),
+        target.receiver,
+        target.field
+    );
+    if !seen.insert(key) {
+        return;
+    }
+
+    out.push(StateRead {
+        field: target.field,
+        receiver: target.receiver,
+        file: file_name,
+        function,
+        line,
+        span: span(node),
+        owner,
+    });
 }
 
 fn record_state_write(
@@ -498,6 +683,31 @@ pub(crate) struct Target {
     pub(crate) field: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CallTarget<'tree> {
+    pub(crate) receiver: String,
+    pub(crate) message: String,
+    pub(crate) arguments: Vec<String>,
+    pub(crate) source_node: Option<Node<'tree>>,
+    pub(crate) span: Option<[usize; 4]>,
+    pub(crate) safe_navigation: bool,
+    pub(crate) block: bool,
+}
+
+impl<'tree> CallTarget<'tree> {
+    pub(crate) fn new(receiver: String, message: String, arguments: Vec<String>) -> Self {
+        Self {
+            receiver,
+            message,
+            arguments,
+            source_node: None,
+            span: None,
+            safe_navigation: false,
+            block: false,
+        }
+    }
+}
+
 pub(crate) fn normalize_type_owner(text: &str) -> String {
     let value = text.trim();
     let value = value.trim_start_matches(['&', '*']);
@@ -516,6 +726,22 @@ fn file_owner(file: &Path) -> String {
         .filter(|stem| !stem.is_empty())
         .unwrap_or("(file)")
         .to_string()
+}
+
+fn namespace_receiver(text: &str) -> bool {
+    let receiver = text.trim();
+    if receiver.starts_with('@') {
+        return true;
+    }
+    if matches!(receiver, "std" | "builtin" | "build_options")
+        || receiver.starts_with("std.")
+        || receiver.starts_with("builtin.")
+        || receiver.starts_with("build_options.")
+    {
+        return true;
+    }
+
+    matches!(receiver.chars().next(), Some(first) if first.is_ascii_uppercase())
 }
 
 pub(crate) fn first_named_text(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
@@ -872,6 +1098,7 @@ mod c_tests {
 }
 
 fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Target {
+    target.receiver = canonical_self_receiver(&target.receiver);
     if let Some(current_receiver) = &context.receiver {
         if &target.receiver == current_receiver {
             target.receiver = "self".to_string();
@@ -889,4 +1116,39 @@ fn normalize_target_receiver(mut target: Target, context: &ContextState) -> Targ
         }
     }
     target
+}
+
+fn normalize_call_receiver(target: &mut CallTarget<'_>, context: &ContextState) {
+    target.receiver = canonical_self_receiver(&target.receiver);
+    if let Some(current_receiver) = &context.receiver {
+        if &target.receiver == current_receiver {
+            target.receiver = "self".to_string();
+        } else if target
+            .receiver
+            .starts_with(&format!("{}.", current_receiver))
+        {
+            target.receiver = format!(
+                "self.{}",
+                target
+                    .receiver
+                    .strip_prefix(&format!("{}.", current_receiver))
+                    .unwrap()
+            );
+        }
+    }
+}
+
+fn canonical_self_receiver(receiver: &str) -> String {
+    match receiver {
+        "self" | "this" | "$this" => "self".to_string(),
+        _ if receiver.starts_with("this.") => format!(
+            "self.{}",
+            receiver.strip_prefix("this.").unwrap_or_default()
+        ),
+        _ if receiver.starts_with("$this.") => format!(
+            "self.{}",
+            receiver.strip_prefix("$this.").unwrap_or_default()
+        ),
+        _ => receiver.to_string(),
+    }
 }

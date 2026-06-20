@@ -1,6 +1,5 @@
 {
   "detector": "predicate-alias",
-  "engine": "ruby",
   "options": {
   },
   "expected": {

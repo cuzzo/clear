@@ -1,6 +1,5 @@
 {
   "detector": "redundant-nil-guard",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

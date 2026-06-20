@@ -1,6 +1,5 @@
 {
   "detector": "false-simplicity",
-  "engine": "ruby",
   "options": {
   },
   "expected": [

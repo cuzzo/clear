@@ -1,6 +1,5 @@
 {
   "detector": "state-mesh",
-  "engine": "ruby",
   "options": {
   },
   "expected": {

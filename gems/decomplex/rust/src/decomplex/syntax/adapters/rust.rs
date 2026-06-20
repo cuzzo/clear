@@ -29,6 +29,10 @@ impl LanguageProfile for RustProfile {
         &["parameters"]
     }
 
+    fn parameter_identifier_node_kinds(&self) -> &[&str] {
+        &["identifier", "self_parameter"]
+    }
+
     fn function_body_node_kinds(&self) -> &[&str] {
         &["block", "declaration_list"]
     }

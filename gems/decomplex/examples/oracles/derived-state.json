@@ -1,6 +1,5 @@
 {
   "detector": "derived-state",
-  "engine": "ruby",
   "options": {
   },
   "expected": [
