@@ -6,221 +6,223 @@
       "language": "zig",
       "functions": [
         {
-          "name": "audit",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 38,
-          "span": [
-            38,
-            4,
-            41,
-            5
-          ],
-          "visibility": "private",
-          "params": [
-            "self",
-            "name"
-          ]
-        },
-        {
-          "name": "init",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 7,
-          "span": [
-            7,
-            4,
-            9,
-            5
-          ],
-          "visibility": "public",
-          "params": [
-            "status"
-          ]
-        },
-        {
+          "line": 11,
           "name": "process",
           "owner": "ZigSyntaxFactsCore",
-          "line": 11,
+          "params": [
+            "self",
+            "user",
+            "items",
+            "callback"
+          ],
           "span": [
             11,
             4,
             36,
             5
           ],
-          "visibility": "public",
-          "params": [
-            "self",
-            "user",
-            "items",
-            "callback"
-          ]
+          "visibility": "public"
         },
         {
+          "line": 38,
+          "name": "audit",
+          "owner": "ZigSyntaxFactsCore",
+          "params": [
+            "self",
+            "name"
+          ],
+          "span": [
+            38,
+            4,
+            41,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 43,
           "name": "ready",
           "owner": "ZigSyntaxFactsCore",
-          "line": 43,
+          "params": [
+            "self"
+          ],
           "span": [
             43,
             4,
             45,
             5
           ],
-          "visibility": "private",
+          "visibility": "private"
+        },
+        {
+          "line": 7,
+          "name": "init",
+          "owner": "ZigSyntaxFactsCore",
           "params": [
-            "self"
-          ]
+            "status"
+          ],
+          "span": [
+            7,
+            4,
+            9,
+            5
+          ],
+          "visibility": "public"
         }
       ],
       "owners": [
         {
-          "name": "Item",
-          "kind": "struct",
-          "line": 53,
-          "span": [
-            53,
-            13,
-            55,
-            1
-          ]
-        },
-        {
-          "name": "ZigSyntaxFactsCore",
           "kind": "struct",
           "line": 3,
+          "name": "ZigSyntaxFactsCore",
           "span": [
             3,
             31,
             46,
             1
           ]
+        },
+        {
+          "kind": "struct",
+          "line": 53,
+          "name": "Item",
+          "span": [
+            53,
+            13,
+            55,
+            1
+          ]
         }
       ],
       "calls": [
         {
-          "receiver": "item",
-          "message": "children",
-          "function": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 31,
-          "span": [
-            31,
-            16,
-            31,
-            31
-          ],
-          "conditional": true,
-          "arguments": [],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "callback",
-          "function": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 15,
-          "span": [
-            15,
-            8,
-            15,
-            22
-          ],
-          "conditional": false,
           "arguments": [
-            "user"
+            ".busy"
           ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "defaultCase",
-          "function": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 20,
-          "span": [
-            20,
-            20,
-            20,
-            42
-          ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "user"
-          ],
           "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "escalate",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 18,
-          "span": [
-            18,
-            30,
-            18,
-            49
-          ],
-          "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "fallback",
-          "function": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "line": 19,
-          "span": [
-            19,
-            22,
-            19,
-            41
-          ],
-          "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "publish",
-          "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 25,
+          "message": "publish",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             25,
             12,
             25,
             31
-          ],
-          "conditional": true,
+          ]
+        },
+        {
           "arguments": [
-            ".busy"
+            "user"
           ],
-          "control": "conditional",
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 15,
+          "message": "callback",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "safe_navigation": false,
-          "block": false
+          "span": [
+            15,
+            8,
+            15,
+            22
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 18,
+          "message": "escalate",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            18,
+            30,
+            18,
+            49
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 19,
+          "message": "fallback",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            19,
+            22,
+            19,
+            41
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 20,
+          "message": "defaultCase",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            20,
+            20,
+            20,
+            42
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 31,
+          "message": "children",
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            31,
+            16,
+            31,
+            31
+          ]
         }
       ],
       "state_reads": [
         {
           "field": "admin",
-          "receiver": ".literal",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 18,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             18,
             20,
@@ -230,10 +232,10 @@
         },
         {
           "field": "busy",
-          "receiver": ".literal",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 25,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             25,
             25,
@@ -243,10 +245,10 @@
         },
         {
           "field": "children",
-          "receiver": "item",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 31,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "item",
           "span": [
             31,
             16,
@@ -256,10 +258,10 @@
         },
         {
           "field": "count",
-          "receiver": "self",
           "function": "ready",
-          "owner": "ZigSyntaxFactsCore",
           "line": 44,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             44,
             15,
@@ -269,10 +271,10 @@
         },
         {
           "field": "defaultCase",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 20,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             20,
             20,
@@ -282,10 +284,10 @@
         },
         {
           "field": "escalate",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 18,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             18,
             30,
@@ -295,10 +297,10 @@
         },
         {
           "field": "fallback",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 19,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             19,
             22,
@@ -308,10 +310,10 @@
         },
         {
           "field": "guest",
-          "receiver": ".literal",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 19,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             19,
             12,
@@ -321,10 +323,10 @@
         },
         {
           "field": "idle",
-          "receiver": ".literal",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 23,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             23,
             27,
@@ -334,10 +336,10 @@
         },
         {
           "field": "name",
-          "receiver": "user.profile",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 12,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "user.profile",
           "span": [
             12,
             21,
@@ -347,10 +349,10 @@
         },
         {
           "field": "owner",
-          "receiver": ".literal",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 18,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             18,
             12,
@@ -360,10 +362,10 @@
         },
         {
           "field": "profile",
-          "receiver": "user",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 12,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             12,
             21,
@@ -373,10 +375,10 @@
         },
         {
           "field": "publish",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 25,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             25,
             12,
@@ -386,10 +388,10 @@
         },
         {
           "field": "ready",
-          "receiver": "user",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 23,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             23,
             37,
@@ -399,10 +401,10 @@
         },
         {
           "field": "role",
-          "receiver": "user",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 17,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             17,
             16,
@@ -412,10 +414,10 @@
         },
         {
           "field": "status",
-          "receiver": "self",
           "function": "audit",
-          "owner": "ZigSyntaxFactsCore",
           "line": 40,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             40,
             12,
@@ -425,10 +427,10 @@
         },
         {
           "field": "status",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 23,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             23,
             12,
@@ -440,10 +442,10 @@
       "state_writes": [
         {
           "field": "count",
-          "receiver": ".literal",
           "function": "init",
-          "owner": "ZigSyntaxFactsCore",
           "line": 8,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             8,
             53,
@@ -453,10 +455,10 @@
         },
         {
           "field": "count",
-          "receiver": "self",
           "function": "process",
-          "owner": "ZigSyntaxFactsCore",
           "line": 24,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             24,
             12,
@@ -466,10 +468,10 @@
         },
         {
           "field": "status",
-          "receiver": ".literal",
           "function": "init",
-          "owner": "ZigSyntaxFactsCore",
           "line": 8,
+          "owner": "ZigSyntaxFactsCore",
+          "receiver": ".literal",
           "span": [
             8,
             35,
@@ -480,21 +482,21 @@
       ],
       "decisions": [
         {
-          "kind": "case_dispatch",
-          "members": [
-            ".guest",
-            ".owner"
-          ],
-          "function": "process",
-          "line": 17,
-          "span": [
+          "enclosing_span": [
             17,
             8,
             21,
             9
           ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 17,
+          "members": [
+            ".guest",
+            ".owner"
+          ],
           "predicate": "user.role",
-          "enclosing_span": [
+          "span": [
             17,
             8,
             21,
@@ -502,25 +504,25 @@
           ]
         },
         {
-          "kind": "conjunction",
-          "members": [
-            "self.status == .idle",
-            "user.ready"
-          ],
-          "function": "process",
-          "line": 23,
-          "span": [
-            23,
-            12,
-            23,
-            47
-          ],
-          "predicate": "self.status == .idle and user.ready",
           "enclosing_span": [
             23,
             8,
             28,
             9
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 23,
+          "members": [
+            "self.status == .idle",
+            "user.ready"
+          ],
+          "predicate": "self.status == .idle and user.ready",
+          "span": [
+            23,
+            12,
+            23,
+            47
           ]
         }
       ],
@@ -528,13 +530,13 @@
         {
           "function": "process",
           "line": 17,
+          "predicate": "user.role",
           "span": [
             17,
             8,
             21,
             9
           ],
-          "predicate": "user.role",
           "state_refs": [
             "user.role"
           ]
@@ -542,13 +544,13 @@
         {
           "function": "process",
           "line": 23,
+          "predicate": "self.status == .idle and user.ready",
           "span": [
             23,
             8,
             28,
             9
           ],
-          "predicate": "self.status == .idle and user.ready",
           "state_refs": [
             ".literal.idle",
             "status",
@@ -556,405 +558,14 @@
           ]
         }
       ],
-      "dispatch_sites": [],
-      "semantic_effects": [],
-      "predicate_bodies": [],
-      "local_complexity": [
-        {
-          "id": "ZigSyntaxFactsCore#audit",
-          "score": 0.0,
-          "signals": {}
-        },
-        {
-          "id": "ZigSyntaxFactsCore#init",
-          "score": 0.0,
-          "signals": {
-            "early_exits": 1
-          }
-        },
-        {
-          "id": "ZigSyntaxFactsCore#process",
-          "score": 5.6,
-          "signals": {
-            "boolean_ops": 2,
-            "branches": 1,
-            "cases": 1,
-            "early_exits": 1,
-            "loops": 2,
-            "nested": 1
-          }
-        },
-        {
-          "id": "ZigSyntaxFactsCore#ready",
-          "score": 0.0,
-          "signals": {
-            "early_exits": 1
-          }
-        }
+      "dispatch_sites": [
+
       ],
-      "clone_candidates": [
-        {
-          "method_name": "(top-level)",
-          "node_name": "enum_declaration",
-          "line": 48,
-          "span": [
-            48,
-            15,
-            51,
-            1
-          ],
-          "mass": 8,
-          "fingerprint": "enum_declaration(id {:{ id ,:, id ,:, }:})",
-          "child_fingerprints": [
-            "id",
-            "id"
-          ],
-          "child_masses": [
-            1,
-            1
-          ]
-        },
-        {
-          "method_name": "(top-level)",
-          "node_name": "struct_declaration",
-          "line": 3,
-          "span": [
-            3,
-            31,
-            46,
-            1
-          ],
-          "mass": 365,
-          "fingerprint": "struct_declaration(id {:{ container_field(id ::: id) ,:, container_field(id ::: id) ,:, function_declaration(id id id parameters((:( parameter(id ::: id) ):)) id block({:{ expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;) }:})) function_declaration(id id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: id) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ,:, parameter(id ::: id) ):)) nullable_type(?:? slice_type([:[ ]:] id id)) block({:{ variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;) variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;) expression_statement(call_expression(id (:( id ):)) ;:;) switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:}) if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:}))) labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:})) variable_declaration(id =:= id ;:;) expression_statement(return_expression(id id) ;:;) }:})) function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ):)) id block({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;) variable_declaration(id =:= field_expression(id .:. id) ;:;) }:})) function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ):)) id block({:{ expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;) }:})) }:})",
-          "child_fingerprints": [
-            "container_field(id ::: id)",
-            "container_field(id ::: id)",
-            "function_declaration(id id id parameters((:( parameter(id ::: id) ):)) id block({:{ expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;) }:}))",
-            "function_declaration(id id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: id) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ,:, parameter(id ::: id) ):)) nullable_type(?:? slice_type([:[ ]:] id id)) block({:{ variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;) variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;) expression_statement(call_expression(id (:( id ):)) ;:;) switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:}) if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:}))) labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:})) variable_declaration(id =:= id ;:;) expression_statement(return_expression(id id) ;:;) }:}))",
-            "function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ):)) id block({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;) variable_declaration(id =:= field_expression(id .:. id) ;:;) }:}))",
-            "function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ):)) id block({:{ expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;) }:}))"
-          ],
-          "child_masses": [
-            4,
-            4,
-            37,
-            231,
-            56,
-            27
-          ]
-        },
-        {
-          "method_name": "(top-level)",
-          "node_name": "struct_declaration",
-          "line": 53,
-          "span": [
-            53,
-            13,
-            55,
-            1
-          ],
-          "mass": 13,
-          "fingerprint": "struct_declaration(id {:{ container_field(id ::: slice_type([:[ ]:] id id)) ,:, }:})",
-          "child_fingerprints": [
-            "container_field(id ::: slice_type([:[ ]:] id id))"
-          ],
-          "child_masses": [
-            8
-          ]
-        },
-        {
-          "method_name": "audit",
-          "node_name": "block",
-          "line": 38,
-          "span": [
-            38,
-            63,
-            41,
-            5
-          ],
-          "mass": 34,
-          "fingerprint": "block({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;) variable_declaration(id =:= field_expression(id .:. id) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;)",
-            "variable_declaration(id =:= field_expression(id .:. id) ;:;)"
-          ],
-          "child_masses": [
-            23,
-            8
-          ]
-        },
-        {
-          "method_name": "audit",
-          "node_name": "defn",
-          "line": 38,
-          "span": [
-            38,
-            4,
-            41,
-            5
-          ],
-          "mass": 56,
-          "fingerprint": "function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ):)) id block({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;) variable_declaration(id =:= field_expression(id .:. id) ;:;) }:}))",
-          "child_fingerprints": [
-            "expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ id }:})) ):)) ;:;)",
-            "variable_declaration(id =:= field_expression(id .:. id) ;:;)"
-          ],
-          "child_masses": [
-            23,
-            8
-          ]
-        },
-        {
-          "method_name": "init",
-          "node_name": "block",
-          "line": 7,
-          "span": [
-            7,
-            51,
-            9,
-            5
-          ],
-          "mass": 25,
-          "fingerprint": "block({:{ expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;)"
-          ],
-          "child_masses": [
-            22
-          ]
-        },
-        {
-          "method_name": "init",
-          "node_name": "defn",
-          "line": 7,
-          "span": [
-            7,
-            4,
-            9,
-            5
-          ],
-          "mass": 37,
-          "fingerprint": "function_declaration(id id id parameters((:( parameter(id ::: id) ):)) id block({:{ expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;) }:}))",
-          "child_fingerprints": [
-            "expression_statement(return_expression(id struct_initializer(id initializer_list({:{ assignment_expression(field_expression(.:. id) =:= id) ,:, assignment_expression(field_expression(.:. id) =:= lit) }:}))) ;:;)"
-          ],
-          "child_masses": [
-            22
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 11,
-          "span": [
-            11,
-            113,
-            36,
-            5
-          ],
-          "mass": 192,
-          "fingerprint": "block({:{ variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;) variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;) expression_statement(call_expression(id (:( id ):)) ;:;) switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:}) if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:}))) labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:})) variable_declaration(id =:= id ;:;) expression_statement(return_expression(id id) ;:;) }:})",
-          "child_fingerprints": [
-            "variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;)",
-            "variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;)",
-            "expression_statement(call_expression(id (:( id ):)) ;:;)",
-            "switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:})",
-            "if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:})))",
-            "labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:}))",
-            "variable_declaration(id =:= id ;:;)",
-            "expression_statement(return_expression(id id) ;:;)"
-          ],
-          "child_masses": [
-            12,
-            14,
-            7,
-            54,
-            69,
-            23,
-            5,
-            5
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "defn",
-          "line": 11,
-          "span": [
-            11,
-            4,
-            36,
-            5
-          ],
-          "mass": 231,
-          "fingerprint": "function_declaration(id id id parameters((:( parameter(id ::: pointer_type(*:* id)) ,:, parameter(id ::: id) ,:, parameter(id ::: slice_type([:[ ]:] id id)) ,:, parameter(id ::: id) ):)) nullable_type(?:? slice_type([:[ ]:] id id)) block({:{ variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;) variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;) expression_statement(call_expression(id (:( id ):)) ;:;) switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:}) if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:}))) labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:})) variable_declaration(id =:= id ;:;) expression_statement(return_expression(id id) ;:;) }:}))",
-          "child_fingerprints": [
-            "variable_declaration(id id =:= field_expression(field_expression(id .:. id) .:. id) ;:;)",
-            "variable_declaration(id id ::: nullable_type(?:? slice_type([:[ ]:] id id)) =:= nil ;:;)",
-            "expression_statement(call_expression(id (:( id ):)) ;:;)",
-            "switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:})",
-            "if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:})))",
-            "labeled_statement(id (:( id ):) payload(|:| id |:|) block_expression({:{ variable_declaration(id =:= call_expression(field_expression(id .:. id) (:( ):)) ;:;) }:}))",
-            "variable_declaration(id =:= id ;:;)",
-            "expression_statement(return_expression(id id) ;:;)"
-          ],
-          "child_masses": [
-            12,
-            14,
-            7,
-            54,
-            69,
-            23,
-            5,
-            5
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "if_statement",
-          "line": 23,
-          "span": [
-            23,
-            8,
-            28,
-            9
-          ],
-          "mass": 69,
-          "fingerprint": "if_statement(id (:( binary_expression(binary_expression(field_expression(id .:. id) ==:== field_expression(.:. id)) id field_expression(id .:. id)) ):) block_expression({:{ variable_declaration(field_expression(id .:. id) +=:+= lit ;:;) expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;) }:}) else_clause(id labeled_statement({:{ expression_statement(call_expression(field_expression(field_expression(id .:. id) .:. id) (:( string(\":\" lit \":\") ,:, anonymous_struct_initializer(.:. initializer_list({:{ }:})) ):)) ;:;) }:})))",
-          "child_fingerprints": [
-            "variable_declaration(field_expression(id .:. id) +=:+= lit ;:;)",
-            "expression_statement(call_expression(field_expression(id .:. id) (:( field_expression(.:. id) ):)) ;:;)"
-          ],
-          "child_masses": [
-            8,
-            12
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "switch_case",
-          "line": 18,
-          "span": [
-            18,
-            12,
-            18,
-            49
-          ],
-          "mass": 17,
-          "fingerprint": "switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):)))",
-          "child_fingerprints": [
-            "field_expression(.:. id)",
-            "field_expression(.:. id)",
-            "call_expression(field_expression(id .:. id) (:( id ):))"
-          ],
-          "child_masses": [
-            3,
-            3,
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "switch_case",
-          "line": 19,
-          "span": [
-            19,
-            12,
-            19,
-            41
-          ],
-          "mass": 13,
-          "fingerprint": "switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):)))",
-          "child_fingerprints": [
-            "field_expression(.:. id)",
-            "call_expression(field_expression(id .:. id) (:( id ):))"
-          ],
-          "child_masses": [
-            3,
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "switch_case",
-          "line": 20,
-          "span": [
-            20,
-            12,
-            20,
-            42
-          ],
-          "mass": 11,
-          "fingerprint": "switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):)))",
-          "child_fingerprints": [
-            "call_expression(field_expression(id .:. id) (:( id ):))"
-          ],
-          "child_masses": [
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "switch_expression",
-          "line": 17,
-          "span": [
-            17,
-            8,
-            21,
-            9
-          ],
-          "mass": 54,
-          "fingerprint": "switch_expression(id (:( field_expression(id .:. id) ):) {:{ switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):))) ,:, }:})",
-          "child_fingerprints": [
-            "field_expression(id .:. id)",
-            "switch_case(field_expression(.:. id) ,:, field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):)))",
-            "switch_case(field_expression(.:. id) =>:=> call_expression(field_expression(id .:. id) (:( id ):)))",
-            "switch_case(id =>:=> call_expression(field_expression(id .:. id) (:( id ):)))"
-          ],
-          "child_masses": [
-            4,
-            17,
-            13,
-            11
-          ]
-        },
-        {
-          "method_name": "ready",
-          "node_name": "block",
-          "line": 43,
-          "span": [
-            43,
-            45,
-            45,
-            5
-          ],
-          "mass": 14,
-          "fingerprint": "block({:{ expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;)"
-          ],
-          "child_masses": [
-            11
-          ]
-        },
-        {
-          "method_name": "ready",
-          "node_name": "defn",
-          "line": 43,
-          "span": [
-            43,
-            4,
-            45,
-            5
-          ],
-          "mass": 27,
-          "fingerprint": "function_declaration(id id parameters((:( parameter(id ::: pointer_type(*:* id)) ):)) id block({:{ expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;) }:}))",
-          "child_fingerprints": [
-            "expression_statement(return_expression(id binary_expression(field_expression(id .:. id) >:> lit)) ;:;)"
-          ],
-          "child_masses": [
-            11
-          ]
-        }
+      "semantic_effects": [
+
+      ],
+      "predicate_bodies": [
+
       ]
     }
   ]

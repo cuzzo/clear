@@ -4,7 +4,8 @@ use super::{
         language_profile, LanguageProfile,
     },
     BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef,
-    Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateRead, StateWrite,
+    Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateDeclaration, StateRead,
+    StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use crate::decomplex::syntax::complexity::local_complexity_scores;
@@ -19,6 +20,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let mut function_defs = Vec::new();
     let mut owner_defs = Vec::new();
     let mut call_sites = Vec::new();
+    let mut state_declarations = Vec::new();
     let mut state_reads = Vec::new();
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
@@ -41,6 +43,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut function_defs,
         &mut owner_defs,
         &mut call_sites,
+        &mut state_declarations,
         &mut state_reads,
         &mut state_writes,
         &mut decision_sites,
@@ -51,6 +54,19 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut seen_reads,
         &mut seen_calls,
         &mut seen_decisions,
+    );
+    collect_implicit_state_accesses(
+        parsed.tree.root_node(),
+        &parsed.source,
+        &parsed.file,
+        language,
+        &context,
+        &function_defs,
+        &state_declarations,
+        &mut state_reads,
+        &mut state_writes,
+        &mut seen_reads,
+        &mut seen_writes,
     );
     language_profile(language).after_collect_facts(&mut function_defs, &call_sites);
     collect_dispatch_sites(
@@ -63,7 +79,8 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         &mut dispatch_sites,
     );
     collect_equality_dispatch_sites(&comparison_uses, &call_sites, &mut dispatch_sites);
-    let semantic_effect_sites = semantic_effect_sites_from_calls(language, &call_sites);
+    let mut semantic_effect_sites = semantic_effect_sites_from_calls(language, &call_sites);
+    semantic_effect_sites.extend(ruby_global_context_effects(language, &state_reads));
     let local_complexity_scores =
         local_complexity_scores(&parsed.file.to_string_lossy(), &function_defs);
 
@@ -77,6 +94,7 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         function_defs,
         owner_defs,
         call_sites,
+        state_declarations,
         state_reads,
         state_writes,
         decision_sites,
@@ -170,6 +188,7 @@ fn collect_facts(
     function_defs: &mut Vec<FunctionDef>,
     owner_defs: &mut Vec<OwnerDef>,
     call_sites: &mut Vec<CallSite>,
+    state_declarations: &mut Vec<StateDeclaration>,
     state_reads: &mut Vec<StateRead>,
     state_writes: &mut Vec<StateWrite>,
     decision_sites: &mut Vec<DecisionSite>,
@@ -202,6 +221,14 @@ fn collect_facts(
         &next_context,
         call_sites,
         seen_calls,
+    );
+    record_state_declaration(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        state_declarations,
     );
     record_state_read(
         node,
@@ -238,7 +265,14 @@ fn collect_facts(
         &next_context,
         branch_decisions,
     );
-    record_predicate_alias(node, source, file, language, predicate_aliases);
+    record_predicate_alias(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        predicate_aliases,
+    );
     record_comparison_use(node, source, file, language, &next_context, comparison_uses);
 
     let mut cursor = node.walk();
@@ -252,6 +286,7 @@ fn collect_facts(
             function_defs,
             owner_defs,
             call_sites,
+            state_declarations,
             state_reads,
             state_writes,
             decision_sites,
@@ -457,9 +492,6 @@ fn record_dispatch_site(
             &context.current_function(),
             span(arm),
         );
-        if members.is_empty() {
-            continue;
-        }
         for pattern in case_arm_patterns(arm, source, profile) {
             for variant in dispatch_constant_patterns(&pattern) {
                 arm_members
@@ -540,9 +572,6 @@ fn collect_equality_dispatch_sites(
                 &function,
                 comparison.enclosing_span,
             );
-            if members.is_empty() {
-                continue;
-            }
             arm_members.entry(variant).or_default().extend(members);
         }
         if arm_members.len() < 2 {
@@ -644,7 +673,10 @@ fn record_owner_def(
     out: &mut Vec<OwnerDef>,
 ) {
     let profile = language_profile(language);
-    if profile.owner_name_from_declaration(node, source).is_none() {
+    if profile
+        .owner_def_name_from_declaration(node, source)
+        .is_none()
+    {
         return;
     }
     let owner = OwnerDef {
@@ -672,6 +704,7 @@ fn record_predicate_alias(
     source: &str,
     file: &Path,
     language: Language,
+    context: &ContextState,
     out: &mut Vec<PredicateAlias>,
 ) {
     let profile = language_profile(language);
@@ -690,6 +723,7 @@ fn record_predicate_alias(
         body: text,
         file: file_name,
         defn: name,
+        owner: context.current_owner(),
         line: line(node),
         span: span(node),
     });
@@ -897,14 +931,18 @@ fn collect_branch_state_refs(
     out: &mut BTreeSet<String>,
 ) {
     if let Some(target) = profile.state_read_target(node, source) {
-        let field = normalized_state_ref_field(&target.field);
+        let field = if profile.language() == Language::Ruby {
+            target.field.clone()
+        } else {
+            normalized_state_ref_field(&target.field)
+        };
         let receiver = target.receiver.trim_start_matches('$');
         if constant_like_state_ref(receiver, &field) {
             // Constants and type namespaces are not mutable object state.
         } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
             // language permits bare predicate-style method calls.
-        } else if receiver.is_empty() || matches!(receiver, "self" | "this") {
+        } else if receiver.is_empty() || receiver == "self" {
             out.insert(field);
         } else {
             out.insert(format!("{receiver}.{field}"));
@@ -917,6 +955,27 @@ fn collect_branch_state_refs(
     }
 }
 
+fn ruby_global_context_effects(
+    language: Language,
+    state_reads: &[StateRead],
+) -> Vec<SemanticEffectSite> {
+    if language != Language::Ruby {
+        return Vec::new();
+    }
+    state_reads
+        .iter()
+        .filter(|read| read.field.starts_with('$'))
+        .map(|read| SemanticEffectSite {
+            kind: "context_dependency".to_string(),
+            detail: read.field.clone(),
+            file: read.file.clone(),
+            function: read.function.clone(),
+            line: read.line,
+            span: read.span,
+        })
+        .collect()
+}
+
 fn branch_local_ref(
     node: Node<'_>,
     source: &str,
@@ -927,6 +986,149 @@ fn branch_local_ref(
     (receiver.is_empty() || matches!(receiver, "self" | "this"))
         && context.locals.contains(field)
         && normalize_text(node_text(node, source)) == field
+}
+
+fn declared_state_index(declarations: &[StateDeclaration]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut index: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for declaration in declarations {
+        index
+            .entry(declaration.owner.clone())
+            .or_default()
+            .insert(declaration.field.clone());
+    }
+    index
+}
+
+fn function_param_index(
+    function_defs: &[FunctionDef],
+) -> BTreeMap<(String, String), BTreeSet<String>> {
+    let mut index: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+    for function in function_defs {
+        index
+            .entry((function.owner.clone(), function.name.clone()))
+            .or_default()
+            .extend(function.params.iter().cloned());
+    }
+    index
+}
+
+fn local_declaration_index(
+    root: Node<'_>,
+    source: &str,
+    language: Language,
+    context: &ContextState,
+) -> BTreeMap<(String, String), BTreeSet<String>> {
+    let mut index = BTreeMap::new();
+    local_declaration_index_for_node(root, source, language, context, &mut index);
+    index
+}
+
+fn local_declaration_index_for_node(
+    node: Node<'_>,
+    source: &str,
+    language: Language,
+    context: &ContextState,
+    out: &mut BTreeMap<(String, String), BTreeSet<String>>,
+) {
+    let next_context = push_control_context(
+        node,
+        push_function_context(
+            node,
+            push_owner_context(node, source, context, language),
+            source,
+            language,
+        ),
+        source,
+        language,
+    );
+    let profile = language_profile(language);
+    if local_variable_declarator(profile, node) {
+        let owner = next_context.current_owner();
+        let function = next_context.current_function();
+        if function != "(top-level)" {
+            if let Some(name) = local_name_node(profile, node, source) {
+                out.entry((owner, function))
+                    .or_default()
+                    .insert(node_text(name, source).to_string());
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        local_declaration_index_for_node(child, source, language, &next_context, out);
+    }
+}
+
+fn local_variable_declarator(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile
+        .local_variable_declarator_node_kinds()
+        .contains(&node.kind())
+        && !inside_kind(node, profile.field_declaration_node_kinds())
+}
+
+fn local_name_node<'tree>(
+    profile: &dyn LanguageProfile,
+    node: Node<'tree>,
+    source: &str,
+) -> Option<Node<'tree>> {
+    node.child_by_field_name("name")
+        .or_else(|| profile.declarator_name_node(node, source))
+        .or_else(|| {
+            named_children(node).into_iter().find(|child| {
+                profile.identifier_node_kinds().contains(&child.kind())
+                    || profile
+                        .field_identifier_node_kinds()
+                        .contains(&child.kind())
+            })
+        })
+}
+
+fn implicit_state_identifier(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    profile.identifier_node_kinds().contains(&node.kind())
+        || profile.field_identifier_node_kinds().contains(&node.kind())
+}
+
+fn identifier_declaration_site(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    if node
+        .parent()
+        .map(|parent| {
+            profile
+                .declaration_site_parent_node_kinds()
+                .contains(&parent.kind())
+        })
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    inside_kind(node, profile.field_declaration_node_kinds())
+}
+
+fn member_message_identifier(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if !profile.field_like_node_kinds().contains(&parent.kind()) {
+        return false;
+    }
+    let field = parent
+        .child_by_field_name("field")
+        .or_else(|| parent.child_by_field_name("property"))
+        .or_else(|| parent.child_by_field_name("name"))
+        .or_else(|| named_children(parent).into_iter().last());
+    field.map(|field| same_node(field, node)).unwrap_or(false)
+}
+
+fn implicit_assignment_lhs(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
+    if let Some(parent) = node.parent() {
+        if profile.assignment_node_kinds().contains(&parent.kind()) {
+            let lhs = parent
+                .child_by_field_name("left")
+                .or_else(|| first_named_child(parent));
+            return lhs.map(|lhs| same_node(lhs, node)).unwrap_or(false);
+        }
+    }
+    profile.assignment_lhs_node(node)
 }
 
 fn normalized_state_ref_field(field: &str) -> String {
@@ -1145,6 +1347,43 @@ fn record_call_site(
     });
 }
 
+fn record_state_declaration(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<StateDeclaration>,
+) {
+    let profile = language_profile(language);
+    let Some((field, r#type)) = profile.state_declaration(node, source) else {
+        return;
+    };
+    let declaration = StateDeclaration {
+        field,
+        owner: context.current_owner(),
+        r#type,
+        file: file.to_string_lossy().to_string(),
+        line: line(node),
+        span: span(node),
+    };
+    let key = (
+        declaration.file.clone(),
+        declaration.owner.clone(),
+        declaration.field.clone(),
+    );
+    if out.iter().any(|existing| {
+        (
+            existing.file.clone(),
+            existing.owner.clone(),
+            existing.field.clone(),
+        ) == key
+    }) {
+        return;
+    }
+    out.push(declaration);
+}
+
 fn record_state_read(
     node: Node<'_>,
     source: &str,
@@ -1195,6 +1434,194 @@ fn record_state_read(
         span: span(node),
         owner,
     });
+}
+
+fn collect_implicit_state_accesses(
+    root: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    function_defs: &[FunctionDef],
+    state_declarations: &[StateDeclaration],
+    state_reads: &mut Vec<StateRead>,
+    state_writes: &mut Vec<StateWrite>,
+    seen_reads: &mut HashSet<String>,
+    seen_writes: &mut HashSet<String>,
+) {
+    let profile = language_profile(language);
+    if !profile.implicit_state_accesses() {
+        return;
+    }
+    let declared = declared_state_index(state_declarations);
+    if declared.is_empty() {
+        return;
+    }
+    let locals = local_declaration_index(root, source, language, context);
+    let params = function_param_index(function_defs);
+    collect_implicit_state_accesses_for_node(
+        root,
+        source,
+        file,
+        language,
+        context,
+        &declared,
+        &locals,
+        &params,
+        state_reads,
+        state_writes,
+        seen_reads,
+        seen_writes,
+    );
+}
+
+fn collect_implicit_state_accesses_for_node(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    declared: &BTreeMap<String, BTreeSet<String>>,
+    locals: &BTreeMap<(String, String), BTreeSet<String>>,
+    params: &BTreeMap<(String, String), BTreeSet<String>>,
+    state_reads: &mut Vec<StateRead>,
+    state_writes: &mut Vec<StateWrite>,
+    seen_reads: &mut HashSet<String>,
+    seen_writes: &mut HashSet<String>,
+) {
+    let next_context = push_control_context(
+        node,
+        push_function_context(
+            node,
+            push_owner_context(node, source, context, language),
+            source,
+            language,
+        ),
+        source,
+        language,
+    );
+    record_implicit_state_access(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        declared,
+        locals,
+        params,
+        state_reads,
+        state_writes,
+        seen_reads,
+        seen_writes,
+    );
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_implicit_state_accesses_for_node(
+            child,
+            source,
+            file,
+            language,
+            &next_context,
+            declared,
+            locals,
+            params,
+            state_reads,
+            state_writes,
+            seen_reads,
+            seen_writes,
+        );
+    }
+}
+
+fn record_implicit_state_access(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    declared: &BTreeMap<String, BTreeSet<String>>,
+    locals: &BTreeMap<(String, String), BTreeSet<String>>,
+    params: &BTreeMap<(String, String), BTreeSet<String>>,
+    state_reads: &mut Vec<StateRead>,
+    state_writes: &mut Vec<StateWrite>,
+    seen_reads: &mut HashSet<String>,
+    seen_writes: &mut HashSet<String>,
+) {
+    let profile = language_profile(language);
+    if !implicit_state_identifier(profile, node) {
+        return;
+    }
+    let owner = context.current_owner();
+    let function = context.current_function();
+    if function == "(top-level)" {
+        return;
+    }
+    let field = node_text(node, source).to_string();
+    if !declared
+        .get(&owner)
+        .map(|fields| fields.contains(&field))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let scope = (owner.clone(), function.clone());
+    if params
+        .get(&scope)
+        .map(|fields| fields.contains(&field))
+        .unwrap_or(false)
+        || locals
+            .get(&scope)
+            .map(|fields| fields.contains(&field))
+            .unwrap_or(false)
+        || identifier_declaration_site(profile, node)
+        || member_message_identifier(profile, node)
+    {
+        return;
+    }
+
+    let file_name = file.to_string_lossy().to_string();
+    if implicit_assignment_lhs(profile, node) {
+        let key = format!(
+            "{}\0{}\0{}\0{}\0self\0{}",
+            file_name,
+            owner,
+            function,
+            line(node),
+            field
+        );
+        if seen_writes.insert(key) {
+            state_writes.push(StateWrite {
+                field,
+                receiver: "self".to_string(),
+                file: file_name,
+                function,
+                line: line(node),
+                span: span(node),
+                owner,
+            });
+        }
+    } else {
+        let key = format!(
+            "{}\0{}\0{}\0{:?}\0self\0{}",
+            file_name,
+            owner,
+            function,
+            span(node),
+            field
+        );
+        if seen_reads.insert(key) {
+            state_reads.push(StateRead {
+                field,
+                receiver: "self".to_string(),
+                file: file_name,
+                function,
+                line: line(node),
+                span: span(node),
+                owner,
+            });
+        }
+    }
 }
 
 fn record_state_write(
@@ -1355,15 +1782,30 @@ pub(crate) fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     node.named_children(&mut cursor).collect()
 }
 
+fn inside_kind(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut parent = node.parent();
+    let mut seen = HashSet::new();
+    while let Some(current) = parent {
+        let key = format!("{:?}\0{}", span(current), current.kind());
+        if !seen.insert(key) {
+            break;
+        }
+        if kinds.contains(&current.kind()) {
+            return true;
+        }
+        parent = current.parent();
+    }
+    false
+}
+
+fn same_node(left: Node<'_>, right: Node<'_>) -> bool {
+    left.kind() == right.kind() && span(left) == span(right)
+}
+
 pub(crate) fn first_child_kind(node: Node<'_>) -> Option<&str> {
     let mut cursor = node.walk();
     let kind = node.children(&mut cursor).next().map(|child| child.kind());
     kind
-}
-
-pub(crate) fn previous_sibling_text(node: Node<'_>, source: &str) -> Option<String> {
-    node.prev_sibling()
-        .map(|sibling| node_text(sibling, source).to_string())
 }
 
 pub(crate) fn previous_sibling_raw_text(node: Node<'_>) -> Option<String> {
@@ -1570,11 +2012,11 @@ fn union_span(left: [usize; 4], right: [usize; 4]) -> [usize; 4] {
 
 fn decision_predicate(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> String {
     let target = profile.decision_subject(node);
-    normalize_text(
+    strip_enclosing_parentheses(&normalize_text(
         target
             .map(|child| node_text(child, source))
             .unwrap_or_else(|| node_text(node, source)),
-    )
+    ))
 }
 
 fn boolean_and(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
@@ -1867,14 +2309,6 @@ fn normalize_call_receiver(target: &mut CallTarget<'_>, context: &ContextState) 
 fn canonical_self_receiver(receiver: &str) -> String {
     match receiver {
         "self" | "this" | "$this" => "self".to_string(),
-        _ if receiver.starts_with("this.") => format!(
-            "self.{}",
-            receiver.strip_prefix("this.").unwrap_or_default()
-        ),
-        _ if receiver.starts_with("$this.") => format!(
-            "self.{}",
-            receiver.strip_prefix("$this.").unwrap_or_default()
-        ),
         _ => receiver.to_string(),
     }
 }

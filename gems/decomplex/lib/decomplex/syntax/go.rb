@@ -22,7 +22,7 @@ module Decomplex
     class GoSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration method_declaration].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze
-      ADJACENT_CALL_NODE_KINDS = %w[selector_expression identifier field_identifier].freeze
+      ADJACENT_CALL_NODE_KINDS = %w[selector_expression identifier].freeze
       GENERIC_OWNER_NODE_KINDS = %w[type_spec].freeze
       PARAMETER_LIST_NODE_KINDS = %w[parameter_list].freeze
       METHOD_PARAMETER_LIST_NODE_KINDS = %w[parameter_list].freeze
@@ -88,6 +88,17 @@ module Decomplex
         return super unless params
 
         params.named_children.filter_map { |param| parameter_name(param) }.uniq
+      end
+
+      def call_target(document, node)
+        return generic_call_target(document, node) if call_node_kinds.include?(node.kind)
+        return go_adjacent_call_target(node) if adjacent_call_node_kinds.include?(node.kind)
+
+        nil
+      end
+
+      def state_read_target(node)
+        go_literal_element_member_target(node) || super
       end
 
       def generic_function_body_statements(node)
@@ -161,11 +172,39 @@ module Decomplex
           argument_list_node_kinds.include?(named.last.kind)
       end
 
+      def go_adjacent_call_target(node)
+        target = adjacent_argument_call_target(node)
+        return nil unless target
+
+        args = next_sibling(node) || next_sibling(parent_node(node))
+        source = go_adjacent_call_source_node(node, args)
+        target.merge(source_node: source)
+      end
+
+      def go_adjacent_call_source_node(node, args)
+        parent = parent_node(node)
+        return node unless parent && args
+
+        call_text = "#{node.text}#{args.text}"
+        parent.text.to_s.include?(call_text) ? parent : node
+      end
+
       def go_keyed_element_key?(node)
         parent = parent_node(node)
         return false unless parent&.kind == "keyed_element"
 
         parent.named_children.first == node
+      end
+
+      def go_literal_element_member_target(node)
+        return nil unless node.kind == "literal_element"
+        return nil if go_keyed_element_key?(node)
+
+        receiver, field = node.named_children
+        return nil unless receiver && field
+        return nil unless generic_identifier?(receiver) && field_identifier_node_kinds.include?(field.kind)
+
+        { receiver: normalize_text(receiver.text), field: field.text }
       end
 
       def go_var_spec_name_nodes(node)

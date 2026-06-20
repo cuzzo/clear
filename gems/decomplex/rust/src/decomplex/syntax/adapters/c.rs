@@ -1,6 +1,7 @@
 use super::super::tree_sitter_adapter::normalize_type_owner;
 use super::super::Language;
 use super::base::LanguageProfile;
+use crate::decomplex::ast::node_text;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct CProfile;
@@ -12,6 +13,14 @@ impl LanguageProfile for CProfile {
 
     fn grammar(&self) -> TreeSitterLanguage {
         tree_sitter_c::LANGUAGE.into()
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node_text(node, source).trim_start().starts_with("static ") {
+            Some("private".to_string())
+        } else {
+            Some("public".to_string())
+        }
     }
 
     fn first_argument_receiver(&self) -> bool {

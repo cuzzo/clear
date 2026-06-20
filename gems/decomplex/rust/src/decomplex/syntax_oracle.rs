@@ -1,4 +1,3 @@
-use crate::decomplex::syntax::adapters::language_profile;
 use crate::decomplex::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -15,8 +14,6 @@ pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
 }
 
 pub fn project_document(document: &Document) -> Value {
-    let clone_candidates = language_profile(document.language).clone_candidates(document);
-
     json!({
         "file": logical_file(&document.file),
         "language": document.language.as_str(),
@@ -96,25 +93,10 @@ pub fn project_document(document: &Document) -> Value {
         })).collect()),
         "predicate_bodies": sorted(document.predicate_aliases.iter().map(|predicate| json!({
             "name": predicate.name,
-            "owner": "",
+            "owner": predicate.owner,
             "body": predicate.body,
             "line": predicate.line,
             "span": predicate.span,
-        })).collect()),
-        "local_complexity": document.local_complexity_scores.iter().map(|(id, score)| json!({
-            "id": id,
-            "score": score.score,
-            "signals": score.signals,
-        })).collect::<Vec<_>>(),
-        "clone_candidates": sorted(clone_candidates.iter().map(|candidate| json!({
-            "method_name": candidate.method_name,
-            "node_name": candidate.node_name,
-            "line": candidate.line,
-            "span": candidate.span,
-            "mass": candidate.mass,
-            "fingerprint": candidate.fingerprint,
-            "child_fingerprints": candidate.child_fingerprints,
-            "child_masses": candidate.child_masses,
         })).collect()),
     })
 }

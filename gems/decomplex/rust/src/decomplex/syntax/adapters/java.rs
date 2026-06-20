@@ -16,6 +16,25 @@ impl LanguageProfile for JavaProfile {
         tree_sitter_java::LANGUAGE.into()
     }
 
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        for child in named_children(node) {
+            if child.kind() != "modifiers" {
+                continue;
+            }
+            let text = node_text(child, source);
+            if text.split_whitespace().any(|token| token == "public") {
+                return Some("public".to_string());
+            }
+            if text.split_whitespace().any(|token| token == "private") {
+                return Some("private".to_string());
+            }
+            if text.split_whitespace().any(|token| token == "protected") {
+                return Some("protected".to_string());
+            }
+        }
+        None
+    }
+
     fn function_node_kinds(&self) -> &[&str] {
         &["method_declaration"]
     }

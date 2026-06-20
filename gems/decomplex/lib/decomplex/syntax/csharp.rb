@@ -72,6 +72,29 @@ module Decomplex
         true
       end
 
+      def field_declaration_name_node(node)
+        declaration = node.named_children.find { |child| child.kind == "variable_declaration" }
+        declarator = declaration&.named_children&.find { |child| child.kind == "variable_declarator" }
+        return named_field(declarator, "name") || declarator if declarator
+
+        super
+      end
+
+      def state_read_target(node)
+        if node.kind == "argument"
+          object = named_field(node, "expression")
+          field = named_field(node, "name")
+          field_text = member_field_text(field)
+          return nil unless object && field_text
+          return nil if namespace_receiver?(object.text)
+          return nil if NOISE_MESSAGES.include?(field_text)
+
+          return { receiver: normalize_text(object.text), field: field_text }
+        end
+
+        super
+      end
+
       private
 
       def control_context(node)

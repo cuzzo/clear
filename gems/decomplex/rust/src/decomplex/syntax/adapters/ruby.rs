@@ -154,7 +154,7 @@ impl LanguageProfile for RubyProfile {
         if ruby_brace_block_parameter_receiver(node, &target.receiver, source) {
             return None;
         }
-        if target.arguments.is_empty() {
+        if target.arguments.is_empty() && !ruby_call_has_block(node) {
             if let Some(span) =
                 ruby_narrow_no_arg_call_span(node, source, &target.receiver, &target.message)
             {
@@ -265,9 +265,16 @@ impl LanguageProfile for RubyProfile {
         if ruby_direct_flat_map_block_statement(node, source) {
             return None;
         }
-        ruby_state_variable_target(node, source)
+        if ruby_sorbet_signature_payload_node(node, source) {
+            return None;
+        }
+        let target = ruby_state_variable_target(node, source)
             .or_else(|| ruby_bare_state_reader_target(node, source))
-            .or_else(|| self.default_state_read_target(node, source))
+            .or_else(|| self.default_state_read_target(node, source))?;
+        if ruby_state_block_parameter_receiver(node, &target.receiver, source) {
+            return None;
+        }
+        Some(target)
     }
 
     fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
@@ -344,7 +351,7 @@ fn ruby_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<CallTarget
         message,
         arguments,
     );
-    if target.arguments.is_empty() {
+    if target.arguments.is_empty() && !ruby_call_has_block(node) {
         if let (Some(receiver), Some(method)) = (receiver, method) {
             let receiver_span = span(receiver);
             let method_span = span(method);
@@ -565,6 +572,9 @@ fn ruby_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
     let Some(args) = args else {
         return Vec::new();
     };
+    if let Some(arguments) = ruby_inline_def_argument_texts(args, source) {
+        return arguments;
+    }
     let values = named_children(args)
         .into_iter()
         .map(|child| normalize_text(node_text(child, source)))
@@ -581,6 +591,38 @@ fn ruby_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
         .map(normalize_text)
         .filter(|arg| !arg.is_empty())
         .collect()
+}
+
+fn ruby_inline_def_argument_texts(args: Node<'_>, source: &str) -> Option<Vec<String>> {
+    let children = named_children(args);
+    if children.len() != 1 || first_child_kind(children[0]) != Some("def") {
+        return None;
+    }
+    let method = children[0];
+    let name = method
+        .child_by_field_name("name")
+        .or_else(|| {
+            named_children(method)
+                .into_iter()
+                .find(|child| matches!(child.kind(), "identifier" | "field_identifier"))
+        })
+        .map(|node| normalize_text(node_text(node, source)))?;
+    let params = named_children(method)
+        .into_iter()
+        .find(|child| child.kind() == "method_parameters")
+        .map(|node| normalize_text(node_text(node, source)));
+    let body = named_children(method)
+        .into_iter()
+        .find(|child| child.kind() == "body_statement")
+        .map(|node| normalize_text(node_text(node, source)));
+    let mut out = vec![name];
+    if let Some(params) = params.filter(|value| !value.is_empty()) {
+        out.push(params);
+    }
+    if let Some(body) = body.filter(|value| !value.is_empty()) {
+        out.push(body);
+    }
+    Some(out)
 }
 
 fn ruby_safe_navigation_call(node: Node<'_>, source: &str) -> bool {
@@ -715,6 +757,40 @@ fn ruby_brace_block_parameter_receiver(node: Node<'_>, receiver: &str, source: &
     false
 }
 
+fn ruby_state_block_parameter_receiver(node: Node<'_>, receiver: &str, source: &str) -> bool {
+    if ruby_brace_block_parameter_receiver(node, receiver, source) {
+        return true;
+    }
+    if receiver.contains('.') || receiver.contains('[') || receiver == "self" {
+        return false;
+    }
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "do_block" {
+            return ruby_block_parameters(parent, source)
+                .into_iter()
+                .any(|param| param == receiver);
+        }
+        if parent.kind() == "body_statement"
+            && parent
+                .parent()
+                .map(|grandparent| grandparent.kind() == "do_block")
+                .unwrap_or(false)
+        {
+            current = parent.parent();
+            continue;
+        }
+        if matches!(
+            parent.kind(),
+            "method" | "singleton_method" | "body_statement"
+        ) {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
 fn ruby_block_parameters(block: Node<'_>, source: &str) -> Vec<String> {
     named_children(block)
         .into_iter()
@@ -774,7 +850,8 @@ fn ruby_narrow_no_arg_call_span(
 fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
     if invalid_call_text(&target.receiver)
         || invalid_call_text(&target.message)
-        || target.receiver.split_whitespace().count() > 1
+        || (target.receiver.split_whitespace().count() > 1
+            && !ruby_literal_receiver_text(&target.receiver))
     {
         return false;
     }
@@ -784,6 +861,13 @@ fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
     Regex::new(r"^[A-Za-z_]\w*[!?=]?$")
         .unwrap()
         .is_match(target.message.as_str())
+}
+
+fn ruby_literal_receiver_text(text: &str) -> bool {
+    let value = text.trim();
+    (value.starts_with("%w[") || value.starts_with("%i["))
+        && value.ends_with(']')
+        && !value.contains('\n')
 }
 
 fn invalid_call_text(text: &str) -> bool {
@@ -800,6 +884,9 @@ fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
 
 fn ruby_bare_state_reader_target(node: Node<'_>, source: &str) -> Option<Target> {
     if node.kind() != "identifier" || !ruby_simple_call_text(node_text(node, source)) {
+        return None;
+    }
+    if matches!(node_text(node, source), "private" | "protected" | "public") {
         return None;
     }
     let parent = node.parent()?;
@@ -833,6 +920,39 @@ fn ruby_bare_state_reader_target(node: Node<'_>, source: &str) -> Option<Target>
         receiver: "self".to_string(),
         field: node_text(node, source).to_string(),
     })
+}
+
+fn ruby_sorbet_signature_payload_node(node: Node<'_>, source: &str) -> bool {
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if candidate.kind() == "block" {
+            let Some(parent) = candidate.parent() else {
+                return false;
+            };
+            if parent.kind() == "call" {
+                let message = parent
+                    .child_by_field_name("method")
+                    .or_else(|| named_children(parent).into_iter().next())
+                    .map(|method| node_text(method, source).to_string());
+                return message.as_deref() == Some("sig");
+            }
+            return false;
+        }
+        if matches!(
+            candidate.kind(),
+            "method" | "singleton_method" | "class" | "module"
+        ) {
+            return false;
+        }
+        current = candidate.parent();
+    }
+    false
+}
+
+fn ruby_call_has_block(node: Node<'_>) -> bool {
+    named_children(node)
+        .into_iter()
+        .any(|child| matches!(child.kind(), "do_block" | "block"))
 }
 
 fn ruby_direct_flat_map_block_statement(node: Node<'_>, source: &str) -> bool {

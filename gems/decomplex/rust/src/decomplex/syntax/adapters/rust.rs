@@ -1,6 +1,7 @@
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::node_text;
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct RustProfile;
 
@@ -15,6 +16,14 @@ impl LanguageProfile for RustProfile {
 
     fn function_node_kinds(&self) -> &[&str] {
         &["function_item"]
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node_text(node, source).trim_start().starts_with("pub ") {
+            Some("public".to_string())
+        } else {
+            Some("private".to_string())
+        }
     }
 
     fn impl_owner_node_kinds(&self) -> &[&str] {

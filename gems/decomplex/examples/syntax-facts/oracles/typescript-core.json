@@ -1,0 +1,646 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/decomplex/examples/syntax-facts/typescript/core.ts",
+      "language": "typescript",
+      "functions": [
+        {
+          "line": 19,
+          "name": "constructor",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            19,
+            2,
+            21,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 23,
+          "name": "process",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            23,
+            2,
+            52,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 54,
+          "name": "audit",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            54,
+            2,
+            58,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 60,
+          "name": "ready",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "params": [
+
+          ],
+          "span": [
+            60,
+            2,
+            62,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 65,
+          "name": "normalizeValue",
+          "owner": "core",
+          "params": [
+            "input"
+          ],
+          "span": [
+            65,
+            7,
+            67,
+            1
+          ],
+          "visibility": "public"
+        }
+      ],
+      "owners": [
+        {
+          "kind": "class",
+          "line": 15,
+          "name": "TypeScriptSyntaxFactsCore",
+          "span": [
+            15,
+            7,
+            63,
+            1
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "arguments": [
+            "\"busy\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 42,
+          "message": "publish",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            42,
+            6,
+            42,
+            26
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 44,
+          "message": "warn",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "safe_navigation": false,
+          "span": [
+            44,
+            6,
+            44,
+            31
+          ]
+        },
+        {
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 56,
+          "message": "send",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "this.sink",
+          "safe_navigation": false,
+          "span": [
+            56,
+            4,
+            56,
+            34
+          ]
+        },
+        {
+          "arguments": [
+            "account"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 26,
+          "message": "callback",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            26,
+            4,
+            26,
+            21
+          ]
+        },
+        {
+          "arguments": [
+            "items[index]"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 48,
+          "message": "audit",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            48,
+            6,
+            48,
+            30
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 55,
+          "message": "log",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "safe_navigation": false,
+          "span": [
+            55,
+            4,
+            55,
+            21
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 31,
+          "message": "escalate",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            31,
+            8,
+            31,
+            27
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 34,
+          "message": "fallback",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            34,
+            8,
+            34,
+            27
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 37,
+          "message": "defaultCase",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            37,
+            8,
+            37,
+            30
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "active",
+          "function": "process",
+          "line": 25,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            25,
+            45,
+            25,
+            56
+          ]
+        },
+        {
+          "field": "audit",
+          "function": "process",
+          "line": 48,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            48,
+            6,
+            48,
+            16
+          ]
+        },
+        {
+          "field": "count",
+          "function": "ready",
+          "line": 61,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            61,
+            11,
+            61,
+            21
+          ]
+        },
+        {
+          "field": "defaultCase",
+          "function": "process",
+          "line": 37,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            37,
+            8,
+            37,
+            24
+          ]
+        },
+        {
+          "field": "escalate",
+          "function": "process",
+          "line": 31,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            31,
+            8,
+            31,
+            21
+          ]
+        },
+        {
+          "field": "fallback",
+          "function": "process",
+          "line": 34,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            34,
+            8,
+            34,
+            21
+          ]
+        },
+        {
+          "field": "log",
+          "function": "audit",
+          "line": 55,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "span": [
+            55,
+            4,
+            55,
+            15
+          ]
+        },
+        {
+          "field": "name",
+          "function": "process",
+          "line": 24,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "user.profile",
+          "span": [
+            24,
+            17,
+            24,
+            35
+          ]
+        },
+        {
+          "field": "profile",
+          "function": "process",
+          "line": 24,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            24,
+            17,
+            24,
+            29
+          ]
+        },
+        {
+          "field": "publish",
+          "function": "process",
+          "line": 42,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            42,
+            6,
+            42,
+            18
+          ]
+        },
+        {
+          "field": "ready",
+          "function": "process",
+          "line": 40,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            40,
+            34,
+            40,
+            44
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 28,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            28,
+            12,
+            28,
+            21
+          ]
+        },
+        {
+          "field": "send",
+          "function": "audit",
+          "line": 56,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "this.sink",
+          "span": [
+            56,
+            4,
+            56,
+            18
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "audit",
+          "line": 56,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            56,
+            4,
+            56,
+            13
+          ]
+        },
+        {
+          "field": "status",
+          "function": "audit",
+          "line": 57,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            57,
+            11,
+            57,
+            22
+          ]
+        },
+        {
+          "field": "status",
+          "function": "process",
+          "line": 40,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            40,
+            8,
+            40,
+            19
+          ]
+        },
+        {
+          "field": "warn",
+          "function": "process",
+          "line": 44,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "console",
+          "span": [
+            44,
+            6,
+            44,
+            18
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "count",
+          "function": "process",
+          "line": 41,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            41,
+            6,
+            41,
+            21
+          ]
+        },
+        {
+          "field": "status",
+          "function": "constructor",
+          "line": 20,
+          "owner": "TypeScriptSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            20,
+            4,
+            20,
+            24
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            28,
+            4,
+            38,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 28,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.role",
+          "span": [
+            28,
+            4,
+            38,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            40,
+            4,
+            45,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 40,
+          "members": [
+            "this.status === \"idle\"",
+            "user.ready"
+          ],
+          "predicate": "this.status === \"idle\" && user.ready",
+          "span": [
+            40,
+            8,
+            40,
+            44
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "process",
+          "line": 28,
+          "predicate": "(user.role)",
+          "span": [
+            28,
+            4,
+            38,
+            5
+          ],
+          "state_refs": [
+            "user.role"
+          ]
+        },
+        {
+          "function": "process",
+          "line": 40,
+          "predicate": "(this.status === \"idle\" && user.ready)",
+          "span": [
+            40,
+            4,
+            45,
+            5
+          ],
+          "state_refs": [
+            "this.status",
+            "user.ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "console.log",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 55,
+          "span": [
+            55,
+            4,
+            55,
+            21
+          ]
+        },
+        {
+          "detail": "console.warn",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 44,
+          "span": [
+            44,
+            6,
+            44,
+            31
+          ]
+        }
+      ],
+      "predicate_bodies": [
+
+      ]
+    }
+  ]
+}

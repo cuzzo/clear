@@ -77,12 +77,7 @@ impl LocalComplexityScorer {
             } else {
                 0.0
             };
-            let child_cost = if bare_early_exit_wrapper(node) {
-                0.0
-            } else {
-                self.score_children(node, nesting, signals)
-            };
-            return exit_cost + child_cost;
+            return exit_cost + self.score_children(node, nesting, signals);
         }
 
         if boolean_node(node) {
@@ -100,12 +95,10 @@ impl LocalComplexityScorer {
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
         compensated_sum(node.children.iter().map(|child| {
-            if transparent_single_line_suite_statement(node, child) {
-                if bare_early_exit_wrapper(child) {
-                    0.0
-                } else {
-                    self.score_children(child, nesting, signals)
-                }
+            if return_fallback_boolean_wrapper(node, child) {
+                0.0
+            } else if transparent_single_line_suite_statement(node, child) {
+                self.score_children(child, nesting, signals)
             } else {
                 self.score_node(child, nesting, signals)
             }
@@ -162,6 +155,14 @@ fn branch(node: &RawNode) -> bool {
 
 fn hidden_if(node: &RawNode) -> bool {
     if node.kind == "expression_statement" && node.text.trim_start().starts_with("if ") {
+        if node.named_children().iter().any(|child| {
+            matches!(
+                child.kind.as_str(),
+                "if" | "unless" | "if_statement" | "if_expression"
+            )
+        }) {
+            return false;
+        }
         return true;
     }
     matches!(
@@ -201,7 +202,12 @@ fn loop_node(node: &RawNode) -> bool {
     ) || hidden_loop(node)
         || (node.kind == "expression_statement"
             && starts_with_any(node.text.trim_start(), &["for", "while", "loop"]))
-        || (node.kind == "labeled_statement" && node.text.trim_start().starts_with("for "))
+        || (node.kind == "labeled_statement"
+            && node.text.trim_start().starts_with("for ")
+            && !has_named_control_child(
+                node,
+                &["for_statement", "for_expression", "while_statement"],
+            ))
 }
 
 fn hidden_loop(node: &RawNode) -> bool {
@@ -225,7 +231,24 @@ fn case_node(node: &RawNode) -> bool {
     matches!(
         node.kind.as_str(),
         "case" | "switch_statement" | "switch_expression" | "match_statement" | "match_expression"
-    ) || (node.kind == "expression_statement" && node.text.trim_start().starts_with("match "))
+    ) || (node.kind == "expression_statement"
+        && node.text.trim_start().starts_with("match ")
+        && !has_named_control_child(
+            node,
+            &[
+                "case",
+                "switch_statement",
+                "switch_expression",
+                "match_statement",
+                "match_expression",
+            ],
+        ))
+}
+
+fn has_named_control_child(node: &RawNode, kinds: &[&str]) -> bool {
+    node.named_children()
+        .iter()
+        .any(|child| kinds.contains(&child.kind.as_str()))
 }
 
 fn rescue_node(node: &RawNode) -> bool {
@@ -236,18 +259,17 @@ fn rescue_node(node: &RawNode) -> bool {
 }
 
 fn early_exit(node: &RawNode) -> bool {
-    (node.named || node.kind == "return")
-        && matches!(
-            node.kind.as_str(),
-            "return"
-                | "break"
-                | "next"
-                | "redo"
-                | "retry"
-                | "return_statement"
-                | "break_statement"
-                | "continue_statement"
-        )
+    matches!(
+        node.kind.as_str(),
+        "return"
+            | "break"
+            | "next"
+            | "redo"
+            | "retry"
+            | "return_statement"
+            | "break_statement"
+            | "continue_statement"
+    )
 }
 
 fn transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) -> bool {
@@ -260,13 +282,13 @@ fn transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) ->
         )
 }
 
-fn bare_early_exit_wrapper(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "return_statement" | "break_statement" | "continue_statement"
-    ) && node.children.len() == 1
-        && !node.children[0].named
-        && node.children[0].text == node.text
+fn return_fallback_boolean_wrapper(parent: &RawNode, child: &RawNode) -> bool {
+    parent.kind == "return_statement"
+        && child.kind == "expression_list"
+        && child
+            .named_children()
+            .iter()
+            .any(|grandchild| boolean_node(grandchild))
 }
 
 fn boolean_node(node: &RawNode) -> bool {

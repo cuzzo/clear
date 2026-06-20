@@ -1,4 +1,4 @@
-use super::super::tree_sitter_adapter::{AssignmentTarget, Target};
+use super::super::tree_sitter_adapter::Target;
 use super::super::Language;
 use super::base::{default_clone_candidate_node, LanguageProfile};
 use crate::decomplex::ast::RawNode;
@@ -137,14 +137,6 @@ impl LanguageProfile for PythonProfile {
             return None;
         }
         Some(target)
-    }
-
-    fn state_write_source_node<'tree>(
-        &self,
-        _node: Node<'tree>,
-        assignment: &AssignmentTarget<'tree>,
-    ) -> Node<'tree> {
-        assignment.lhs
     }
 
     fn clone_candidate_node(&self, node: &RawNode) -> bool {

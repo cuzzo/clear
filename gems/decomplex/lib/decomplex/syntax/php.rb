@@ -55,7 +55,10 @@ module Decomplex
       SELF_CALL_IDENTIFIER_NODE_KINDS = %w[name variable_name].freeze
       SELF_RECEIVER_NAMES = %w[$this this self].freeze
       ACCESSOR_CALL_NODE_KINDS = [].freeze
-      FIELD_LIKE_NODE_KINDS = %w[member_access_expression member_call_expression class_constant_access_expression].freeze
+      FIELD_LIKE_NODE_KINDS = %w[
+        member_access_expression nullsafe_member_access_expression member_call_expression
+        class_constant_access_expression
+      ].freeze
       BLOCK_ARGUMENT_NODE_KINDS = [].freeze
 
       def function_name(node)
@@ -94,7 +97,7 @@ module Decomplex
       def state_read_target(node)
         return nil if php_assignment_lhs?(node)
 
-        super
+        php_argument_member_target(node) || super
       end
 
       def state_declaration(node)
@@ -153,9 +156,8 @@ module Decomplex
 
         case node.kind
         when "member_call_expression"
-          access = names.find { |child| child.kind == "member_access_expression" }
-          receiver = access ? php_member_receiver(access) : names.first
-          message = access ? php_member_name(access) : names[1]
+          receiver = php_member_receiver(node) || names.first
+          message = php_member_name(node) || names[1]
           return nil unless receiver && message
 
           {
@@ -189,8 +191,16 @@ module Decomplex
         {
           receiver: "self",
           message: "print",
-          arguments: node.named_children.map { |child| php_normalize_source(child.text) }
+          arguments: node.named_children.map { |child| php_print_argument_text(child) }
         }
+      end
+
+      def conjunction_predicate(node)
+        php_normalize_source(super)
+      end
+
+      def branch_predicate(node)
+        php_normalize_source(super)
       end
 
       def php_property_declaration(node)
@@ -312,6 +322,25 @@ module Decomplex
         Array(args&.named_children).map { |child| php_normalize_source(child.text) }
       end
 
+      def php_print_argument_text(node)
+        value = php_unwrap_parenthesized(node)
+        php_normalize_source(value&.text || node.text)
+      end
+
+      def php_argument_member_target(node)
+        return nil unless ts_node?(node) && node.kind == "argument"
+        return nil unless node.text.to_s.include?("->") || node.text.to_s.include?("::")
+        return nil if node.text.to_s.include?("(")
+
+        parts = php_normalize_source(node.text).split(".")
+        return nil unless parts.size >= 2
+
+        {
+          receiver: php_normalize_receiver(parts[0...-1].join(".")),
+          field: php_identifier_text_value(parts.last)
+        }
+      end
+
       def php_member_receiver(node)
         return nil unless ts_node?(node)
 
@@ -341,7 +370,7 @@ module Decomplex
       end
 
       def php_normalize_receiver(receiver)
-        value = php_identifier_text_value(receiver)
+        value = php_normalize_source(php_identifier_text_value(receiver))
         value == "this" ? "self" : value
       end
 

@@ -1,6 +1,7 @@
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::node_text;
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct CppProfile;
 
@@ -11,6 +12,10 @@ impl LanguageProfile for CppProfile {
 
     fn grammar(&self) -> TreeSitterLanguage {
         tree_sitter_cpp::LANGUAGE.into()
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        cpp_previous_access_specifier(node, source).or_else(|| Some("private".to_string()))
     }
 
     fn function_node_kinds(&self) -> &[&str] {
@@ -76,6 +81,32 @@ impl LanguageProfile for CppProfile {
 
     fn local_declaration_node_kinds(&self) -> &[&str] {
         &["declaration", "init_declarator"]
+    }
+
+    fn local_variable_declarator_node_kinds(&self) -> &[&str] {
+        &["init_declarator"]
+    }
+
+    fn field_declaration_node_kinds(&self) -> &[&str] {
+        &["field_declaration"]
+    }
+
+    fn declaration_site_parent_node_kinds(&self) -> &[&str] {
+        &[
+            "parameter_declaration",
+            "init_declarator",
+            "function_declarator",
+            "class_specifier",
+            "struct_specifier",
+        ]
+    }
+
+    fn assignment_state_declaration_node_kinds(&self) -> &[&str] {
+        &["assignment_expression"]
+    }
+
+    fn implicit_state_accesses(&self) -> bool {
+        true
     }
 
     fn receiver_type_node_kinds(&self) -> &[&str] {
@@ -146,4 +177,18 @@ impl LanguageProfile for CppProfile {
     fn field_like_node_kinds(&self) -> &[&str] {
         &["field_expression"]
     }
+}
+
+fn cpp_previous_access_specifier(node: Node<'_>, source: &str) -> Option<String> {
+    let mut sibling = node.prev_sibling();
+    while let Some(current) = sibling {
+        if current.kind() == "access_specifier" {
+            let text = node_text(current, source);
+            if matches!(text, "public" | "private" | "protected") {
+                return Some(text.to_string());
+            }
+        }
+        sibling = current.prev_sibling();
+    }
+    None
 }

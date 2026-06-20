@@ -1,4 +1,4 @@
-use super::super::tree_sitter_adapter::named_children;
+use super::super::tree_sitter_adapter::{named_children, AssignmentTarget, Target};
 use super::super::Language;
 use super::base::LanguageProfile;
 use crate::decomplex::ast::node_text;
@@ -19,6 +19,14 @@ impl LanguageProfile for ZigProfile {
         &["function_declaration"]
     }
 
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        if node_text(node, source).trim_start().starts_with("pub ") {
+            Some("public".to_string())
+        } else {
+            Some("private".to_string())
+        }
+    }
+
     fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
         if node.kind() == "struct_declaration" {
             return node
@@ -32,6 +40,10 @@ impl LanguageProfile for ZigProfile {
                 .map(|name| node_text(name, source).to_string());
         }
         self.default_owner_name_from_declaration(node, source)
+    }
+
+    fn struct_owner_node_kinds(&self) -> &[&str] {
+        &["struct_declaration"]
     }
 
     fn parameter_list_node_kinds(&self) -> &[&str] {
@@ -83,12 +95,7 @@ impl LanguageProfile for ZigProfile {
     }
 
     fn branch_node_kinds(&self) -> &[&str] {
-        &[
-            "if_statement",
-            "switch_expression",
-            "for_statement",
-            "labeled_statement",
-        ]
+        &["if_statement", "switch_expression"]
     }
 
     fn case_node_kinds(&self) -> &[&str] {
@@ -122,4 +129,39 @@ impl LanguageProfile for ZigProfile {
     fn field_like_node_kinds(&self) -> &[&str] {
         &["field_expression"]
     }
+
+    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
+        zig_literal_field_target(lhs, source).or_else(|| self.default_state_target(lhs, source))
+    }
+
+    fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        zig_literal_field_target(node, source)
+            .or_else(|| self.default_state_read_target(node, source))
+    }
+
+    fn state_write_source_node<'tree>(
+        &self,
+        node: Node<'tree>,
+        assignment: &AssignmentTarget<'tree>,
+    ) -> Node<'tree> {
+        let mut cursor = node.walk();
+        if node.children(&mut cursor).any(|child| child.kind() == "+=") {
+            assignment.lhs
+        } else {
+            assignment.source
+        }
+    }
+}
+
+fn zig_literal_field_target(node: Node<'_>, source: &str) -> Option<Target> {
+    if node.kind() != "field_expression" || !node_text(node, source).trim_start().starts_with('.') {
+        return None;
+    }
+    let field = named_children(node)
+        .into_iter()
+        .find(|child| child.kind() == "identifier")?;
+    Some(Target {
+        receiver: ".literal".to_string(),
+        field: node_text(field, source).to_string(),
+    })
 }

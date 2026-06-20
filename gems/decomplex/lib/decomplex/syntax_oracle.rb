@@ -12,14 +12,16 @@ module Decomplex
 
     def project(files, engine: "ruby", language: nil)
       paths = Array(files).map(&:to_s)
-      case engine.to_s
-      when "ruby"
-        project_files(paths, language: language)
-      when "rust"
-        rust_project_files(paths, language: language)
-      else
-        raise ArgumentError, "unsupported syntax oracle engine: #{engine}"
-      end
+      projection =
+        case engine.to_s
+        when "ruby"
+          project_files(paths, language: language)
+        when "rust"
+          rust_project_files(paths, language: language)
+        else
+          raise ArgumentError, "unsupported syntax oracle engine: #{engine}"
+        end
+      canonical_projection(projection)
     end
 
     def canonical_json(files, engine: "ruby", language: nil)
@@ -52,18 +54,36 @@ module Decomplex
         "branch_decisions" => branch_decision_rows(document),
         "dispatch_sites" => rows(document.dispatch_sites, %i[variant_set arm_members outside function line span]),
         "semantic_effects" => rows(document.semantic_effect_sites, %i[kind detail function line span]),
-        "predicate_bodies" => rows(document.predicate_defs, %i[name owner body line span]),
-        "local_complexity" => local_complexity_rows(document),
-        "clone_candidates" => rows(
-          document.clone_candidates,
-          %i[method_name node_name line span mass fingerprint child_fingerprints child_masses]
-        )
+        "predicate_bodies" => rows(document.predicate_defs, %i[name owner body line span])
       }
     end
 
     def rust_project_files(files, language:)
       lang = language || Syntax.language_for(files.first).to_s
       JSON.parse(Native::Command.run("syntax-facts", "--language", lang.to_s, *files))
+    end
+
+    def canonical_projection(projection)
+      {
+        "format" => projection.fetch("format"),
+        "documents" => Array(projection.fetch("documents")).map { |document| canonical_document(document) }
+      }
+    end
+
+    def canonical_document(document)
+      sections = %w[
+        functions owners calls state_reads state_writes decisions branch_decisions
+        dispatch_sites semantic_effects predicate_bodies
+      ]
+      out = {
+        "file" => document.fetch("file"),
+        "language" => document.fetch("language")
+      }
+      sections.each do |section|
+        rows = Array(document.fetch(section)).map { |row| normalize_value(row) }
+        out[section] = rows.sort_by { |row| JSON.generate(row) }
+      end
+      out
     end
 
     def rows(items, keys)

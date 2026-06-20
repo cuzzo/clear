@@ -28,7 +28,7 @@ impl LanguageProfile for PhpProfile {
     }
 
     fn parameter_identifier_node_kinds(&self) -> &[&str] {
-        &["name", "variable_name", "simple_parameter"]
+        &["name", "variable_name"]
     }
 
     fn function_body_node_kinds(&self) -> &[&str] {
@@ -122,6 +122,7 @@ impl LanguageProfile for PhpProfile {
     fn field_like_node_kinds(&self) -> &[&str] {
         &[
             "member_access_expression",
+            "nullsafe_member_access_expression",
             "member_call_expression",
             "class_constant_access_expression",
         ]
@@ -159,6 +160,15 @@ impl LanguageProfile for PhpProfile {
         self.default_owner_name_from_declaration(node, source)
     }
 
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "visibility_modifier")
+            .map(|modifier| node_text(modifier, source).to_string())
+            .filter(|modifier| matches!(modifier.as_str(), "public" | "private" | "protected"))
+            .or_else(|| Some("public".to_string()))
+    }
+
     fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
         self.default_assignment_target(node)
     }
@@ -171,11 +181,12 @@ impl LanguageProfile for PhpProfile {
             return Some(CallTarget::new(
                 "self".to_string(),
                 "print".to_string(),
-                self.call_argument_texts(node, source),
+                php_print_argument_texts(node, source),
             ));
         }
         let mut target = self.default_call_target(node, source)?;
         target.receiver = php_normalize_receiver(&target.receiver);
+        target.message = php_identifier_text_value(&target.message);
         Some(target)
     }
 
@@ -188,6 +199,14 @@ impl LanguageProfile for PhpProfile {
 
     fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
         let target = self.default_state_target(lhs, source)?;
+        Some(Target {
+            receiver: php_normalize_receiver(&target.receiver),
+            field: php_identifier_text_value(&target.field),
+        })
+    }
+
+    fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        let target = self.default_state_read_target(node, source)?;
         Some(Target {
             receiver: php_normalize_receiver(&target.receiver),
             field: php_identifier_text_value(&target.field),
@@ -226,12 +245,31 @@ fn php_identifier_text_value(text: &str) -> String {
 }
 
 fn php_normalize_receiver(receiver: &str) -> String {
-    let value = php_identifier_text_value(receiver);
+    let value = php_normalize_source(&php_identifier_text_value(receiver));
     if value == "this" {
         "self".to_string()
     } else {
         value
     }
+}
+
+fn php_print_argument_texts(node: Node<'_>, source: &str) -> Vec<String> {
+    named_children(node)
+        .into_iter()
+        .flat_map(|child| {
+            if child.kind() == "parenthesized_expression" {
+                let children = named_children(child);
+                if children.is_empty() {
+                    vec![child]
+                } else {
+                    children
+                }
+            } else {
+                vec![child]
+            }
+        })
+        .map(|argument| normalize_text(&php_normalize_source(node_text(argument, source))))
+        .collect()
 }
 
 fn php_normalize_source(source: &str) -> String {

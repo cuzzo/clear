@@ -13,7 +13,29 @@ module Decomplex
         params = declarator&.named_children&.find { |child| child.kind == "parameter_list" }
         return nil unless params
 
-        params.named_children.filter_map { |param| parameter_name(param) }.uniq
+        params.named_children.filter_map { |param| c_family_parameter_name(param) || parameter_name(param) }.uniq
+      end
+
+      def c_family_parameter_name(param)
+        declarator = param.named_children.reverse.find { |child| child.kind.end_with?("_declarator") }
+        name = c_family_declarator_name_node(declarator)
+        return name.text if name
+
+        direct = param.named_children.select do |child|
+          parameter_identifier_node_kinds.include?(child.kind)
+        end.last
+        direct&.text
+      end
+
+      def c_family_declarator_name_node(node)
+        return nil unless ts_node?(node)
+        return node if parameter_identifier_node_kinds.include?(node.kind)
+
+        node.named_children.reverse_each do |child|
+          nested = c_family_declarator_name_node(child)
+          return nested if nested
+        end
+        nil
       end
 
       def boolean_expression_list?(node, operator)

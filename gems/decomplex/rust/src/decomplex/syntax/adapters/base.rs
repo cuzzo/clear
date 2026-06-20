@@ -1,7 +1,7 @@
 use super::super::tree_sitter_adapter::{
     first_named_child, first_named_child_except, first_named_child_with_kind, first_named_text,
-    named_children, normalize_type_owner, previous_sibling_text, strip_assignment_suffix,
-    AssignmentTarget, CallTarget, Target,
+    named_children, normalize_type_owner, strip_assignment_suffix, AssignmentTarget, CallTarget,
+    Target,
 };
 use super::super::{CallSite, CloneCandidate, Document, FunctionDef, Language};
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
@@ -225,7 +225,23 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn local_variable_declarator_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn multi_name_variable_declaration_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn field_declaration_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn declaration_site_parent_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn assignment_state_declaration_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 
@@ -354,6 +370,10 @@ pub(crate) trait LanguageProfile {
         false
     }
 
+    fn implicit_state_accesses(&self) -> bool {
+        false
+    }
+
     fn path_action_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -421,6 +441,10 @@ pub(crate) trait LanguageProfile {
 
     fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
         self.default_owner_name_from_declaration(node, source)
+    }
+
+    fn owner_def_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
+        self.owner_name_from_declaration(node, source)
     }
 
     fn owner_kind(&self, node: Node<'_>) -> String {
@@ -585,11 +609,25 @@ pub(crate) trait LanguageProfile {
         }
 
         let (receiver, message) = self.target_from_callee(callee, source)?;
-        Some(CallTarget::new(
-            receiver,
-            message,
-            self.call_argument_texts(node, source),
-        ))
+        let mut target = CallTarget::new(receiver, message, self.call_argument_texts(node, source));
+        if let Some(receiver) = self.first_argument_receiver_call_receiver(node, source, &target) {
+            target.receiver = receiver;
+        }
+        Some(target)
+    }
+
+    fn first_argument_receiver_call_receiver(
+        &self,
+        node: Node<'_>,
+        source: &str,
+        target: &CallTarget<'_>,
+    ) -> Option<String> {
+        if !self.first_argument_receiver() || target.receiver != "self" {
+            return None;
+        }
+        let first_arg = self.call_argument_nodes(node).first().copied()?;
+        let arg_target = self.state_read_target(first_arg, source)?;
+        Some(format!("{}.{}", arg_target.receiver, arg_target.field))
     }
 
     fn target_from_callee(&self, callee: Node<'_>, source: &str) -> Option<(String, String)> {
@@ -687,6 +725,10 @@ pub(crate) trait LanguageProfile {
         self.default_state_target(lhs, source)
     }
 
+    fn state_declaration(&self, node: Node<'_>, source: &str) -> Option<(String, Option<String>)> {
+        self.default_state_declaration(node, source)
+    }
+
     fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
         self.default_state_read_target(node, source)
     }
@@ -714,14 +756,13 @@ pub(crate) trait LanguageProfile {
     }
 
     fn default_state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
-        if previous_sibling_text(lhs, source).as_deref() == Some(":") {
-            return None;
-        }
-
         if self.expression_list_node_kinds().contains(&lhs.kind()) {
             let children = named_children(lhs);
             if children.len() == 1 {
                 return self.default_state_target(children[0], source);
+            }
+            if !self.member_expression_list(lhs, source) {
+                return None;
             }
         }
 
@@ -760,6 +801,100 @@ pub(crate) trait LanguageProfile {
         }
 
         None
+    }
+
+    fn member_expression_list(&self, node: Node<'_>, source: &str) -> bool {
+        if node.child_by_field_name("operand").is_some()
+            && node.child_by_field_name("field").is_some()
+        {
+            return true;
+        }
+        if !self
+            .field_like_dot_wrapper_node_kinds()
+            .contains(&node.kind())
+        {
+            return false;
+        }
+        let text = node_text(node, source);
+        text.contains('.') || text.contains("->") || text.contains("::") || text.contains("?.")
+    }
+
+    fn default_state_declaration(
+        &self,
+        node: Node<'_>,
+        source: &str,
+    ) -> Option<(String, Option<String>)> {
+        if self
+            .assignment_state_declaration_node_kinds()
+            .contains(&node.kind())
+        {
+            if let Some((field, r#type)) = self.assignment_state_declaration(node, source) {
+                return Some((field, r#type));
+            }
+        }
+        if !self.field_declaration_node_kinds().contains(&node.kind()) {
+            return None;
+        }
+        let name = self.field_declaration_name_node(node, source)?;
+        let field = node_text(name, source).to_string();
+        let r#type = declared_type_text(node, name, source);
+        Some((field, r#type))
+    }
+
+    fn field_declaration_name_node<'tree>(
+        &self,
+        node: Node<'tree>,
+        source: &str,
+    ) -> Option<Node<'tree>> {
+        node.child_by_field_name("name")
+            .or_else(|| self.declarator_name_node(node, source))
+            .or_else(|| {
+                named_children(node)
+                    .into_iter()
+                    .find(|child| self.field_identifier_node_kinds().contains(&child.kind()))
+            })
+            .or_else(|| {
+                named_children(node).into_iter().rev().find(|child| {
+                    self.identifier_node_kinds().contains(&child.kind())
+                        || self.field_identifier_node_kinds().contains(&child.kind())
+                })
+            })
+    }
+
+    fn declarator_name_node<'tree>(&self, node: Node<'tree>, _source: &str) -> Option<Node<'tree>> {
+        let mut pending = named_children(node);
+        let mut seen = HashSet::new();
+        while let Some(current) = pending.pop() {
+            let key = format!("{:?}\0{}", span(current), current.kind());
+            if !seen.insert(key) {
+                continue;
+            }
+            if self.identifier_node_kinds().contains(&current.kind())
+                || self.field_identifier_node_kinds().contains(&current.kind())
+            {
+                return Some(current);
+            }
+            pending.extend(named_children(current));
+        }
+        None
+    }
+
+    fn assignment_state_declaration(
+        &self,
+        node: Node<'_>,
+        source: &str,
+    ) -> Option<(String, Option<String>)> {
+        let assignment = self.assignment_target(node)?;
+        let target = self.state_target(assignment.lhs, source)?;
+        if !matches!(target.receiver.as_str(), "self" | "this") {
+            return None;
+        }
+        let rhs = node
+            .child_by_field_name("right")
+            .or_else(|| node.child_by_field_name("value"))
+            .or_else(|| named_children(node).get(1).copied());
+        let r#type = rhs.and_then(|node| inferred_assignment_type(node, source));
+        r#type.map(|type_name| (target.field, Some(type_name)))
     }
 
     fn assignment_target<'tree>(&self, node: Node<'tree>) -> Option<AssignmentTarget<'tree>> {
@@ -1200,6 +1335,52 @@ fn clone_body_node(node: &RawNode) -> Option<&RawNode> {
     node.children
         .iter()
         .find(|child| CLONE_BODY_KINDS.contains(&child.kind.as_str()))
+}
+
+fn declared_type_text(node: Node<'_>, name: Node<'_>, source: &str) -> Option<String> {
+    if let Some(r#type) = node.child_by_field_name("type") {
+        let text = normalize_text(node_text(r#type, source));
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+
+    let text = node_text(node, source);
+    let name_text = node_text(name, source);
+    let before_name = text.split(name_text).next().unwrap_or("").trim();
+    let candidate = before_name
+        .split_whitespace()
+        .filter(|token| {
+            !matches!(
+                *token,
+                "public" | "private" | "protected" | "static" | "final" | "const"
+            )
+        })
+        .last()
+        .unwrap_or("")
+        .trim_matches(['*', '&']);
+    (!candidate.is_empty()).then(|| candidate.to_string())
+}
+
+fn inferred_assignment_type(node: Node<'_>, source: &str) -> Option<String> {
+    let text = normalize_text(node_text(node, source));
+    for prefix in ["new ", ""] {
+        let value = text.strip_prefix(prefix).unwrap_or(&text);
+        let candidate = value
+            .split(['(', '{', '<', ' ', ':'])
+            .next()
+            .unwrap_or("")
+            .trim();
+        if candidate
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_uppercase())
+            .unwrap_or(false)
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
 }
 
 fn clone_fingerprint_for_profile<P: LanguageProfile + ?Sized>(

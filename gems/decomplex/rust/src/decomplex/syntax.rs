@@ -121,6 +121,8 @@ pub struct Document {
     #[serde(default)]
     pub call_sites: Vec<CallSite>,
     #[serde(default)]
+    pub state_declarations: Vec<StateDeclaration>,
+    #[serde(default)]
     pub state_reads: Vec<StateRead>,
     #[serde(default)]
     pub state_writes: Vec<StateWrite>,
@@ -203,6 +205,16 @@ pub struct CallSite {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StateDeclaration {
+    pub field: String,
+    pub owner: String,
+    pub r#type: Option<String>,
+    pub file: String,
+    pub line: usize,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateWrite {
     pub field: String,
     pub receiver: String,
@@ -230,6 +242,8 @@ pub struct PredicateAlias {
     pub body: String,
     pub file: String,
     pub defn: String,
+    #[serde(default)]
+    pub owner: String,
     pub line: usize,
     pub span: Span,
 }

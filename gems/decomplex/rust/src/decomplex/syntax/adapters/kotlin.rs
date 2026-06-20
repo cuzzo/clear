@@ -1,4 +1,4 @@
-use super::super::tree_sitter_adapter::named_children;
+use super::super::tree_sitter_adapter::{named_children, CallTarget};
 use super::super::Language;
 use super::base::LanguageProfile;
 use crate::decomplex::ast::node_text;
@@ -13,6 +13,21 @@ impl LanguageProfile for KotlinProfile {
 
     fn grammar(&self) -> TreeSitterLanguage {
         tree_sitter_kotlin_ng::LANGUAGE.into()
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        for child in named_children(node) {
+            if child.kind() != "modifiers" {
+                continue;
+            }
+            if node_text(child, source)
+                .split_whitespace()
+                .any(|token| token == "private")
+            {
+                return Some("private".to_string());
+            }
+        }
+        None
     }
 
     fn function_node_kinds(&self) -> &[&str] {
@@ -134,7 +149,7 @@ impl LanguageProfile for KotlinProfile {
     }
 
     fn case_pattern_node_kinds(&self) -> &[&str] {
-        &["when_condition", "pattern"]
+        &["when_condition", "pattern", "string_literal"]
     }
 
     fn case_subject_node_kinds(&self) -> &[&str] {
@@ -177,4 +192,44 @@ impl LanguageProfile for KotlinProfile {
     fn field_like_node_kinds(&self) -> &[&str] {
         &["navigation_expression", "directly_assignable_expression"]
     }
+
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let mut target = self.default_call_target(node, source)?;
+        if kotlin_single_call_control_body(node) {
+            target.source_node = named_children(node).into_iter().next();
+        }
+        Some(target)
+    }
+}
+
+fn kotlin_single_call_control_body(node: Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() == "when_entry" {
+        return true;
+    }
+    if parent.kind() != "block" {
+        return false;
+    }
+    if named_children(parent)
+        .into_iter()
+        .filter(|child| child.is_named())
+        .count()
+        != 1
+    {
+        return false;
+    }
+    parent
+        .parent()
+        .map(|ancestor| {
+            matches!(
+                ancestor.kind(),
+                "if_expression" | "for_statement" | "control_structure_body"
+            )
+        })
+        .unwrap_or(false)
 }

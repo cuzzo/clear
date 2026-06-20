@@ -1,4 +1,4 @@
-use super::super::tree_sitter_adapter::{named_children, normalize_type_owner, CallTarget};
+use super::super::tree_sitter_adapter::{named_children, normalize_type_owner, CallTarget, Target};
 use super::super::Language;
 use super::base::LanguageProfile;
 use crate::decomplex::ast::{node_text, normalize_text};
@@ -35,6 +35,15 @@ impl LanguageProfile for GoProfile {
             return go_method_receiver(node, source).map(|(_owner, name)| name);
         }
         None
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        let name = self.function_name(node, source)?;
+        if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
+            Some("public".to_string())
+        } else {
+            Some("private".to_string())
+        }
     }
 
     fn generic_owner_node_kinds(&self) -> &[&str] {
@@ -233,6 +242,27 @@ impl LanguageProfile for GoProfile {
             _ => None,
         }
     }
+
+    fn state_target(&self, lhs: Node<'_>, source: &str) -> Option<Target> {
+        if self.expression_list_node_kinds().contains(&lhs.kind()) {
+            let children = named_children(lhs);
+            if children.len() == 1 {
+                return self.state_target(children[0], source);
+            }
+        }
+        if self.indexed_lhs_node_kinds().contains(&lhs.kind()) {
+            let object = named_children(lhs).into_iter().next()?;
+            return self.default_state_target(object, source);
+        }
+        self.default_state_target(lhs, source)
+    }
+
+    fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
+        if go_augmented_assignment_lhs(node) {
+            return None;
+        }
+        self.default_state_read_target(node, source)
+    }
 }
 
 fn go_method_receiver(node: Node<'_>, source: &str) -> Option<(String, String)> {
@@ -273,4 +303,39 @@ fn go_statement_arguments(node: Node<'_>, source: &str) -> Option<Vec<String>> {
             .filter(|argument| !argument.is_empty())
             .collect(),
     )
+}
+
+fn go_augmented_assignment_lhs(node: Node<'_>) -> bool {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "assignment_statement" {
+            let lhs = named_children(parent).into_iter().next();
+            let operator = go_assignment_operator(parent);
+            return lhs.map(|lhs| go_contains_node(lhs, node)).unwrap_or(false)
+                && !matches!(operator.as_deref(), Some("=" | ":="));
+        }
+        current = parent;
+    }
+    false
+}
+
+fn go_assignment_operator(node: Node<'_>) -> Option<String> {
+    let mut cursor = node.walk();
+    let operator = node
+        .children(&mut cursor)
+        .find(|child| !child.is_named() && child.kind().ends_with('='))
+        .map(|child| child.kind().to_string());
+    operator
+}
+
+fn go_contains_node(root: Node<'_>, target: Node<'_>) -> bool {
+    if root.kind() == target.kind()
+        && root.start_byte() == target.start_byte()
+        && root.end_byte() == target.end_byte()
+    {
+        return true;
+    }
+    named_children(root)
+        .into_iter()
+        .any(|child| go_contains_node(child, target))
 }

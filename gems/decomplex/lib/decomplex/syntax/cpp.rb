@@ -78,6 +78,16 @@ module Decomplex
         true
       end
 
+      def field_declaration_name_node(node)
+        declarator = node.named_children.reverse.find { |child| child.kind.end_with?("_declarator") }
+        name = declarator&.named_children&.reverse&.find do |child|
+          (identifier_node_kinds + field_identifier_node_kinds).include?(child.kind)
+        end
+        return name if name
+
+        super
+      end
+
       private
 
       def control_context(node)

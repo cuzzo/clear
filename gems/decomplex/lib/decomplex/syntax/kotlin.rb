@@ -69,6 +69,24 @@ module Decomplex
       NAVIGATION_SUFFIX_NODE_KINDS = %w[navigation_suffix].freeze
       FIELD_LIKE_NODE_KINDS = %w[navigation_expression directly_assignable_expression].freeze
       BLOCK_ARGUMENT_NODE_KINDS = [].freeze
+
+      def state_read_target(node)
+        kotlin_value_argument_state_target(node) || super
+      end
+
+      private
+
+      def kotlin_value_argument_state_target(node)
+        return nil unless ts_node?(node) && node.kind == "value_argument"
+
+        suffix = node.named_children.find { |child| navigation_suffix_node_kinds.include?(child.kind) }
+        receiver = node.named_children.find { |child| child != suffix }
+        field = member_field_text(suffix)
+        return nil unless receiver && field
+        return nil if namespace_receiver?(receiver.text)
+
+        { receiver: normalize_text(receiver.text), field: field }
+      end
     end
   end
 end

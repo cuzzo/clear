@@ -1252,9 +1252,13 @@ module Decomplex
           function: current_function(stack),
           line: conjunction_span(node)[0],
           span: conjunction_span(node),
-          predicate: normalize_text(node.text),
+          predicate: conjunction_predicate(node),
           enclosing_span: decision_enclosing_span(node)
         )
+      end
+
+      def conjunction_predicate(node)
+        normalize_text(node.text)
       end
 
       def decision_enclosing_span(node)
@@ -1465,9 +1469,13 @@ module Decomplex
           function: current_function(stack),
           line: line(node),
           span: span(node),
-          predicate: normalize_text(cond.text),
+          predicate: branch_predicate(cond),
           state_refs: refs
         )
+      end
+
+      def branch_predicate(node)
+        normalize_text(node.text)
       end
 
       def record_branch_arm(document, node, stack, out)
@@ -1614,6 +1622,9 @@ module Decomplex
           case_pattern_texts(patterns)
         elsif switch_case_arm_node_kinds.include?(child.kind)
           return [] if child.text.to_s.lstrip.start_with?("else")
+
+          patterns = child.named_children.select { |node| case_pattern_node_kinds.include?(node.kind) }
+          return case_pattern_texts(patterns) unless patterns.empty?
 
           value = named_field(child, "value") || named_field(child, "pattern") ||
                   child.named_children.find { |candidate| candidate.kind == "when_condition" } ||
@@ -2221,7 +2232,7 @@ module Decomplex
 
       def adjacent_argument_call_target(node)
         return nil if generic_member_name?(node) && !member_message_identifier?(node)
-        return nil if call_node_kinds.include?(parent_node(node)&.kind)
+        return nil if call_node_ancestor?(node)
 
         callee = node
         args = nil
@@ -2244,6 +2255,22 @@ module Decomplex
         target_from_callee(callee).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
       rescue NoMethodError
         nil
+      end
+
+      def call_node_ancestor?(node)
+        parent = parent_node(node)
+        seen = Set.new
+        while parent
+          key = node_key(parent)
+          return false if seen.include?(key)
+          return true if call_node_kinds.include?(parent.kind)
+
+          seen << key
+          parent = parent_node(parent)
+        end
+        false
+      rescue NoMethodError
+        false
       end
 
       def target_from_callee(callee)

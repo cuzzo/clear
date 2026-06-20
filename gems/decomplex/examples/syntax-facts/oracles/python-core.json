@@ -6,94 +6,94 @@
       "language": "python",
       "functions": [
         {
-          "name": "__init__",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 7,
-          "span": [
-            7,
-            4,
-            10,
-            22
-          ],
-          "visibility": "public",
-          "params": [
-            "self",
-            "lock",
-            "resource"
-          ]
-        },
-        {
-          "name": "_normalize",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 54,
-          "span": [
-            54,
-            4,
-            56,
-            22
-          ],
-          "visibility": "private",
-          "params": [
-            "self",
-            "value"
-          ]
-        },
-        {
-          "name": "generator",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 58,
-          "span": [
-            58,
-            4,
-            60,
-            23
-          ],
-          "visibility": "public",
-          "params": [
-            "self",
-            "values"
-          ]
-        },
-        {
+          "line": 12,
           "name": "process",
           "owner": "PythonSyntaxFactsCore",
-          "line": 12,
+          "params": [
+            "self",
+            "user",
+            "items",
+            "callback"
+          ],
           "span": [
             12,
             4,
             52,
             41
           ],
-          "visibility": "public",
-          "params": [
-            "self",
-            "user",
-            "items",
-            "callback"
-          ]
+          "visibility": "public"
         },
         {
+          "line": 54,
+          "name": "_normalize",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "value"
+          ],
+          "span": [
+            54,
+            4,
+            56,
+            22
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 58,
+          "name": "generator",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "values"
+          ],
+          "span": [
+            58,
+            4,
+            60,
+            23
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 62,
           "name": "simple_with",
           "owner": "PythonSyntaxFactsCore",
-          "line": 62,
+          "params": [
+            "self",
+            "resource"
+          ],
           "span": [
             62,
             4,
             64,
             16
           ],
-          "visibility": "public",
+          "visibility": "public"
+        },
+        {
+          "line": 7,
+          "name": "__init__",
+          "owner": "PythonSyntaxFactsCore",
           "params": [
             "self",
+            "lock",
             "resource"
-          ]
+          ],
+          "span": [
+            7,
+            4,
+            10,
+            22
+          ],
+          "visibility": "public"
         }
       ],
       "owners": [
         {
-          "name": "PythonSyntaxFactsCore",
           "kind": "class",
           "line": 6,
+          "name": "PythonSyntaxFactsCore",
           "span": [
             6,
             0,
@@ -104,345 +104,213 @@
       ],
       "calls": [
         {
-          "receiver": "handle",
-          "message": "read",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 22,
-          "span": [
-            22,
-            19,
-            22,
-            32
+          "arguments": [
+            "\"x\""
           ],
-          "conditional": false,
-          "arguments": [],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "handle",
-          "message": "read",
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 22,
-          "span": [
-            22,
-            26,
-            22,
-            30
-          ],
-          "conditional": false,
-          "arguments": [],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "item",
-          "message": "startswith",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 28,
+          "message": "startswith",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
           "span": [
             28,
             30,
             28,
             50
-          ],
-          "conditional": true,
-          "arguments": [
-            "\"x\""
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "item",
-          "message": "startswith",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 28,
-          "span": [
-            28,
-            35,
-            28,
-            45
-          ],
-          "conditional": true,
-          "arguments": [
-            "\"x\""
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "result",
-          "message": "append",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 37,
-          "span": [
-            37,
-            12,
-            37,
-            31
-          ],
-          "conditional": true,
           "arguments": [
             "item"
           ],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "result",
-          "message": "append",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 37,
-          "span": [
-            37,
-            19,
-            37,
-            25
-          ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "item"
-          ],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "audit",
+          "control": "conditional",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 45,
-          "span": [
-            45,
-            16,
-            45,
-            41
-          ],
-          "conditional": true,
-          "arguments": [
-            "result[index]"
-          ],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "audit",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 45,
-          "span": [
-            45,
-            21,
-            45,
-            26
-          ],
-          "conditional": true,
-          "arguments": [
-            "result[index]"
-          ],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "callback",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 29,
+          "message": "callback",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             29,
             16,
             29,
             30
-          ],
-          "conditional": true,
+          ]
+        },
+        {
           "arguments": [
             "item"
           ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "default",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 35,
-          "span": [
-            35,
-            20,
-            35,
-            38
-          ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "default",
+          "control": "iterates",
           "function": "process",
+          "line": 37,
+          "message": "append",
           "owner": "PythonSyntaxFactsCore",
-          "line": 35,
+          "receiver": "result",
+          "safe_navigation": false,
           "span": [
-            35,
-            25,
-            35,
-            32
-          ],
-          "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
+            37,
+            12,
+            37,
+            31
+          ]
         },
         {
-          "receiver": "self",
-          "message": "escalate",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 33,
-          "span": [
-            33,
-            20,
-            33,
-            39
-          ],
-          "conditional": true,
           "arguments": [
-            "user"
+            "result"
           ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "escalate",
-          "function": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 33,
-          "span": [
-            33,
-            25,
-            33,
-            33
-          ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "len",
+          "control": "iterates",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 40,
+          "message": "len",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             40,
             22,
             40,
             33
-          ],
-          "conditional": true,
-          "arguments": [
-            "result"
-          ],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "self",
-          "message": "open",
+          "arguments": [
+            "result[index]"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
           "function": "process",
+          "line": 45,
+          "message": "audit",
           "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            45,
+            16,
+            45,
+            41
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 33,
+          "message": "escalate",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            33,
+            20,
+            33,
+            39
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 35,
+          "message": "default",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            35,
+            20,
+            35,
+            38
+          ]
+        },
+        {
+          "arguments": [
+            "user.path"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
           "line": 21,
+          "message": "open",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             21,
             13,
             21,
             28
-          ],
-          "conditional": false,
-          "arguments": [
-            "user.path"
-          ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "value",
-          "message": "strip",
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
           "function": "_normalize",
-          "owner": "PythonSyntaxFactsCore",
           "line": 55,
+          "message": "strip",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "value",
+          "safe_navigation": false,
           "span": [
             55,
             18,
             55,
             31
-          ],
-          "conditional": false,
-          "arguments": [],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "value",
-          "message": "strip",
-          "function": "_normalize",
-          "owner": "PythonSyntaxFactsCore",
-          "line": 55,
-          "span": [
-            55,
-            24,
-            55,
-            29
+          "arguments": [
+
           ],
+          "block": false,
           "conditional": false,
-          "arguments": [],
           "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "read",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "handle",
           "safe_navigation": false,
-          "block": false
+          "span": [
+            22,
+            19,
+            22,
+            32
+          ]
         }
       ],
       "state_reads": [
         {
           "field": "append",
-          "receiver": "result",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 37,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "result",
           "span": [
             37,
             12,
@@ -452,10 +320,10 @@
         },
         {
           "field": "audit",
-          "receiver": "self",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 45,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             45,
             16,
@@ -465,10 +333,10 @@
         },
         {
           "field": "default",
-          "receiver": "self",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 35,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             35,
             20,
@@ -478,10 +346,10 @@
         },
         {
           "field": "escalate",
-          "receiver": "self",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 33,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             33,
             20,
@@ -491,10 +359,10 @@
         },
         {
           "field": "name",
-          "receiver": "user.profile",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 13,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user.profile",
           "span": [
             13,
             20,
@@ -504,10 +372,10 @@
         },
         {
           "field": "path",
-          "receiver": "user",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 21,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             21,
             18,
@@ -517,10 +385,10 @@
         },
         {
           "field": "profile",
-          "receiver": "user",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 13,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             13,
             20,
@@ -530,10 +398,10 @@
         },
         {
           "field": "read",
-          "receiver": "handle",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 22,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "handle",
           "span": [
             22,
             19,
@@ -543,10 +411,10 @@
         },
         {
           "field": "ready",
-          "receiver": "user",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 28,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             28,
             15,
@@ -556,10 +424,10 @@
         },
         {
           "field": "startswith",
-          "receiver": "item",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 28,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "item",
           "span": [
             28,
             30,
@@ -569,10 +437,10 @@
         },
         {
           "field": "strip",
-          "receiver": "value",
           "function": "_normalize",
-          "owner": "PythonSyntaxFactsCore",
           "line": 55,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "value",
           "span": [
             55,
             18,
@@ -584,10 +452,10 @@
       "state_writes": [
         {
           "field": "_lock",
-          "receiver": "self",
           "function": "__init__",
-          "owner": "PythonSyntaxFactsCore",
           "line": 8,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             8,
             8,
@@ -597,10 +465,10 @@
         },
         {
           "field": "count",
-          "receiver": "self",
           "function": "__init__",
-          "owner": "PythonSyntaxFactsCore",
           "line": 10,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             10,
             8,
@@ -610,23 +478,23 @@
         },
         {
           "field": "count",
-          "receiver": "self",
           "function": "process",
-          "owner": "PythonSyntaxFactsCore",
           "line": 19,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             19,
             12,
             19,
-            22
+            27
           ]
         },
         {
           "field": "resource",
-          "receiver": "self",
           "function": "__init__",
-          "owner": "PythonSyntaxFactsCore",
           "line": 9,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             9,
             8,
@@ -637,25 +505,25 @@
       ],
       "decisions": [
         {
-          "kind": "conjunction",
-          "members": [
-            "item.startswith(\"x\")",
-            "user.ready"
-          ],
-          "function": "process",
-          "line": 28,
-          "span": [
-            28,
-            15,
-            28,
-            50
-          ],
-          "predicate": "user.ready and item.startswith(\"x\")",
           "enclosing_span": [
             28,
             12,
             29,
             30
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 28,
+          "members": [
+            "item.startswith(\"x\")",
+            "user.ready"
+          ],
+          "predicate": "user.ready and item.startswith(\"x\")",
+          "span": [
+            28,
+            15,
+            28,
+            50
           ]
         }
       ],
@@ -663,25 +531,27 @@
         {
           "function": "process",
           "line": 28,
+          "predicate": "user.ready and item.startswith(\"x\")",
           "span": [
             28,
             12,
             29,
             30
           ],
-          "predicate": "user.ready and item.startswith(\"x\")",
           "state_refs": [
             "item.startswith",
             "user.ready"
           ]
         }
       ],
-      "dispatch_sites": [],
+      "dispatch_sites": [
+
+      ],
       "semantic_effects": [
         {
-          "kind": "hidden_io",
           "detail": "open",
           "function": "process",
+          "kind": "hidden_io",
           "line": 21,
           "span": [
             21,
@@ -691,726 +561,8 @@
           ]
         }
       ],
-      "predicate_bodies": [],
-      "local_complexity": [
-        {
-          "id": "PythonSyntaxFactsCore#__init__",
-          "score": 0.0,
-          "signals": {}
-        },
-        {
-          "id": "PythonSyntaxFactsCore#_normalize",
-          "score": 0.0,
-          "signals": {
-            "early_exits": 2
-          }
-        },
-        {
-          "id": "PythonSyntaxFactsCore#generator",
-          "score": 3.2,
-          "signals": {
-            "loops": 2,
-            "nested": 1
-          }
-        },
-        {
-          "id": "PythonSyntaxFactsCore#process",
-          "score": 15.0,
-          "signals": {
-            "boolean_ops": 2,
-            "branches": 3,
-            "cases": 3,
-            "early_exits": 2,
-            "loops": 4,
-            "nested": 5
-          }
-        },
-        {
-          "id": "PythonSyntaxFactsCore#simple_with",
-          "score": 0.0,
-          "signals": {}
-        }
-      ],
-      "clone_candidates": [
-        {
-          "method_name": "(top-level)",
-          "node_name": "class_definition",
-          "line": 6,
-          "span": [
-            6,
-            0,
-            64,
-            16
-          ],
-          "mass": 377,
-          "fingerprint": "class_definition(id id ::: block(function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit))) function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id)))) function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id))))",
-          "child_fingerprints": [
-            "function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit)))",
-            "function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id))))",
-            "function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id)))",
-            "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id)))",
-            "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id))"
-          ],
-          "child_masses": [
-            34,
-            258,
-            46,
-            19,
-            15
-          ]
-        },
-        {
-          "method_name": "(top-level)",
-          "node_name": "module",
-          "line": 1,
-          "span": [
-            1,
-            0,
-            66,
-            0
-          ],
-          "mass": 389,
-          "fingerprint": "module(future_import_statement(id id id id) import_statement(id dotted_name(id .:. id)) class_definition(id id ::: block(function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit))) function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id)))) function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id)))))",
-          "child_fingerprints": [
-            "future_import_statement(id id id id)",
-            "import_statement(id dotted_name(id .:. id))",
-            "class_definition(id id ::: block(function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit))) function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id)))) function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id))))"
-          ],
-          "child_masses": [
-            5,
-            6,
-            377
-          ]
-        },
-        {
-          "method_name": "__init__",
-          "node_name": "block",
-          "line": 7,
-          "span": [
-            7,
-            4,
-            64,
-            16
-          ],
-          "mass": 373,
-          "fingerprint": "block(function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit))) function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id)))) function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id))) function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id)))",
-          "child_fingerprints": [
-            "function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit)))",
-            "function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id))))",
-            "function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id)))",
-            "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id)))",
-            "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id))"
-          ],
-          "child_masses": [
-            34,
-            258,
-            46,
-            19,
-            15
-          ]
-        },
-        {
-          "method_name": "__init__",
-          "node_name": "block",
-          "line": 8,
-          "span": [
-            8,
-            8,
-            10,
-            22
-          ],
-          "mass": 22,
-          "fingerprint": "block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit))",
-          "child_fingerprints": [
-            "expression_statement(attribute(id .:. id) =:= id)",
-            "expression_statement(attribute(id .:. id) =:= id)",
-            "expression_statement(attribute(id .:. id) =:= lit)"
-          ],
-          "child_masses": [
-            7,
-            7,
-            7
-          ]
-        },
-        {
-          "method_name": "__init__",
-          "node_name": "defn",
-          "line": 7,
-          "span": [
-            7,
-            4,
-            10,
-            22
-          ],
-          "mass": 34,
-          "fingerprint": "function_definition(id id parameters((:( id ,:, id ,:, id ):)) ::: block(expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= id) expression_statement(attribute(id .:. id) =:= lit)))",
-          "child_fingerprints": [
-            "expression_statement(attribute(id .:. id) =:= id)",
-            "expression_statement(attribute(id .:. id) =:= id)",
-            "expression_statement(attribute(id .:. id) =:= lit)"
-          ],
-          "child_masses": [
-            7,
-            7,
-            7
-          ]
-        },
-        {
-          "method_name": "_normalize",
-          "node_name": "block",
-          "line": 55,
-          "span": [
-            55,
-            8,
-            56,
-            22
-          ],
-          "mass": 28,
-          "fingerprint": "block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id))",
-          "child_fingerprints": [
-            "expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\")))",
-            "return_statement(id id)"
-          ],
-          "child_masses": [
-            24,
-            3
-          ]
-        },
-        {
-          "method_name": "_normalize",
-          "node_name": "defn",
-          "line": 54,
-          "span": [
-            54,
-            4,
-            56,
-            22
-          ],
-          "mass": 46,
-          "fingerprint": "function_definition(id id parameters((:( id ,:, typed_default_parameter(id ::: type(id |:| nil) =:= nil) ):)) ::: block(expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\"))) return_statement(id id)))",
-          "child_fingerprints": [
-            "expression_statement(id =:= conditional_expression(call<strip>(attribute(id .:. id) argument_list((:( ):))) id comparison_operator(id is not(id id) nil) id string(string_start:\" lit string_end:\")))",
-            "return_statement(id id)"
-          ],
-          "child_masses": [
-            24,
-            3
-          ]
-        },
-        {
-          "method_name": "generator",
-          "node_name": "block",
-          "line": 59,
-          "span": [
-            59,
-            8,
-            60,
-            23
-          ],
-          "mass": 9,
-          "fingerprint": "block(id id id id ::: block(id id))",
-          "child_fingerprints": [],
-          "child_masses": []
-        },
-        {
-          "method_name": "generator",
-          "node_name": "block",
-          "line": 60,
-          "span": [
-            60,
-            12,
-            60,
-            23
-          ],
-          "mass": 3,
-          "fingerprint": "block(id id)",
-          "child_fingerprints": [],
-          "child_masses": []
-        },
-        {
-          "method_name": "generator",
-          "node_name": "defn",
-          "line": 58,
-          "span": [
-            58,
-            4,
-            60,
-            23
-          ],
-          "mass": 19,
-          "fingerprint": "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id id id ::: block(id id)))",
-          "child_fingerprints": [
-            "block(id id)"
-          ],
-          "child_masses": [
-            3
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 13,
-          "span": [
-            13,
-            8,
-            52,
-            41
-          ],
-          "mass": 230,
-          "fingerprint": "block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id)))",
-          "child_fingerprints": [
-            "expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id))",
-            "expression_statement(id ::: id)",
-            "expression_statement(id =:= list([:[ ]:]))",
-            "expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\"))",
-            "with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit))",
-            "with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):)))))",
-            "for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):)))))",
-            "expression_statement(id =:= lit)",
-            "while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit)))",
-            "assert_statement(id id)",
-            "return_statement(id conditional_expression(id id id id id))"
-          ],
-          "child_masses": [
-            12,
-            4,
-            6,
-            8,
-            14,
-            26,
-            91,
-            4,
-            53,
-            3,
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 19,
-          "span": [
-            19,
-            12,
-            19,
-            27
-          ],
-          "mass": 7,
-          "fingerprint": "block(attribute(id .:. id) +=:+= lit)",
-          "child_fingerprints": [
-            "attribute(id .:. id)",
-            "lit"
-          ],
-          "child_masses": [
-            4,
-            1
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 22,
-          "span": [
-            22,
-            12,
-            22,
-            32
-          ],
-          "mass": 11,
-          "fingerprint": "block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))",
-          "child_fingerprints": [
-            "call<read>(attribute(id .:. id) argument_list((:( ):)))"
-          ],
-          "child_masses": [
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 25,
-          "span": [
-            25,
-            12,
-            37,
-            31
-          ],
-          "mass": 85,
-          "fingerprint": "block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))",
-          "child_fingerprints": [
-            "if_statement(id comparison_operator(id id nil) ::: id)",
-            "if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):))))",
-            "match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))))",
-            "expression_statement(attribute(id .:. id) argument_list((:( id ):)))"
-          ],
-          "child_masses": [
-            8,
-            27,
-            40,
-            9
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 29,
-          "span": [
-            29,
-            16,
-            29,
-            30
-          ],
-          "mass": 6,
-          "fingerprint": "block(id argument_list((:( id ):)))",
-          "child_fingerprints": [],
-          "child_masses": []
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 31,
-          "span": [
-            31,
-            23,
-            35,
-            38
-          ],
-          "mass": 36,
-          "fingerprint": "block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))",
-          "child_fingerprints": [
-            "case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):))))",
-            "case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))"
-          ],
-          "child_masses": [
-            22,
-            13
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 33,
-          "span": [
-            33,
-            20,
-            33,
-            39
-          ],
-          "mass": 9,
-          "fingerprint": "block(attribute(id .:. id) argument_list((:( id ):)))",
-          "child_fingerprints": [
-            "attribute(id .:. id)"
-          ],
-          "child_masses": [
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 35,
-          "span": [
-            35,
-            20,
-            35,
-            38
-          ],
-          "mass": 9,
-          "fingerprint": "block(attribute(id .:. id) argument_list((:( id ):)))",
-          "child_fingerprints": [
-            "attribute(id .:. id)"
-          ],
-          "child_masses": [
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 41,
-          "span": [
-            41,
-            12,
-            49,
-            22
-          ],
-          "mass": 41,
-          "fingerprint": "block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))",
-          "child_fingerprints": [
-            "if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id)",
-            "try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id))",
-            "expression_statement(id +=:+= lit)"
-          ],
-          "child_masses": [
-            15,
-            21,
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 45,
-          "span": [
-            45,
-            16,
-            45,
-            41
-          ],
-          "mass": 13,
-          "fingerprint": "block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):)))",
-          "child_fingerprints": [
-            "attribute(id .:. id)"
-          ],
-          "child_masses": [
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "case_clause",
-          "line": 32,
-          "span": [
-            32,
-            16,
-            33,
-            39
-          ],
-          "mass": 22,
-          "fingerprint": "case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):))))",
-          "child_fingerprints": [
-            "attribute(id .:. id)"
-          ],
-          "child_masses": [
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "case_clause",
-          "line": 34,
-          "span": [
-            34,
-            16,
-            35,
-            38
-          ],
-          "mass": 13,
-          "fingerprint": "case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))",
-          "child_fingerprints": [
-            "attribute(id .:. id)"
-          ],
-          "child_masses": [
-            4
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "defn",
-          "line": 12,
-          "span": [
-            12,
-            4,
-            52,
-            41
-          ],
-          "mass": 258,
-          "fingerprint": "function_definition(id id parameters((:( id ,:, typed_parameter(id ::: type(string_start:\" lit string_end:\")) ,:, typed_parameter(id ::: type(id type_parameter([:[ id ]:]))) ,:, id ):)) ::: block(expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id)) expression_statement(id ::: id) expression_statement(id =:= list([:[ ]:])) expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\")) with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit)) with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):))))) for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):))))) expression_statement(id =:= lit) while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit))) assert_statement(id id) return_statement(id conditional_expression(id id id id id))))",
-          "child_fingerprints": [
-            "expression_statement(id ::: id =:= attribute(attribute(id .:. id) .:. id))",
-            "expression_statement(id ::: id)",
-            "expression_statement(id =:= list([:[ ]:]))",
-            "expression_statement(id =:= string(string_start:\" string_content(escape_sequence:\\\\) string_end:\"))",
-            "with_statement(id with_clause(id .:. id) ::: block(attribute(id .:. id) +=:+= lit))",
-            "with_statement(id with_clause(call<open>(id argument_list((:( attribute(id .:. id) ):))) id id) ::: block(id =:= call<read>(attribute(id .:. id) argument_list((:( ):)))))",
-            "for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):)))))",
-            "expression_statement(id =:= lit)",
-            "while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit)))",
-            "assert_statement(id id)",
-            "return_statement(id conditional_expression(id id id id id))"
-          ],
-          "child_masses": [
-            12,
-            4,
-            6,
-            8,
-            14,
-            26,
-            91,
-            4,
-            53,
-            3,
-            8
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "for_statement",
-          "line": 24,
-          "span": [
-            24,
-            8,
-            37,
-            31
-          ],
-          "mass": 91,
-          "fingerprint": "for_statement(id id id id ::: block(if_statement(id comparison_operator(id id nil) ::: id) if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):)))) match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):)))))) expression_statement(attribute(id .:. id) argument_list((:( id ):)))))",
-          "child_fingerprints": [
-            "if_statement(id comparison_operator(id id nil) ::: id)",
-            "if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):))))",
-            "match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))))",
-            "expression_statement(attribute(id .:. id) argument_list((:( id ):)))"
-          ],
-          "child_masses": [
-            8,
-            27,
-            40,
-            9
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "if_statement",
-          "line": 25,
-          "span": [
-            25,
-            12,
-            26,
-            24
-          ],
-          "mass": 8,
-          "fingerprint": "if_statement(id comparison_operator(id id nil) ::: id)",
-          "child_fingerprints": [
-            "comparison_operator(id id nil)",
-            "id"
-          ],
-          "child_masses": [
-            4,
-            1
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "if_statement",
-          "line": 28,
-          "span": [
-            28,
-            12,
-            29,
-            30
-          ],
-          "mass": 27,
-          "fingerprint": "if_statement(id boolean_operator(attribute(id .:. id) id call<startswith>(attribute(id .:. id) argument_list((:( string(string_start:\" lit string_end:\") ):)))) ::: block(id argument_list((:( id ):))))",
-          "child_fingerprints": [],
-          "child_masses": []
-        },
-        {
-          "method_name": "process",
-          "node_name": "if_statement",
-          "line": 41,
-          "span": [
-            41,
-            12,
-            42,
-            21
-          ],
-          "mass": 15,
-          "fingerprint": "if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id)",
-          "child_fingerprints": [
-            "comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\"))",
-            "id"
-          ],
-          "child_masses": [
-            11,
-            1
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "match_statement",
-          "line": 31,
-          "span": [
-            31,
-            12,
-            35,
-            38
-          ],
-          "mass": 40,
-          "fingerprint": "match_statement(id id ::: block(case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):)))) case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))))",
-          "child_fingerprints": [
-            "case_clause(id case_pattern(string(string_start:\" lit string_end:\") |:| string(string_start:\" lit string_end:\")) ::: block(attribute(id .:. id) argument_list((:( id ):))))",
-            "case_clause(id id ::: block(attribute(id .:. id) argument_list((:( id ):))))"
-          ],
-          "child_masses": [
-            22,
-            13
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "while_statement",
-          "line": 40,
-          "span": [
-            40,
-            8,
-            49,
-            22
-          ],
-          "mass": 53,
-          "fingerprint": "while_statement(id comparison_operator(id <:< call<len>(id argument_list((:( id ):)))) ::: block(if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id) try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id)) expression_statement(id +=:+= lit)))",
-          "child_fingerprints": [
-            "if_statement(id comparison_operator(subscript(id [:[ id ]:]) ==:== string(string_start:\" lit string_end:\")) ::: id)",
-            "try_statement(id ::: block(attribute(id .:. id) argument_list((:( subscript(id [:[ id ]:]) ):))) except_clause(id id ::: id))",
-            "expression_statement(id +=:+= lit)"
-          ],
-          "child_masses": [
-            15,
-            21,
-            4
-          ]
-        },
-        {
-          "method_name": "simple_with",
-          "node_name": "block",
-          "line": 63,
-          "span": [
-            63,
-            8,
-            64,
-            16
-          ],
-          "mass": 5,
-          "fingerprint": "block(id id ::: id)",
-          "child_fingerprints": [
-            "id",
-            "id"
-          ],
-          "child_masses": [
-            1,
-            1
-          ]
-        },
-        {
-          "method_name": "simple_with",
-          "node_name": "defn",
-          "line": 62,
-          "span": [
-            62,
-            4,
-            64,
-            16
-          ],
-          "mass": 15,
-          "fingerprint": "function_definition(id id parameters((:( id ,:, id ):)) ::: block(id id ::: id))",
-          "child_fingerprints": [
-            "id",
-            "id"
-          ],
-          "child_masses": [
-            1,
-            1
-          ]
-        }
+      "predicate_bodies": [
+
       ]
     }
   ]

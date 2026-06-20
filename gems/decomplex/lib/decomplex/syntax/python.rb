@@ -99,6 +99,8 @@ module Decomplex
       end
 
       def call_target(document, node)
+        return nil if node.kind == "identifier" && parent_node(node)&.kind == "attribute"
+
         python_adjacent_call_target(node) || super
       end
 
@@ -159,6 +161,10 @@ module Decomplex
         end
       end
 
+      def state_write_source_node(node)
+        assignment_lhs?(node) ? (parent_node(node) || node) : super
+      end
+
       def local_methods(document)
         document.function_defs.map do |function_def|
           statements = python_function_body_statements(function_def.body, document)
@@ -217,7 +223,9 @@ module Decomplex
       end
 
       def python_adjacent_call_target(node)
+        return nil if call_node_ancestor?(node)
         return python_adjacent_member_call_target(node) if node.kind == "attribute"
+        return nil if parent_node(node)&.kind == "attribute"
         return nil unless node.kind == "identifier"
 
         args = next_sibling(node)
@@ -234,6 +242,7 @@ module Decomplex
       end
 
       def python_adjacent_member_call_target(node)
+        return nil if call_node_ancestor?(node)
         args = next_sibling(node)
         return nil unless args&.kind == "argument_list"
 

@@ -1,6 +1,7 @@
 use super::super::Language;
 use super::base::LanguageProfile;
-use tree_sitter::Language as TreeSitterLanguage;
+use crate::decomplex::ast::node_text;
+use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) struct TypeScriptProfile;
 
@@ -11,6 +12,29 @@ impl LanguageProfile for TypeScriptProfile {
 
     fn grammar(&self) -> TreeSitterLanguage {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        let name = self.function_name(node, source).unwrap_or_default();
+        if name.starts_with('#') {
+            return Some("private".to_string());
+        }
+        for child in super::super::tree_sitter_adapter::named_children(node) {
+            if !matches!(child.kind(), "accessibility_modifier" | "modifier") {
+                continue;
+            }
+            let text = node_text(child, source);
+            if text.split_whitespace().any(|token| token == "private") {
+                return Some("private".to_string());
+            }
+            if text.split_whitespace().any(|token| token == "protected") {
+                return Some("protected".to_string());
+            }
+            if text.split_whitespace().any(|token| token == "public") {
+                return Some("public".to_string());
+            }
+        }
+        Some("public".to_string())
     }
 
     fn function_node_kinds(&self) -> &[&str] {

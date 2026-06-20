@@ -1,3 +1,4 @@
+use super::super::tree_sitter_adapter::{named_children, CallTarget};
 use super::super::Language;
 use super::base::LanguageProfile;
 use crate::decomplex::ast::{node_text, normalize_text};
@@ -12,6 +13,21 @@ impl LanguageProfile for SwiftProfile {
 
     fn grammar(&self) -> TreeSitterLanguage {
         tree_sitter_swift::LANGUAGE.into()
+    }
+
+    fn function_visibility(&self, node: Node<'_>, source: &str) -> Option<String> {
+        for child in named_children(node) {
+            if child.kind() != "modifiers" {
+                continue;
+            }
+            if node_text(child, source)
+                .split_whitespace()
+                .any(|token| token == "private")
+            {
+                return Some("private".to_string());
+            }
+        }
+        None
     }
 
     fn function_node_kinds(&self) -> &[&str] {
@@ -148,6 +164,75 @@ impl LanguageProfile for SwiftProfile {
         &["navigation_expression"]
     }
 
+    fn assignment_lhs_node(&self, node: Node<'_>) -> bool {
+        let candidate = if node
+            .parent()
+            .map(|parent| parent.kind() == "directly_assignable_expression")
+            .unwrap_or(false)
+        {
+            node.parent().unwrap()
+        } else {
+            node
+        };
+        let Some(parent) = candidate.parent() else {
+            return false;
+        };
+        if parent.kind() != "assignment" {
+            return false;
+        }
+        named_children(parent)
+            .into_iter()
+            .next()
+            .map(|lhs| same_node(lhs, candidate))
+            .unwrap_or(false)
+    }
+
+    fn state_read_target(
+        &self,
+        node: Node<'_>,
+        source: &str,
+    ) -> Option<super::super::tree_sitter_adapter::Target> {
+        if self.assignment_lhs_node(node) {
+            return None;
+        }
+        self.default_state_read_target(node, source)
+    }
+
+    fn call_argument_nodes<'tree>(&self, node: Node<'tree>) -> Vec<Node<'tree>> {
+        let Some(args) = named_children(node)
+            .into_iter()
+            .find(|child| matches!(child.kind(), "call_suffix" | "value_arguments"))
+        else {
+            return Vec::new();
+        };
+        let value_arguments = if args.kind() == "call_suffix" {
+            named_children(args)
+                .into_iter()
+                .find(|child| child.kind() == "value_arguments")
+        } else {
+            Some(args)
+        };
+        value_arguments
+            .map(|arguments| {
+                named_children(arguments)
+                    .into_iter()
+                    .filter(|child| child.kind() == "value_argument")
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let mut target = self.default_call_target(node, source)?;
+        if swift_single_line_switch_call(node) {
+            target.source_node = named_children(node).into_iter().next();
+        }
+        Some(target)
+    }
+
     fn call_argument_texts(&self, node: Node<'_>, source: &str) -> Vec<String> {
         self.call_argument_nodes(node)
             .into_iter()
@@ -163,4 +248,23 @@ impl LanguageProfile for SwiftProfile {
             })
             .collect()
     }
+}
+
+fn same_node(left: Node<'_>, right: Node<'_>) -> bool {
+    left.kind() == right.kind()
+        && left.start_byte() == right.start_byte()
+        && left.end_byte() == right.end_byte()
+}
+
+fn swift_single_line_switch_call(node: Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if parent.kind() != "statements" || parent.start_position().row != parent.end_position().row {
+        return false;
+    }
+    parent
+        .parent()
+        .map(|ancestor| ancestor.kind() == "switch_entry")
+        .unwrap_or(false)
 }

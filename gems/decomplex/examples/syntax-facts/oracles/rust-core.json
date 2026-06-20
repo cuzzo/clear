@@ -6,75 +6,75 @@
       "language": "rust",
       "functions": [
         {
-          "name": "audit",
-          "owner": "RustSyntaxFactsCore",
-          "line": 46,
-          "span": [
-            46,
-            4,
-            50,
-            5
-          ],
-          "visibility": "private",
-          "params": [
-            "&self",
-            "name"
-          ]
-        },
-        {
+          "line": 12,
           "name": "new",
           "owner": "RustSyntaxFactsCore",
-          "line": 12,
+          "params": [
+            "status"
+          ],
           "span": [
             12,
             4,
             14,
             5
           ],
-          "visibility": "public",
-          "params": [
-            "status"
-          ]
+          "visibility": "public"
         },
         {
+          "line": 16,
           "name": "process",
           "owner": "RustSyntaxFactsCore",
-          "line": 16,
+          "params": [
+            "&mut self",
+            "user",
+            "items",
+            "callback"
+          ],
           "span": [
             16,
             4,
             44,
             5
           ],
-          "visibility": "public",
-          "params": [
-            "&mut self",
-            "user",
-            "items",
-            "callback"
-          ]
+          "visibility": "public"
         },
         {
+          "line": 46,
+          "name": "audit",
+          "owner": "RustSyntaxFactsCore",
+          "params": [
+            "&self",
+            "name"
+          ],
+          "span": [
+            46,
+            4,
+            50,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 52,
           "name": "ready",
           "owner": "RustSyntaxFactsCore",
-          "line": 52,
+          "params": [
+            "&self"
+          ],
           "span": [
             52,
             4,
             54,
             5
           ],
-          "visibility": "private",
-          "params": [
-            "&self"
-          ]
+          "visibility": "private"
         }
       ],
       "owners": [
         {
-          "name": "RustSyntaxFactsCore",
           "kind": "impl",
           "line": 11,
+          "name": "RustSyntaxFactsCore",
           "span": [
             11,
             0,
@@ -83,9 +83,9 @@
           ]
         },
         {
-          "name": "RustSyntaxFactsCore",
           "kind": "struct",
           "line": 1,
+          "name": "RustSyntaxFactsCore",
           "span": [
             1,
             0,
@@ -96,357 +96,375 @@
       ],
       "calls": [
         {
-          "receiver": "Account",
-          "message": "new",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 23,
-          "span": [
-            23,
-            22,
-            23,
-            63
-          ],
-          "conditional": false,
           "arguments": [
-            "name.clone()",
-            "user.active()"
+            "&account"
           ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "item",
-          "message": "children",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 40,
-          "span": [
-            40,
-            12,
-            40,
-            27
-          ],
-          "conditional": true,
-          "arguments": [],
-          "control": "iterates",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "name",
-          "message": "clone",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 23,
-          "span": [
-            23,
-            35,
-            23,
-            47
-          ],
+          "block": false,
           "conditional": false,
-          "arguments": [],
           "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "Some",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 43,
-          "span": [
-            43,
-            8,
-            43,
-            18
-          ],
-          "conditional": false,
-          "arguments": [
-            "name"
-          ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "callback",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 24,
+          "message": "callback",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             24,
             8,
             24,
             26
-          ],
-          "conditional": false,
-          "arguments": [
-            "&account"
-          ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "self",
-          "message": "default_case",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 29,
-          "span": [
-            29,
-            17,
-            29,
-            40
+          "arguments": [
+            "Status::Busy"
           ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "user"
-          ],
           "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "escalate",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 27,
-          "span": [
-            27,
-            41,
-            27,
-            60
-          ],
-          "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "fallback",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 28,
-          "span": [
-            28,
-            27,
-            28,
-            46
-          ],
-          "conditional": true,
-          "arguments": [
-            "user"
-          ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "publish",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 34,
+          "message": "publish",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             34,
             12,
             34,
             38
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
           ],
+          "block": false,
           "conditional": true,
-          "arguments": [
-            "Status::Busy"
-          ],
           "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "send",
-          "function": "audit",
-          "owner": "RustSyntaxFactsCore",
-          "line": 48,
-          "span": [
-            48,
-            8,
-            48,
-            33
-          ],
-          "conditional": false,
-          "arguments": [
-            "\"record\"",
-            "name"
-          ],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "status",
-          "function": "audit",
-          "owner": "RustSyntaxFactsCore",
-          "line": 49,
-          "span": [
-            49,
-            8,
-            49,
-            21
-          ],
-          "conditional": false,
-          "arguments": [],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "self",
-          "message": "warn",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 36,
+          "message": "warn",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
             36,
             12,
             36,
             34
-          ],
-          "conditional": true,
+          ]
+        },
+        {
           "arguments": [
-            "\"not ready\""
+            "\"record\"",
+            "name"
           ],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "user",
-          "message": "active",
-          "function": "process",
-          "owner": "RustSyntaxFactsCore",
-          "line": 23,
-          "span": [
-            23,
-            49,
-            23,
-            62
-          ],
+          "block": false,
           "conditional": false,
-          "arguments": [],
           "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "user",
-          "message": "profile",
-          "function": "process",
+          "function": "audit",
+          "line": 48,
+          "message": "send",
           "owner": "RustSyntaxFactsCore",
-          "line": 22,
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
-            22,
-            19,
-            22,
+            48,
+            8,
+            48,
             33
+          ]
+        },
+        {
+          "arguments": [
+            "name"
           ],
+          "block": false,
           "conditional": false,
-          "arguments": [],
           "control": "always",
-          "safe_navigation": false,
-          "block": false
-        },
-        {
-          "receiver": "user",
-          "message": "ready",
           "function": "process",
+          "line": 43,
+          "message": "Some",
           "owner": "RustSyntaxFactsCore",
-          "line": 32,
+          "receiver": "self",
+          "safe_navigation": false,
           "span": [
-            32,
-            50,
-            32,
-            62
-          ],
-          "conditional": true,
-          "arguments": [],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
+            43,
+            8,
+            43,
+            18
+          ]
         },
         {
-          "receiver": "user",
-          "message": "role",
+          "arguments": [
+            "name.clone()",
+            "user.active()"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
           "function": "process",
+          "line": 23,
+          "message": "new",
           "owner": "RustSyntaxFactsCore",
-          "line": 26,
+          "receiver": "Account",
+          "safe_navigation": false,
           "span": [
-            26,
-            14,
-            26,
-            25
-          ],
-          "conditional": true,
-          "arguments": [],
-          "control": "conditional",
-          "safe_navigation": false,
-          "block": false
+            23,
+            22,
+            23,
+            63
+          ]
         },
         {
-          "receiver": "user.profile()",
-          "message": "name",
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
           "function": "process",
+          "line": 27,
+          "message": "escalate",
           "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            27,
+            41,
+            27,
+            60
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 28,
+          "message": "fallback",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            28,
+            27,
+            28,
+            46
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 29,
+          "message": "default_case",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            29,
+            17,
+            29,
+            40
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 49,
+          "message": "status",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            49,
+            8,
+            49,
+            21
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
           "line": 22,
+          "message": "name",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile()",
+          "safe_navigation": false,
           "span": [
             22,
             19,
             22,
             40
-          ],
-          "conditional": false,
-          "arguments": [],
-          "control": "always",
-          "safe_navigation": false,
-          "block": false
+          ]
         },
         {
-          "receiver": "user.profile().name()",
-          "message": "to_string",
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 22,
+          "message": "profile",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            22,
+            19,
+            22,
+            33
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "to_string",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile().name()",
+          "safe_navigation": false,
           "span": [
             22,
             19,
             22,
             52
+          ]
+        },
+        {
+          "arguments": [
+
           ],
+          "block": false,
           "conditional": false,
-          "arguments": [],
           "control": "always",
+          "function": "process",
+          "line": 23,
+          "message": "active",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
           "safe_navigation": false,
-          "block": false
+          "span": [
+            23,
+            49,
+            23,
+            62
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 23,
+          "message": "clone",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "name",
+          "safe_navigation": false,
+          "span": [
+            23,
+            35,
+            23,
+            47
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 26,
+          "message": "role",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            26,
+            14,
+            26,
+            25
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 32,
+          "message": "ready",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            32,
+            50,
+            32,
+            62
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 40,
+          "message": "children",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            40,
+            12,
+            40,
+            27
+          ]
         }
       ],
       "state_reads": [
         {
           "field": "active",
-          "receiver": "user",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 23,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             23,
             49,
@@ -456,10 +474,10 @@
         },
         {
           "field": "children",
-          "receiver": "item",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 40,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "item",
           "span": [
             40,
             12,
@@ -469,10 +487,10 @@
         },
         {
           "field": "clone",
-          "receiver": "name",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 23,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "name",
           "span": [
             23,
             35,
@@ -482,10 +500,10 @@
         },
         {
           "field": "count",
-          "receiver": "self",
           "function": "ready",
-          "owner": "RustSyntaxFactsCore",
           "line": 53,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             53,
             8,
@@ -495,10 +513,10 @@
         },
         {
           "field": "default_case",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 29,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             29,
             17,
@@ -508,10 +526,10 @@
         },
         {
           "field": "escalate",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 27,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             27,
             41,
@@ -521,10 +539,10 @@
         },
         {
           "field": "fallback",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 28,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             28,
             27,
@@ -534,10 +552,10 @@
         },
         {
           "field": "name",
-          "receiver": "user.profile()",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile()",
           "span": [
             22,
             19,
@@ -547,10 +565,10 @@
         },
         {
           "field": "profile",
-          "receiver": "user",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             22,
             19,
@@ -560,10 +578,10 @@
         },
         {
           "field": "publish",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 34,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             34,
             12,
@@ -573,10 +591,10 @@
         },
         {
           "field": "ready",
-          "receiver": "user",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 32,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             32,
             50,
@@ -586,10 +604,10 @@
         },
         {
           "field": "role",
-          "receiver": "user",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 26,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
           "span": [
             26,
             14,
@@ -599,10 +617,10 @@
         },
         {
           "field": "send",
-          "receiver": "self",
           "function": "audit",
-          "owner": "RustSyntaxFactsCore",
           "line": 48,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             48,
             8,
@@ -612,10 +630,10 @@
         },
         {
           "field": "status",
-          "receiver": "self",
           "function": "audit",
-          "owner": "RustSyntaxFactsCore",
           "line": 49,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             49,
             8,
@@ -625,10 +643,10 @@
         },
         {
           "field": "to_string",
-          "receiver": "user.profile().name()",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile().name()",
           "span": [
             22,
             19,
@@ -638,10 +656,10 @@
         },
         {
           "field": "warn",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 36,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             36,
             12,
@@ -653,10 +671,10 @@
       "state_writes": [
         {
           "field": "count",
-          "receiver": "self",
           "function": "process",
-          "owner": "RustSyntaxFactsCore",
           "line": 33,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
           "span": [
             33,
             12,
@@ -667,21 +685,21 @@
       ],
       "decisions": [
         {
-          "kind": "case_dispatch",
-          "members": [
-            "Role::Guest",
-            "Role::Owner | Role::Admin"
-          ],
-          "function": "process",
-          "line": 26,
-          "span": [
+          "enclosing_span": [
             26,
             8,
             30,
             9
           ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 26,
+          "members": [
+            "Role::Guest",
+            "Role::Owner | Role::Admin"
+          ],
           "predicate": "user.role()",
-          "enclosing_span": [
+          "span": [
             26,
             8,
             30,
@@ -689,25 +707,25 @@
           ]
         },
         {
-          "kind": "conjunction",
-          "members": [
-            "matches!(self.status, Status::Idle)",
-            "user.ready()"
-          ],
-          "function": "process",
-          "line": 32,
-          "span": [
-            32,
-            11,
-            32,
-            62
-          ],
-          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
           "enclosing_span": [
             32,
             8,
             37,
             9
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 32,
+          "members": [
+            "matches!(self.status, Status::Idle)",
+            "user.ready()"
+          ],
+          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
+          "span": [
+            32,
+            11,
+            32,
+            62
           ]
         }
       ],
@@ -715,13 +733,13 @@
         {
           "function": "process",
           "line": 26,
+          "predicate": "user.role()",
           "span": [
             26,
             8,
             30,
             9
           ],
-          "predicate": "user.role()",
           "state_refs": [
             "user.role"
           ]
@@ -729,24 +747,26 @@
         {
           "function": "process",
           "line": 32,
+          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
           "span": [
             32,
             8,
             37,
             9
           ],
-          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
           "state_refs": [
             "user.ready"
           ]
         }
       ],
-      "dispatch_sites": [],
+      "dispatch_sites": [
+
+      ],
       "semantic_effects": [
         {
-          "kind": "callback_inversion",
           "detail": "callback",
           "function": "process",
+          "kind": "callback_inversion",
           "line": 24,
           "span": [
             24,
@@ -756,279 +776,8 @@
           ]
         }
       ],
-      "predicate_bodies": [],
-      "local_complexity": [
-        {
-          "id": "RustSyntaxFactsCore#audit",
-          "score": 0.0,
-          "signals": {}
-        },
-        {
-          "id": "RustSyntaxFactsCore#new",
-          "score": 0.0,
-          "signals": {}
-        },
-        {
-          "id": "RustSyntaxFactsCore#process",
-          "score": 5.6,
-          "signals": {
-            "boolean_ops": 2,
-            "branches": 1,
-            "cases": 1,
-            "loops": 2,
-            "nested": 1
-          }
-        },
-        {
-          "id": "RustSyntaxFactsCore#ready",
-          "score": 0.0,
-          "signals": {}
-        }
-      ],
-      "clone_candidates": [
-        {
-          "method_name": "audit",
-          "node_name": "block",
-          "line": 46,
-          "span": [
-            46,
-            32,
-            50,
-            5
-          ],
-          "mass": 43,
-          "fingerprint": "block({:{ expression_statement(macro_invocation(id !:! token_tree((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;) expression_statement(call_expression<send>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;) expression_statement(call_expression<status>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(macro_invocation(id !:! token_tree((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;)",
-            "expression_statement(call_expression<send>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;)",
-            "expression_statement(call_expression<status>(field_expression(id .:. id) arguments((:( ):))) ;:;)"
-          ],
-          "child_masses": [
-            14,
-            16,
-            10
-          ]
-        },
-        {
-          "method_name": "audit",
-          "node_name": "defn",
-          "line": 46,
-          "span": [
-            46,
-            4,
-            50,
-            5
-          ],
-          "mass": 59,
-          "fingerprint": "function_item(id id parameters((:( self_parameter(&:& id) ,:, parameter(id ::: reference_type(&:& id)) ):)) block({:{ expression_statement(macro_invocation(id !:! token_tree((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;) expression_statement(call_expression<send>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;) expression_statement(call_expression<status>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:}))",
-          "child_fingerprints": [
-            "expression_statement(macro_invocation(id !:! token_tree((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;)",
-            "expression_statement(call_expression<send>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ,:, id ):))) ;:;)",
-            "expression_statement(call_expression<status>(field_expression(id .:. id) arguments((:( ):))) ;:;)"
-          ],
-          "child_masses": [
-            14,
-            16,
-            10
-          ]
-        },
-        {
-          "method_name": "new",
-          "node_name": "block",
-          "line": 12,
-          "span": [
-            12,
-            39,
-            14,
-            5
-          ],
-          "mass": 14,
-          "fingerprint": "block({:{ struct_expression(id field_initializer_list({:{ id ,:, field_initializer(id ::: lit) }:})) }:})",
-          "child_fingerprints": [
-            "struct_expression(id field_initializer_list({:{ id ,:, field_initializer(id ::: lit) }:}))"
-          ],
-          "child_masses": [
-            11
-          ]
-        },
-        {
-          "method_name": "new",
-          "node_name": "defn",
-          "line": 12,
-          "span": [
-            12,
-            4,
-            14,
-            5
-          ],
-          "mass": 27,
-          "fingerprint": "function_item(id id id parameters((:( parameter(id ::: id) ):)) ->:-> id block({:{ struct_expression(id field_initializer_list({:{ id ,:, field_initializer(id ::: lit) }:})) }:}))",
-          "child_fingerprints": [
-            "struct_expression(id field_initializer_list({:{ id ,:, field_initializer(id ::: lit) }:}))"
-          ],
-          "child_masses": [
-            11
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 21,
-          "span": [
-            21,
-            24,
-            44,
-            5
-          ],
-          "mass": 228,
-          "fingerprint": "block({:{ let_declaration(id id =:= call_expression<to_string>(field_expression(call_expression<name>(field_expression(call_expression<profile>(field_expression(id .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) ;:;) let_declaration(id id =:= call_expression<new>(scoped_identifier(id ::::: id) arguments((:( call_expression<clone>(field_expression(id .:. id) arguments((:( ):))) ,:, call_expression<active>(field_expression(id .:. id) arguments((:( ):))) ):))) ;:;) expression_statement(call_expression<callback>(id arguments((:( reference_expression(&:& id) ):))) ;:;) expression_statement(id call_expression<role>(field_expression(id .:. id) arguments((:( ):))) match_block({:{ match_arm(match_pattern(scoped_identifier(id ::::: id) |:| scoped_identifier(id ::::: id)) =>:=> call_expression<escalate>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(match_pattern(id ::::: id) =>:=> call_expression<fallback>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(id =>:=> call_expression<default_case>(field_expression(id .:. id) arguments((:( id ):))) ,:,) }:})) expression_statement(id binary_expression(macro_invocation(id !:! token_tree((:( id .:. id ,:, id ::::: id ):))) &&:&& call_expression<ready>(field_expression(id .:. id) arguments((:( ):)))) block({:{ expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;) expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;) }:}) else_clause(id block({:{ expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;) }:}))) expression_statement(id id id id block({:{ expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:})) call_expression<Some>(id arguments((:( id ):))) }:})",
-          "child_fingerprints": [
-            "let_declaration(id id =:= call_expression<to_string>(field_expression(call_expression<name>(field_expression(call_expression<profile>(field_expression(id .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) ;:;)",
-            "let_declaration(id id =:= call_expression<new>(scoped_identifier(id ::::: id) arguments((:( call_expression<clone>(field_expression(id .:. id) arguments((:( ):))) ,:, call_expression<active>(field_expression(id .:. id) arguments((:( ):))) ):))) ;:;)",
-            "expression_statement(call_expression<callback>(id arguments((:( reference_expression(&:& id) ):))) ;:;)",
-            "expression_statement(id call_expression<role>(field_expression(id .:. id) arguments((:( ):))) match_block({:{ match_arm(match_pattern(scoped_identifier(id ::::: id) |:| scoped_identifier(id ::::: id)) =>:=> call_expression<escalate>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(match_pattern(id ::::: id) =>:=> call_expression<fallback>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(id =>:=> call_expression<default_case>(field_expression(id .:. id) arguments((:( id ):))) ,:,) }:}))",
-            "expression_statement(id binary_expression(macro_invocation(id !:! token_tree((:( id .:. id ,:, id ::::: id ):))) &&:&& call_expression<ready>(field_expression(id .:. id) arguments((:( ):)))) block({:{ expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;) expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;) }:}) else_clause(id block({:{ expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;) }:})))",
-            "expression_statement(id id id id block({:{ expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:}))",
-            "call_expression<Some>(id arguments((:( id ):)))"
-          ],
-          "child_masses": [
-            27,
-            30,
-            10,
-            64,
-            70,
-            18,
-            6
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 32,
-          "span": [
-            32,
-            63,
-            35,
-            9
-          ],
-          "mass": 26,
-          "fingerprint": "block({:{ expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;) expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;)",
-            "expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;)"
-          ],
-          "child_masses": [
-            9,
-            14
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 35,
-          "span": [
-            35,
-            15,
-            37,
-            9
-          ],
-          "mass": 17,
-          "fingerprint": "block({:{ expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;)"
-          ],
-          "child_masses": [
-            14
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "block",
-          "line": 39,
-          "span": [
-            39,
-            26,
-            41,
-            9
-          ],
-          "mass": 13,
-          "fingerprint": "block({:{ expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:})",
-          "child_fingerprints": [
-            "expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;)"
-          ],
-          "child_masses": [
-            10
-          ]
-        },
-        {
-          "method_name": "process",
-          "node_name": "defn",
-          "line": 16,
-          "span": [
-            16,
-            4,
-            44,
-            5
-          ],
-          "mass": 276,
-          "fingerprint": "function_item(id id id parameters((:( self_parameter(&:& id id) ,:, parameter(id ::: reference_type(&:& id)) ,:, parameter(id ::: generic_type(id type_arguments(<:< id >:>))) ,:, parameter(id ::: function_type(id parameters((:( reference_type(&:& id) ):)))) ,:, ):)) ->:-> generic_type(id type_arguments(<:< id >:>)) block({:{ let_declaration(id id =:= call_expression<to_string>(field_expression(call_expression<name>(field_expression(call_expression<profile>(field_expression(id .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) ;:;) let_declaration(id id =:= call_expression<new>(scoped_identifier(id ::::: id) arguments((:( call_expression<clone>(field_expression(id .:. id) arguments((:( ):))) ,:, call_expression<active>(field_expression(id .:. id) arguments((:( ):))) ):))) ;:;) expression_statement(call_expression<callback>(id arguments((:( reference_expression(&:& id) ):))) ;:;) expression_statement(id call_expression<role>(field_expression(id .:. id) arguments((:( ):))) match_block({:{ match_arm(match_pattern(scoped_identifier(id ::::: id) |:| scoped_identifier(id ::::: id)) =>:=> call_expression<escalate>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(match_pattern(id ::::: id) =>:=> call_expression<fallback>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(id =>:=> call_expression<default_case>(field_expression(id .:. id) arguments((:( id ):))) ,:,) }:})) expression_statement(id binary_expression(macro_invocation(id !:! token_tree((:( id .:. id ,:, id ::::: id ):))) &&:&& call_expression<ready>(field_expression(id .:. id) arguments((:( ):)))) block({:{ expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;) expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;) }:}) else_clause(id block({:{ expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;) }:}))) expression_statement(id id id id block({:{ expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:})) call_expression<Some>(id arguments((:( id ):))) }:}))",
-          "child_fingerprints": [
-            "let_declaration(id id =:= call_expression<to_string>(field_expression(call_expression<name>(field_expression(call_expression<profile>(field_expression(id .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) .:. id) arguments((:( ):))) ;:;)",
-            "let_declaration(id id =:= call_expression<new>(scoped_identifier(id ::::: id) arguments((:( call_expression<clone>(field_expression(id .:. id) arguments((:( ):))) ,:, call_expression<active>(field_expression(id .:. id) arguments((:( ):))) ):))) ;:;)",
-            "expression_statement(call_expression<callback>(id arguments((:( reference_expression(&:& id) ):))) ;:;)",
-            "expression_statement(id call_expression<role>(field_expression(id .:. id) arguments((:( ):))) match_block({:{ match_arm(match_pattern(scoped_identifier(id ::::: id) |:| scoped_identifier(id ::::: id)) =>:=> call_expression<escalate>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(match_pattern(id ::::: id) =>:=> call_expression<fallback>(field_expression(id .:. id) arguments((:( id ):))) ,:,) match_arm(id =>:=> call_expression<default_case>(field_expression(id .:. id) arguments((:( id ):))) ,:,) }:}))",
-            "expression_statement(id binary_expression(macro_invocation(id !:! token_tree((:( id .:. id ,:, id ::::: id ):))) &&:&& call_expression<ready>(field_expression(id .:. id) arguments((:( ):)))) block({:{ expression_statement(compound_assignment_expr(field_expression(id .:. id) +=:+= lit) ;:;) expression_statement(call_expression<publish>(field_expression(id .:. id) arguments((:( scoped_identifier(id ::::: id) ):))) ;:;) }:}) else_clause(id block({:{ expression_statement(call_expression<warn>(field_expression(id .:. id) arguments((:( string_literal(\":\" lit \":\") ):))) ;:;) }:})))",
-            "expression_statement(id id id id block({:{ expression_statement(call_expression<children>(field_expression(id .:. id) arguments((:( ):))) ;:;) }:}))",
-            "call_expression<Some>(id arguments((:( id ):)))"
-          ],
-          "child_masses": [
-            27,
-            30,
-            10,
-            64,
-            70,
-            18,
-            6
-          ]
-        },
-        {
-          "method_name": "ready",
-          "node_name": "block",
-          "line": 52,
-          "span": [
-            52,
-            28,
-            54,
-            5
-          ],
-          "mass": 10,
-          "fingerprint": "block({:{ binary_expression(field_expression(id .:. id) >:> lit) }:})",
-          "child_fingerprints": [
-            "binary_expression(field_expression(id .:. id) >:> lit)"
-          ],
-          "child_masses": [
-            7
-          ]
-        },
-        {
-          "method_name": "ready",
-          "node_name": "defn",
-          "line": 52,
-          "span": [
-            52,
-            4,
-            54,
-            5
-          ],
-          "mass": 21,
-          "fingerprint": "function_item(id id parameters((:( self_parameter(&:& id) ):)) ->:-> id block({:{ binary_expression(field_expression(id .:. id) >:> lit) }:}))",
-          "child_fingerprints": [
-            "binary_expression(field_expression(id .:. id) >:> lit)"
-          ],
-          "child_masses": [
-            7
-          ]
-        }
+      "predicate_bodies": [
+
       ]
     }
   ]

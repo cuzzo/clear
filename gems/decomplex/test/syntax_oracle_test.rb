@@ -7,7 +7,7 @@ require_relative "../lib/decomplex/syntax_oracle"
 class SyntaxOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples/syntax-facts", __dir__)
   ORACLE_ROOT = File.join(EXAMPLES_ROOT, "oracles")
-  ENGINES = %w[ruby].freeze
+  ENGINES = %w[ruby rust].freeze
 
   FIXTURES = Dir[File.join(EXAMPLES_ROOT, "*", "*")]
              .select { |path| File.file?(path) && Decomplex::Syntax.supported_source?(path) }
