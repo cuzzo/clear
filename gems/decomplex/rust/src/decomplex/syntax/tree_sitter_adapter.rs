@@ -769,9 +769,7 @@ fn collect_branch_state_refs(
         let receiver = target.receiver.trim_start_matches('$');
         if constant_like_state_ref(receiver, &field) {
             // Constants and type namespaces are not mutable object state.
-        } else if (receiver.is_empty() || matches!(receiver, "self" | "this"))
-            && context.locals.contains(&field)
-        {
+        } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
             // language permits bare predicate-style method calls.
         } else if receiver.is_empty() || matches!(receiver, "self" | "this") {
@@ -785,6 +783,18 @@ fn collect_branch_state_refs(
     for child in node.named_children(&mut cursor) {
         collect_branch_state_refs(profile, child, source, context, out);
     }
+}
+
+fn branch_local_ref(
+    node: Node<'_>,
+    source: &str,
+    receiver: &str,
+    field: &str,
+    context: &ContextState,
+) -> bool {
+    (receiver.is_empty() || matches!(receiver, "self" | "this"))
+        && context.locals.contains(field)
+        && normalize_text(node_text(node, source)) == field
 }
 
 fn normalized_state_ref_field(field: &str) -> String {

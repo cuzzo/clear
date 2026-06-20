@@ -1201,7 +1201,8 @@ module Decomplex
           immutable_readers: immutable_readers,
           immutable_reader_types: immutable_reader_types,
           type_aliases: type_aliases,
-          method_param_types: method_param_types
+          method_param_types: method_param_types,
+          params: current_params(stack)
         )
         refs.uniq!
         refs.sort!
@@ -1560,12 +1561,13 @@ module Decomplex
       end
 
       def collect_state_refs(node, refs, defn:, immutable_readers:, immutable_reader_types:, type_aliases:,
-                             method_param_types:)
+                             method_param_types:, params:)
         if (ref = direct_state_ref(node))
           refs << ref
         elsif (target = state_read_target(node))
           unless namespace_receiver?(target[:receiver])
-            unless immutable_state_read?(target, defn, immutable_readers, immutable_reader_types, type_aliases, method_param_types)
+            unless branch_local_param_ref?(node, target, params) ||
+                   immutable_state_read?(target, defn, immutable_readers, immutable_reader_types, type_aliases, method_param_types)
               refs << (target[:receiver] == "self" ? target[:field] : "#{target[:receiver]}.#{target[:field]}")
             end
           end
@@ -1578,9 +1580,20 @@ module Decomplex
             immutable_readers: immutable_readers,
             immutable_reader_types: immutable_reader_types,
             type_aliases: type_aliases,
-            method_param_types: method_param_types
+            method_param_types: method_param_types,
+            params: params
           ) if ts_node?(child)
         end
+      end
+
+      def branch_local_param_ref?(node, target, params)
+        field = target[:field].to_s
+        return false unless params.include?(field)
+
+        receiver = target[:receiver].to_s
+        return false unless receiver.empty? || receiver == "self"
+
+        normalize_text(node.text) == field
       end
 
       def immutable_state_read?(target, defn, immutable_readers, immutable_reader_types, type_aliases, method_param_types)

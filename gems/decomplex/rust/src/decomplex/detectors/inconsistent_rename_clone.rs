@@ -187,7 +187,6 @@ impl Report {
                     continue;
                 }
                 out.extend(self.inconsistent_pairs(ref_block, candidate));
-                out.extend(self.inconsistent_pairs(candidate, ref_block));
             }
         }
         out
@@ -200,32 +199,38 @@ impl Report {
     ) -> Vec<InconsistentRenameCloneRow> {
         let mut out = Vec::new();
         for (ref_name, positions) in self.ref_classes(ref_block) {
-            let mut spellings = BTreeSet::new();
+            let mut spellings = Vec::new();
             for pos in positions {
                 if let Some(name) = candidate.names.get(pos) {
-                    spellings.insert(name.clone());
+                    if !spellings.contains(name) {
+                        spellings.push(name.clone());
+                    }
                 }
             }
             if spellings.len() < 2 {
                 continue;
             }
-            out.push(self.finding(
-                ref_block,
-                candidate,
-                &ref_name,
-                spellings.into_iter().collect(),
-            ));
+            out.push(self.finding(ref_block, candidate, &ref_name, spellings));
         }
         out
     }
 
-    fn ref_classes(&self, ref_block: &Block) -> BTreeMap<String, Vec<usize>> {
+    fn ref_classes(&self, ref_block: &Block) -> Vec<(String, Vec<usize>)> {
+        let mut order = Vec::new();
         let mut classes: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for (index, name) in ref_block.names.iter().enumerate() {
+            if !classes.contains_key(name) {
+                order.push(name.clone());
+            }
             classes.entry(name.clone()).or_default().push(index);
         }
-        classes.retain(|_, v| v.len() >= 2);
-        classes
+        order
+            .into_iter()
+            .filter_map(|name| {
+                let positions = classes.remove(&name)?;
+                (positions.len() >= 2).then_some((name, positions))
+            })
+            .collect()
     }
 
     fn same_unit(&self, left: &Block, right: &Block) -> bool {

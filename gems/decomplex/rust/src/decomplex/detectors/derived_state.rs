@@ -51,12 +51,17 @@ fn assignments(method: &MethodSummary) -> Vec<Asgn> {
         .statements
         .iter()
         .flat_map(|statement| {
-            statement
-                .writes
-                .iter()
+            let mut writes = statement.writes.iter().cloned().collect::<Vec<_>>();
+            writes.sort_by(|a, b| {
+                write_position(&statement.source, a)
+                    .cmp(&write_position(&statement.source, b))
+                    .then_with(|| a.cmp(b))
+            });
+            writes
+                .into_iter()
                 .map(|name| Asgn {
-                    name: name.clone(),
-                    deps: dependencies_for(statement, name),
+                    deps: dependencies_for(statement, &name),
+                    name,
                     line: statement.line,
                     span: statement.span,
                     statement_index: statement.index,
@@ -64,6 +69,47 @@ fn assignments(method: &MethodSummary) -> Vec<Asgn> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn write_position(source: &str, name: &str) -> usize {
+    identifier_positions(source)
+        .into_iter()
+        .find_map(|(identifier, position)| (identifier == name).then_some(position))
+        .unwrap_or(usize::MAX)
+}
+
+fn identifier_positions(source: &str) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut start = 0usize;
+    for (index, ch) in source.char_indices() {
+        if ch == '_' || ch.is_ascii_alphanumeric() {
+            if current.is_empty() {
+                start = index;
+            }
+            current.push(ch);
+        } else if !current.is_empty() {
+            if current
+                .chars()
+                .next()
+                .map(|first| first == '_' || first.is_ascii_alphabetic())
+                .unwrap_or(false)
+            {
+                out.push((current.clone(), start));
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty()
+        && current
+            .chars()
+            .next()
+            .map(|first| first == '_' || first.is_ascii_alphabetic())
+            .unwrap_or(false)
+    {
+        out.push((current, start));
+    }
+    out
 }
 
 fn dependencies_for(statement: &Statement, name: &str) -> Vec<String> {
