@@ -60,6 +60,14 @@ impl LanguageProfile for LuaProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &["function_call", "expression_list", "return_statement"]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn local_declaration_node_kinds(&self) -> &[&str] {
         &["variable_declaration"]
     }

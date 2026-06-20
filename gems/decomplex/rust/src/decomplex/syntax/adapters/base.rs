@@ -318,6 +318,18 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn path_transparent_branch_body_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn expression_body_operator_tokens(&self) -> &[&str] {
         DEFAULT_EXPRESSION_BODY_OPERATOR_TOKENS
     }
@@ -373,6 +385,20 @@ pub(crate) trait LanguageProfile {
 
     fn owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {
         self.default_owner_name_from_declaration(node, source)
+    }
+
+    fn owner_kind(&self, node: Node<'_>) -> String {
+        if self.class_owner_node_kinds().contains(&node.kind()) {
+            "class".to_string()
+        } else if self.module_owner_node_kinds().contains(&node.kind()) {
+            "module".to_string()
+        } else if self.impl_owner_node_kinds().contains(&node.kind()) {
+            "impl".to_string()
+        } else if self.struct_owner_node_kinds().contains(&node.kind()) {
+            "struct".to_string()
+        } else {
+            "owner".to_string()
+        }
     }
 
     fn default_owner_name_from_declaration(&self, node: Node<'_>, source: &str) -> Option<String> {

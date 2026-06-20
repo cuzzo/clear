@@ -57,6 +57,18 @@ impl LanguageProfile for RustProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "call_expression",
+            "expression_statement",
+            "return_expression",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
         &["pattern"]
     }
@@ -71,6 +83,10 @@ impl LanguageProfile for RustProfile {
 
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_expression", "match_expression", "for_expression"]
     }
 
     fn case_node_kinds(&self) -> &[&str] {

@@ -1,7 +1,7 @@
 use super::{
     adapters::{language_profile, LanguageProfile},
-    CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef, Language,
-    PredicateAlias, StateRead, StateWrite,
+    BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document, FunctionDef,
+    Language, OwnerDef, PredicateAlias, StateRead, StateWrite,
 };
 use crate::decomplex::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use anyhow::{Context, Result};
@@ -13,10 +13,12 @@ use tree_sitter::{Node, Parser};
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
     let parsed = ParsedDocument::parse(file, language)?;
     let mut function_defs = Vec::new();
+    let mut owner_defs = Vec::new();
     let mut call_sites = Vec::new();
     let mut state_reads = Vec::new();
     let mut state_writes = Vec::new();
     let mut decision_sites = Vec::new();
+    let mut branch_decisions = Vec::new();
     let mut dispatch_sites = Vec::new();
     let mut predicate_aliases = Vec::new();
     let mut comparison_uses = Vec::new();
@@ -33,10 +35,12 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         language,
         &context,
         &mut function_defs,
+        &mut owner_defs,
         &mut call_sites,
         &mut state_reads,
         &mut state_writes,
         &mut decision_sites,
+        &mut branch_decisions,
         &mut predicate_aliases,
         &mut comparison_uses,
         &mut seen_writes,
@@ -64,10 +68,12 @@ pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
         root: RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source),
         normalized_root: normalize_tree(parsed.tree.root_node(), &parsed.source, language),
         function_defs,
+        owner_defs,
         call_sites,
         state_reads,
         state_writes,
         decision_sites,
+        branch_decisions,
         dispatch_sites,
         predicate_aliases,
         comparison_uses,
@@ -102,6 +108,7 @@ struct ContextState {
     function: Option<String>,
     function_line: Option<usize>,
     pub receiver: Option<String>,
+    locals: BTreeSet<String>,
     controls: Vec<String>,
 }
 
@@ -113,6 +120,7 @@ impl ContextState {
             function: None,
             function_line: None,
             receiver: None,
+            locals: BTreeSet::new(),
             controls: Vec::new(),
         }
     }
@@ -150,10 +158,12 @@ fn collect_facts(
     language: Language,
     context: &ContextState,
     function_defs: &mut Vec<FunctionDef>,
+    owner_defs: &mut Vec<OwnerDef>,
     call_sites: &mut Vec<CallSite>,
     state_reads: &mut Vec<StateRead>,
     state_writes: &mut Vec<StateWrite>,
     decision_sites: &mut Vec<DecisionSite>,
+    branch_decisions: &mut Vec<BranchDecision>,
     predicate_aliases: &mut Vec<PredicateAlias>,
     comparison_uses: &mut Vec<ComparisonUse>,
     seen_writes: &mut HashSet<String>,
@@ -173,6 +183,7 @@ fn collect_facts(
         language,
     );
     record_function_def(node, source, file, language, &next_context, function_defs);
+    record_owner_def(node, source, file, language, &next_context, owner_defs);
     record_call_site(
         node,
         source,
@@ -209,6 +220,14 @@ fn collect_facts(
         decision_sites,
         seen_decisions,
     );
+    record_branch_decision(
+        node,
+        source,
+        file,
+        language,
+        &next_context,
+        branch_decisions,
+    );
     record_predicate_alias(node, source, file, language, predicate_aliases);
     record_comparison_use(node, source, file, language, &next_context, comparison_uses);
 
@@ -221,10 +240,12 @@ fn collect_facts(
             language,
             &next_context,
             function_defs,
+            owner_defs,
             call_sites,
             state_reads,
             state_writes,
             decision_sites,
+            branch_decisions,
             predicate_aliases,
             comparison_uses,
             seen_writes,
@@ -482,6 +503,38 @@ fn record_function_def(
     out.push(function);
 }
 
+fn record_owner_def(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<OwnerDef>,
+) {
+    let profile = language_profile(language);
+    if profile.owner_name_from_declaration(node, source).is_none() {
+        return;
+    }
+    let owner = OwnerDef {
+        file: file.to_string_lossy().to_string(),
+        name: context.current_owner(),
+        kind: profile.owner_kind(node),
+        line: line(node),
+        span: span(node),
+    };
+    let key = (owner.file.clone(), owner.name.clone(), owner.kind.clone());
+    if out.iter().any(|existing| {
+        (
+            existing.file.clone(),
+            existing.name.clone(),
+            existing.kind.clone(),
+        ) == key
+    }) {
+        return;
+    }
+    out.push(owner);
+}
+
 fn record_predicate_alias(
     node: Node<'_>,
     source: &str,
@@ -639,6 +692,116 @@ fn record_decision_site(
     }
 }
 
+fn record_branch_decision(
+    node: Node<'_>,
+    source: &str,
+    file: &Path,
+    language: Language,
+    context: &ContextState,
+    out: &mut Vec<BranchDecision>,
+) {
+    let profile = language_profile(language);
+    if !branch_decision_node(profile, node, source) {
+        return;
+    }
+    if branch_decision_wrapper_for_real_branch(profile, node, source) {
+        return;
+    }
+    let Some(condition) = branch_condition_node(profile, node) else {
+        return;
+    };
+    let mut refs = BTreeSet::new();
+    collect_branch_state_refs(profile, condition, source, context, &mut refs);
+    if refs.is_empty() {
+        return;
+    }
+    out.push(BranchDecision {
+        file: file.to_string_lossy().to_string(),
+        function: context.current_function(),
+        line: line(node),
+        span: span(node),
+        predicate: profile.normalize_source_text(node_text(condition, source)),
+        state_refs: refs.into_iter().collect(),
+    });
+}
+
+fn branch_decision_node(profile: &dyn LanguageProfile, node: Node<'_>, source: &str) -> bool {
+    profile.branch_node_kinds().contains(&node.kind())
+        || profile.hidden_case(node)
+        || profile.control_context(node, source).as_deref() == Some("conditional")
+}
+
+fn branch_decision_wrapper_for_real_branch(
+    profile: &dyn LanguageProfile,
+    node: Node<'_>,
+    source: &str,
+) -> bool {
+    if profile.branch_node_kinds().contains(&node.kind()) || profile.hidden_case(node) {
+        return false;
+    }
+    if profile.control_context(node, source).as_deref() != Some("conditional") {
+        return false;
+    }
+    first_named_child(node)
+        .map(|child| branch_decision_node(profile, child, source))
+        .unwrap_or(false)
+}
+
+fn branch_condition_node<'tree>(
+    _profile: &dyn LanguageProfile,
+    node: Node<'tree>,
+) -> Option<Node<'tree>> {
+    node.child_by_field_name("condition")
+        .or_else(|| node.child_by_field_name("value"))
+        .or_else(|| node.child_by_field_name("subject"))
+        .or_else(|| first_named_child(node))
+}
+
+fn collect_branch_state_refs(
+    profile: &dyn LanguageProfile,
+    node: Node<'_>,
+    source: &str,
+    context: &ContextState,
+    out: &mut BTreeSet<String>,
+) {
+    if let Some(target) = profile.state_read_target(node, source) {
+        let field = normalized_state_ref_field(&target.field);
+        let receiver = target.receiver.trim_start_matches('$');
+        if constant_like_state_ref(receiver, &field) {
+            // Constants and type namespaces are not mutable object state.
+        } else if (receiver.is_empty() || matches!(receiver, "self" | "this"))
+            && context.locals.contains(&field)
+        {
+            // Function-local bindings are not object state, even when a
+            // language permits bare predicate-style method calls.
+        } else if receiver.is_empty() || matches!(receiver, "self" | "this") {
+            out.insert(field);
+        } else {
+            out.insert(format!("{receiver}.{field}"));
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_branch_state_refs(profile, child, source, context, out);
+    }
+}
+
+fn normalized_state_ref_field(field: &str) -> String {
+    field
+        .trim_start_matches('@')
+        .trim_start_matches('$')
+        .to_string()
+}
+
+fn constant_like_state_ref(receiver: &str, field: &str) -> bool {
+    starts_uppercase(receiver) || (receiver.is_empty() && starts_uppercase(field))
+}
+
+fn starts_uppercase(value: &str) -> bool {
+    matches!(value.chars().next(), Some(ch) if ch.is_ascii_uppercase())
+}
+
 fn record_conjunction_decision(
     profile: &dyn LanguageProfile,
     mut node: Node<'_>,
@@ -761,6 +924,10 @@ fn push_function_context(
     context.function_line = Some(line(node));
     context.owner = Some(owner);
     context.receiver = profile.function_receiver_name(node, source);
+    context.locals = profile.function_params(node, source).into_iter().collect();
+    if let Some(receiver) = &context.receiver {
+        context.locals.insert(receiver.clone());
+    }
     context
 }
 
@@ -854,7 +1021,9 @@ fn record_state_read(
         return;
     };
     let target = normalize_target_receiver(target, context);
-    if namespace_receiver(&target.receiver) {
+    if namespace_receiver(&target.receiver)
+        || constant_like_state_ref(&target.receiver, &target.field)
+    {
         return;
     }
 

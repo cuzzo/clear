@@ -62,6 +62,14 @@ impl LanguageProfile for SwiftProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &["call_expression", "control_transfer_statement"]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["statements", "control_structure_body", "function_body"]
+    }
+
     fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
         &[
             "directly_assignable_expression",

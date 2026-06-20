@@ -49,6 +49,18 @@ impl LanguageProfile for CSharpProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "invocation_expression",
+            "expression_statement",
+            "return_statement",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
         &["argument"]
     }

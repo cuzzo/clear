@@ -40,6 +40,7 @@ pub struct RawNode {
     pub text: String,
     pub span: Span,
     pub named: bool,
+    pub field_name: Option<String>,
     pub children: Vec<RawNode>,
 }
 
@@ -48,7 +49,12 @@ impl RawNode {
         let mut cursor = node.walk();
         let mut children: Vec<RawNode> = node
             .children(&mut cursor)
-            .map(|child| Self::from_tree_sitter(child, source))
+            .enumerate()
+            .map(|(index, child)| {
+                let mut raw = Self::from_tree_sitter(child, source);
+                raw.field_name = node.field_name_for_child(index as u32).map(str::to_string);
+                raw
+            })
             .collect();
 
         if node.kind() == "argument_list"
@@ -161,6 +167,7 @@ impl RawNode {
             text: node_text(node, source).to_string(),
             span: span(node),
             named: node.is_named(),
+            field_name: None,
             children,
         }
     }

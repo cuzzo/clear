@@ -436,7 +436,7 @@ module Decomplex
           local_statements = statements.each_with_index.map do |statement, index|
             generic_local_statement(statement, index, local_names)
           end
-          owner = function_def.owner.to_s == file_owner(document.file) ? "(top-level)" : function_def.owner
+          owner = local_method_owner(document, function_def.owner)
 
           LocalMethod.new(
             id: "#{owner}##{function_def.name}",
@@ -463,6 +463,14 @@ module Decomplex
       end
 
       private
+
+      def local_method_owner(document, owner)
+        file_owner_name = file_owner(document.file)
+        owner_name = owner.to_s
+        return "(top-level)" if owner_name == file_owner_name
+
+        owner_name.sub(/\A#{Regexp.escape(file_owner_name)}::/, "")
+      end
 
       def generic_predicate_body(node)
         body = generic_function_body_node(node)
@@ -834,6 +842,8 @@ module Decomplex
         return stack unless owner
 
         parent_owner = current_owner_from_stack(stack)
+        parent_owner ||= current_file_owner_from_stack(stack) \
+          if current_language(stack) == :python && current_function_entry?(stack)
         full_owner = if parent_owner && parent_owner != owner && !owner.include?("::")
                        "#{parent_owner}::#{owner}"
                      else
@@ -854,6 +864,15 @@ module Decomplex
       def current_owner_from_stack(stack)
         entry = stack.reverse.find { |item| item.is_a?(Hash) && item[:owner] }
         entry && entry[:owner]
+      end
+
+      def current_file_owner_from_stack(stack)
+        entry = stack.reverse.find { |item| item.is_a?(Hash) && item[:file_owner] }
+        entry && entry[:file_owner]
+      end
+
+      def current_function_entry?(stack)
+        stack.reverse.any? { |item| item.is_a?(Hash) && item[:function] }
       end
 
       def current_language(stack)

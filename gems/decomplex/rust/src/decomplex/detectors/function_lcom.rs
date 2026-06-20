@@ -201,7 +201,7 @@ impl FunctionLcom {
         raw_components: Vec<BTreeSet<String>>,
         statements: &[local_flow::Statement],
     ) -> Vec<Component> {
-        raw_components
+        let mut components = raw_components
             .into_iter()
             .filter_map(|vars| {
                 let touched = statements
@@ -223,7 +223,10 @@ impl FunctionLcom {
                     statements: touched,
                 })
             })
-            .collect()
+            .collect::<Vec<_>>();
+        components
+            .sort_by_key(|component| component.statements.first().copied().unwrap_or(usize::MAX));
+        components
     }
 
     fn components(&self, statements: &[local_flow::Statement]) -> Vec<BTreeSet<String>> {

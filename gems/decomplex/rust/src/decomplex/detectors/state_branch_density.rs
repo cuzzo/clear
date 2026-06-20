@@ -94,65 +94,58 @@ pub fn scan_documents(documents: &[Document]) -> Vec<StateBranchDensityRow> {
 }
 
 fn decisions_from_mined_facts(document: &Document) -> Vec<Decision> {
-    let state_fields = document
-        .state_writes
-        .iter()
-        .map(|write| normalized_state_field(&write.field))
-        .collect::<BTreeSet<_>>();
-
-    document
-        .decision_sites
-        .iter()
-        .filter_map(|decision| {
-            let refs = document
-                .state_reads
-                .iter()
-                .filter(|read| {
-                    read.function == decision.function && span_inside(read.span, decision.span)
-                })
-                .filter_map(|read| mined_state_ref(read, &state_fields))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            if refs.is_empty() {
-                return None;
-            }
-            Some(Decision {
+    filter_wrapper_decisions(
+        document
+            .branch_decisions
+            .iter()
+            .map(|decision| Decision {
                 file: decision.file.clone(),
                 defn: decision.function.clone(),
                 line: decision.line,
                 span: decision.span,
                 predicate: decision.predicate.clone(),
-                state_refs: refs,
+                state_refs: decision.state_refs.clone(),
             })
+            .collect(),
+    )
+}
+
+fn filter_wrapper_decisions(decisions: Vec<Decision>) -> Vec<Decision> {
+    decisions
+        .iter()
+        .filter(|decision| {
+            !(wrapper_predicate(&decision.predicate) && nested_state_decision(decision, &decisions))
         })
+        .cloned()
         .collect()
 }
 
-fn mined_state_ref(read: &syntax::StateRead, state_fields: &BTreeSet<String>) -> Option<String> {
-    let field = normalized_state_field(&read.field);
-    if !state_fields.is_empty() && !state_fields.contains(&field) {
-        return None;
-    }
-    let receiver = read.receiver.trim_start_matches('$');
-    if receiver.is_empty() || matches!(receiver, "self" | "this") {
-        Some(field)
-    } else {
-        Some(format!("{}.{}", receiver, field))
-    }
+fn wrapper_predicate(predicate: &str) -> bool {
+    ["if", "unless", "while", "until"].iter().any(|prefix| {
+        predicate == *prefix
+            || predicate
+                .strip_prefix(prefix)
+                .map(|rest| rest.starts_with(char::is_whitespace))
+                .unwrap_or(false)
+    })
 }
 
-fn normalized_state_field(field: &str) -> String {
-    field
-        .trim_start_matches('@')
-        .trim_start_matches('$')
-        .to_string()
+fn nested_state_decision(decision: &Decision, decisions: &[Decision]) -> bool {
+    decisions.iter().any(|candidate| {
+        !std::ptr::eq(candidate, decision)
+            && candidate.defn == decision.defn
+            && span_encloses(decision.span, candidate.span)
+            && candidate
+                .state_refs
+                .iter()
+                .all(|state_ref| decision.state_refs.contains(state_ref))
+    })
 }
 
-fn span_inside(inner: Span, outer: Span) -> bool {
-    let starts_after_or_at = inner[0] > outer[0] || (inner[0] == outer[0] && inner[1] >= outer[1]);
-    let ends_before_or_at = inner[2] < outer[2] || (inner[2] == outer[2] && inner[3] <= outer[3]);
-    starts_after_or_at && ends_before_or_at
+fn span_encloses(outer: Span, inner: Span) -> bool {
+    let starts_before_or_at = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]);
+    let ends_after_or_at = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]);
+    starts_before_or_at && ends_after_or_at
 }
 
 struct StateBranchDensity {

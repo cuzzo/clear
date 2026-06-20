@@ -90,6 +90,14 @@ impl LanguageProfile for KotlinProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &["call_expression", "jump_expression"]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["statements", "control_structure_body", "function_body"]
+    }
+
     fn local_identifier_wrapper_node_kinds(&self) -> &[&str] {
         &["directly_assignable_expression", "value_argument"]
     }
@@ -111,6 +119,10 @@ impl LanguageProfile for KotlinProfile {
             "multiplicative_expression",
             "binary_expression",
         ]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_expression", "for_statement", "when_expression"]
     }
 
     fn case_node_kinds(&self) -> &[&str] {

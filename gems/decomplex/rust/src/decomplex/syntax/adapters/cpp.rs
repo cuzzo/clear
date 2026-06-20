@@ -62,6 +62,18 @@ impl LanguageProfile for CppProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "call_expression",
+            "expression_statement",
+            "return_statement",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["compound_statement"]
+    }
+
     fn local_declaration_node_kinds(&self) -> &[&str] {
         &["declaration", "init_declarator"]
     }

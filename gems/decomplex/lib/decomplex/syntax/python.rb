@@ -47,7 +47,8 @@ module Decomplex
       SIMPLE_ACTION_WRAPPER_NODE_KINDS = %w[block].freeze
       COMPARISON_NODE_KINDS = %w[comparison_operator binary_operator boolean_operator].freeze
       BRANCH_NODE_KINDS = %w[if_statement for_statement match_statement].freeze
-      LOOP_NODE_KINDS = %w[for_statement].freeze
+      LOOP_NODE_KINDS = %w[for_statement while_statement].freeze
+      TEXT_LOOP_NODE_KINDS = %w[block].freeze
       BRANCH_LOOP_NODE_KINDS = LOOP_NODE_KINDS
       CASE_NODE_KINDS = %w[match_statement].freeze
       HIDDEN_CASE_WRAPPER_NODE_KINDS = %w[block].freeze
@@ -165,7 +166,7 @@ module Decomplex
           local_statements = statements.each_with_index.map do |statement, index|
             generic_local_statement(statement, index, local_names)
           end
-          owner = function_def.owner.to_s == file_owner(document.file) ? "(top-level)" : function_def.owner
+          owner = local_method_owner(document, function_def.owner)
 
           LocalMethod.new(
             id: "#{owner}##{function_def.name}",
@@ -216,7 +217,8 @@ module Decomplex
       end
 
       def python_adjacent_call_target(node)
-        return nil unless %w[identifier].include?(node.kind)
+        return python_adjacent_member_call_target(node) if node.kind == "attribute"
+        return nil unless node.kind == "identifier"
 
         args = next_sibling(node)
         return nil unless args&.kind == "argument_list"
@@ -224,10 +226,31 @@ module Decomplex
         {
           receiver: "self",
           message: node.text,
-          arguments: args.named_children.map { |child| normalize_text(child.text) }
+          arguments: args.named_children.map { |child| normalize_text(child.text) },
+          source_node: python_adjacent_call_source_node(node, args)
         }
       rescue StandardError
         nil
+      end
+
+      def python_adjacent_member_call_target(node)
+        args = next_sibling(node)
+        return nil unless args&.kind == "argument_list"
+
+        target_from_callee(node).merge(
+          arguments: args.named_children.map { |child| normalize_text(child.text) },
+          source_node: python_adjacent_call_source_node(node, args)
+        )
+      rescue StandardError
+        nil
+      end
+
+      def python_adjacent_call_source_node(node, args)
+        parent = parent_node(node)
+        return node unless parent
+
+        call_text = "#{node.text}#{args.text}"
+        parent.text.to_s.include?(call_text) ? parent : node
       end
 
       def assignment_lhs?(node)

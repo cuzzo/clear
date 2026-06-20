@@ -52,6 +52,18 @@ impl LanguageProfile for JavaProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "method_invocation",
+            "expression_statement",
+            "return_statement",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn local_declaration_node_kinds(&self) -> &[&str] {
         &["local_variable_declaration", "variable_declarator"]
     }

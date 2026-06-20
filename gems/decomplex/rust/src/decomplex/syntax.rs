@@ -100,10 +100,12 @@ pub struct Document {
     pub root: RawNode,
     pub normalized_root: NormalizedNode,
     pub function_defs: Vec<FunctionDef>,
+    pub owner_defs: Vec<OwnerDef>,
     pub call_sites: Vec<CallSite>,
     pub state_reads: Vec<StateRead>,
     pub state_writes: Vec<StateWrite>,
     pub decision_sites: Vec<DecisionSite>,
+    pub branch_decisions: Vec<BranchDecision>,
     pub dispatch_sites: Vec<DispatchSite>,
     pub predicate_aliases: Vec<PredicateAlias>,
     pub comparison_uses: Vec<ComparisonUse>,
@@ -119,6 +121,15 @@ pub struct FunctionDef {
     pub body: RawNode,
     pub visibility: Option<String>,
     pub params: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OwnerDef {
+    pub file: String,
+    pub name: String,
+    pub kind: String,
+    pub line: usize,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -179,6 +190,16 @@ pub struct DecisionSite {
     pub span: Span,
     pub predicate: String,
     pub enclosing_span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BranchDecision {
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
+    pub predicate: String,
+    pub state_refs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

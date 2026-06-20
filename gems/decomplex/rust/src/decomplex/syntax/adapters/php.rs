@@ -56,6 +56,21 @@ impl LanguageProfile for PhpProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "function_call_expression",
+            "member_call_expression",
+            "scoped_call_expression",
+            "expression_statement",
+            "return_statement",
+            "print_intrinsic",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["compound_statement", "declaration_list"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
     }
@@ -98,6 +113,10 @@ impl LanguageProfile for PhpProfile {
 
     fn parenthesized_wrapper_node_kinds(&self) -> &[&str] {
         &["parenthesized_expression"]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &["if_statement", "foreach_statement", "switch_statement"]
     }
 
     fn field_like_node_kinds(&self) -> &[&str] {
@@ -143,6 +162,13 @@ impl LanguageProfile for PhpProfile {
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
         if !self.call_node_kinds().contains(&node.kind()) {
             return None;
+        }
+        if node.kind() == "print_intrinsic" {
+            return Some(CallTarget::new(
+                "self".to_string(),
+                "print".to_string(),
+                self.call_argument_texts(node, source),
+            ));
         }
         let mut target = self.default_call_target(node, source)?;
         target.receiver = php_normalize_receiver(&target.receiver);

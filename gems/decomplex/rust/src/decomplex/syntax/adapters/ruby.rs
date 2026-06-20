@@ -64,8 +64,29 @@ impl LanguageProfile for RubyProfile {
         &["=", "+=", "-=", "*=", "/=", "%=", "&&=", "||="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &["call", "return"]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["body_statement"]
+    }
+
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary"]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &[
+            "if",
+            "unless",
+            "if_modifier",
+            "unless_modifier",
+            "case",
+            "while",
+            "until",
+            "for",
+        ]
     }
 
     fn case_node_kinds(&self) -> &[&str] {

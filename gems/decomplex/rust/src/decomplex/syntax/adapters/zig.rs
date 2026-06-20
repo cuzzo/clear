@@ -62,12 +62,33 @@ impl LanguageProfile for ZigProfile {
         &["=", "+=", "-=", "*=", "/=", "%="]
     }
 
+    fn path_action_node_kinds(&self) -> &[&str] {
+        &[
+            "call_expression",
+            "expression_statement",
+            "return_expression",
+        ]
+    }
+
+    fn simple_action_wrapper_node_kinds(&self) -> &[&str] {
+        &["block"]
+    }
+
     fn local_declaration_node_kinds(&self) -> &[&str] {
         &["variable_declaration"]
     }
 
     fn comparison_node_kinds(&self) -> &[&str] {
         &["binary_expression"]
+    }
+
+    fn branch_node_kinds(&self) -> &[&str] {
+        &[
+            "if_statement",
+            "switch_expression",
+            "for_statement",
+            "labeled_statement",
+        ]
     }
 
     fn case_node_kinds(&self) -> &[&str] {
