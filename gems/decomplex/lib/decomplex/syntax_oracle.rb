@@ -53,7 +53,11 @@ module Decomplex
         "dispatch_sites" => rows(document.dispatch_sites, %i[variant_set arm_members outside function line span]),
         "semantic_effects" => rows(document.semantic_effect_sites, %i[kind detail function line span]),
         "predicate_bodies" => rows(document.predicate_defs, %i[name owner body line span]),
-        "local_complexity" => local_complexity_rows(document)
+        "local_complexity" => local_complexity_rows(document),
+        "clone_candidates" => rows(
+          document.clone_candidates,
+          %i[method_name node_name line span mass fingerprint child_fingerprints child_masses]
+        )
       }
     end
 

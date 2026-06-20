@@ -1182,6 +1182,495 @@
           "score": 0.0,
           "signals": {}
         }
+      ],
+      "clone_candidates": [
+        {
+          "method_name": "(top-level)",
+          "node_name": "assignment",
+          "line": 10,
+          "span": [
+            10,
+            2,
+            10,
+            34
+          ],
+          "mass": 11,
+          "fingerprint": "assignment(id =:= call(id .:. id block({:{ id }:})))",
+          "child_fingerprints": [
+            "call(id .:. id block({:{ id }:}))"
+          ],
+          "child_masses": [
+            8
+          ]
+        },
+        {
+          "method_name": "(top-level)",
+          "node_name": "assignment",
+          "line": 9,
+          "span": [
+            9,
+            2,
+            9,
+            38
+          ],
+          "mass": 11,
+          "fingerprint": "assignment(id =:= call(string_array(%w(:%w[ id id ):]) .:. id))",
+          "child_fingerprints": [
+            "call(string_array(%w(:%w[ id id ):]) .:. id)"
+          ],
+          "child_masses": [
+            8
+          ]
+        },
+        {
+          "method_name": "(top-level)",
+          "node_name": "block",
+          "line": 10,
+          "span": [
+            10,
+            24,
+            10,
+            34
+          ],
+          "mass": 4,
+          "fingerprint": "block({:{ id }:})",
+          "child_fingerprints": [
+            "id"
+          ],
+          "child_masses": [
+            1
+          ]
+        },
+        {
+          "method_name": "(top-level)",
+          "node_name": "block",
+          "line": 18,
+          "span": [
+            18,
+            6,
+            18,
+            37
+          ],
+          "mass": 15,
+          "fingerprint": "block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ):))) .:. id) }:})",
+          "child_fingerprints": [
+            "call<params>(id argument_list((:( pair(id ::: id) ):)))"
+          ],
+          "child_masses": [
+            9
+          ]
+        },
+        {
+          "method_name": "(top-level)",
+          "node_name": "block",
+          "line": 25,
+          "span": [
+            25,
+            6,
+            25,
+            76
+          ],
+          "mass": 29,
+          "fingerprint": "block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ,:, pair(id ::: id) ,:, pair(id ::: id) ):))) .:. id argument_list((:( id ):))) }:})",
+          "child_fingerprints": [
+            "call<params>(id argument_list((:( pair(id ::: id) ,:, pair(id ::: id) ,:, pair(id ::: id) ):)))"
+          ],
+          "child_masses": [
+            19
+          ]
+        },
+        {
+          "method_name": "(top-level)",
+          "node_name": "class",
+          "line": 8,
+          "span": [
+            8,
+            0,
+            73,
+            3
+          ],
+          "mass": 342,
+          "fingerprint": "class(id id body_statement(assignment(id =:= call(string_array(%w(:%w[ id id ):]) .:. id)) assignment(id =:= call(id .:. id block({:{ id }:}))) call<attr_reader>(id lit) singleton_method(id id .:. id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id) call(id block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ):))) .:. id) }:})) method(id id method_parameters((:( id ):)) body_statement(assignment(instance_variable:@source =:= id) assignment(instance_variable:@count =:= call<let>(id .:. id argument_list((:( lit ,:, id ):)))) assignment(instance_variable:@status =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))) id) call(id block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ,:, pair(id ::: id) ,:, pair(id ::: id) ):))) .:. id argument_list((:( id ):))) }:})) method(id id method_parameters((:( id ,:, id ,:, id ):)) body_statement(assignment(id =:= call(call(id &.:&. id) &.:&. id)) assignment(id =:= call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):)))) call<audit>(id argument_list((:( id ):))) call<callback>(id .:. argument_list((:( id ):))) case(id call(id .:. id) when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):))))) when(id id then(call<fallback>(id argument_list((:( id ):))))) else(id call<default>(id argument_list((:( id ):)))) id) if(id binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id)) then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):)))) else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):)))) id) call(id .:. id do_block(id block_parameters(|:| id |:|) body_statement(id .:. id) id)) instance_variable:@status) id) id method(id id method_parameters((:( id ):)) body_statement(call<puts>(id argument_list((:( id ):))) call<send>(id argument_list((:( lit ,:, id ):))) global_variable:$GLOBAL_STATE instance_variable:@source) id) call<private>(id argument_list(id id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id)) method(id id body_statement(instance_variable:@count >:> lit) id) method(id id =:= binary(instance_variable:@status ==:== lit))) id)",
+          "child_fingerprints": [
+            "assignment(id =:= call(string_array(%w(:%w[ id id ):]) .:. id))",
+            "assignment(id =:= call(id .:. id block({:{ id }:})))",
+            "call<attr_reader>(id lit)",
+            "singleton_method(id id .:. id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id)",
+            "call(id block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ):))) .:. id) }:}))",
+            "method(id id method_parameters((:( id ):)) body_statement(assignment(instance_variable:@source =:= id) assignment(instance_variable:@count =:= call<let>(id .:. id argument_list((:( lit ,:, id ):)))) assignment(instance_variable:@status =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))) id)",
+            "call(id block({:{ block_body(call<params>(id argument_list((:( pair(id ::: id) ,:, pair(id ::: id) ,:, pair(id ::: id) ):))) .:. id argument_list((:( id ):))) }:}))",
+            "method(id id method_parameters((:( id ,:, id ,:, id ):)) body_statement(assignment(id =:= call(call(id &.:&. id) &.:&. id)) assignment(id =:= call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):)))) call<audit>(id argument_list((:( id ):))) call<callback>(id .:. argument_list((:( id ):))) case(id call(id .:. id) when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):))))) when(id id then(call<fallback>(id argument_list((:( id ):))))) else(id call<default>(id argument_list((:( id ):)))) id) if(id binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id)) then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):)))) else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):)))) id) call(id .:. id do_block(id block_parameters(|:| id |:|) body_statement(id .:. id) id)) instance_variable:@status) id)",
+            "method(id id method_parameters((:( id ):)) body_statement(call<puts>(id argument_list((:( id ):))) call<send>(id argument_list((:( lit ,:, id ):))) global_variable:$GLOBAL_STATE instance_variable:@source) id)",
+            "call<private>(id argument_list(id id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id))",
+            "method(id id body_statement(instance_variable:@count >:> lit) id)",
+            "method(id id =:= binary(instance_variable:@status ==:== lit))"
+          ],
+          "child_masses": [
+            11,
+            11,
+            3,
+            16,
+            17,
+            39,
+            31,
+            151,
+            25,
+            16,
+            8,
+            8
+          ]
+        },
+        {
+          "method_name": "audit",
+          "node_name": "defn",
+          "line": 57,
+          "span": [
+            57,
+            2,
+            62,
+            5
+          ],
+          "mass": 25,
+          "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(call<puts>(id argument_list((:( id ):))) call<send>(id argument_list((:( lit ,:, id ):))) global_variable:$GLOBAL_STATE instance_variable:@source) id)",
+          "child_fingerprints": [
+            "call<puts>(id argument_list((:( id ):)))",
+            "call<send>(id argument_list((:( lit ,:, id ):)))",
+            "global_variable:$GLOBAL_STATE",
+            "instance_variable:@source"
+          ],
+          "child_masses": [
+            6,
+            8,
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "initialize",
+          "node_name": "assignment",
+          "line": 20,
+          "span": [
+            20,
+            4,
+            20,
+            20
+          ],
+          "mass": 4,
+          "fingerprint": "assignment(instance_variable:@source =:= id)",
+          "child_fingerprints": [
+            "instance_variable:@source"
+          ],
+          "child_masses": [
+            1
+          ]
+        },
+        {
+          "method_name": "initialize",
+          "node_name": "assignment",
+          "line": 21,
+          "span": [
+            21,
+            4,
+            21,
+            30
+          ],
+          "mass": 13,
+          "fingerprint": "assignment(instance_variable:@count =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))",
+          "child_fingerprints": [
+            "instance_variable:@count",
+            "call<let>(id .:. id argument_list((:( lit ,:, id ):)))"
+          ],
+          "child_masses": [
+            1,
+            10
+          ]
+        },
+        {
+          "method_name": "initialize",
+          "node_name": "assignment",
+          "line": 22,
+          "span": [
+            22,
+            4,
+            22,
+            34
+          ],
+          "mass": 13,
+          "fingerprint": "assignment(instance_variable:@status =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))",
+          "child_fingerprints": [
+            "instance_variable:@status",
+            "call<let>(id .:. id argument_list((:( lit ,:, id ):)))"
+          ],
+          "child_masses": [
+            1,
+            10
+          ]
+        },
+        {
+          "method_name": "initialize",
+          "node_name": "defn",
+          "line": 19,
+          "span": [
+            19,
+            2,
+            23,
+            5
+          ],
+          "mass": 39,
+          "fingerprint": "method(id id method_parameters((:( id ):)) body_statement(assignment(instance_variable:@source =:= id) assignment(instance_variable:@count =:= call<let>(id .:. id argument_list((:( lit ,:, id ):)))) assignment(instance_variable:@status =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))) id)",
+          "child_fingerprints": [
+            "assignment(instance_variable:@source =:= id)",
+            "assignment(instance_variable:@count =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))",
+            "assignment(instance_variable:@status =:= call<let>(id .:. id argument_list((:( lit ,:, id ):))))"
+          ],
+          "child_masses": [
+            4,
+            13,
+            13
+          ]
+        },
+        {
+          "method_name": "inline_private",
+          "node_name": "defn",
+          "line": 64,
+          "span": [
+            64,
+            10,
+            66,
+            5
+          ],
+          "mass": 14,
+          "fingerprint": "argument_list(id id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id)",
+          "child_fingerprints": [],
+          "child_masses": []
+        },
+        {
+          "method_name": "loaded?",
+          "node_name": "defn",
+          "line": 72,
+          "span": [
+            72,
+            2,
+            72,
+            33
+          ],
+          "mass": 8,
+          "fingerprint": "method(id id =:= binary(instance_variable:@status ==:== lit))",
+          "child_fingerprints": [
+            "instance_variable:@status",
+            "lit"
+          ],
+          "child_masses": [
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "assignment",
+          "line": 27,
+          "span": [
+            27,
+            4,
+            27,
+            30
+          ],
+          "mass": 10,
+          "fingerprint": "assignment(id =:= call(call(id &.:&. id) &.:&. id))",
+          "child_fingerprints": [
+            "call(call(id &.:&. id) &.:&. id)"
+          ],
+          "child_masses": [
+            7
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "assignment",
+          "line": 28,
+          "span": [
+            28,
+            4,
+            28,
+            59
+          ],
+          "mass": 22,
+          "fingerprint": "assignment(id =:= call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):))))",
+          "child_fingerprints": [
+            "call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):)))"
+          ],
+          "child_masses": [
+            19
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "case",
+          "line": 32,
+          "span": [
+            32,
+            4,
+            39,
+            7
+          ],
+          "mass": 42,
+          "fingerprint": "case(id call(id .:. id) when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):))))) when(id id then(call<fallback>(id argument_list((:( id ):))))) else(id call<default>(id argument_list((:( id ):)))) id)",
+          "child_fingerprints": [
+            "call(id .:. id)",
+            "when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):)))))",
+            "when(id id then(call<fallback>(id argument_list((:( id ):)))))",
+            "else(id call<default>(id argument_list((:( id ):))))"
+          ],
+          "child_masses": [
+            4,
+            17,
+            10,
+            8
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "defn",
+          "line": 26,
+          "span": [
+            26,
+            2,
+            53,
+            5
+          ],
+          "mass": 151,
+          "fingerprint": "method(id id method_parameters((:( id ,:, id ,:, id ):)) body_statement(assignment(id =:= call(call(id &.:&. id) &.:&. id)) assignment(id =:= call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):)))) call<audit>(id argument_list((:( id ):))) call<callback>(id .:. argument_list((:( id ):))) case(id call(id .:. id) when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):))))) when(id id then(call<fallback>(id argument_list((:( id ):))))) else(id call<default>(id argument_list((:( id ):)))) id) if(id binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id)) then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):)))) else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):)))) id) call(id .:. id do_block(id block_parameters(|:| id |:|) body_statement(id .:. id) id)) instance_variable:@status) id)",
+          "child_fingerprints": [
+            "assignment(id =:= call(call(id &.:&. id) &.:&. id))",
+            "assignment(id =:= call<new>(id .:. id argument_list((:( pair(id ::: id) ,:, pair(id ::: call(id .:. id)) ):))))",
+            "call<audit>(id argument_list((:( id ):)))",
+            "call<callback>(id .:. argument_list((:( id ):)))",
+            "case(id call(id .:. id) when(id pattern(\":\" lit \":\") ,:, pattern(*:* id) then(call<escalate>(id argument_list((:( id ):))))) when(id id then(call<fallback>(id argument_list((:( id ):))))) else(id call<default>(id argument_list((:( id ):)))) id)",
+            "if(id binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id)) then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):)))) else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):)))) id)",
+            "call(id .:. id do_block(id block_parameters(|:| id |:|) body_statement(id .:. id) id))",
+            "instance_variable:@status"
+          ],
+          "child_masses": [
+            10,
+            22,
+            6,
+            7,
+            42,
+            35,
+            15,
+            1
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "do_block",
+          "line": 48,
+          "span": [
+            48,
+            19,
+            50,
+            7
+          ],
+          "mass": 11,
+          "fingerprint": "do_block(id block_parameters(|:| id |:|) body_statement(id .:. id) id)",
+          "child_fingerprints": [],
+          "child_masses": []
+        },
+        {
+          "method_name": "process",
+          "node_name": "if",
+          "line": 41,
+          "span": [
+            41,
+            4,
+            46,
+            7
+          ],
+          "mass": 35,
+          "fingerprint": "if(id binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id)) then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):)))) else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):)))) id)",
+          "child_fingerprints": [
+            "binary(binary(instance_variable:@status ==:== lit) &&:&& call(id .:. id))",
+            "then(operator_assignment(instance_variable:@count +=:+= lit) call<publish>(id argument_list((:( lit ):))))",
+            "else(id call<warn>(id argument_list((:( string(\":\" lit \":\") ):))))"
+          ],
+          "child_masses": [
+            10,
+            11,
+            11
+          ]
+        },
+        {
+          "method_name": "process",
+          "node_name": "operator_assignment",
+          "line": 42,
+          "span": [
+            42,
+            6,
+            42,
+            17
+          ],
+          "mass": 4,
+          "fingerprint": "operator_assignment(instance_variable:@count +=:+= lit)",
+          "child_fingerprints": [
+            "instance_variable:@count",
+            "lit"
+          ],
+          "child_masses": [
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "ready?",
+          "node_name": "defn",
+          "line": 68,
+          "span": [
+            68,
+            2,
+            70,
+            5
+          ],
+          "mass": 8,
+          "fingerprint": "method(id id body_statement(instance_variable:@count >:> lit) id)",
+          "child_fingerprints": [
+            "instance_variable:@count",
+            "lit"
+          ],
+          "child_masses": [
+            1,
+            1
+          ]
+        },
+        {
+          "method_name": "self.build",
+          "node_name": "defn",
+          "line": 14,
+          "span": [
+            14,
+            2,
+            16,
+            5
+          ],
+          "mass": 16,
+          "fingerprint": "singleton_method(id id .:. id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id)",
+          "child_fingerprints": [],
+          "child_masses": []
+        },
+        {
+          "method_name": "self.build",
+          "node_name": "defs",
+          "line": 14,
+          "span": [
+            14,
+            2,
+            16,
+            5
+          ],
+          "mass": 16,
+          "fingerprint": "singleton_method(id id .:. id method_parameters((:( id ):)) body_statement(id argument_list((:( id ):))) id)",
+          "child_fingerprints": [],
+          "child_masses": []
+        }
       ]
     }
   ]
