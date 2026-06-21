@@ -8,7 +8,8 @@ projection. That architecture is documented in
 
 This document describes the Decomplex side of the pipeline: source selection,
 fact loading, detector responsibilities, report shaping, and the invariants
-that keep detectors language-neutral.
+that keep detectors language-neutral. Keep FactMine-specific pass details in
+the linked FactMine architecture document instead of duplicating them here.
 
 ## Pipeline Summary
 
@@ -121,8 +122,9 @@ responsibilities live in FactMine:
   path conditions, and local complexity fact generation
 - `FactDocument` hydration
 
-See [`gems/fact-mine/docs/architecture.md`](../../fact-mine/docs/architecture.md)
-for the detailed pass list and language-specific boundaries.
+See the [FactMine architecture](../../fact-mine/docs/architecture.md) for the
+detailed pass list, normalized IR contract, fact-population table, and
+language-specific boundaries.
 
 ## Detector Rules
 

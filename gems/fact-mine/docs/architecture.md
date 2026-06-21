@@ -174,6 +174,12 @@ Language-specific examples:
 - Lua `obj:method()`.
 - Rust/Zig/Go receiver and function-call conventions.
 
+Source text canonicalization for public facts also belongs to language-owned
+behavior. For example, PHP source spellings such as `$value->name` normalize to
+`value.name` before generic local-contract and path-condition facts are
+projected. The generic pass may call `normalize_source_text`; it must not know
+PHP sigils, Ruby ivars, or any other concrete spelling.
+
 ### Assignments And Mutation
 
 Normalize:
@@ -244,11 +250,14 @@ Normalize:
 - Safe navigation to `QCALL`.
 - Explicit nil-predicate calls through language behavior hooks.
 - Early terminating calls through language behavior hooks.
+- Rescue/catch fallback expressions to normalized `RESCUE`/handler nodes so
+  eliminable guards can be emitted from normalized IR.
 
 Facts populated later:
 
 - `redundant_nil_guards`
 - `branch_decisions`
+- `semantic_effects` with `kind: eliminable_guard`
 - `decision_pressure` detector inputs
 
 Language-specific examples:
@@ -258,6 +267,8 @@ Language-specific examples:
 - JavaScript/TypeScript `null`, `undefined`, `?.`.
 - PHP `null`, `?->`.
 - Rust `None`, `is_none`, `is_some`.
+- C-family, Go, Java, Kotlin, Lua, Swift, and Zig fixture guards such as
+  `isNull`/`isSome` through language-owned nil-predicate behavior hooks.
 
 ### Dynamic Local Flow
 
@@ -387,6 +398,9 @@ Responsibility:
 
 - Walk normalized AST once with lexical owner/function/control stacks.
 - Emit facts that depend on one node plus stack context.
+- Emit semantic effects that are directly represented by normalized nodes,
+  such as `yield`, global reads/writes, mutating assignments, and
+  `rescue nil`/nil-fallback `eliminable_guard`.
 
 Populates:
 
@@ -401,6 +415,7 @@ Populates:
 - `branch_decisions`
 - `branch_arms`
 - `dispatch_sites`
+- `semantic_effects` from normalized-node semantics
 - `predicate_bodies`
 - `comparisons`
 
@@ -432,7 +447,8 @@ Must not:
 - know concrete language names
 - apply visibility timelines
 - own language lexicons
-- compute protocol/effect/nil/clone/local-flow facts
+- compute protocol/nil-guard/clone/local-flow facts
+- compute call-lexicon semantic effects
 
 ### 4. Stateful Normalized Enrichment
 
@@ -440,11 +456,13 @@ Responsibility:
 
 - Consume already-collected facts and normalized AST.
 - Apply order-sensitive or multi-section derivations.
+- Append lexicon-derived semantic effects from already-collected call facts and
+  dedupe them with stateless semantic effects.
 
 Populates:
 
 - final function visibility
-- `semantic_effects`
+- `semantic_effects` from call lexicons and deduplication
 - `protocol_method_effects`
 - `protocol_call_paths`
 - `clone_candidates`
@@ -478,6 +496,22 @@ Must not:
 - inspect raw parser nodes
 - branch on concrete languages
 - own concrete language vocabulary
+
+Stateful pass details:
+
+- Visibility enrichment consumes language-owned visibility events and applies
+  them to already-extracted function rows.
+- Effect enrichment consumes generic call facts plus language-owned effect
+  lexicons; it must not inspect raw source.
+- Protocol enrichment consumes state/call/read/write facts and language-owned
+  protocol labels.
+- Clone enrichment consumes normalized AST and projects canonical public clone
+  node names/fingerprints.
+- Nil-guard enrichment consumes normalized AST plus language-owned nil-predicate
+  and terminating-call hooks.
+- Local-flow enrichment consumes normalized AST and canonicalized source text to
+  populate statement reads/writes, path conditions, local complexity, and local
+  contract assignments.
 
 ### 5. Public Projection And Hydration
 
