@@ -19,6 +19,20 @@ module FactMine
       ].freeze
     ).freeze
 
+    C_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[dlsym dlopen GetProcAddress].freeze,
+      meta_mids: %w[setjmp longjmp va_start va_arg].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[FILE DIR pthread mutex atomic].freeze,
+      io_bare: %w[printf fprintf fopen open read write close system exec abort exit assert puts].freeze,
+      dir_context: %w[getcwd getenv].freeze,
+      context_pairs: {}.freeze,
+      context_bare: %w[rand time clock].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook pthread_mutex_lock pthread_mutex_unlock].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:c, C_EFFECT_LEXICON)
+
     class CSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_definition].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze
@@ -121,7 +135,15 @@ module FactMine
       end
 
       def owner_name_span(_name, node, default_span:)
-        struct_keyword_span(node) || default_span
+        keyword_block_span(node, "struct") || default_span
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "TYPE_DEFINITION"
+
+        text = node.text.to_s
+        name = text[/}\s*([A-Za-z_]\w*)\s*;/m, 1]
+        name && text.include?("struct") ? { name: name, kind: "struct" } : nil
       end
 
       def owner_for_function(name, node, current_owner:, file_owner:)
@@ -134,6 +156,10 @@ module FactMine
         return "private" if node.text.to_s.strip.start_with?("static ")
 
         super
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
       end
     end
 

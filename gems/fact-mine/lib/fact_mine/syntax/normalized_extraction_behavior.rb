@@ -66,6 +66,10 @@ module FactMine
         false
       end
 
+      def field_name_from_declaration(_node)
+        nil
+      end
+
       def embedded_member_reads(_node)
         []
       end
@@ -103,19 +107,26 @@ module FactMine
       end
 
       def self_member_receiver(message)
-        "this.#{message}"
+        message
       end
 
       def owner_name_span(_name, _node, default_span:)
         nil
       end
 
-      def owner_for_function(_name, node, current_owner:, file_owner:)
-        return current_owner unless current_owner == file_owner
+      def owner_name_from_text(_node)
+        nil
+      end
 
-        text = node.text.to_s
-        return text[/\Afunction\s+([A-Za-z_]\w*)[:]/, 1] || current_owner if text.start_with?("function ")
+      def owner_kind(_node, default_kind:)
+        default_kind
+      end
 
+      def declarative_owner(_node, current_owner:)
+        nil
+      end
+
+      def owner_for_function(_name, _node, current_owner:, file_owner:)
         current_owner
       end
 
@@ -123,12 +134,7 @@ module FactMine
         {}
       end
 
-      def function_visibility(name, node, lines:)
-        text = node.text.to_s.strip
-        return "private" if text.match?(/\A(?:private|protected)\b/)
-        return "public" if text.match?(/\Apublic\b/) || text.start_with?("pub ")
-        return "private" if name.start_with?("#")
-
+      def function_visibility(_name, _node, lines:)
         "public"
       end
 
@@ -151,15 +157,8 @@ module FactMine
       def parameter_name_from_signature(param)
         text = param.to_s.strip
         return nil if text.empty?
-        return text if text.match?(/\A&(?:mut\s+)?self\z/)
 
-        text = text.sub(/\A(?:public|private|protected|readonly|mut|var|let|const|final)\s+/, "")
         text = text.sub(/=.*\z/, "").strip
-        text = text.split(":", 2).first.strip if text.include?(":") && !text.include?("::")
-        if text.include?("$")
-          return text[/\$([A-Za-z_]\w*)/, 1]
-        end
-
         text.scan(/[A-Za-z_]\w*[!?]?/).last&.delete_suffix("?")
       end
 
@@ -205,18 +204,39 @@ module FactMine
         []
       end
 
-      def wrap_branch_predicate?(branch)
-        branch.text.to_s.match?(/\b(?:if|switch|while|for)\s*\(/)
+      def wrap_branch_predicate?(_branch)
+        false
       end
 
-      def explicit_self_state_ref(node, message)
-        text = node.text.to_s.strip
-        return "this.#{message}" if text.start_with?("this.")
-
+      def explicit_self_state_ref(_node, message)
         message
       end
 
       def stream_insertion_operator?(_node)
+        false
+      end
+
+      def mutating_receiver_message?(_message)
+        false
+      end
+
+      def normalize_comparison_source(source)
+        normalize_source_text(source.to_s.strip)
+      end
+
+      def structural_semantic_effects(_node, function_name:)
+        []
+      end
+
+      def visibility_events_from_calls(_calls)
+        []
+      end
+
+      def nil_guard_fact(_message, _subject)
+        nil
+      end
+
+      def terminating_call_message?(_message)
         false
       end
 
@@ -248,16 +268,17 @@ module FactMine
         [node.first_lineno, node.first_column + index, node.first_lineno, node.first_column + index + target.to_s.length]
       end
 
-      def struct_keyword_span(node)
+      def keyword_block_span(node, keyword)
         text = node.text.to_s
         lines = text.lines
-        start_offset = lines.index { |line| line.include?("struct") }
+        keyword = keyword.to_s
+        start_offset = lines.index { |line| line.include?(keyword) }
         return nil unless start_offset
 
         end_offset = lines.rindex { |line| line.include?("}") } || lines.length - 1
         start_line = node.first_lineno + start_offset
         end_line = node.first_lineno + end_offset
-        start_column = (start_offset.zero? ? node.first_column : 0) + lines[start_offset].index("struct").to_i
+        start_column = (start_offset.zero? ? node.first_column : 0) + lines[start_offset].index(keyword).to_i
         end_column = (end_offset.zero? ? node.first_column : 0) + lines[end_offset].index("}").to_i + 1
         [start_line, start_column, end_line, end_column]
       end

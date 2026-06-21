@@ -16,19 +16,6 @@ module Decomplex
   # over calls instead of assigned attributes.
   class SequenceMine
     Call = Struct.new(:mid, :file, :defn, :line, :span, keyword_init: true)
-    DECLARATIVE_MIDS = %w[
-      abstract! alias_method any attr_accessor attr_reader attr_writer bind
-      cast checked enum extend final include interface! let must must_because
-      nilable override overridable params prepend private private_class_method
-      public require require_relative requires_ancestor sealed! sig type_member
-      type_template untyped unsafe void
-    ].freeze
-    TEST_DSL_MIDS = %w[
-      a_kind_of after around before be be_a be_an be_empty be_falsey be_nil
-      be_truthy change contain_exactly context describe eq eql equal expect
-      have_attributes have_key have_received it match not_to raise_error
-      receive subject to
-    ].freeze
     ZERO_ARG_ACTION_MIDS = %w[
       acquire begin close commit connect deinit disconnect drain finish flush
       lock open release rollback start stop unlock wait
@@ -40,8 +27,6 @@ module Decomplex
       resolve rewrite run scan set stamp sync transform validate verify visit
       walk warn write
     ].freeze
-    IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
-
     def self.scan(files)
       calls = []
       files.each do |f|
@@ -58,6 +43,7 @@ module Decomplex
     def initialize(file, document)
       @file = file
       @document = document
+      @ignored_mids = Syntax.protocol_ignored_mids(document.language)
       @calls = []
     end
 
@@ -82,7 +68,7 @@ module Decomplex
     private
 
     def protocol_event?(call, mid)
-      return false if IGNORED_MIDS.include?(mid)
+      return false if @ignored_mids.include?(mid)
       return false if passive_reader_call?(call, mid)
 
       true
@@ -97,12 +83,12 @@ module Decomplex
     end
 
     def nested_protocol_events(call)
-      return [] unless IGNORED_MIDS.include?(call.message.to_s)
+      return [] unless @ignored_mids.include?(call.message.to_s)
 
       candidates = call.arguments.to_a
       candidates += source_text(call.span).scan(/\b[a-z_]\w*[!?]?\b/)
       candidates.uniq.select do |candidate|
-        !IGNORED_MIDS.include?(candidate) && zero_arg_action_name?(candidate)
+        !@ignored_mids.include?(candidate) && zero_arg_action_name?(candidate)
       end
     end
 

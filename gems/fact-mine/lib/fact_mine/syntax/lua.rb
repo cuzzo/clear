@@ -19,6 +19,23 @@ module FactMine
       ].freeze
     ).freeze
 
+    LUA_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[load loadfile dofile require rawget rawset].freeze,
+      meta_mids: %w[setmetatable getmetatable debug eval load loadfile].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[io os debug package].freeze,
+      io_bare: %w[print error assert require collectgarbage].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "os" => %w[time clock date getenv],
+        "math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:lua, LUA_EFFECT_LEXICON)
+
     class LuaSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
       CALL_NODE_KINDS = %w[function_call method_call].freeze

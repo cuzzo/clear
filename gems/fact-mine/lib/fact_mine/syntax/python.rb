@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     PYTHON_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bNone\b/].freeze,
+      guard_mids: %w[is_none is_some].freeze,
       type_guard_patterns: [
         /\b(?:isinstance|issubclass|hasattr)\s*\(/,
         /\bis\s+(?:not\s+)?None\b/,
@@ -19,6 +20,24 @@ module FactMine
         /\Areturn\s+(?:None|True|False|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    PYTHON_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[getattr setattr hasattr __getattr__ __setattr__ import_module].freeze,
+      meta_mids: %w[eval exec compile type globals locals vars setattr delattr].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[Path pathlib os sys subprocess socket shutil].freeze,
+      io_bare: %w[print input open exec eval].freeze,
+      dir_context: %w[getcwd home].freeze,
+      context_pairs: {
+        "time" => %w[time monotonic perf_counter],
+        "datetime" => %w[now today utcnow],
+        "random" => %w[random randint randrange choice]
+      }.freeze,
+      context_bare: %w[random randint randrange].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:python, PYTHON_EFFECT_LEXICON)
 
     class PythonSyntaxAdapter < TreeSitterLanguageAdapter
       PythonSyntheticStatement = Struct.new(:kind, :children, :text, :start_point, :end_point, keyword_init: true) do

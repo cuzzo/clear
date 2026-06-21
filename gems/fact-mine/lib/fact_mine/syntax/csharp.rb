@@ -19,6 +19,24 @@ module FactMine
       ].freeze
     ).freeze
 
+    CSHARP_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[Invoke GetMethod GetProperty GetField Activator CreateInstance].freeze,
+      meta_mids: %w[Invoke GetType Reflection Emit DynamicMethod].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[Console File Directory Path Process Socket HttpClient Environment].freeze,
+      io_bare: %w[throw].freeze,
+      dir_context: %w[CurrentDirectory GetEnvironmentVariable].freeze,
+      context_pairs: {
+        "DateTime" => %w[Now UtcNow Today],
+        "Guid" => %w[NewGuid],
+        "Random" => %w[Next NextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook Lock Monitor Enter Exit Wait Pulse].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:csharp, CSHARP_EFFECT_LEXICON)
+
     class CSharpSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[method_declaration].freeze
       CALL_NODE_KINDS = %w[invocation_expression].freeze
@@ -111,6 +129,18 @@ module FactMine
     class CsharpNormalizedExtractionBehavior < NormalizedExtractionBehavior
       def implicit_owner_fields?
         true
+      end
+
+      def field_name_from_declaration(node)
+        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
+        return nil if node.text.to_s.include?("(")
+
+        text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && name.match?(/\A[A-Za-z_]\w*\z/)
+        return nil if %w[private protected public internal readonly static const volatile string int long short byte bool decimal double float var].include?(name)
+
+        name
       end
 
       def suppress_self_call_state_read?(call)

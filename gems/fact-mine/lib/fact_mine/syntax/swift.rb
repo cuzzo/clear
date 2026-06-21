@@ -20,6 +20,23 @@ module FactMine
       ].freeze
     ).freeze
 
+    SWIFT_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[perform value setValue selector NSClassFromString].freeze,
+      meta_mids: %w[Mirror unsafeBitCast withUnsafePointer withUnsafeBytes].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[FileManager Process URLSession DispatchQueue Thread Lock NSLock].freeze,
+      io_bare: %w[print fatalError preconditionFailure assertionFailure].freeze,
+      dir_context: %w[currentDirectoryPath homeDirectoryForCurrentUser].freeze,
+      context_pairs: {
+        "Date" => %w[now],
+        "UUID" => %w[init]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook async sync].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:swift, SWIFT_EFFECT_LEXICON)
+
     class SwiftSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze

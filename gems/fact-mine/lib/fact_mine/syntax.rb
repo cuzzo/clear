@@ -35,7 +35,7 @@ module FactMine
     PathConditionSite = Struct.new(:guards, :action, :file, :function, :line, :span, keyword_init: true)
     LanguageLexicon = Struct.new(
       :type_guard_patterns, :diagnostic_patterns, :trivial_patterns,
-      :nil_literal_patterns,
+      :nil_literal_patterns, :guard_mids,
       keyword_init: true
     ) do
       def type_guard?(text, allow_literal_nil: true)
@@ -56,6 +56,10 @@ module FactMine
         source.empty? || matches?(trivial_patterns, source)
       end
 
+      def guard_mid?(message)
+        Array(guard_mids).include?(message.to_s)
+      end
+
       private
 
       def matches?(patterns, source)
@@ -67,6 +71,12 @@ module FactMine
           source.match?(/(?:\A|[^\w!?])#{Regexp.escape(name)}[!?]?(?:\s*\(|\b)/)
         end
       end
+    end
+
+    def self.guard_mid?(language, message)
+      language_profile(language).lexicon.guard_mid?(message)
+    rescue StandardError
+      false
     end
 
     class TreeSitterLanguageAdapter
@@ -2717,6 +2727,8 @@ module FactMine
     require_relative "syntax/dynamic_language"
     require_relative "syntax/passes"
     require_relative "syntax/normalized_extraction_behavior"
+    require_relative "syntax/effects"
+    require_relative "syntax/protocols"
     require_relative "syntax/ruby"
     require_relative "syntax/python"
     require_relative "syntax/javascript"
@@ -3502,12 +3514,11 @@ module FactMine
   end
 end
 
-require_relative "syntax/effects"
-require_relative "syntax/protocols"
 require_relative "syntax/contracts"
 require_relative "syntax/dispatch"
 require_relative "syntax/clone_similarity"
 require_relative "syntax/complexity"
 require_relative "syntax/nil_guards"
+require_relative "syntax/normalized_local_facts"
 require_relative "syntax/fact_document"
 require_relative "syntax/normalized_extractor"

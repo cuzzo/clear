@@ -20,6 +20,22 @@ module FactMine
       ].freeze
     ).freeze
 
+    ZIG_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[field fieldParentPtr ptrCast alignCast call].freeze,
+      meta_mids: %w[typeInfo TypeOf ptrCast intFromPtr ptrFromInt eval].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[std os fs process net Thread Mutex Atomic].freeze,
+      io_bare: %w[panic unreachable].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "time" => %w[timestamp nanoTimestamp milliTimestamp]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook spawn wait signal].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:zig, ZIG_EFFECT_LEXICON)
+
     class ZigSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze
@@ -129,7 +145,14 @@ module FactMine
       end
 
       def owner_name_span(_name, node, default_span:)
-        struct_keyword_span(node) || default_span
+        keyword_block_span(node, "struct") || default_span
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "VARIABLE_DECLARATION"
+
+        name = node.text.to_s[/\bconst\s+([A-Za-z_]\w*)\s*=\s*struct\b/, 1]
+        name ? { name: name, kind: "struct" } : nil
       end
 
       def owner_for_function(_name, node, current_owner:, file_owner:)

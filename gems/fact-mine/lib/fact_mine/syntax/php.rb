@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     PHP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/i].freeze,
+      guard_mids: %w[is_null is_a].freeze,
       type_guard_patterns: [
         /\bnull\b/i,
         /\b(?:is_null|isset|empty|is_a|instanceof)\s*(?:\(|\b)/
@@ -17,6 +18,24 @@ module FactMine
         /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/i
       ].freeze
     ).freeze
+
+    PHP_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[call_user_func call_user_func_array __call __callStatic].freeze,
+      meta_mids: %w[eval ReflectionClass ReflectionMethod ReflectionFunction class_alias].freeze,
+      method_obj_mids: %w[Closure fromCallable].freeze,
+      io_consts: %w[FilesystemIterator DirectoryIterator PDO mysqli].freeze,
+      io_bare: %w[print printf fopen file_get_contents file_put_contents exec shell_exec system passthru die exit trigger_error].freeze,
+      dir_context: %w[getcwd getenv].freeze,
+      context_pairs: {
+        "DateTime" => %w[createFromFormat],
+        "DateTimeImmutable" => %w[createFromFormat],
+        "random_int" => %w[call]
+      }.freeze,
+      context_bare: %w[time microtime random_int rand mt_rand].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:php, PHP_EFFECT_LEXICON)
 
     class PhpSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_definition method_declaration].freeze
@@ -536,6 +555,24 @@ module FactMine
             .gsub(/\$this->/, "this.")
             .gsub(/\$([A-Za-z_]\w*)->/, '\1.')
             .gsub(/\$([A-Za-z_]\w*)/, '\1')
+      end
+
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        return current_owner unless current_owner == file_owner
+
+        text = node.text.to_s
+        text[/\Afunction\s+([A-Za-z_]\w*)[:]/, 1] || current_owner
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+
+        "public"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
       end
 
       def function_name_from_text(text)

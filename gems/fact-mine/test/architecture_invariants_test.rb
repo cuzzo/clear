@@ -64,6 +64,7 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     nil_guards.rb
     normalized_extraction_behavior.rb
     normalized_extractor.rb
+    normalized_local_facts.rb
     passes.rb
     php.rb
     protocols.rb
@@ -268,6 +269,56 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Concrete normalized extraction quirks belong in the language syntax adapter files",
+      offenders
+    )
+  end
+
+  def test_generic_normalized_fact_engines_do_not_walk_raw_parser_nodes
+    files = %w[
+      clone_similarity.rb
+      nil_guards.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
+    offenders = scan_files(
+      files,
+      "generic normalized fact engines must consume normalized IR, not parser nodes" =>
+        /\b(?:ts_node\?|named_children|named_child_count|named_field|first_token_kind|direct_operator)\b/
+    )
+
+    assert_empty offenders, format_offenders(
+      "Raw parser traversal belongs in concrete language syntax adapters",
+      offenders
+    )
+  end
+
+  def test_generic_effect_and_protocol_engines_do_not_own_language_vocabularies
+    files = %w[
+      effects.rb
+      protocols.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
+    offenders = scan_files(
+      files,
+      "language vocabularies belong in syntax/<language>.rb" =>
+        /\b(?:RUBY_|PYTHON_|JAVASCRIPT_|TYPESCRIPT_|RUST_|ZIG_|LUA_|GO_|CSHARP_|JAVA_|SWIFT_|KOTLIN_|PHP_|COMMON_CALLBACK_SET|T::Struct)\b/
+    )
+
+    assert_empty offenders, format_offenders(
+      "Generic effect/protocol engines must expose registries, not language lexicons",
+      offenders
+    )
+  end
+
+  def test_normalized_extractor_does_not_own_stateful_enrichment_or_visibility
+    file = File.join(LIB, "syntax", "normalized_extractor.rb")
+    offenders = scan_files(
+      [file],
+      "stateful enrichment belongs in syntax/passes.rb or language behavior" =>
+        /\b(?:apply_visibility|append_effects_from_calls|dedupe_semantic_effects|visibility_events_from_calls|public protected private)\b/,
+      "declaration modifier/type vocabularies belong in language behavior" =>
+        /%w\[[^\]]*\b(?:readonly|static|volatile|unsigned|signed|short|long|int|char|float|double|bool|string|var)\b[^\]]*\]/
+    )
+
+    assert_empty offenders, format_offenders(
+      "NormalizedExtractor must remain a stateless normalized fact scanner",
       offenders
     )
   end

@@ -19,6 +19,25 @@ module FactMine
       ].freeze
     ).freeze
 
+    KOTLIN_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[invoke call callBy memberProperties declaredMemberFunctions].freeze,
+      meta_mids: %w[reflection javaClass Class forName setAccessible].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Mutex AtomicReference].freeze,
+      io_bare: %w[println print error check require TODO].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Random" => %w[nextInt nextLong nextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook synchronized launch async await].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:kotlin, KOTLIN_EFFECT_LEXICON)
+
     class KotlinSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze

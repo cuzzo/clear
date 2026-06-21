@@ -48,19 +48,21 @@ module FactMine
 
       def fact_document
         scan(@root)
-        apply_visibility!
-        append_effects_from_calls!
-        dedupe_semantic_effects!
+        facts = row
+        NormalizedStatefulSyntaxPass.enrich(
+          facts,
+          language: @language,
+          file: @file,
+          source: @source,
+          lines: @lines
+        )
 
-        FactDocument.new(row, file: @file, language: @language, source: @source, lines: @lines)
+        FactDocument.new(facts, file: @file, language: @language, source: @source, lines: @lines)
       end
 
       private
 
       def row
-        profile = Syntax.language_profile(@language)
-        doc = OpenStruct.new(file: @file, language: @language, source: @source, lines: @lines)
-
         {
           "file" => @file,
           "language" => @language.to_s,
@@ -81,7 +83,7 @@ module FactMine
           "semantic_effects" => @facts.fetch(:semantic_effect_sites),
           "predicate_aliases" => @facts.fetch(:predicate_aliases),
           "predicate_bodies" => @facts.fetch(:predicate_aliases),
-          "comparisons" => [],
+          "comparisons" => @facts.fetch(:comparison_sites),
           "path_conditions" => @facts.fetch(:path_condition_sites),
           "protocol_method_effects" => [],
           "protocol_call_paths" => [],
@@ -89,10 +91,10 @@ module FactMine
           "redundant_nil_guards" => [],
           "local_methods" => [],
           "local_complexity_scores" => {},
-          "immutable_struct_readers" => profile.immutable_struct_readers(doc),
-          "immutable_struct_reader_types" => profile.immutable_struct_reader_types(doc),
-          "type_aliases" => profile.type_aliases(doc),
-          "method_param_types" => profile.__send__(:method_param_types, doc)
+          "immutable_struct_readers" => {},
+          "immutable_struct_reader_types" => {},
+          "type_aliases" => {},
+          "method_param_types" => {}
         }
       end
 
@@ -101,7 +103,6 @@ module FactMine
 
         case node.type.to_s
         when "CLASS", "MODULE" then scan_owner(node)
-        when "STRUCT_ITEM", "TYPE_DECLARATION", "TYPE_DEFINITION", "VARIABLE_DECLARATION" then scan_declarative_owner(node)
         when "DEFN", "DEFS" then scan_function(node)
         when "HASH" then scan_children(node)
         when "IF", "UNLESS" then scan_if(node)
@@ -121,7 +122,8 @@ module FactMine
         when "ATTRASGN" then scan_attr_assignment(node)
         when "OPCALL" then scan_operator_call(node)
         when "OP_ASGN1", "OP_ASGN2" then scan_operator_assignment(node)
-        else scan_children(node)
+        else
+          declarative_owner(node) ? scan_declarative_owner(node) : scan_children(node)
         end
       end
 
@@ -130,7 +132,7 @@ module FactMine
       end
 
       def scan_owner(node)
-        name = owner_name(node) || owner_name_from_text(node) || "(anonymous)"
+        name = owner_name(node) || @extraction_behavior.owner_name_from_text(node) || owner_name_from_text(node) || "(anonymous)"
         qualified = @owners.empty? ? name : "#{current_owner}::#{name}"
         @facts.fetch(:owner_defs) << {
           "file" => @file,
@@ -161,7 +163,9 @@ module FactMine
       def scan_function(node)
         name = function_name(node) || "(anonymous)"
         owner = owner_for_function(name, node)
-        record_semantic_effect(node, "metaprogramming", "def #{name}") if %w[method_missing respond_to_missing?].include?(name)
+        @extraction_behavior.structural_semantic_effects(node, function_name: name).each do |effect|
+          record_semantic_effect(node, effect.fetch(:kind), effect.fetch(:detail))
+        end
 
         @facts.fetch(:function_defs) << {
           "file" => @file,
@@ -225,7 +229,10 @@ module FactMine
       def scan_if(node)
         condition = child_node(node, 0)
         return scan_children(node) unless condition
-        return scan_children(node) if normalized_ternary_if?(node)
+        if normalized_ternary_if?(node)
+          child_nodes(node).each { |child| with_control("conditional") { scan(child) } }
+          return
+        end
 
         @decision_spans << span(node)
         with_control("conditional") { scan(condition) }
@@ -357,7 +364,10 @@ module FactMine
 
         call = call_hash(node, parts, block)
         call = @extraction_behavior.project_call(node, call)
-        return if call.fetch("message") == "[]"
+        if call.fetch("message") == "[]"
+          append_call_site(call)
+          return
+        end
 
         if property_read_call?(node, parts)
           record_state_read_for_call(call)
@@ -365,15 +375,19 @@ module FactMine
         end
         return if suppress_call_site?(node, call)
 
-        key = call.values_at("receiver", "message", "function", "line", "span")
-        return if @seen_calls[key]
-
-        @seen_calls[key] = true
         record_state_read_for_call(call)
         record_state_write_for_mutating_call(call)
         if call["receiver"] == "self" && node.text.to_s.include?(".(")
           record_semantic_effect(node, "dynamic_dispatch", "#{call.fetch("message")}.call")
         end
+        append_call_site(call)
+      end
+
+      def append_call_site(call)
+        key = call.values_at("receiver", "message", "function", "line", "span")
+        return if @seen_calls[key]
+
+        @seen_calls[key] = true
         @facts.fetch(:call_sites) << call
       end
 
@@ -423,7 +437,8 @@ module FactMine
         message = call.fetch("message").to_s
         receiver = call.fetch("receiver").to_s
         return true if receiver == "self" && message.match?(/\A[A-Z]/) && call.fetch("arguments").empty?
-        return true if constant_receiver?(receiver) && call.fetch("arguments").empty? && !call.fetch("block")
+        return true if constant_receiver?(receiver) && !receiver.include?("(") &&
+                       call.fetch("arguments").empty? && !call.fetch("block")
         return true if @extraction_behavior.suppress_call_site?(node, call)
 
         false
@@ -780,70 +795,6 @@ module FactMine
         @controls.pop
       end
 
-      def apply_visibility!
-        owners = @facts.fetch(:function_defs).map { |function| function.fetch("owner") }.uniq
-        owners.each { |owner| apply_visibility_for_owner!(owner) }
-      end
-
-      def apply_visibility_for_owner!(owner)
-        functions = @facts.fetch(:function_defs)
-        calls = @facts.fetch(:call_sites)
-        function_indices = functions.each_index.select { |index| functions[index].fetch("owner") == owner }
-        events = function_indices.map { |index| [functions[index].fetch("line"), 1, index] }
-        calls.each_with_index do |call, index|
-          next unless call.fetch("owner") == owner &&
-                      call.fetch("receiver") == "self" &&
-                      %w[public protected private].include?(call.fetch("message"))
-
-          events << [call.fetch("line"), 0, index]
-        end
-
-        current = "public"
-        events.sort.each do |(_line, kind, index)|
-          if kind == 1
-            function = functions[index]
-            function["visibility"] = function.fetch("name").include?(".") ? "public" : current if function["visibility"] == "public"
-            next
-          end
-
-          call = calls[index]
-          if call.fetch("arguments").empty?
-            current = call.fetch("message")
-          else
-            call.fetch("arguments").each do |argument|
-              target = normalized_visibility_argument_name(argument)
-              function_indices.reverse_each do |function_index|
-                next unless functions[function_index].fetch("name") == target
-
-                functions[function_index]["visibility"] = call.fetch("message")
-                break
-              end
-            end
-          end
-        end
-      end
-
-      def append_effects_from_calls!
-        profile = Syntax.language_profile(@language)
-        document = OpenStruct.new(
-          language: @language,
-          call_sites: @facts.fetch(:call_sites).map { |call| OpenStruct.new(call.transform_keys(&:to_sym)) }
-        )
-        profile.semantic_effect_sites(document).each do |effect|
-          @facts.fetch(:semantic_effect_sites) << effect.to_h.transform_keys(&:to_s)
-        end
-      end
-
-      def dedupe_semantic_effects!
-        seen = {}
-        @facts[:semantic_effect_sites] = @facts.fetch(:semantic_effect_sites).select do |effect|
-          key = effect.values_at("kind", "detail", "function", "line", "span")
-          next false if seen[key]
-
-          seen[key] = true
-        end.sort_by { |effect| effect.values_at("kind", "detail", "function", "line", "span").map(&:to_s) }
-      end
-
       def call_parts(node)
         case node.type.to_s
         when "VCALL"
@@ -918,8 +869,8 @@ module FactMine
 
       def call_source_text(parts, node = nil)
         receiver = parts.fetch(:receiver).to_s
-        message = source_message_text(parts.fetch(:message).to_s, node)
-        operator = source_member_operator(node)
+        message = source_call_message(parts, node)
+        operator = message.start_with?("[") ? "" : source_member_operator(node)
         if receiver == "self"
           self_member_receiver(message)
         elsif receiver.empty?
@@ -927,6 +878,15 @@ module FactMine
         else
           "#{receiver}#{operator}#{message}"
         end
+      end
+
+      def source_call_message(parts, node)
+        message = source_message_text(parts.fetch(:message).to_s, node)
+        arguments = parts.fetch(:arguments).to_a
+        return "#{message}(#{arguments.join(", ")})" if message != "[]" && !arguments.empty?
+        return "[#{arguments.join(", ")}]" if message == "[]" && !arguments.empty?
+
+        message
       end
 
       def safe_navigation_source?(node)
@@ -1030,29 +990,13 @@ module FactMine
       end
 
       def owner_kind(node)
-        text = node.text.to_s.strip
-        return "impl" if text.start_with?("impl ")
-        return "module" if node.type.to_s == "MODULE"
-
-        "class"
+        default_kind = node.type.to_s == "MODULE" ? "module" : "class"
+        @extraction_behavior.owner_kind(node, default_kind: default_kind)
       end
 
       def declarative_owner(node)
-        text = node.text.to_s
-        case node.type.to_s
-        when "STRUCT_ITEM"
-          name = text[/\bstruct\s+([A-Za-z_]\w*)/, 1] || owner_name(node)
-          owner_row(name, "struct", node) if name
-        when "TYPE_DECLARATION"
-          name = text[/\Atype\s+([A-Za-z_]\w*)\b/, 1]
-          owner_row(name, "owner", node) if name
-        when "TYPE_DEFINITION"
-          name = text[/}\s*([A-Za-z_]\w*)\s*;/m, 1]
-          owner_row(name, "struct", node) if name && text.include?("struct")
-        when "VARIABLE_DECLARATION"
-          name = text[/\bconst\s+([A-Za-z_]\w*)\s*=\s*struct\b/, 1]
-          owner_row(name, "struct", node) if name
-        end
+        owner = @extraction_behavior.declarative_owner(node, current_owner: current_owner)
+        owner_row(owner.fetch(:name), owner.fetch(:kind), node) if owner
       end
 
       def owner_row(name, kind, node)
@@ -1080,23 +1024,9 @@ module FactMine
         [line, column, node.last_lineno, node.last_column]
       end
 
-      def struct_keyword_span(node)
-        text = node.text.to_s
-        lines = text.lines
-        start_offset = lines.index { |line| line.include?("struct") }
-        return nil unless start_offset
-
-        end_offset = lines.rindex { |line| line.include?("}") } || lines.length - 1
-        start_line = node.first_lineno + start_offset
-        end_line = node.first_lineno + end_offset
-        start_column = (start_offset.zero? ? node.first_column : 0) + lines[start_offset].index("struct").to_i
-        end_column = (end_offset.zero? ? node.first_column : 0) + lines[end_offset].index("}").to_i + 1
-        [start_line, start_column, end_line, end_column]
-      end
-
       def owner_name_from_text(node)
         text = node.text.to_s
-        text[/\b(?:class|enum|impl|struct)\s+([A-Za-z_]\w*)/, 1]
+        text[/\b(?:class|module)\s+([A-Za-z_]\w*)/, 1]
       end
 
       def owner_for_function(name, node)
@@ -1135,12 +1065,7 @@ module FactMine
       end
 
       def field_name_from_declaration(node)
-        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
-        return nil if node.text.to_s.include?("(")
-
-        text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
-        name = text.scan(/[A-Za-z_]\w*/).last
-        name if name && simple_identifier?(name) && !%w[private protected public readonly static int string].include?(name)
+        @extraction_behavior.field_name_from_declaration(node)
       end
 
       def owner_field?(field)
@@ -1395,6 +1320,8 @@ module FactMine
         return unless node
 
         case node.type.to_s
+        when "OPCALL"
+          child_nodes(node).each { |child| collect_state_refs(child, refs) }
         when "IVAR", "GVAR"
           name = first_string_or_symbol(node)
           refs << name if name
@@ -1402,7 +1329,7 @@ module FactMine
           parts = call_parts(node)
           if parts
             unless parts[:message].to_s == "[]" ||
-                   constant_receiver?(parts[:receiver]) ||
+                   (constant_receiver?(parts[:receiver]) && !parts[:receiver].to_s.include?("(")) ||
                    @extraction_behavior.method_state_ref?(node, parts)
               refs << state_ref_text(node, parts)
             end
@@ -1458,10 +1385,7 @@ module FactMine
       end
 
       def mutating_receiver_message?(message)
-        %w[
-          << []= add append clear collect! compact! concat delete delete_if fill filter!
-          keep_if merge! move push reject! replace shift store unshift update write
-        ].include?(message) || (message.to_s.end_with?("!") && !%w[!= !~].include?(message))
+        @extraction_behavior.mutating_receiver_message?(message)
       end
 
       def stream_insertion_operator?(node)
@@ -1481,21 +1405,7 @@ module FactMine
       end
 
       def normalize_comparison_source(source)
-        text = source.to_s.strip
-        if text.start_with?("!")
-          text = text.delete_prefix("!")
-                     .sub(/\A\(+/, "")
-                     .sub(/\)+\z/, "")
-                     .strip
-        end
-        text = text.delete_prefix("self.")
-        text = text.delete_prefix("@")
-        if (dot_index = text.index("."))
-          receiver = text[0...dot_index]
-          rest = text[(dot_index + 1)..]
-          text = rest if simple_identifier?(receiver) && (rest.include?(" == ") || rest.include?(" != ") || rest.include?("."))
-        end
-        normalize_text(text)
+        @extraction_behavior.normalize_comparison_source(source)
       end
 
       def raw_from_normalized(node)
@@ -1653,17 +1563,6 @@ module FactMine
         parts.concat(@lines[first_line...(last_line - 1)] || [])
         parts << @lines[last_line - 1].to_s.byteslice(0...last_column).to_s
         parts.join
-      end
-
-      def normalized_visibility_argument_name(argument)
-        argument.to_s.strip
-                .delete_prefix(":")
-                .delete_prefix("\"")
-                .delete_suffix("\"")
-                .delete_prefix("'")
-                .delete_suffix("'")
-                .split(/\s+/)
-                .first.to_s
       end
 
       def dedupe_decision_sites(sites)

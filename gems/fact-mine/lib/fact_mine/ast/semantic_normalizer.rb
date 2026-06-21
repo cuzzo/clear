@@ -93,28 +93,7 @@ module FactMine
 
       def enclosing_decision_span(metadata)
         span = metadata[:span]
-        return span unless span
-
-        line = span[0]
-        source_line = document.lines[line - 1].to_s
-        keyword_column = source_line.index(/\b(if|unless|while|until)\b/)
-        return span unless keyword_column && keyword_column <= span[1]
-
-        end_line, end_column = matching_end_point(line, keyword_column)
-        [line, keyword_column, end_line, end_column]
-      end
-
-      def matching_end_point(start_line, keyword_column)
-        depth = 0
-        document.lines[(start_line - 1)..].to_a.each_with_index do |line_text, offset|
-          stripped = line_text.strip
-          depth += 1 if stripped.match?(/\A(?:if|unless|while|until)\b/)
-          if stripped == "end" && line_text.index(/\S/).to_i == keyword_column
-            depth -= 1
-            return [start_line + offset, keyword_column + stripped.length] if depth <= 0
-          end
-        end
-        [start_line, document.lines[start_line - 1].to_s.length]
+        span
       end
 
       def source_text(span)

@@ -19,6 +19,23 @@ module FactMine
       ].freeze
     ).freeze
 
+    GO_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[Call CallSlice Method MethodByName ValueOf TypeOf].freeze,
+      meta_mids: %w[Call CallSlice MethodByName New MakeFunc].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[os io ioutil fs net http exec syscall].freeze,
+      io_bare: %w[panic print println recover].freeze,
+      dir_context: %w[Getwd UserHomeDir].freeze,
+      context_pairs: {
+        "time" => %w[Now Since Until],
+        "rand" => %w[Int Intn Float64 Read]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook Lock Unlock RLock RUnlock Do Go Add Done Wait].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:go, GO_EFFECT_LEXICON)
+
     class GoSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration method_declaration].freeze
       CALL_NODE_KINDS = %w[call_expression].freeze
@@ -228,6 +245,13 @@ module FactMine
     class GoNormalizedExtractionBehavior < NormalizedExtractionBehavior
       def self_member_receiver(message)
         "self.#{message}"
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "TYPE_DECLARATION"
+
+        name = node.text.to_s[/\Atype\s+([A-Za-z_]\w*)\b/, 1]
+        name ? { name: name, kind: "owner" } : nil
       end
 
       def embedded_member_reads(node)

@@ -20,6 +20,25 @@ module FactMine
       ].freeze
     ).freeze
 
+    JAVA_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[invoke getMethod getDeclaredMethod getField getDeclaredField forName].freeze,
+      meta_mids: %w[invoke setAccessible newInstance Proxy].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Lock AtomicReference].freeze,
+      io_bare: %w[throw].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook wait notify notifyAll submit execute].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:java, JAVA_EFFECT_LEXICON)
+
     class JavaSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[method_declaration].freeze
       CALL_NODE_KINDS = %w[method_invocation].freeze
