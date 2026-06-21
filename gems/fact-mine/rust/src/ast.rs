@@ -831,7 +831,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.leading_if_statement(node) {
             return self.normalize_leading_if_statement(node);
         }
-        if node.kind() == "elsif" {
+        if self.elsif_statement(node) {
             return Some(self.normalize_elsif(node));
         }
         if self.ensure_body_statement(node) {
@@ -893,6 +893,14 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         if self.command_call_statement(node) {
             return self.normalize_command_call_statement(node);
+        }
+        if let Some(target) = self
+            .normalization_adapter
+            .statement_wrapped_call_target(node, self.source)
+        {
+            if !self.same_ts_node(target, node) {
+                return self.normalize_call(target);
+            }
         }
         if self.yield_statement(node) {
             return Some(self.normalize_yield_statement(node));
@@ -1259,7 +1267,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             .or_else(|| self.block_child(target))
             .or_else(|| self.named_children(target).into_iter().last())?;
         let body = self.with_dynamic_scope(target, false, |normalizer| {
-            normalizer.normalize_body(body_node).map(dynamic_scope)
+            normalizer
+                .normalize_body(body_node)
+                .map(|node| normalizer.normalize_dynamic_scope(node))
         });
         let scope = self.scope(body, None, target);
         Some(self.wrap("LAMBDA", vec![Child::Node(Box::new(scope))], target))
@@ -1337,7 +1347,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.leading_if_statement(node) {
             return self.normalize_leading_if_statement(node);
         }
-        if node.kind() == "elsif" {
+        if self.elsif_statement(node) {
             return Some(self.normalize_elsif(node));
         }
         if self.ternary_statement(node) {
@@ -1482,6 +1492,19 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_elsif(&mut self, node: TreeSitterNode<'_>) -> Node {
+        if let Some(parts) = self.normalization_adapter.elsif_parts(node, self.source) {
+            let condition = optional_node(self.normalize_node(parts.condition));
+            let positive =
+                optional_node(parts.positive.and_then(|child| self.normalize_body(child)));
+            let negative = optional_node(
+                parts
+                    .negative
+                    .and_then(|child| self.normalize_else_or_branch(child)),
+            );
+
+            return self.wrap("IF", vec![condition, positive, negative], node);
+        }
+
         let condition = self
             .named_children(node)
             .into_iter()
@@ -1534,6 +1557,16 @@ impl<'source> TreeSitterNormalizer<'source> {
                     node,
                 ));
             }
+        }
+        if let Some(nodes) = self
+            .normalization_adapter
+            .else_body_nodes(node, self.source)
+        {
+            let body = self.normalize_body_nodes(nodes, node);
+            let children = body
+                .map(|node| vec![Child::Node(Box::new(node))])
+                .unwrap_or_default();
+            return Some(self.wrap(&kind_type(node.kind()), children, node));
         }
         if node.kind() != "else" {
             return self.normalize_body(node);
@@ -2014,7 +2047,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             direct_parts.or_else(|| self.infix_statement_parts(node))?;
         let left = self.normalize_node(left_raw);
         let right = self.normalize_node(right_raw);
-        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw)) {
+        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw))
+        {
             return Some(self.wrap(
                 "MATCH3",
                 vec![optional_node(right), optional_node(left)],
@@ -2047,7 +2081,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         let (left_raw, operator, right_raw) = self.infix_statement_parts(node)?;
         let left = self.normalize_node(left_raw);
         let right = self.normalize_node(right_raw);
-        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw)) {
+        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw))
+        {
             return Some(self.wrap(
                 "MATCH3",
                 vec![optional_node(right), optional_node(left)],
@@ -2539,7 +2574,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .named_field(block, "body")
                     .or_else(|| normalizer.block_child(block))
                     .unwrap_or(block);
-                normalizer.normalize_body(body_node).map(dynamic_scope)
+                normalizer
+                    .normalize_body(body_node)
+                    .map(|node| normalizer.normalize_dynamic_scope(node))
             })
         });
         let scope = self.scope(body, args, node);
@@ -2675,7 +2712,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
                 .unwrap_or(block);
-            normalizer.normalize_body(body_node).map(dynamic_scope)
+            normalizer
+                .normalize_body(body_node)
+                .map(|node| normalizer.normalize_dynamic_scope(node))
         });
         Some(self.wrap(
             "ITER",
@@ -2698,7 +2737,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .named_field(block, "body")
                     .or_else(|| normalizer.block_child(block))
                     .unwrap_or(block);
-                normalizer.normalize_body(body_node).map(dynamic_scope)
+                normalizer
+                    .normalize_body(body_node)
+                    .map(|node| normalizer.normalize_dynamic_scope(node))
             })
         });
         let scope = self.scope(body, args, node);
@@ -2722,7 +2763,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
                 .unwrap_or(block);
-            normalizer.normalize_body(body_node).map(dynamic_scope)
+            normalizer
+                .normalize_body(body_node)
+                .map(|node| normalizer.normalize_dynamic_scope(node))
         });
         let scope = self.scope(body, args, node);
         Some(self.wrap(
@@ -3209,9 +3252,14 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(self.wrap("YIELD", children, node));
         }
         let call_type = if args.is_empty() { "VCALL" } else { "FCALL" };
+        let list_source = if self.dynamic_syntax_enabled() || !self.command_call_statement(node) {
+            args_node.unwrap_or(node)
+        } else {
+            target
+        };
         let call_children = vec![
             Child::Symbol(node_text(function, self.source).to_string()),
-            list_or_nil(args, args_node.unwrap_or(node), self),
+            list_or_nil(args, list_source, self),
         ];
         let call = if let Some(source) = call_source.as_ref() {
             self.wrap_from_source_node(call_type, call_children, source)
@@ -3227,7 +3275,9 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
                 .unwrap_or(block);
-            normalizer.normalize_body(body_node).map(dynamic_scope)
+            normalizer
+                .normalize_body(body_node)
+                .map(|node| normalizer.normalize_dynamic_scope(node))
         });
         Some(self.wrap(
             "ITER",
@@ -3460,9 +3510,6 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_terminal_statement(&self, node: TreeSitterNode<'_>) -> Node {
         let text = node_text(node, self.source).trim();
-        if self.dynamic_syntax_enabled() && text == "yield" {
-            return self.wrap("YIELD", vec![Child::Nil], node);
-        }
         if dynamic_instance_variable_text(text) {
             return self.wrap("IVAR", vec![Child::String(text.to_string())], node);
         }
@@ -3623,7 +3670,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn normalize_concatenated_string_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
         let target = concatenated_string_target(node).unwrap_or(node);
         let mut normalized_children = Vec::new();
-        for child in self.named_children(target) {
+        let children = self
+            .normalization_adapter
+            .concatenated_string_children(target, self.source)
+            .unwrap_or_else(|| self.named_children(target));
+        for child in children {
             let normalized = self.normalize_node(child);
             normalized_children.push((child, normalized));
         }
@@ -5199,6 +5250,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 | "attribute"
                 | "member_expression"
                 | "member_access_expression"
+                | "dot_index_expression"
                 | "field"
                 | "field_access"
                 | "selector_expression"
@@ -5406,7 +5458,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn scalar_argument_list_value(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let text = node_text(node, self.source).trim();
-        if self.dynamic_syntax_enabled() && text == "yield" {
+        if self.dynamic_syntax_enabled() && self.identifier_kind(node.kind()) && text == "yield" {
             return Some(self.wrap("YIELD", vec![Child::Nil], node));
         }
         if text == "nil" {
@@ -5442,6 +5494,14 @@ impl<'source> TreeSitterNormalizer<'source> {
             self.wrap("VCALL", vec![Child::Symbol(name.to_string())], source)
         } else {
             self.wrap("LVAR", vec![Child::String(name.to_string())], source)
+        }
+    }
+
+    fn normalize_dynamic_scope(&self, node: Node) -> Node {
+        if self.dynamic_syntax_enabled() {
+            dynamic_scope(node)
+        } else {
+            node
         }
     }
 
@@ -6018,6 +6078,13 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalization_adapter.explicit_alternative(node)
     }
 
+    fn elsif_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "elsif"
+            || self
+                .normalization_adapter
+                .elsif_statement(node, self.source)
+    }
+
     fn case_value<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
         self.named_field(node, "value")
             .or_else(|| self.named_field(node, "subject"))
@@ -6110,7 +6177,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn call_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
-            "call" | "call_expression" | "method_call" | "method_call_expression"
+            "call"
+                | "call_expression"
+                | "function_call_expression"
+                | "method_call"
+                | "method_call_expression"
         )
     }
 
@@ -6210,7 +6281,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             .into_iter()
             .filter(|child| child.kind() != "comment")
             .collect::<Vec<_>>();
-        if children.len() == 1 && node_text(node, self.source) == node_text(children[0], self.source)
+        if children.len() == 1
+            && node_text(node, self.source) == node_text(children[0], self.source)
         {
             return self.single_dotted_body_node(children[0]);
         }

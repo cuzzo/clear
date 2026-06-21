@@ -121,13 +121,22 @@ impl AstNormalizationAdapter for PythonAstAdapter {
                 if statement_children.len() == 1 && statement_children[0].kind() == "ellipsis" {
                     return NamedChildrenAction::Drop;
                 }
+                if statement_children.len() == 1 && statement_children[0].kind() == "call" {
+                    let call_children = raw_named_children(statement_children[0]);
+                    if call_children
+                        .first()
+                        .map(|child| child.kind() == "identifier")
+                        .unwrap_or(false)
+                    {
+                        return NamedChildrenAction::Recurse(statement_children[0]);
+                    }
+                }
                 if statement_children.len() == 1
                     && matches!(
                         statement_children[0].kind(),
                         "assignment"
                             | "augmented_assignment"
                             | "binary_operator"
-                            | "call"
                             | "string"
                             | "subscript"
                     )
@@ -144,14 +153,19 @@ impl AstNormalizationAdapter for PythonAstAdapter {
             }
             if matches!(
                 child.kind(),
-                "yield"
-                    | "binary_operator"
-                    | "comparison_operator"
-                    | "call"
-                    | "attribute"
-                    | "string"
+                "yield" | "binary_operator" | "comparison_operator" | "attribute" | "string"
             ) {
                 return NamedChildrenAction::Recurse(child);
+            }
+            if child.kind() == "call" {
+                let call_children = raw_named_children(child);
+                if call_children
+                    .first()
+                    .map(|child| child.kind() == "identifier")
+                    .unwrap_or(false)
+                {
+                    return NamedChildrenAction::Recurse(child);
+                }
             }
         }
 
@@ -246,6 +260,25 @@ impl AstNormalizationAdapter for PythonAstAdapter {
 
     fn leading_function_body_kind(&self) -> &'static str {
         "block"
+    }
+
+    fn statement_wrapped_call_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "expression_statement" {
+            return None;
+        }
+        let raw_named = raw_named_children(node);
+        if raw_named.len() == 1
+            && raw_named[0].kind() == "call"
+            && node_text(raw_named[0], source) == node_text(node, source)
+        {
+            Some(raw_named[0])
+        } else {
+            None
+        }
     }
 
     fn leading_owner_target<'tree>(

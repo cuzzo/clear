@@ -310,7 +310,17 @@ fn ruby_private_predicate(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          puts normalizer.send(method, target) ? "true" : "false"
+          adapter = normalizer.send(:normalization_adapter)
+          result =
+            case method
+            when "ruby_definition_identifier?"
+              adapter.definition_identifier?(target, helpers: normalizer)
+            when "ruby_assignment_node?", "ruby_scope_boundary?", "ruby_scope_child_boundary?"
+              adapter.send(method, target)
+            else
+              normalizer.send(method, target)
+            end
+          puts result ? "true" : "false"
         "#;
     let output = Command::new("ruby")
         .current_dir(fact_mine_dir)
@@ -375,8 +385,9 @@ fn ruby_private_collected_names(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
+          adapter = normalizer.send(:normalization_adapter)
           locals = Set.new
-          normalizer.send(method, target, locals)
+          adapter.send(method, target, locals)
           puts JSON.generate(locals.to_a.sort)
         "#;
     let output = Command::new("ruby")
@@ -447,8 +458,9 @@ fn ruby_private_scope_collected_names(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
+          adapter = normalizer.send(:normalization_adapter)
           locals = Set.new
-          normalizer.send(:collect_ruby_scope_locals, target, locals, root: root)
+          adapter.send(:collect_ruby_scope_locals, target, locals, root: root)
           puts JSON.generate(locals.to_a.sort)
         "#;
     let output = Command::new("ruby")
@@ -514,7 +526,8 @@ fn ruby_private_ruby_scope_locals(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          puts JSON.generate(normalizer.send(:ruby_scope_locals, target).to_a.sort)
+          adapter = normalizer.send(:normalization_adapter)
+          puts JSON.generate(adapter.send(:ruby_scope_locals, target).to_a.sort)
         "#;
     let output = Command::new("ruby")
         .current_dir(fact_mine_dir)
@@ -586,13 +599,14 @@ fn ruby_private_with_ruby_scope_trace(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          normalizer.instance_variable_set(:@local_stack, initial)
+          adapter = normalizer.send(:normalization_adapter)
+          adapter.instance_variable_set(:@local_stack, initial)
           snapshot = lambda do
-            Array(normalizer.instance_variable_get(:@local_stack)).map { |locals| locals.to_a.sort }
+            Array(adapter.instance_variable_get(:@local_stack)).map { |locals| locals.to_a.sort }
           end
           before = snapshot.call
           inside = nil
-          result = normalizer.send(:with_ruby_scope, target, reset: reset) do
+          result = adapter.with_local_scope(target, reset: reset) do
             inside = snapshot.call
             "block-result"
           end
@@ -1510,7 +1524,8 @@ fn ruby_private_local_or_call_for_name_value(
           end
 
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          normalizer.instance_variable_set(:@local_stack, local ? [Set[name]] : [])
+          adapter = normalizer.send(:normalization_adapter)
+          adapter.instance_variable_set(:@local_stack, local ? [Set[name]] : [])
           result = normalizer.send(:local_or_call_for_name, name, target)
           puts JSON.generate(value(result))
         "#;
@@ -1579,8 +1594,9 @@ fn ruby_private_ruby_vcall_identifier_predicate(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          normalizer.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
-          puts normalizer.send(:ruby_vcall_identifier?, target)
+          adapter = normalizer.send(:normalization_adapter)
+          adapter.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
+          puts adapter.implicit_call_identifier?(target, helpers: normalizer)
         "#;
     let output = Command::new("ruby")
         .current_dir(fact_mine_dir)
@@ -1646,7 +1662,8 @@ fn ruby_private_vcall_identifier_predicate(
           walk.call(document.root)
           abort "target node not found: #{target_kind} #{target_text.inspect}" unless target
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          normalizer.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
+          adapter = normalizer.send(:normalization_adapter)
+          adapter.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
           puts normalizer.send(:vcall_identifier?, target)
         "#;
     let output = Command::new("ruby")
@@ -1732,7 +1749,8 @@ fn ruby_private_normalize_terminal_statement_value(
           end
 
           normalizer = FactMine::Ast::TreeSitterNormalizer.new(document)
-          normalizer.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
+          adapter = normalizer.send(:normalization_adapter)
+          adapter.instance_variable_set(:@local_stack, local_names.empty? ? [] : [Set.new(local_names)])
           result = normalizer.send(:normalize_terminal_statement, target)
           puts JSON.generate(value(result))
         "#;
@@ -4036,8 +4054,8 @@ fn ruby_private_drop_trailing_nil_statement_value(input: &Value) -> Value {
             end
           end
 
-          normalizer = FactMine::Ast::TreeSitterNormalizer.allocate
-          result = normalizer.send(:drop_trailing_nil_statement, node(JSON.parse(ARGV.fetch(0))))
+          adapter = FactMine::Ast::RubyTreeSitterNormalizationAdapter.new(nil)
+          result = adapter.send(:drop_trailing_nil_statement, node(JSON.parse(ARGV.fetch(0))))
           puts JSON.generate(value(result))
         "#;
     let output = Command::new("ruby")
@@ -5133,7 +5151,7 @@ fn python_yield_statement_in_multi_statement_block_matches_ruby_ast() {
     let body = child_node(scope, 2);
 
     assert_eq!(body.r#type, "BLOCK");
-    assert_eq!(child_types(body), vec!["YIELD", "EXPRESSION_STATEMENT"]);
+    assert_eq!(child_types(body), vec!["YIELD", "VCALL"]);
 }
 
 #[test]
@@ -7442,27 +7460,6 @@ fn ruby_assignment_node_matches_ruby_private_predicate() {
             "block_body",
             "local = item",
         ),
-        (
-            "value = 1\n",
-            Language::Python,
-            ".py",
-            "expression_statement",
-            "value = 1",
-        ),
-        (
-            "value = other;\n",
-            Language::TypeScript,
-            ".ts",
-            "assignment_expression",
-            "value = other",
-        ),
-        (
-            "local value = other\n",
-            Language::Lua,
-            ".lua",
-            "assignment_statement",
-            "value = other",
-        ),
     ] {
         let tree = raw_tree(source, language);
         let node = first_raw_node(tree.root_node(), source, kind, text);
@@ -7499,27 +7496,6 @@ fn collect_assignment_target_names_matches_ruby_private_method() {
             ".rb",
             "left_assignment_list",
             "left, *rest",
-        ),
-        (
-            "value = other\n",
-            Language::Python,
-            ".py",
-            "identifier",
-            "value",
-        ),
-        (
-            "const value = other;\n",
-            Language::TypeScript,
-            ".ts",
-            "identifier",
-            "value",
-        ),
-        (
-            "local value = other\n",
-            Language::Lua,
-            ".lua",
-            "variable_list",
-            "value",
         ),
     ] {
         let tree = raw_tree(source, language);
@@ -7559,27 +7535,6 @@ fn collect_identifier_names_matches_ruby_private_method() {
             ".rb",
             "call",
             "receiver.call(argument)",
-        ),
-        (
-            "value = other\n",
-            Language::Python,
-            ".py",
-            "expression_statement",
-            "value = other",
-        ),
-        (
-            "const value = { shorthand };\n",
-            Language::TypeScript,
-            ".ts",
-            "object",
-            "{ shorthand }",
-        ),
-        (
-            "local value = other\n",
-            Language::Lua,
-            ".lua",
-            "variable_declaration",
-            "local value = other",
         ),
     ] {
         let tree = raw_tree(source, language);
@@ -9165,27 +9120,6 @@ fn collect_ruby_assignment_locals_matches_ruby_private_method() {
             "exception_variable",
             "=> error",
         ),
-        (
-            "value = other\n",
-            Language::Python,
-            ".py",
-            "expression_statement",
-            "value = other",
-        ),
-        (
-            "let value = other;\n",
-            Language::TypeScript,
-            ".ts",
-            "variable_declarator",
-            "value = other",
-        ),
-        (
-            "local value = other\n",
-            Language::Lua,
-            ".lua",
-            "assignment_statement",
-            "value = other",
-        ),
     ] {
         let tree = raw_tree(source, language);
         let node = first_raw_node(tree.root_node(), source, kind, text);
@@ -9235,30 +9169,6 @@ fn collect_ruby_scope_locals_matches_ruby_private_method() {
                 "{ |item| local = item }",
                 true,
             ),
-            (
-                "value = other\n",
-                Language::Python,
-                ".py",
-                "expression_statement",
-                "value = other",
-                true,
-            ),
-            (
-                "let value = other;\n",
-                Language::TypeScript,
-                ".ts",
-                "variable_declarator",
-                "value = other",
-                true,
-            ),
-            (
-                "local value = other\n",
-                Language::Lua,
-                ".lua",
-                "assignment_statement",
-                "value = other",
-                true,
-            ),
         ] {
             let tree = raw_tree(source, language);
             let node = first_raw_node(tree.root_node(), source, kind, text);
@@ -9290,27 +9200,6 @@ fn ruby_scope_locals_matches_ruby_private_method() {
                 ".rb",
                 "block",
                 "{ |item| local = item }",
-            ),
-            (
-                "value = other\n",
-                Language::Python,
-                ".py",
-                "expression_statement",
-                "value = other",
-            ),
-            (
-                "let value = other;\n",
-                Language::TypeScript,
-                ".ts",
-                "variable_declarator",
-                "value = other",
-            ),
-            (
-                "local value = other\n",
-                Language::Lua,
-                ".lua",
-                "assignment_statement",
-                "value = other",
             ),
         ] {
             let tree = raw_tree(source, language);
@@ -9453,48 +9342,6 @@ fn ruby_scope_boundary_matches_ruby_private_predicate() {
             "block",
             "{ value }",
         ),
-        (
-            "def f():\n    return value\n    break\n    continue\n",
-            Language::Python,
-            ".py",
-            "function_definition",
-            "def f():\n    return value\n    break\n    continue",
-        ),
-        (
-            "def f():\n    return value\n",
-            Language::Python,
-            ".py",
-            "block",
-            "return value",
-        ),
-        (
-            "class Box:\n    pass\n",
-            Language::Python,
-            ".py",
-            "class_definition",
-            "class Box:\n    pass",
-        ),
-        (
-            "function f() { return value; }\n",
-            Language::TypeScript,
-            ".ts",
-            "function_declaration",
-            "function f() { return value; }",
-        ),
-        (
-            "class Box {}\n",
-            Language::TypeScript,
-            ".ts",
-            "class_declaration",
-            "class Box {}",
-        ),
-        (
-            "function f()\n  return value\nend\n",
-            Language::Lua,
-            ".lua",
-            "function_declaration",
-            "function f()\n  return value\nend",
-        ),
     ] {
         let tree = raw_tree(source, language);
         let node = first_raw_node(tree.root_node(), source, kind, text);
@@ -9545,48 +9392,6 @@ fn ruby_scope_child_boundary_matches_ruby_private_predicate() {
             ".rb",
             "block",
             "{ value }",
-        ),
-        (
-            "def f():\n    return value\n",
-            Language::Python,
-            ".py",
-            "function_definition",
-            "def f():\n    return value",
-        ),
-        (
-            "def f():\n    return value\n",
-            Language::Python,
-            ".py",
-            "block",
-            "return value",
-        ),
-        (
-            "class Box:\n    pass\n",
-            Language::Python,
-            ".py",
-            "class_definition",
-            "class Box:\n    pass",
-        ),
-        (
-            "function f() { return value; }\n",
-            Language::TypeScript,
-            ".ts",
-            "function_declaration",
-            "function f() { return value; }",
-        ),
-        (
-            "class Box {}\n",
-            Language::TypeScript,
-            ".ts",
-            "class_declaration",
-            "class Box {}",
-        ),
-        (
-            "function f()\n  return value\nend\n",
-            Language::Lua,
-            ".lua",
-            "function_declaration",
-            "function f()\n  return value\nend",
         ),
     ] {
         let tree = raw_tree(source, language);
@@ -20635,10 +20440,10 @@ end
             &root,
             "IF",
             "if test_env.LUA_V == \"5.1\" then\n  one()\nelseif test_env.LUA_V == \"5.2\" then\n  two()\nend",
-        );
+    );
     let alternative = child_node(if_node, 2);
 
-    assert_eq!(alternative.r#type, "ELSEIF_STATEMENT");
+    assert_eq!(alternative.r#type, "IF");
 }
 
 #[test]

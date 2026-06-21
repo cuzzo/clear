@@ -3,7 +3,9 @@ use super::super::{
     named_children, node_text, raw_named_children, LUA_LEADING_FUNCTION_WRAPPER_KINDS,
     LUA_LEADING_IF_WRAPPER_KINDS,
 };
-use super::base::{AstNormalizationAdapter, NamedChildrenAction, LUA_ASSIGNMENT_OPERATORS};
+use super::base::{
+    AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction, LUA_ASSIGNMENT_OPERATORS,
+};
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct LuaAstAdapter;
@@ -114,7 +116,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
             && children.len() == 1
             && matches!(
                 children[0].kind(),
-                "function_call" | "return_statement" | "variable_declaration"
+                "return_statement" | "variable_declaration"
             )
             && node_text(node, source) == node_text(children[0], source)
         {
@@ -234,6 +236,45 @@ impl AstNormalizationAdapter for LuaAstAdapter {
             return Some(node);
         }
         None
+    }
+
+    fn else_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "else_statement" {
+            return None;
+        }
+
+        let block = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "block")?;
+        Some(named_children(block))
+    }
+
+    fn elsif_statement(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.kind() == "elseif_statement"
+    }
+
+    fn elsif_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<ConditionalBranchParts<'tree>> {
+        if node.kind() != "elseif_statement" {
+            return None;
+        }
+
+        let named = named_children(node);
+        Some(ConditionalBranchParts {
+            condition: *named.first()?,
+            positive: named.iter().copied().find(|child| child.kind() == "block"),
+            negative: named
+                .iter()
+                .copied()
+                .find(|child| matches!(child.kind(), "elseif_statement" | "else_statement")),
+        })
     }
 
     fn array_literal_target<'tree>(
@@ -440,6 +481,11 @@ impl AstNormalizationAdapter for LuaAstAdapter {
 
     fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {
         node.kind() == "field"
+            || (node.kind() == "dot_index_expression"
+                && node
+                    .parent()
+                    .map(|parent| parent.kind() == "binary_expression")
+                    .unwrap_or(false))
     }
 
     fn no_paren_string_argument_content<'tree>(
@@ -457,6 +503,35 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         raw_named_children(node)
             .into_iter()
             .find(|child| child.kind() == "string_content")
+    }
+
+    fn concatenated_string_children<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        let named = named_children(node);
+        let call = if node.kind() == "function_call" {
+            node
+        } else if node.kind() == "block" && named.len() == 1 && named[0].kind() == "function_call" {
+            named[0]
+        } else {
+            return None;
+        };
+
+        if lua_no_paren_string_call(call, source) {
+            Some(named_children(call))
+        } else {
+            None
+        }
+    }
+
+    fn call_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        if node.kind() != "function_call" {
+            return false;
+        }
+
+        !lua_no_paren_string_call(node, source)
     }
 
     fn assignment_operators(&self) -> &'static [&'static str] {
@@ -477,4 +552,24 @@ fn lua_single_assignment_block_child(node: TreeSitterNode<'_>, source: &str) -> 
     grandparent.kind() == "block"
         && node_text(grandparent, source) == node_text(parent, source)
         && raw_named_children(grandparent).len() == 1
+}
+
+fn lua_no_paren_string_call(node: TreeSitterNode<'_>, source: &str) -> bool {
+    if node.kind() != "function_call" {
+        return false;
+    }
+
+    named_children(node)
+        .iter()
+        .find(|child| child.kind() == "arguments")
+        .and_then(|args| {
+            named_children(*args)
+                .first()
+                .copied()
+                .map(|string| (*args, string))
+        })
+        .map(|(args, string)| {
+            string.kind() == "string" && node_text(args, source) == node_text(string, source)
+        })
+        .unwrap_or(false)
 }

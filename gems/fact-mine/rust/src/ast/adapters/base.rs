@@ -35,6 +35,12 @@ pub(crate) enum NamedChildrenAction<'tree> {
     Replace(Vec<TreeSitterNode<'tree>>),
 }
 
+pub(crate) struct ConditionalBranchParts<'tree> {
+    pub(crate) condition: TreeSitterNode<'tree>,
+    pub(crate) positive: Option<TreeSitterNode<'tree>>,
+    pub(crate) negative: Option<TreeSitterNode<'tree>>,
+}
+
 pub(crate) trait AstNormalizationAdapter: Sync {
     fn ruby(&self) -> bool {
         false
@@ -652,6 +658,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         children.len() == 1 && concatenated_string_target(children[0]).is_some()
     }
 
+    fn concatenated_string_children<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
     fn zero_child_identifier_call(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
     }
@@ -844,6 +858,26 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         named_children(node)
             .into_iter()
             .find(|child| matches!(child.kind(), "else" | "else_clause" | "else_statement"))
+    }
+
+    fn elsif_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn elsif_parts<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<ConditionalBranchParts<'tree>> {
+        None
+    }
+
+    fn else_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
     }
 
     fn named_field<'tree>(
