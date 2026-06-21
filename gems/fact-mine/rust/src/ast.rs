@@ -820,6 +820,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         if node.kind() == "comment" {
             return None;
         }
+        if let Some(name) = self
+            .normalization_adapter
+            .local_binding_name(node, self.source)
+        {
+            return Some(self.wrap("LASGN", vec![Child::String(name), Child::Nil], node));
+        }
         if self.assignment_lhs(node) {
             return self.normalize_assignment_lhs(node);
         }
@@ -1091,7 +1097,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         let name = self.function_name(node)?;
-        let args = self.normalize_parameters(self.parameters_child(node));
+        let args = self.normalize_function_parameters(node);
         let body = self.with_dynamic_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
@@ -1138,7 +1144,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .singleton_receiver(node)
             .and_then(|child| self.normalize_node(child))
             .unwrap_or_else(|| self.wrap("SELF", Vec::new(), node));
-        let args = self.normalize_parameters(self.parameters_child(node));
+        let args = self.normalize_function_parameters(node);
         let body = self.with_dynamic_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
@@ -3874,13 +3880,33 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
     }
 
+    fn normalize_function_parameters(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if !self.normalization_adapter.normalize_default_parameters() {
+            return None;
+        }
+        if let Some(params) = self
+            .normalization_adapter
+            .function_parameter_nodes(node, self.source)
+        {
+            return self.normalize_parameter_nodes(params, node);
+        }
+        self.normalize_parameters(self.parameters_child(node))
+    }
+
     fn normalize_parameters(&mut self, node: Option<TreeSitterNode<'_>>) -> Option<Node> {
         if !self.normalization_adapter.normalize_default_parameters() {
             return None;
         }
         let node = node?;
-        let pre_init = self
-            .named_children(node)
+        self.normalize_parameter_nodes(self.named_children(node), node)
+    }
+
+    fn normalize_parameter_nodes(
+        &mut self,
+        nodes: Vec<TreeSitterNode<'_>>,
+        source: TreeSitterNode<'_>,
+    ) -> Option<Node> {
+        let pre_init = nodes
             .into_iter()
             .filter_map(|param| self.normalize_parameter_init(param))
             .map(|node| Child::Node(Box::new(node)))
@@ -3888,7 +3914,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if pre_init.is_empty() {
             None
         } else {
-            Some(self.wrap("ARGS", pre_init, node))
+            Some(self.wrap("ARGS", pre_init, source))
         }
     }
 
@@ -4200,6 +4226,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             return false;
         }
         if self.literal_fragment_assignment_context(node) {
+            return false;
+        }
+        if self
+            .normalization_adapter
+            .non_local_assignment_lhs(node, self.source)
+        {
             return false;
         }
         node.next_sibling()

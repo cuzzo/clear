@@ -195,6 +195,18 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         NamedChildrenAction::Default
     }
 
+    fn non_local_assignment_lhs(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.parent()
+            .map(|parent| parent.kind() == "keyword_argument")
+            .unwrap_or(false)
+    }
+
+    fn local_binding_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        (node.kind() == "as_pattern_target")
+            .then(|| node_text(node, source).to_string())
+            .filter(|name| bare_identifier_text(name))
+    }
+
     fn nested_class_body_child<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -293,10 +305,7 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         let statement = self
             .exact_single_named_child(node, &["for_statement"], source)
             .unwrap_or(node);
-        let text = node_text(statement, source).trim_start();
-        if statement.kind() != "for_statement"
-            && !(statement.kind() == "block" && text.starts_with("for "))
-        {
+        if statement.kind() != "for_statement" {
             return None;
         }
 
@@ -320,10 +329,7 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         let statement = self
             .exact_single_named_child(node, &["with_statement"], source)
             .unwrap_or(node);
-        let text = node_text(statement, source).trim_start();
-        if statement.kind() != "with_statement"
-            && !(statement.kind() == "block" && text.starts_with("with "))
-        {
+        if statement.kind() != "with_statement" {
             return None;
         }
 

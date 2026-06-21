@@ -244,4 +244,12 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
     fn assignment_operators(&self) -> &'static [&'static str] {
         TYPESCRIPT_ASSIGNMENT_OPERATORS
     }
+
+    fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
+        match kind {
+            "for_in_statement" | "for_statement" => Some("FOR"),
+            "while_statement" => Some("WHILE"),
+            _ => None,
+        }
+    }
 }

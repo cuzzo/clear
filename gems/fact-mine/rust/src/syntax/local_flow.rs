@@ -1649,6 +1649,7 @@ impl LocalFlow {
                     writes.push(name.clone());
                 }
             }
+            writes.extend(normalized_control_writes(child));
         });
         writes.extend(textual_local_writes(&ast::slice(node, &self.lines)));
         writes.into_iter().collect()
@@ -1770,8 +1771,34 @@ fn textual_local_reads(
         .filter(|identifier| local_names.contains(&identifier.name))
         .filter(|identifier| !writes.contains(&identifier.name))
         .filter(|identifier| !member_name(source, identifier.start))
-        .filter(|identifier| !call_name(source, identifier.end))
         .map(|identifier| identifier.name)
+        .collect()
+}
+
+fn normalized_control_writes(node: &Node) -> Vec<String> {
+    match node.r#type.as_str() {
+        "FOR" => node
+            .children
+            .first()
+            .and_then(ast::node)
+            .into_iter()
+            .flat_map(normalized_target_names)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn normalized_target_names(node: &Node) -> Vec<String> {
+    if matches!(node.r#type.as_str(), "LVAR" | "DVAR" | "LASGN" | "DASGN") {
+        return local_read_name(node)
+            .filter(|name| simple_identifier(name))
+            .into_iter()
+            .collect();
+    }
+    node.children
+        .iter()
+        .filter_map(ast::node)
+        .flat_map(normalized_target_names)
         .collect()
 }
 
@@ -1951,11 +1978,6 @@ fn simple_identifier(name: &str) -> bool {
 fn member_name(source: &str, start: usize) -> bool {
     let prefix = source[..start].trim_end();
     prefix.ends_with('.') || prefix.ends_with("->") || prefix.ends_with("::")
-}
-
-fn call_name(source: &str, end: usize) -> bool {
-    let suffix = source[end..].trim_start();
-    suffix.starts_with('(')
 }
 
 fn method_metadata(document: &Document) -> BTreeMap<Span, MethodMetadata> {

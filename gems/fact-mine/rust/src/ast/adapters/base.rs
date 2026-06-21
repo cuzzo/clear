@@ -801,6 +801,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             .unwrap_or(false)
     }
 
+    fn non_local_assignment_lhs(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn local_binding_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
     fn assignment_operator(&self, text: &str) -> bool {
         self.assignment_operators().contains(&text)
     }
@@ -967,6 +975,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn normalize_block_parameters(&self) -> bool {
         false
+    }
+
+    fn function_parameter_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
     }
 
     fn boolean_statement_target<'tree>(

@@ -10,6 +10,7 @@ use std::path::Path;
 
 pub(crate) struct StatelessSyntaxPass<'a> {
     file: &'a Path,
+    lines: &'a [String],
     normalized_root: &'a Node,
     behavior: &'a dyn NormalizedLanguageBehavior,
 }
@@ -17,18 +18,20 @@ pub(crate) struct StatelessSyntaxPass<'a> {
 impl<'a> StatelessSyntaxPass<'a> {
     pub(crate) fn normalized(
         file: &'a Path,
+        lines: &'a [String],
         normalized_root: &'a Node,
         behavior: &'a dyn NormalizedLanguageBehavior,
     ) -> Self {
         Self {
             file,
+            lines,
             normalized_root,
             behavior,
         }
     }
 
     pub(crate) fn run(&self) -> normalized_extractor::NormalizedFacts {
-        normalized_extractor::extract(self.file, self.normalized_root, self.behavior)
+        normalized_extractor::extract(self.file, self.lines, self.normalized_root, self.behavior)
     }
 }
 

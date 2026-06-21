@@ -78,15 +78,20 @@ fn parse_normalized_file(
 
     let started = Instant::now();
     let behavior = normalized_behavior::behavior(language);
+    let lines = parsed
+        .source
+        .lines()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     let mut facts =
-        passes::StatelessSyntaxPass::normalized(&parsed.file, &normalized_root, behavior).run();
+        passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
+            .run();
     let metadata =
         passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, language, behavior)
             .enrich(&mut facts);
     profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
 
     let started = Instant::now();
-    let lines = parsed.source.lines().map(ToString::to_string).collect();
     profile_parse_phase(profile, file_label, "lines", started.elapsed());
 
     let started = Instant::now();
