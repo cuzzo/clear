@@ -33,6 +33,7 @@ group :development do
   gem 'tapioca', require: false
 
   # Local path while nil-kill is extracted as a standalone gem.
+  gem 'fact-mine', path: 'gems/fact-mine', require: false
   gem 'decomplex', path: 'gems/decomplex', require: false
   gem 'nil-kill', path: 'gems/nil-kill', require: false
   gem 'auto-type', path: 'gems/auto-type', require: false

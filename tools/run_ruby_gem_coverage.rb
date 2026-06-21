@@ -21,7 +21,7 @@ SimpleCov.print_error_status = false
 SimpleCov.minimum_coverage 0
 SimpleCov.start do
   enable_coverage :branch
-  track_files "gems/{auto-type,boobytrap,decomplex,espalier,nil-kill,slopcop}/lib/**/*.rb"
+  track_files "gems/{auto-type,boobytrap,decomplex,espalier,fact-mine,nil-kill,slopcop}/lib/**/*.rb"
   add_filter "/vendor/"
   add_filter "/spec/"
   add_filter "/test/"
@@ -30,6 +30,7 @@ SimpleCov.start do
   add_group "boobytrap", "gems/boobytrap/lib"
   add_group "decomplex", "gems/decomplex/lib"
   add_group "espalier", "gems/espalier/lib"
+  add_group "fact-mine", "gems/fact-mine/lib"
   add_group "nil-kill", "gems/nil-kill/lib"
   add_group "slopcop", "gems/slopcop/lib"
 
@@ -56,6 +57,7 @@ minitest_files = Dir[
   "gems/boobytrap/test/**/*_test.rb",
   "gems/decomplex/test/**/*_test.rb",
   "gems/espalier/test/**/*_test.rb",
+  "gems/fact-mine/test/**/*_test.rb",
   "gems/slopcop/test/**/*_test.rb",
 ].sort
 coverage_owned_minitest_files, simplecov_minitest_files =

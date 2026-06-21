@@ -9,6 +9,13 @@ PATH
   remote: gems/decomplex
   specs:
     decomplex (0.0.1)
+      fact-mine (>= 0.0.1)
+      tree_sitter (~> 0.1)
+
+PATH
+  remote: gems/fact-mine
+  specs:
+    fact-mine (0.0.1)
       tree_sitter (~> 0.1)
 
 PATH
@@ -293,6 +300,7 @@ DEPENDENCIES
   csv
   debride
   decomplex!
+  fact-mine!
   flog
   minitest (~> 5.25)
   msgpack (~> 1.7, >= 1.7.2)
