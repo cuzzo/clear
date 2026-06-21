@@ -117,6 +117,19 @@ module FactMine
         text.to_s.strip[/\bfun\s+([A-Za-z_]\w*)\s*\(/, 1] || super
       end
 
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+
+        "public"
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip.sub(/=.*\z/, "").strip
+        name = text[/\A(?:vararg\s+)?([A-Za-z_]\w*)\s*:/, 1]
+        name || super
+      end
+
       def case_predicate_text(text)
         text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
       end

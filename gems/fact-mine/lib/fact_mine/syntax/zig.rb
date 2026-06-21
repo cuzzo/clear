@@ -155,6 +155,27 @@ module FactMine
         name ? { name: name, kind: "struct" } : nil
       end
 
+      def body_owner_for_function(name, node, current_owner:, file_owner:)
+        return nil unless current_owner == file_owner
+        return nil unless node.text.to_s.match?(/\A(?:pub\s+)?fn\s+#{Regexp.escape(name)}\b/)
+        return nil unless node.text.to_s.include?("return struct")
+
+        { name: name, kind: "struct" }
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "CONTAINER_FIELD"
+
+        field = node.children.find { |child| child.respond_to?(:type) && child.type.to_s == "LVAR" }
+        return nil unless field
+
+        name = field.children.first.to_s
+        type = node.text.to_s[/\A#{Regexp.escape(name)}\s*:\s*([^=,\n]+)/, 1].to_s.strip
+        return nil if name.empty? || type.empty?
+
+        { "field" => name, "type" => type }
+      end
+
       def owner_for_function(_name, node, current_owner:, file_owner:)
         return current_owner unless current_owner == file_owner
 
@@ -169,6 +190,16 @@ module FactMine
 
       def function_name_from_text(text)
         text.to_s.strip[/\A(?:pub\s+)?fn\s+([A-Za-z_]\w*)\b/, 1] || super
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip
+        if text.include?(":")
+          name = text.split(":", 2).first.to_s.strip
+          return name if name.match?(/\A[A-Za-z_]\w*\z/)
+        end
+
+        super
       end
 
       def case_pattern_values(pattern_values)

@@ -219,6 +219,13 @@ impl AstNormalizationAdapter for RubyAstAdapter {
         function
     }
 
+    fn inline_def_wrapper_mid(&self, text: &str) -> bool {
+        matches!(
+            text,
+            "public" | "protected" | "private" | "private_class_method" | "module_function"
+        )
+    }
+
     fn bare_const_call_function(&self, function: TreeSitterNode<'_>) -> bool {
         matches!(
             function.kind(),

@@ -152,6 +152,14 @@ module FactMine
         name[/\A([A-Z]\w*)_/, 1] || current_owner
       end
 
+      def receiver_aliases_for_function(node)
+        params = parameter_list_source(node.text.to_s)
+        first = params.split(",", 2).first.to_s.strip
+        name = first[/\b([A-Za-z_]\w*)\s*\z/, 1]
+        pointer = first.include?("*")
+        name && pointer ? { name => "self" } : {}
+      end
+
       def function_visibility(name, node, lines:)
         return "private" if node.text.to_s.strip.start_with?("static ")
 

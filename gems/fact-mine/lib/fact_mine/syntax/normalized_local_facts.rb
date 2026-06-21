@@ -63,9 +63,10 @@ module FactMine
       end
 
       def local_owner(owner)
-        file_owner = File.basename(@file, File.extname(@file)).split(/[_-]/).map(&:capitalize).join
+        basename = File.basename(@file, File.extname(@file))
+        file_owner = basename.split(/[_-]/).map(&:capitalize).join
         owner_name = owner.to_s
-        return "(top-level)" if owner_name == file_owner
+        return "(top-level)" if owner_name == file_owner || owner_name == basename
 
         owner_name.sub(/\A#{Regexp.escape(file_owner)}::/, "")
       end
@@ -125,6 +126,13 @@ module FactMine
       def local_reads(node, local_names)
         reads = []
         walk(node).each do |child|
+          next if import_context?(child)
+
+          if callable_local_read?(child, local_names)
+            reads << scalar_child(child, 0).to_s
+            next
+          end
+
           name = local_identifier(child)
           next unless name && local_names.include?(name)
           next if assignment_target?(child)
@@ -140,8 +148,19 @@ module FactMine
         walk(node).each do |child|
           case node_type(child)
           when "LASGN", "DASGN"
+            next if keyword_argument_assignment?(child)
+
             name = scalar_child(child, 0).to_s
             writes << name unless name.empty?
+          when "IASGN", "GASGN"
+            name = scalar_child(child, 0).to_s.delete_prefix("@").delete_prefix("$")
+            writes << name unless name.empty?
+          when "LVAR", "DVAR"
+            name = scalar_child(child, 0).to_s
+            writes << name if for_target?(child) && !name.empty?
+          when "AS_PATTERN_TARGET"
+            name = compact_text(child)
+            writes << name if simple_local_name?(name)
           when "MASGN"
             writes.concat(node_children(child).flat_map { |grandchild| local_writes(grandchild) })
           end
@@ -150,6 +169,8 @@ module FactMine
       end
 
       def assignment_target?(node)
+        return true if node_type(node) == "AS_PATTERN_TARGET"
+        return true if for_target?(node)
         %w[LASGN DASGN].include?(node_type(parent_of(node))) &&
           scalar_child(parent_of(node), 0).to_s == local_identifier(node).to_s
       end
@@ -166,6 +187,35 @@ module FactMine
         else
           false
         end
+      end
+
+      def callable_local_read?(node, local_names)
+        return false unless %w[FCALL VCALL].include?(node_type(node))
+
+        name = scalar_child(node, 0).to_s
+        !name.empty? && local_names.include?(name)
+      end
+
+      def keyword_argument_assignment?(node)
+        node_type(parent_of(node)) == "KEYWORD_ARGUMENT"
+      end
+
+      def for_target?(node)
+        parent = parent_of(node)
+        return false unless parent && node_type(parent) == "FOR"
+
+        child_node(parent, 0).equal?(node)
+      end
+
+      def import_context?(node)
+        current = node
+        while current
+          type = node_type(current)
+          return true if type.start_with?("IMPORT")
+
+          current = parent_of(current)
+        end
+        false
       end
 
       def structural_boundaries(statement_rows)
@@ -416,9 +466,16 @@ module FactMine
         case node_type(node)
         when "LVAR", "DVAR"
           scalar_child(node, 0).to_s
+        when "WITH_CLAUSE"
+          text = compact_text(node)
+          text if node_children(node).empty? && simple_local_name?(text)
         else
           nil
         end
+      end
+
+      def simple_local_name?(name)
+        name.to_s.match?(/\A[A-Za-z_]\w*\z/)
       end
 
       def normalized_node?(node)

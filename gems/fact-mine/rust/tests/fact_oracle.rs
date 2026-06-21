@@ -180,7 +180,9 @@ fn source_fixture_name(path: &Path) -> Result<String> {
             .and_then(|parent| parent.file_name())
             .and_then(|name| name.to_str())
             .map(str::to_string)
-            .with_context(|| format!("missing general source fixture name for {}", path.display()));
+            .with_context(|| {
+                format!("missing general source fixture name for {}", path.display())
+            });
     }
 
     file_stem(path)

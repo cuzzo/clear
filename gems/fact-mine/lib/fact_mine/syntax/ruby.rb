@@ -29,6 +29,10 @@ module FactMine
       method_obj_mids: %w[method public_method instance_method].freeze,
       io_consts: %w[File IO Dir FileUtils Open3 Socket TCPSocket UDPSocket
                     TCPServer UNIXSocket Tempfile Pathname Marshal].freeze,
+      io_pairs: {
+        "Net" => %w[get post post_form start],
+        "URI" => %w[open]
+      }.freeze,
       io_bare: %w[puts print warn gets readline readlines system
                   exec spawn fork sleep open abort exit exit!].freeze,
       dir_context: %w[pwd getwd home].freeze,
@@ -42,6 +46,7 @@ module FactMine
       context_bare: %w[rand srand].freeze,
       callback_set: %w[transaction synchronize lock with_lock unlock
                        mutex atomic reentrant subscribe callback hook].freeze,
+      callback_requires_block: false,
       core_consts: %w[String Symbol Integer Float Numeric Rational Complex
                       Array Hash Set Range Struct Object BasicObject Kernel
                       Module Class Comparable Enumerable Enumerator Proc Method
@@ -965,6 +970,29 @@ module FactMine
         "self.#{message}"
       end
 
+      def emit_index_call_site?(_node, _call)
+        true
+      end
+
+      def emit_index_assignment_mutation?(_node, _field)
+        true
+      end
+
+      def emit_attribute_assignment_mutation?(_node, field)
+        field.to_s != "[]"
+      end
+
+      def preserve_constant_receiver_call?(call)
+        receiver = call.fetch("receiver").to_s
+        message = call.fetch("message").to_s
+        base = receiver.sub(/\A::/, "").split("::").first
+        return true if base == "Dir" && RUBY_EFFECT_LEXICON.dir_context.include?(message)
+        return true if RUBY_EFFECT_LEXICON.context_pairs[base]&.include?(message)
+        return true if RUBY_EFFECT_LEXICON.io_pairs.to_h[base]&.include?(message)
+
+        false
+      end
+
       def function_visibility(name, _node, lines:)
         return "private" if name.start_with?("#")
 
@@ -1007,6 +1035,32 @@ module FactMine
           << []= add append clear collect! compact! concat delete delete_if fill filter!
           keep_if merge! move push reject! replace shift store unshift update write
         ].include?(message) || (message.to_s.end_with?("!") && !%w[!= !~].include?(message))
+      end
+
+      def branch_state_ref(_node, parts, default_ref:)
+        default_ref
+      end
+
+      def protocol_read_label_from_state(read)
+        receiver = read.receiver.to_s
+        field = read.field.to_s.delete_prefix("@").delete_prefix("$").delete_suffix("?")
+        return field if receiver.empty? || receiver == "self"
+
+        "#{receiver}.#{field}"
+      end
+
+      def protocol_read_label_from_call(call)
+        return nil unless call.receiver.to_s == "self"
+
+        call.message.to_s
+      end
+
+      def protocol_write_label(write)
+        field = write.field.to_s.delete_prefix("@").delete_prefix("$")
+        receiver = write.receiver.to_s
+        return field if receiver.empty? || receiver == "self"
+
+        "#{receiver}.#{field}"
       end
 
       def normalize_comparison_source(source)

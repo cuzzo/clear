@@ -466,10 +466,25 @@ module FactMine
         call.fetch("receiver") == "self" && %w[break continue len open value].include?(call.fetch("message"))
       end
 
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def ternary_children_conditional?(_node)
+        false
+      end
+
       def function_visibility(name, node, lines:)
         return "private" if name.start_with?("_") && !name.start_with?("__")
 
         super
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip.sub(/=.*\z/, "").strip
+        text = text.sub(/\A\*+/, "")
+        name = text[/\A([A-Za-z_]\w*)\s*:/, 1]
+        name || super
       end
     end
 

@@ -146,6 +146,14 @@ module FactMine
         nil
       end
 
+      def special_statement?(_node)
+        false
+      end
+
+      def normalize_special_statement(_node, helpers:)
+        nil
+      end
+
       def typed_assignment_statement?(_node)
         false
       end
@@ -230,6 +238,10 @@ module FactMine
       end
 
       def inline_def_source?(_source)
+        false
+      end
+
+      def inline_def_wrapper_mid?(_text)
         false
       end
 

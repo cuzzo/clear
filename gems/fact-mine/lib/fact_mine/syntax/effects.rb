@@ -5,9 +5,9 @@ module FactMine
     SemanticEffectSite = Struct.new(:kind, :detail, :file, :function, :owner, :line, :span,
                                     keyword_init: true)
     EffectLexicon = Struct.new(
-      :dispatch_mids, :meta_mids, :method_obj_mids, :io_consts,
+      :dispatch_mids, :meta_mids, :method_obj_mids, :io_consts, :io_pairs,
       :io_bare, :dir_context, :context_pairs, :context_bare,
-      :callback_set, :core_consts,
+      :callback_set, :callback_requires_block, :core_consts,
       keyword_init: true
     )
 
@@ -40,6 +40,8 @@ module FactMine
 
         by_operation = {}
         document.call_sites.each do |call|
+          next if local_self_call?(document, call)
+
           site = semantic_effect_site_for_call(call)
           next unless site
 
@@ -86,6 +88,10 @@ module FactMine
         return semantic_effect_site_from_call(call, :context_dependency, "Dir.#{message}") \
           if base == "Dir" && lexicon.dir_context.include?(message)
 
+        if lexicon.io_pairs.to_h[base]&.include?(message)
+          return semantic_effect_site_from_call(call, :hidden_io, "#{receiver.sub(/\A::/, "")}.#{message}")
+        end
+
         if lexicon.io_consts.include?(base)
           return semantic_effect_site_from_call(call, :hidden_io, "#{receiver.sub(/\A::/, "")}.#{message}")
         end
@@ -93,6 +99,16 @@ module FactMine
 
         if lexicon.context_pairs[base]&.include?(message)
           return semantic_effect_site_from_call(call, :context_dependency, "#{base}.#{message}")
+        end
+        if receiver.include?(".")
+          receiver_base, receiver_message = receiver.sub(/\A::/, "").split(".", 2)
+          if lexicon.context_pairs[receiver_base]&.include?(receiver_message)
+            return semantic_effect_site_from_call(
+              call,
+              :context_dependency,
+              "#{receiver_base}.#{receiver_message}"
+            )
+          end
         end
 
         nil
@@ -116,9 +132,12 @@ module FactMine
       end
 
       def effect_callback_call?(call, message)
-        (call.block || call.arguments.to_a.any? { |arg| arg.to_s.start_with?("&") }) &&
-          effect_callback_name?(message) &&
-          !effect_lexicon.meta_mids.include?(message)
+        return false unless effect_callback_name?(message)
+        return false if effect_lexicon.meta_mids.include?(message)
+
+        effect_lexicon.callback_requires_block == false ||
+          call.block ||
+          call.arguments.to_a.any? { |arg| arg.to_s.start_with?("&") }
       end
 
       def effect_callback_name?(message)
@@ -150,6 +169,15 @@ module FactMine
         )
       end
 
+      def local_self_call?(document, call)
+        return false unless call.receiver.to_s == "self"
+        return false unless document.respond_to?(:function_defs)
+
+        document.function_defs.any? do |function_def|
+          function_def.owner == call.owner && function_def.name.to_s == call.message.to_s
+        end
+      end
+
       def semantic_effect_site(document, node, stack, kind, detail)
         SemanticEffectSite.new(
           kind: kind,
@@ -174,11 +202,13 @@ module FactMine
       meta_mids: [].freeze,
       method_obj_mids: [].freeze,
       io_consts: [].freeze,
+      io_pairs: {}.freeze,
       io_bare: [].freeze,
       dir_context: [].freeze,
       context_pairs: {}.freeze,
       context_bare: [].freeze,
       callback_set: [].freeze,
+      callback_requires_block: true,
       core_consts: [].freeze
     ).freeze
 

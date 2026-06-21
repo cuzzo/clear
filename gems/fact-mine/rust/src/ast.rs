@@ -846,6 +846,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.leading_case_statement(node) {
             return self.normalize_leading_case_statement(node);
         }
+        if self.special_statement(node) {
+            return self.normalize_special_statement(node);
+        }
         if self.leading_loop_statement(node) {
             return self.normalize_leading_loop_statement(node);
         }
@@ -1358,6 +1361,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         if self.leading_case_statement(node) {
             return self.normalize_leading_case_statement(node);
+        }
+        if self.special_statement(node) {
+            return self.normalize_special_statement(node);
         }
         if self.leading_loop_statement(node) {
             return self.normalize_leading_loop_statement(node);
@@ -2524,11 +2530,11 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.zero_child_identifier_call(node) {
             return Some(self.normalize_zero_child_call(node));
         }
-        if self.call_block(node).is_some() {
-            return self.normalize_call_with_block(node);
-        }
         if self.visibility_inline_def_call(node) {
             return self.normalize_visibility_inline_def(node);
+        }
+        if self.call_block(node).is_some() {
+            return self.normalize_call_with_block(node);
         }
         self.normalize_call_without_block(node, None)
     }
@@ -3252,11 +3258,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(self.wrap("YIELD", children, node));
         }
         let call_type = if args.is_empty() { "VCALL" } else { "FCALL" };
-        let list_source = if self.dynamic_syntax_enabled() || !self.command_call_statement(node) {
-            args_node.unwrap_or(node)
-        } else {
-            target
-        };
+        let list_source = args_node.unwrap_or(node);
         let call_children = vec![
             Child::Symbol(node_text(function, self.source).to_string()),
             list_or_nil(args, list_source, self),
@@ -4331,6 +4333,51 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalize_case(target)
     }
 
+    fn special_statement(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .normalized_for_parts(node, self.source)
+            .is_some()
+            || self
+                .normalization_adapter
+                .normalized_with_parts(node, self.source)
+                .is_some()
+    }
+
+    fn normalize_special_statement(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        if let Some((target, iterable, body)) = self
+            .normalization_adapter
+            .normalized_for_parts(node, self.source)
+        {
+            let target = self.normalize_node(target);
+            let iterable = self.normalize_node(iterable);
+            let body = body.and_then(|body| self.normalize_body(body));
+            return Some(self.wrap(
+                "FOR",
+                vec![
+                    optional_node(target),
+                    optional_node(iterable),
+                    optional_node(body),
+                ],
+                node,
+            ));
+        }
+
+        if let Some((clause, body)) = self
+            .normalization_adapter
+            .normalized_with_parts(node, self.source)
+        {
+            let clause = clause.and_then(|clause| self.normalize_node(clause));
+            let body = body.and_then(|body| self.normalize_body(body));
+            return Some(self.wrap(
+                "WITH",
+                vec![optional_node(clause), optional_node(body)],
+                node,
+            ));
+        }
+
+        None
+    }
+
     fn leading_loop_statement(&self, node: TreeSitterNode<'_>) -> bool {
         self.normalization_adapter
             .leading_loop_statement(node, self.source)
@@ -4516,7 +4563,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         let Some(message) = self.named_children(node).into_iter().next() else {
             return false;
         };
-        if !inline_def_wrapper_mid(node_text(message, self.source)) {
+        if !self
+            .normalization_adapter
+            .inline_def_wrapper_mid(node_text(message, self.source))
+        {
             return false;
         }
         self.named_children(node)
@@ -4539,7 +4589,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             .normalization_adapter
             .inline_def_function_text_source(function, self.source);
         let function_text = node_text(function_text_source, self.source);
-        inline_def_wrapper_mid(function_text) && node_text(node, self.source).contains("def ")
+        self.normalization_adapter
+            .inline_def_wrapper_mid(function_text)
+            && node_text(node, self.source).contains("def ")
     }
 
     fn inline_def_from_argument_list(&mut self, args: Option<TreeSitterNode<'_>>) -> Option<Node> {
@@ -6544,13 +6596,6 @@ fn return_statement_kind(kind: &str) -> bool {
             | "break_expression"
             | "next"
             | "continue_statement"
-    )
-}
-
-fn inline_def_wrapper_mid(text: &str) -> bool {
-    matches!(
-        text,
-        "public" | "protected" | "private" | "private_class_method" | "module_function"
     )
 }
 

@@ -256,12 +256,7 @@ impl SyntaxFactMetadata {
         metadata
     }
 
-    fn immutable_state_ref(
-        &self,
-        document: &Document,
-        function: &str,
-        state_ref: &str,
-    ) -> bool {
+    fn immutable_state_ref(&self, document: &Document, function: &str, state_ref: &str) -> bool {
         let mut parts = state_ref.split('.').collect::<Vec<_>>();
         if parts.len() < 2 {
             return false;

@@ -37,7 +37,7 @@ module FactMine
           file: row.fetch("file"),
           language: row.fetch("language"),
           normalized_root: row.fetch("normalized_root")
-        )).scan.map(&:to_h)
+        )).scan.map { |finding| finding.to_h.transform_keys(&:to_s) }
       end
 
       def initialize(document)
@@ -216,6 +216,8 @@ module FactMine
       end
 
       def terminating?(node)
+        return true if %w[RETURN BREAK NEXT].include?(node_type(node))
+
         @behavior.terminating_call_message?(call_message(node))
       end
 

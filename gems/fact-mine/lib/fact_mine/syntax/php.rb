@@ -550,6 +550,10 @@ module FactMine
         full_span
       end
 
+      def self_member_receiver(message)
+        "this.#{message}"
+      end
+
       def normalize_source_text(text)
         text.to_s
             .gsub(/\$this->/, "this.")

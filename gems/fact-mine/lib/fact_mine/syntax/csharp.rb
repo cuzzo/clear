@@ -147,6 +147,18 @@ module FactMine
         call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
       end
 
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+        return "public" if text.match?(/\Apublic\b/)
+
+        "public"
+      end
+
+      def explicit_self_state_ref(_node, message)
+        "this.#{message}"
+      end
+
       def wrap_branch_predicate?(_branch)
         false
       end

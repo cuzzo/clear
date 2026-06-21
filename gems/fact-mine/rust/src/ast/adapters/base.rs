@@ -925,12 +925,36 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    fn inline_def_wrapper_mid(&self, _text: &str) -> bool {
+        false
+    }
+
     fn inline_def_function_text_source<'tree>(
         &self,
         function: TreeSitterNode<'tree>,
         _source: &str,
     ) -> TreeSitterNode<'tree> {
         function
+    }
+
+    fn normalized_for_parts<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(
+        TreeSitterNode<'tree>,
+        TreeSitterNode<'tree>,
+        Option<TreeSitterNode<'tree>>,
+    )> {
+        None
+    }
+
+    fn normalized_with_parts<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+        None
     }
 
     fn bare_const_call_function(&self, _function: TreeSitterNode<'_>) -> bool {

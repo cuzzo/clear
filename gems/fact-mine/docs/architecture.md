@@ -4,6 +4,12 @@ FactMine is the source-fact compiler used by Decomplex. Its job is to turn
 language source into stable, language-neutral fact sections. Detectors consume
 those facts; they do not parse source and they do not inspect syntax trees.
 
+FactMine has Ruby and Rust implementations. They must expose the same public
+facts for the same source, but neither implementation may achieve parity by
+burying concrete-language behavior in generic extractors. Concrete grammar
+knowledge belongs in language files and AST adapters; generic passes operate
+on normalized AST and language-owned descriptors.
+
 The architecture is normalization-first:
 
 1. Parse concrete source with the language grammar.
@@ -26,6 +32,7 @@ Language files may own:
 
 - Tree-sitter grammar/package names and file extensions.
 - Concrete node-kind declarations for the raw compatibility path.
+- Concrete-to-normalized AST adapter rules in `lib/fact_mine/ast/adapters/<language>.rb`.
 - Normalized extraction behavior hooks for grammar quirks.
 - Language lexicons for nil/type guards, diagnostics, semantic effects, and
   protocol vocabulary.
@@ -206,6 +213,11 @@ Normalize:
 - Boolean conjunction/disjunction to `AND`/`OR`.
 - `case`/`switch`/`match` to `CASE`/`CASE2` and `WHEN`.
 - Loops to `ITER`, `FOR`, `WHILE`, or `UNTIL`.
+- Resource/context blocks to normalized compound statements such as `WITH`
+  when the concrete grammar otherwise exposes the clause and body as sibling
+  nodes.
+- Loop targets and loop iterables as explicit normalized children when local
+  flow must distinguish writes from reads.
 
 Facts populated later:
 
@@ -253,6 +265,11 @@ Normalize:
 
 - Function body statements into ordered normalized statement nodes.
 - Local parameters and local writes.
+- Compound statements such as normalized `FOR` and `WITH` as one statement
+  when their body is part of the same local-flow operation.
+- Loop targets as local writes and loop iterables as local reads.
+- Context-manager/resource targets as local writes.
+- Import/module path names as import metadata, not local reads.
 - Block-local variables as scoped reads/writes without making them method
   locals unless assigned in the method flow.
 - Statement spans and source text.
@@ -277,9 +294,16 @@ Normalize or emit metadata events for:
 - Type aliases.
 - Method parameter types.
 - Visibility events/declarations.
+- Owner field declarations.
+- State-param origins from normalized state writes whose RHS is a current
+  function parameter.
+- Body-owner scopes for language constructs that define an owner through a
+  function-returned type, such as Zig `fn Box(...) type { return struct { ... } }`.
 
 Facts populated later:
 
+- `state_declarations`
+- `state_param_origins`
 - `immutable_struct_readers`
 - `immutable_struct_reader_types`
 - `type_aliases`
@@ -347,8 +371,15 @@ Must not:
 Ruby implementation:
 
 - `lib/fact_mine/ast/normalizer.rb`
-- language behavior in `lib/fact_mine/syntax/<language>.rb`
+- language AST adapters in `lib/fact_mine/ast/adapters/<language>.rb`
+- language extraction behavior in `lib/fact_mine/syntax/<language>.rb`
 - `lib/fact_mine/syntax/normalized_extraction_behavior.rb`
+
+Rust implementation:
+
+- `rust/src/ast.rs`
+- language AST adapters in `rust/src/ast/adapters/<language>.rs`
+- language syntax behavior in `rust/src/syntax/<language>.rs`
 
 ### 3. Stateless Normalized Extraction
 
@@ -376,6 +407,25 @@ Populates:
 Ruby implementation:
 
 - `lib/fact_mine/syntax/normalized_extractor.rb`
+
+Rust implementation:
+
+- `rust/src/syntax.rs` and normalized extraction modules under
+  `rust/src/syntax/`
+
+Current stateless language hooks are narrow descriptors only:
+
+- receiver spelling and receiver aliases
+- owner names and body-owner scopes
+- field declarations and state declaration rows
+- function visibility and parameter-name projection
+- branch predicate/state-ref projection
+- nil-predicate spelling and terminating-call spelling
+- public projection toggles for index calls, index assignment mutation effects,
+  and ternary child conditionality
+
+Hooks must not walk a subtree to compute detector-ready facts. If a hook needs
+to inspect concrete grammar structure, that belongs in AST normalization.
 
 Must not:
 
@@ -417,6 +467,12 @@ Ruby implementation:
 - `lib/fact_mine/syntax/nil_guards.rb`
 - `lib/fact_mine/syntax/normalized_local_facts.rb`
 
+Rust implementation:
+
+- normalized enrichment modules under `rust/src/syntax/`, including
+  semantic effects, protocols, clone similarity, nil guards, local flow,
+  path conditions, and local complexity.
+
 Must not:
 
 - inspect raw parser nodes
@@ -448,6 +504,9 @@ Special public projection:
   fingerprint vocabulary derived from normalized AST.
 - Clone output must not expose raw Tree-sitter names or private normalized
   names such as `DEFN`, `LASGN`, or `CALL`.
+- If canonical projection changes, only clone oracle expectations should
+  change. Detector facts that do not expose clone node names must remain
+  byte-for-byte stable.
 
 ### 6. Consumers
 
@@ -462,9 +521,9 @@ Must not:
 - branch on concrete languages
 - run syntax adapters
 
-## Current Ruby Architecture
+## Current Ruby-Side Architecture
 
-Ruby now follows the target shape:
+The Ruby implementation now follows the target shape:
 
 - `syntax/ruby.rb` owns Ruby grammar quirks, Ruby lexicons, Ruby visibility
   events, Ruby nil-predicate spelling, Ruby mutating-method vocabulary, and
@@ -477,8 +536,23 @@ Ruby now follows the target shape:
   operate on normalized AST, not raw parser nodes.
 - Decomplex detectors consume facts only.
 
-The remaining compatibility work is output parity and fixture regeneration
-where public projection intentionally changed, especially clone fingerprints.
+The same normalized pass structure is used by the other Ruby-side language
+profiles. Their language-specific code is limited to concrete AST normalization,
+small extraction-behavior projection hooks, and language-owned lexicons.
+
+## Current Rust-Side Architecture
+
+The Rust implementation must match the same boundaries:
+
+- `rust/src/ast/adapters/<language>.rs` owns concrete grammar normalization
+  quirks such as Ruby inline visibility wrappers and Python `for`/`with`
+  statement parts.
+- `rust/src/ast.rs` owns shared normalized tree construction and dispatches to
+  adapter hooks without naming concrete languages.
+- `rust/src/syntax/clone_similarity.rs` projects clone candidates from
+  normalized AST using canonical public clone node names.
+- Generic Rust syntax modules must not reintroduce language lexicons or raw
+  concrete grammar branches. Add a language hook or adapter method instead.
 
 ## Invariants
 

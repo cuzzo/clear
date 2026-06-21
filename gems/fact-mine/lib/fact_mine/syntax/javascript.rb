@@ -97,5 +97,25 @@ module FactMine
         function_name(node).to_s.start_with?("#") ? :private : :public
       end
     end
+
+    class JavaScriptNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "this.#{message}"
+      end
+
+      def function_visibility(name, _node, lines:)
+        name.to_s.start_with?("#") ? "private" : "public"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def explicit_self_state_ref(_node, message)
+        "this.#{message}"
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:javascript, JavaScriptNormalizedExtractionBehavior)
   end
 end

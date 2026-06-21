@@ -58,6 +58,22 @@ module FactMine
         false
       end
 
+      def preserve_constant_receiver_call?(_call)
+        false
+      end
+
+      def emit_index_call_site?(_node, _call)
+        false
+      end
+
+      def emit_index_assignment_mutation?(_node, _field)
+        false
+      end
+
+      def emit_attribute_assignment_mutation?(_node, _field)
+        false
+      end
+
       def local_assignment_writes(_field, _node, default_span:)
         []
       end
@@ -67,6 +83,10 @@ module FactMine
       end
 
       def field_name_from_declaration(_node)
+        nil
+      end
+
+      def state_declaration_from_node(_node, owner:)
         nil
       end
 
@@ -96,6 +116,10 @@ module FactMine
 
       def suppress_branch_decision?(_node)
         false
+      end
+
+      def ternary_children_conditional?(_node)
+        true
       end
 
       def normalize_source_text(text)
@@ -128,6 +152,10 @@ module FactMine
 
       def owner_for_function(_name, _node, current_owner:, file_owner:)
         current_owner
+      end
+
+      def body_owner_for_function(_name, _node, current_owner:, file_owner:)
+        nil
       end
 
       def receiver_aliases_for_function(_node)
@@ -218,6 +246,27 @@ module FactMine
 
       def mutating_receiver_message?(_message)
         false
+      end
+
+      def branch_state_ref(_node, parts, default_ref:)
+        receiver = parts.fetch(:receiver).to_s
+        return nil if receiver.match?(/\A[:A-Z]/) && !receiver.include?("(")
+
+        default_ref
+      end
+
+      def protocol_read_label_from_state(read)
+        read.field.to_s
+      end
+
+      def protocol_read_label_from_call(call)
+        return nil unless call.receiver.to_s == "self"
+
+        call.message.to_s
+      end
+
+      def protocol_write_label(write)
+        write.field.to_s
       end
 
       def normalize_comparison_source(source)

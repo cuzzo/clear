@@ -200,27 +200,94 @@ module FactMine
       end
 
       def typed_assignment_statement?(node)
-        return false unless %w[expression_statement statement].include?(node.kind)
+        return false unless %w[block expression_statement statement].include?(node.kind)
+        return false if node.kind == "block" && node.text.to_s.lines.size > 1
         return false unless node.children.any? { |child| !child.named? && child.text == ":" }
-        return false unless node.children.any? { |child| !child.named? && child.text == "=" }
 
-        node.named_children.size >= 3
+        node.named_children.size >= 2
       rescue StandardError
         false
       end
 
       def normalize_typed_assignment_statement(node, helpers:)
         left = node.named_children.first
-        right = node.named_children.last
-        helpers.__send__(
+        right = node.children.any? { |child| !child.named? && child.text == "=" } ? node.named_children.last : nil
+        normalized_right = helpers.__send__(:normalize_node, right)
+        helpers.__send__(:assignment_target, left, normalized_right, source: node) || helpers.__send__(
           :wrap,
           :LASGN,
-          children: [helpers.__send__(:target_name, left), helpers.__send__(:normalize_node, right)],
+          children: [helpers.__send__(:target_name, left), normalized_right],
           source: node
         )
       end
 
+      def special_statement?(node)
+        return true if %w[for_statement with_statement].include?(node.kind)
+        return false unless node.kind == "block"
+
+        text = node.text.to_s.lstrip
+        text.start_with?("for ") || text.start_with?("with ")
+      rescue StandardError
+        false
+      end
+
+      def normalize_special_statement(node, helpers:)
+        text = node.text.to_s.lstrip
+        if node.kind == "for_statement" || text.start_with?("for ")
+          normalize_python_for_statement(node, helpers: helpers)
+        elsif node.kind == "with_statement" || text.start_with?("with ")
+          normalize_python_with_statement(node, helpers: helpers)
+        end
+      end
+
       private
+
+      def normalize_python_for_statement(node, helpers:)
+        named = node.named_children
+        body = named.reverse.find { |child| child.kind == "block" }
+        targets = named.take_while { |child| child != body }
+        target = targets[0]
+        iterable = targets[1]
+        target_name, iterable_name = python_for_header_names(node)
+        helpers.__send__(
+          :wrap,
+          :FOR,
+          children: [
+            python_loop_name_node(target || target_name, helpers: helpers, source: node),
+            python_loop_name_node(iterable || iterable_name, helpers: helpers, source: node),
+            helpers.__send__(:normalize_body, body)
+          ],
+          source: node
+        )
+      end
+
+      def python_loop_name_node(node, helpers:, source: nil)
+        return nil unless node
+
+        text = node.respond_to?(:text) ? node.text.to_s : node.to_s
+        helpers.__send__(:wrap, :LVAR, children: [text], source: source || node)
+      end
+
+      def python_for_header_names(node)
+        header = node.text.to_s.lines.first.to_s
+        match = header.match(/\bfor\s+([A-Za-z_]\w*)\s+in\s+([A-Za-z_]\w*)\s*:/)
+        match ? [match[1], match[2]] : [nil, nil]
+      end
+
+      def normalize_python_with_statement(node, helpers:)
+        named = node.named_children
+        clause = named.find { |child| child.kind == "with_clause" }
+        body = named.reverse.find { |child| child.kind == "block" }
+        helpers.__send__(
+          :wrap,
+          :WITH,
+          children: [
+            helpers.__send__(:normalize_node, clause),
+            helpers.__send__(:normalize_body, body)
+          ],
+          source: node
+        )
+      end
 
       def flattened_try_block?(node, clauses:)
         node.kind == "block" &&

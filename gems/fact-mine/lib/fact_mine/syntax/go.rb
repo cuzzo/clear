@@ -254,6 +254,19 @@ module FactMine
         name ? { name: name, kind: "owner" } : nil
       end
 
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+
+        name_node = node.children.find { |child| child.respond_to?(:type) && child.type.to_s == "LVAR" }
+        return nil unless name_node
+
+        name = name_node.children.first.to_s
+        type = node.text.to_s.sub(/\A#{Regexp.escape(name)}\s*/, "").strip
+        return nil if name.empty? || type.empty?
+
+        { "field" => name, "type" => type }
+      end
+
       def embedded_member_reads(node)
         return [] unless node.first_lineno == node.last_lineno
 

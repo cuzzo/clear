@@ -82,10 +82,6 @@ module FactMine
       COMPARISON_OPERATORS = %w[== != === !== < <= > >=].freeze
       OPERATOR_CALL_OPERATORS = TreeSitterNormalizationAdapter::OPERATOR_CALL_OPERATORS
       INFIX_STATEMENT_OPERATORS = (OPERATOR_CALL_OPERATORS + COMPARISON_OPERATORS).freeze
-      INLINE_DEF_WRAPPER_MIDS = %w[
-        public protected private private_class_method module_function
-      ].freeze
-
       def initialize(document)
         @document = document
         @normalization_adapter = TreeSitterNormalizationAdapters.for(document)
@@ -131,12 +127,12 @@ module FactMine
             normalize_modifier_statement(node)
           elsif ternary_statement?(node)
             normalize_ternary_statement(node)
-          elsif adjacent_call_statement?(node)
-            normalize_adjacent_call_statement(node)
           elsif statement_call_with_block?(node)
             normalize_statement_call_with_block(node)
           elsif command_call_statement?(node)
             normalize_command_call_statement(node)
+          elsif adjacent_call_statement?(node)
+            normalize_adjacent_call_statement(node)
           elsif lambda_expression?(node)
             normalize_lambda(node)
           elsif FUNCTION_KINDS.include?(node.kind)
@@ -147,6 +143,8 @@ module FactMine
             normalize_module(node)
           elsif node.kind == "impl_item"
             normalize_impl(node)
+          elsif special_statement?(node)
+            normalize_special_statement(node)
           elsif special_if_statement?(node)
             normalize_special_if(node)
           elsif %w[elsif elseif_statement].include?(node.kind)
@@ -339,6 +337,14 @@ module FactMine
 
       def normalize_special_if(node)
         normalization_adapter.normalize_special_if(node, helpers: self)
+      end
+
+      def special_statement?(node)
+        normalization_adapter.special_statement?(node)
+      end
+
+      def normalize_special_statement(node)
+        normalization_adapter.normalize_special_statement(node, helpers: self)
       end
 
       def normalize_loop(node)
@@ -684,8 +690,8 @@ module FactMine
 
       def normalize_call(node)
         return normalize_zero_child_call(node) if zero_child_identifier_call?(node)
-        return normalize_call_with_block(node) if call_block(node)
         return normalize_visibility_inline_def(node) if visibility_inline_def_call?(node)
+        return normalize_call_with_block(node) if call_block(node)
 
         if call_member_receiver(node)
           recv, mid = member_parts(node)
@@ -897,7 +903,7 @@ module FactMine
 
         args_node = node.named_children.find { |child| %w[argument_list arguments].include?(child.kind) }
         args = args_node ? command_arguments(args_node) : []
-        block = call_block(node)
+        block = call_block(node) || (args_node && call_block(args_node))
         call_source = block ? source_before_child(node, block) : node
         if normalization_adapter.callable_yield?(function)
           return wrap(:YIELD, children: [list(args, source: args_node || call_source)], source: call_source)
@@ -960,6 +966,7 @@ module FactMine
         return normalize_typed_assignment_statement(node) if typed_assignment_statement?(node)
         return normalize_text_loop_statement(node) if text_loop_statement?(node)
         return normalize_heredoc_body_statement(node) if heredoc_body_statement?(node)
+        return normalize_special_statement(node) if special_statement?(node)
         return normalize_leading_loop_statement(node) if leading_loop_statement?(node)
         return normalize_leading_if_statement(node) if leading_if_statement?(node)
         return normalize_special_if(node) if special_if_statement?(node)
@@ -978,9 +985,9 @@ module FactMine
         return normalize_terminal_statement(node) if terminal_statement?(node)
         return normalize_modifier_statement(node) if modifier_statement?(node)
         return normalize_ternary_statement(node) if ternary_statement?(node)
-        return normalize_adjacent_call_statement(node) if adjacent_call_statement?(node)
         return normalize_statement_call_with_block(node) if statement_call_with_block?(node)
         return normalize_command_call_statement(node) if command_call_statement?(node)
+        return normalize_adjacent_call_statement(node) if adjacent_call_statement?(node)
         return normalize_infix_statement(node) if infix_statement?(node)
         return normalize_boolean(node) if boolean_expression?(node)
         return normalize_dotted_expression(node) if dotted_expression?(node)
@@ -1848,6 +1855,7 @@ module FactMine
           expression_statement statement statements then
         ].include?(node.kind)
         return false if assignment_lhs?(node) || assignment_rhs?(node)
+        return false if call_block(node)
 
         named = node.named_children
         return false unless named.size >= 2
@@ -2363,14 +2371,14 @@ module FactMine
         return false unless node.kind == "call"
 
         message = node.named_children.first&.text.to_s
-        return false unless INLINE_DEF_WRAPPER_MIDS.include?(message)
+        return false unless normalization_adapter.inline_def_wrapper_mid?(message)
 
         args = node.named_children.find { |child| child.kind == "argument_list" }
         args&.text.to_s.lstrip.start_with?("def ")
       end
 
       def visibility_inline_def_statement?(node, function)
-        INLINE_DEF_WRAPPER_MIDS.include?(function&.text.to_s) && node.text.to_s.include?("def ")
+        normalization_adapter.inline_def_wrapper_mid?(function&.text.to_s) && node.text.to_s.include?("def ")
       end
 
       def inline_def_from_argument_list(args)
@@ -2568,7 +2576,8 @@ module FactMine
         return [normalize_infix_statement(args)] if infix_statement?(args)
         return [normalize_dotted_expression(args)] if dotted_expression?(args)
 
-        args.named_children.map { |child| normalize_node(child) }.compact
+        args.named_children.reject { |child| %w[block do_block].include?(child.kind) }
+            .map { |child| normalize_node(child) }.compact
       end
 
       def parent_named_child?(parent, node)

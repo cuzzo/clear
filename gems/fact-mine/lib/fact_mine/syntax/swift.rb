@@ -101,6 +101,22 @@ module FactMine
         text.to_s.strip[/\bfunc\s+([A-Za-z_]\w*)\s*\(/, 1] || super
       end
 
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip.sub(/=.*\z/, "").strip
+        before_colon = text.split(":", 2).first.to_s.strip
+        name = before_colon.split(/\s+/).reject { |part| part == "_" }.last
+        return name if name&.match?(/\A[A-Za-z_]\w*\z/)
+
+        super
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|fileprivate)\b/)
+
+        "public"
+      end
+
       def access_span_call_site?(message, _current_function)
         message == "fallback"
       end

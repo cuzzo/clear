@@ -232,6 +232,10 @@ module FactMine
         "self.#{message}"
       end
 
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        node.text.to_s[/\Afunction\s+([A-Za-z_]\w*)\s*:/, 1] || current_owner
+      end
+
       def call_site_span(_node, parts, full_span:, access_span:, current_function:)
         full_span_call?(parts, current_function) ? full_span : access_span
       end
@@ -249,6 +253,8 @@ module FactMine
       end
 
       def suppress_branch_decision?(node)
+        return true if teal_compat_prelude?(node)
+
         node.text.to_s.lstrip.start_with?("elseif")
       end
 
@@ -257,6 +263,11 @@ module FactMine
       end
 
       private
+
+      def teal_compat_prelude?(node)
+        node.first_lineno == 1 &&
+          node.text.to_s.include?("compat53.module")
+      end
 
       def full_span_call?(parts, current_function)
         message = parts.fetch(:message).to_s

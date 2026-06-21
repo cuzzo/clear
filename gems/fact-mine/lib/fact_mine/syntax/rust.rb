@@ -140,6 +140,10 @@ module FactMine
       def parameter_name_from_signature(param)
         text = param.to_s.strip
         return text if text.match?(/\A&(?:mut\s+)?self\z/)
+        if text.include?(":")
+          name = text.split(":", 2).first.to_s.strip.sub(/\Amut\s+/, "")
+          return name if name.match?(/\A[A-Za-z_]\w*\z/)
+        end
 
         super
       end

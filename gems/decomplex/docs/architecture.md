@@ -1,8 +1,9 @@
 # Decomplex Architecture
 
 Decomplex is the detector and report layer that consumes source facts produced
-by FactMine. Fact-mining architecture, normalization, language adapters, and
-fact section ownership are documented in
+by FactMine. FactMine owns parsing, language adapters, normalization,
+stateless fact extraction, stateful fact enrichment, and public fact
+projection. That architecture is documented in
 [`gems/fact-mine/docs/architecture.md`](../../fact-mine/docs/architecture.md).
 
 This document describes the Decomplex side of the pipeline: source selection,
@@ -113,7 +114,7 @@ Decomplex does not own syntax normalization or source-fact extraction. Those
 responsibilities live in FactMine:
 
 - normalized AST vocabulary
-- language syntax files and normalization behavior hooks
+- language syntax files, AST adapters, and normalization behavior hooks
 - stateless normalized extraction
 - stateful normalized enrichment
 - semantic effects, protocols, clone similarity, nil guards, local flow,

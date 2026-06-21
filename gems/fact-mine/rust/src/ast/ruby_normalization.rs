@@ -77,11 +77,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.with_ruby_scope(node, reset, f)
     }
 
-    pub(super) fn dynamic_vcall_identifier(
-        &self,
-        node: TreeSitterNode<'_>,
-        name: &str,
-    ) -> bool {
+    pub(super) fn dynamic_vcall_identifier(&self, node: TreeSitterNode<'_>, name: &str) -> bool {
         self.ruby_vcall_identifier(node, name)
     }
 

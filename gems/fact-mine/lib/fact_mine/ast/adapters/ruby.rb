@@ -237,6 +237,10 @@ module FactMine
         ts_node?(source)
       end
 
+      def inline_def_wrapper_mid?(text)
+        %w[public protected private private_class_method module_function].include?(text.to_s)
+      end
+
       def normalize_tail_returns(node, helpers:)
         return node unless node.is_a?(Node)
         return node if %i[DEFN DEFS CLASS MODULE SCLASS LAMBDA ITER].include?(node.type)

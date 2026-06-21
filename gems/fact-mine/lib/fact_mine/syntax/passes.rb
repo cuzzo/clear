@@ -265,6 +265,7 @@ module FactMine
       def append_effects_from_calls!
         document = OpenStruct.new(
           language: @language,
+          function_defs: object_rows("functions"),
           call_sites: calls.map { |call| OpenStruct.new(call.transform_keys(&:to_sym)) }
         )
         @profile.semantic_effect_sites(document).each do |effect|

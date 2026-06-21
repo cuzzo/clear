@@ -27,12 +27,15 @@ module FactMine
         @seen_calls = {}
         @seen_reads = {}
         @seen_writes = {}
+        @seen_param_origins = {}
         @seen_effects = {}
+        @function_params = []
         @facts = {
           function_defs: [],
           owner_defs: [],
           call_sites: [],
           state_declarations: [],
+          state_param_origins: [],
           state_reads: [],
           state_writes: [],
           decision_sites: [],
@@ -74,6 +77,7 @@ module FactMine
           "owners" => @facts.fetch(:owner_defs),
           "calls" => @facts.fetch(:call_sites),
           "state_declarations" => @facts.fetch(:state_declarations),
+          "state_param_origins" => @facts.fetch(:state_param_origins),
           "state_reads" => @facts.fetch(:state_reads),
           "state_writes" => @facts.fetch(:state_writes),
           "decisions" => dedupe_decision_sites(@facts.fetch(:decision_sites)),
@@ -153,6 +157,7 @@ module FactMine
         @facts.fetch(:owner_defs) << owner if owner
         if owner
           @owners << owner.fetch("name")
+          collect_owner_fields(owner.fetch("name"), node)
           scan_children(node)
           @owners.pop
         else
@@ -163,6 +168,7 @@ module FactMine
       def scan_function(node)
         name = function_name(node) || "(anonymous)"
         owner = owner_for_function(name, node)
+        params = function_params(node)
         @extraction_behavior.structural_semantic_effects(node, function_name: name).each do |effect|
           record_semantic_effect(node, effect.fetch(:kind), effect.fetch(:detail))
         end
@@ -175,7 +181,7 @@ module FactMine
           "span" => span(node),
           "body" => raw_from_normalized(node),
           "visibility" => function_visibility(name, node),
-          "params" => function_params(node)
+          "params" => params
         }
 
         if (predicate = predicate_alias(node, owner))
@@ -186,11 +192,20 @@ module FactMine
         owner_pushed = owner && owner != current_owner
         @owners << owner if owner_pushed
         @functions << name
+        @function_params << params
         @receiver_aliases << receiver_aliases_for_function(node)
+        body_owner = body_owner_for_function(name, node)
+        if body_owner
+          @facts.fetch(:owner_defs) << owner_row(body_owner.fetch(:name), body_owner.fetch(:kind, "owner"), node)
+          @owners << body_owner.fetch(:name)
+          collect_owner_fields(body_owner.fetch(:name), node)
+        end
         scope = function_scope(node)
         body = scope && scope_body(scope)
         scan(body) if body
+        @owners.pop if body_owner
         @receiver_aliases.pop
+        @function_params.pop
         @functions.pop
         @owners.pop if owner_pushed
       end
@@ -230,7 +245,11 @@ module FactMine
         condition = child_node(node, 0)
         return scan_children(node) unless condition
         if normalized_ternary_if?(node)
-          child_nodes(node).each { |child| with_control("conditional") { scan(child) } }
+          if @extraction_behavior.ternary_children_conditional?(node)
+            child_nodes(node).each { |child| with_control("conditional") { scan(child) } }
+          else
+            scan_children(node)
+          end
           return
         end
 
@@ -310,8 +329,10 @@ module FactMine
             receiver_name = receiver_text(receiver)
             indexed_field = node.text.to_s.include?("[") && state_receiver_field(receiver_name)
             if indexed_field
+              effect_detail = "[]="
               record_state_write_target("self", indexed_field, node)
             else
+              value_node = assignment_value_node(node)
               write_span = @extraction_behavior.state_write_span(
                 receiver_name,
                 field,
@@ -319,13 +340,14 @@ module FactMine
                 default_span: span(node)
               )
               record_state_write_target(receiver_name, field, node, write_span)
-              record_index_assignment_read(receiver, field, node)
+              record_state_param_origin(receiver_name, field, value_node, node)
             end
           end
         elsif receiver
           field = state_receiver_field(receiver_text(receiver))
           record_state_write_target("self", field, node) if field
         end
+        record_semantic_effect(node, "hidden_mutation", effect_detail) if hidden_assignment_mutation?(node, field)
         scan(receiver) if receiver
         scan(child_node(node, 2)) if child_node(node, 2)
       end
@@ -351,6 +373,7 @@ module FactMine
       end
 
       def scan_operator_assignment(node)
+        record_semantic_effect(node, "hidden_mutation", "op-assign")
         scan_children(node)
       end
 
@@ -365,7 +388,7 @@ module FactMine
         call = call_hash(node, parts, block)
         call = @extraction_behavior.project_call(node, call)
         if call.fetch("message") == "[]"
-          append_call_site(call)
+          append_call_site(call) if @extraction_behavior.emit_index_call_site?(node, call)
           return
         end
 
@@ -438,7 +461,8 @@ module FactMine
         receiver = call.fetch("receiver").to_s
         return true if receiver == "self" && message.match?(/\A[A-Z]/) && call.fetch("arguments").empty?
         return true if constant_receiver?(receiver) && !receiver.include?("(") &&
-                       call.fetch("arguments").empty? && !call.fetch("block")
+                       call.fetch("arguments").empty? && !call.fetch("block") &&
+                       !@extraction_behavior.preserve_constant_receiver_call?(call)
         return true if @extraction_behavior.suppress_call_site?(node, call)
 
         false
@@ -448,6 +472,7 @@ module FactMine
         field = first_string_or_symbol(node) || normalized_text(node)
         record_semantic_effect(node, "context_dependency", field) if node.type.to_s == "GASGN"
         record_state_write_target("self", field, node)
+        record_state_param_origin("self", field, child_node(node, 1), node)
         scan(child_node(node, 1)) if child_node(node, 1)
       end
 
@@ -455,7 +480,10 @@ module FactMine
         field = first_string_or_symbol(node)
         writes = @extraction_behavior.local_assignment_writes(field, node, default_span: span(node))
         unless writes.empty?
-          writes.each { |write| record_state_write_target(write.fetch(:receiver), write.fetch(:field), node, write.fetch(:span)) }
+          writes.each do |write|
+            record_state_write_target(write.fetch(:receiver), write.fetch(:field), node, write.fetch(:span))
+            record_state_param_origin(write.fetch(:receiver), write.fetch(:field), child_node(node, 1), node)
+          end
           scan(child_node(node, 1)) if child_node(node, 1)
           return
         end
@@ -486,6 +514,45 @@ module FactMine
 
         @seen_writes[key] = true
         @facts.fetch(:state_writes) << write
+      end
+
+      def record_state_param_origin(receiver, field, value_node, assignment_node)
+        param = param_origin_name(value_node)
+        return unless param && current_function_params.include?(param)
+
+        origin = {
+          "field" => field,
+          "receiver" => receiver,
+          "file" => @file,
+          "function" => current_function,
+          "owner" => current_owner,
+          "param" => param,
+          "line" => assignment_node.first_lineno,
+          "span" => span(assignment_node)
+        }
+        key = origin.values_at("field", "receiver", "owner", "function", "param", "line", "span")
+        return if @seen_param_origins[key]
+
+        @seen_param_origins[key] = true
+        @facts.fetch(:state_param_origins) << origin
+      end
+
+      def assignment_value_node(node)
+        args = child_node(node, 2)
+        return nil unless args
+
+        child_nodes(args).last
+      end
+
+      def param_origin_name(node)
+        return nil unless ast_node?(node)
+
+        case node.type.to_s
+        when "LVAR", "DVAR"
+          first_string_or_symbol(node).to_s
+        else
+          nil
+        end
       end
 
       def record_index_assignment_read(receiver, field, node)
@@ -699,6 +766,7 @@ module FactMine
 
       def record_if_arms(node, condition)
         return if normalized_ternary_if?(node)
+        return if @extraction_behavior.suppress_branch_decision?(node)
 
         predicate = normalized_text(condition)
         [[1, "then"], [2, "else"]].each do |index, member|
@@ -778,6 +846,10 @@ module FactMine
 
       def current_function
         @functions.last || "(top-level)"
+      end
+
+      def current_function_params
+        @function_params.last || []
       end
 
       def current_control
@@ -868,6 +940,8 @@ module FactMine
       end
 
       def call_source_text(parts, node = nil)
+        return normalized_text(node) if multiline_call_source?(node)
+
         receiver = parts.fetch(:receiver).to_s
         message = source_call_message(parts, node)
         operator = message.start_with?("[") ? "" : source_member_operator(node)
@@ -878,6 +952,10 @@ module FactMine
         else
           "#{receiver}#{operator}#{message}"
         end
+      end
+
+      def multiline_call_source?(node)
+        node && node.first_lineno != node.last_lineno && node.text.to_s.include?("(")
       end
 
       def source_call_message(parts, node)
@@ -1037,6 +1115,10 @@ module FactMine
         @extraction_behavior.receiver_aliases_for_function(node)
       end
 
+      def body_owner_for_function(name, node)
+        @extraction_behavior.body_owner_for_function(name, node, current_owner: current_owner, file_owner: @file_owner)
+      end
+
       def collect_owner_fields(owner, node)
         child_nodes(node).each { |child| collect_owner_fields_from_node(owner, child) }
       end
@@ -1044,6 +1126,17 @@ module FactMine
       def collect_owner_fields_from_node(owner, node)
         return unless ast_node?(node)
         return if %w[DEFN DEFS CLASS MODULE].include?(node.type.to_s)
+
+        if (declaration = @extraction_behavior.state_declaration_from_node(node, owner: owner))
+          @facts.fetch(:state_declarations) << declaration.merge(
+            "file" => @file,
+            "owner" => owner,
+            "line" => node.first_lineno,
+            "span" => span(node)
+          )
+          @owner_fields[owner] << declaration.fetch("field")
+          @owner_fields[owner].uniq!
+        end
 
         if %w[FIELD_DECLARATION PROPERTY_DECLARATION FIELD_DECLARATION_LIST].include?(node.type.to_s)
           if (name = field_name_from_declaration(node))
@@ -1182,10 +1275,12 @@ module FactMine
       def tail_return(node)
         return nil unless node
         return node if node.type.to_s == "RETURN"
+        return nil unless predicate_container_node?(node)
 
         child_nodes(node).reverse_each do |child|
-          found = tail_return(child)
-          return found if found
+          return child if child.type.to_s == "RETURN"
+          return tail_return(child) if predicate_container_node?(child)
+          return nil
         end
         nil
       end
@@ -1328,11 +1423,8 @@ module FactMine
         when "CALL", "QCALL"
           parts = call_parts(node)
           if parts
-            unless parts[:message].to_s == "[]" ||
-                   (constant_receiver?(parts[:receiver]) && !parts[:receiver].to_s.include?("(")) ||
-                   @extraction_behavior.method_state_ref?(node, parts)
-              refs << state_ref_text(node, parts)
-            end
+            ref = branch_state_ref(node, parts)
+            refs << ref if ref
           end
           child_nodes(node).each { |child| collect_state_refs(child, refs) }
         when "FIELD_EXPRESSION", "RAW_ARGUMENT"
@@ -1368,6 +1460,13 @@ module FactMine
         "#{receiver}.#{message}"
       end
 
+      def branch_state_ref(node, parts)
+        return nil if parts[:message].to_s == "[]"
+        return nil if @extraction_behavior.method_state_ref?(node, parts)
+
+        @extraction_behavior.branch_state_ref(node, parts, default_ref: state_ref_text(node, parts))
+      end
+
       def explicit_self_state_ref(node, message)
         @extraction_behavior.explicit_self_state_ref(node, message)
       end
@@ -1395,6 +1494,14 @@ module FactMine
       def block_like_hash?(node)
         text = node.text.to_s.strip
         text.start_with?("{") && !text.include?("=>") && !text.include?(":")
+      end
+
+      def hidden_assignment_mutation?(node, field)
+        if node.text.to_s.include?("[") || field.to_s == "[]"
+          return @extraction_behavior.emit_index_assignment_mutation?(node, field)
+        end
+
+        @extraction_behavior.emit_attribute_assignment_mutation?(node, field)
       end
 
       def normalized_ternary_if?(node)

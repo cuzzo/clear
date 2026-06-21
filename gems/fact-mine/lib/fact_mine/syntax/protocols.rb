@@ -51,13 +51,26 @@ module FactMine
 
     class TreeSitterLanguageAdapter
       def protocol_method_effects(document)
+        behavior = Syntax::NormalizedExtractionBehavior.for(document.language)
+
         document.function_defs.map do |function_def|
           reads = document.state_reads.select do |read|
             read.owner == function_def.owner && read.function == function_def.name
-          end.map(&:field).uniq.sort
+          end.filter_map { |read| behavior.protocol_read_label_from_state(read) }
+
+          reads.concat(document.call_sites.select do |call|
+            call.owner == function_def.owner && call.function == function_def.name
+          end.filter_map do |call|
+            label = behavior.protocol_read_label_from_call(call)
+            next nil if label.to_s.empty?
+
+            label
+          end)
+          reads = reads.uniq.sort
+
           writes = document.state_writes.select do |write|
             write.owner == function_def.owner && write.function == function_def.name
-          end.map(&:field).uniq.sort
+          end.filter_map { |write| behavior.protocol_write_label(write) }.uniq.sort
 
           ProtocolMethodEffect.new(
             file: function_def.file,
@@ -72,29 +85,55 @@ module FactMine
 
       def protocol_call_paths(document)
         document.function_defs.map do |function_def|
-          calls = document.call_sites.select do |call|
+          calls = protocol_self_calls(document, function_def)
+
+          protocol_call_variants(calls, function_def).map do |path_calls|
+            ProtocolMethodPath.new(
+              file: function_def.file,
+              owner: function_def.owner,
+              name: function_def.name.to_s.split(/[.:]/).last,
+              line: function_def.line,
+              calls: path_calls
+            )
+          end
+        end.flatten
+      end
+
+      def protocol_self_calls(document, function_def)
+        document.call_sites.select do |call|
             call.owner == function_def.owner &&
               call.function == function_def.name &&
               call.receiver.to_s == "self"
-          end.map do |call|
-            ProtocolCall.new(
-              mid: call.message.to_s.split(/[.:]/).last,
-              file: call.file,
-              owner: call.owner,
-              defn: call.function,
-              line: call.line,
-              span: call.span
-            )
+        end.map do |call|
+          ProtocolCall.new(
+            mid: call.message.to_s.split(/[.:]/).last,
+            file: call.file,
+            owner: call.owner,
+            defn: call.function,
+            line: call.line,
+            span: call.span
+          ).tap do |protocol_call|
+            protocol_call.define_singleton_method(:conditional?) { call.conditional }
           end
-
-          ProtocolMethodPath.new(
-            file: function_def.file,
-            owner: function_def.owner,
-            name: function_def.name.to_s.split(/[.:]/).last,
-            line: function_def.line,
-            calls: calls
-          )
         end
+      end
+
+      def protocol_call_variants(calls, function_def)
+        return [[], []] if calls.empty? && protocol_conditional_body?(function_def.body)
+
+        conditional_calls, always_calls = calls.partition do |call|
+          call.respond_to?(:conditional?) && call.conditional?
+        end
+        return [calls] if conditional_calls.empty?
+
+        conditional_calls.map { |call| (always_calls + [call]).sort_by(&:line) }
+      end
+
+      def protocol_conditional_body?(node)
+        return false unless node.is_a?(Hash)
+        return true if %w[if unless case].include?(node["kind"].to_s)
+
+        Array(node["children"]).any? { |child| protocol_conditional_body?(child) }
       end
     end
 

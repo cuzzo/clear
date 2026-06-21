@@ -281,6 +281,65 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         }
     }
 
+    fn normalized_for_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(
+        TreeSitterNode<'tree>,
+        TreeSitterNode<'tree>,
+        Option<TreeSitterNode<'tree>>,
+    )> {
+        let statement = self
+            .exact_single_named_child(node, &["for_statement"], source)
+            .unwrap_or(node);
+        let text = node_text(statement, source).trim_start();
+        if statement.kind() != "for_statement"
+            && !(statement.kind() == "block" && text.starts_with("for "))
+        {
+            return None;
+        }
+
+        let named = named_children(statement);
+        let body = named
+            .iter()
+            .rev()
+            .copied()
+            .find(|child| child.kind() == "block");
+        let mut header = named.into_iter().filter(|child| Some(*child) != body);
+        let target = header.next()?;
+        let iterable = header.next()?;
+        Some((target, iterable, body))
+    }
+
+    fn normalized_with_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+        let statement = self
+            .exact_single_named_child(node, &["with_statement"], source)
+            .unwrap_or(node);
+        let text = node_text(statement, source).trim_start();
+        if statement.kind() != "with_statement"
+            && !(statement.kind() == "block" && text.starts_with("with "))
+        {
+            return None;
+        }
+
+        let named = named_children(statement);
+        let clause = named
+            .iter()
+            .copied()
+            .find(|child| child.kind() == "with_clause");
+        let body = named
+            .iter()
+            .rev()
+            .copied()
+            .find(|child| child.kind() == "block");
+        Some((clause, body))
+    }
+
     fn leading_owner_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
