@@ -1,28 +1,5 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "prepare",
-        "owner": "SourceFactVisibility",
-        "line": 10,
-        "visibility": "private",
-        "params": []
-      },
-      {
-        "name": "inline_guard",
-        "owner": "SourceFactVisibility",
-        "line": 14,
-        "visibility": "private",
-        "params": []
-      },
-      {
-        "name": "public_step",
-        "owner": "SourceFactVisibility",
-        "line": 4,
-        "visibility": "public",
-        "params": []
-      }
-    ],
     "calls": [
       {
         "receiver": "self",
@@ -60,7 +37,9 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": []
+        "arguments": [
+
+        ]
       },
       {
         "receiver": "self",
@@ -71,7 +50,38 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": []
+        "arguments": [
+
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "name": "prepare",
+        "owner": "SourceFactVisibility",
+        "line": 10,
+        "visibility": "private",
+        "params": [
+
+        ]
+      },
+      {
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility",
+        "line": 14,
+        "visibility": "private",
+        "params": [
+
+        ]
+      },
+      {
+        "name": "public_step",
+        "owner": "SourceFactVisibility",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+
+        ]
       }
     ],
     "state_writes": [

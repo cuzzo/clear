@@ -1,12 +1,11 @@
 pub(crate) mod adapters;
-pub(crate) mod calls;
 pub(crate) mod complexity;
 pub mod local_flow;
+pub(crate) mod normalized_extractor;
 pub mod path_condition;
 pub(crate) mod protocols;
 pub(crate) mod raw_tree;
 pub mod redundant_nil_guard;
-pub(crate) mod semantic_effects;
 pub mod tree_sitter_adapter;
 pub(crate) mod visibility;
 
@@ -156,6 +155,16 @@ pub struct Document {
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]
     pub protocol_call_paths: Vec<ProtocolMethodPath>,
+    #[serde(default)]
+    pub(crate) clone_candidates: Vec<CloneCandidate>,
+    #[serde(default)]
+    pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub immutable_struct_reader_types: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub type_aliases: BTreeMap<String, String>,
+    #[serde(default)]
+    pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn empty_raw_node() -> RawNode {
@@ -381,7 +390,7 @@ pub(crate) struct ProtocolFacts {
     pub(crate) call_paths: Vec<ProtocolMethodPath>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub(crate) struct CloneCandidate {
     pub(crate) file: String,
     pub(crate) line: usize,
@@ -438,18 +447,21 @@ pub(crate) fn protocol_method_effects(document: &Document) -> Vec<ProtocolMethod
     if !document.protocol_method_effects.is_empty() {
         return document.protocol_method_effects.clone();
     }
-    adapters::language_profile(document.language).protocol_method_effects(document)
+    protocols::method_effects_from_document_facts(document)
 }
 
 pub(crate) fn protocol_call_paths(document: &Document) -> Vec<ProtocolMethodPath> {
     if !document.protocol_call_paths.is_empty() {
         return document.protocol_call_paths.clone();
     }
-    adapters::language_profile(document.language).protocol_call_paths(document)
+    protocols::call_paths_from_document_facts(document)
 }
 
 pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
-    adapters::language_profile(document.language).clone_candidates(document)
+    if !document.clone_candidates.is_empty() {
+        return document.clone_candidates.clone();
+    }
+    adapters::clone_candidates(document)
 }
 
 pub(crate) fn core_owner_names(document: &Document) -> &'static [&'static str] {

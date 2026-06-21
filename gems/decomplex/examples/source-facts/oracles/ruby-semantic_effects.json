@@ -1,36 +1,5 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "mutate",
-        "owner": "SourceFactSemanticEffects",
-        "line": 11,
-        "visibility": "public",
-        "params": [
-          "target",
-          "value"
-        ]
-      },
-      {
-        "name": "shape_hash",
-        "owner": "SourceFactSemanticEffects",
-        "line": 16,
-        "visibility": "public",
-        "params": [
-          "data"
-        ]
-      },
-      {
-        "name": "perform",
-        "owner": "SourceFactSemanticEffects",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "callback",
-          "name"
-        ]
-      }
-    ],
     "calls": [
       {
         "receiver": "Hash",
@@ -125,24 +94,35 @@
         ]
       }
     ],
-    "state_reads": [
+    "functions": [
       {
-        "receiver": "self",
-        "field": "$source_fact_seen",
-        "function": "perform",
-        "line": 8
+        "name": "mutate",
+        "owner": "SourceFactSemanticEffects",
+        "line": 11,
+        "visibility": "public",
+        "params": [
+          "target",
+          "value"
+        ]
       },
       {
-        "receiver": "data",
-        "field": "each",
-        "function": "shape_hash",
-        "line": 20
+        "name": "shape_hash",
+        "owner": "SourceFactSemanticEffects",
+        "line": 16,
+        "visibility": "public",
+        "params": [
+          "data"
+        ]
       },
       {
-        "receiver": "target",
-        "field": "items",
-        "function": "mutate",
-        "line": 13
+        "name": "perform",
+        "owner": "SourceFactSemanticEffects",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "callback",
+          "name"
+        ]
       }
     ],
     "semantic_effects": [
@@ -193,6 +173,26 @@
         "detail": "send",
         "function": "perform",
         "line": 7
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "$source_fact_seen",
+        "function": "perform",
+        "line": 8
+      },
+      {
+        "receiver": "data",
+        "field": "each",
+        "function": "shape_hash",
+        "line": 20
+      },
+      {
+        "receiver": "target",
+        "field": "items",
+        "function": "mutate",
+        "line": 13
       }
     ]
   }

@@ -180,12 +180,7 @@ impl<'a> RawRedundantNilGuard<'a> {
         }
     }
 
-    fn process_branch(
-        &mut self,
-        node: &RawNode,
-        function: &str,
-        known: &BTreeSet<String>,
-    ) -> Flow {
+    fn process_branch(&mut self, node: &RawNode, function: &str, known: &BTreeSet<String>) -> Flow {
         let cond = self.branch_condition(node);
         if let Some(cond) = cond {
             self.inspect_node(cond, function, known);
@@ -283,13 +278,13 @@ impl<'a> RawRedundantNilGuard<'a> {
         true
     }
 
-    fn redundant_nil_subject(
-        &self,
-        node: &RawNode,
-        known: &BTreeSet<String>,
-    ) -> Option<String> {
+    fn redundant_nil_subject(&self, node: &RawNode, known: &BTreeSet<String>) -> Option<String> {
         let subject = self.safe_navigation_subject(node);
-        if subject.as_ref().map(|local| known.contains(local)).unwrap_or(false) {
+        if subject
+            .as_ref()
+            .map(|local| known.contains(local))
+            .unwrap_or(false)
+        {
             return subject;
         }
         let fact = self.nil_fact(node)?;
@@ -664,8 +659,10 @@ impl<'a> RawRedundantNilGuard<'a> {
 
     fn assignment_lhs_name(&self, node: &RawNode) -> Option<String> {
         let lhs = self.assignment_lhs(node)?;
-        self.simple_subject_identifier(lhs)
-            .then(|| self.profile.normalize_local_identifier_text(lhs.text.trim()))
+        self.simple_subject_identifier(lhs).then(|| {
+            self.profile
+                .normalize_local_identifier_text(lhs.text.trim())
+        })
     }
 
     fn assignment_lhs<'n>(&self, node: &'n RawNode) -> Option<&'n RawNode> {
@@ -686,7 +683,10 @@ impl<'a> RawRedundantNilGuard<'a> {
             .profile
             .boolean_container_node_kinds()
             .contains(&node.kind.as_str())
-            || self.profile.boolean_wrapper_node_kinds().contains(&node.kind.as_str()))
+            || self
+                .profile
+                .boolean_wrapper_node_kinds()
+                .contains(&node.kind.as_str()))
             && self
                 .direct_operator(node)
                 .map(|operator| {
@@ -748,15 +748,17 @@ impl<'a> RawRedundantNilGuard<'a> {
             .or_else(|| raw_child_by_field(node, "property"))
             .or_else(|| raw_child_by_field(node, "name"))
             .or_else(|| raw_child_by_field(node, "suffix"))
-            .or_else(|| raw_named_children(node).into_iter().rev().find(|child| {
-                self.profile
-                    .identifier_node_kinds()
-                    .contains(&child.kind.as_str())
-                    || self
-                        .profile
-                        .field_identifier_node_kinds()
+            .or_else(|| {
+                raw_named_children(node).into_iter().rev().find(|child| {
+                    self.profile
+                        .identifier_node_kinds()
                         .contains(&child.kind.as_str())
-            }))
+                        || self
+                            .profile
+                            .field_identifier_node_kinds()
+                            .contains(&child.kind.as_str())
+                })
+            })
     }
 
     fn raw_callee_node<'n>(&self, node: &'n RawNode) -> Option<&'n RawNode> {

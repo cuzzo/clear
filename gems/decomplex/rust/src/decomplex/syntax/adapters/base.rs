@@ -3,13 +3,9 @@ use super::super::tree_sitter_adapter::{
     named_children, normalize_type_owner, strip_assignment_suffix, AssignmentTarget, CallTarget,
     Target,
 };
-use super::super::{
-    CallSite, CloneCandidate, Document, FunctionDef, Language, ProtocolCall, ProtocolMethodEffect,
-    ProtocolMethodPath, SemanticEffectSite, StateRead, StateWrite,
-};
+use super::super::{CallSite, CloneCandidate, Document, Language};
 use crate::decomplex::ast::{node_text, normalize_text, span, RawNode};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
 pub(crate) const EMPTY_NODE_KINDS: &[&str] = &[];
@@ -71,6 +67,7 @@ const CLONE_CANDIDATE_KINDS: &[&str] = &[
     "array",
     "assignment",
     "assignment_statement",
+    "body_statement",
     "block",
     "case",
     "case_clause",
@@ -107,6 +104,7 @@ const CLONE_CANDIDATE_KINDS: &[&str] = &[
 ];
 const CLONE_BODY_KINDS: &[&str] = &[
     "body",
+    "body_statement",
     "block",
     "body_statement",
     "declaration_list",
@@ -462,91 +460,16 @@ pub(crate) trait LanguageProfile {
         out
     }
 
-    fn after_collect_facts(&self, _functions: &mut Vec<FunctionDef>, _calls: &[CallSite]) {}
-
-    fn structural_semantic_effect_sites(
-        &self,
-        _root: Node<'_>,
-        _source: &str,
-        _file: &Path,
-        _functions: &[FunctionDef],
-        _state_reads: &[StateRead],
-        _state_writes: &[StateWrite],
-    ) -> Vec<SemanticEffectSite> {
-        Vec::new()
+    fn visibility_call(&self, _call: &CallSite) -> bool {
+        false
     }
 
-    fn protocol_method_effects(&self, document: &Document) -> Vec<ProtocolMethodEffect> {
-        document
-            .function_defs
-            .iter()
-            .map(|function_def| {
-                let mut reads = document
-                    .state_reads
-                    .iter()
-                    .filter(|read| {
-                        read.owner == function_def.owner && read.function == function_def.name
-                    })
-                    .map(|read| normalize_protocol_state(&read.field))
-                    .collect::<Vec<_>>();
-                reads.sort();
-                reads.dedup();
-
-                let mut writes = document
-                    .state_writes
-                    .iter()
-                    .filter(|write| {
-                        write.owner == function_def.owner && write.function == function_def.name
-                    })
-                    .map(|write| normalize_protocol_state(&write.field))
-                    .collect::<Vec<_>>();
-                writes.sort();
-                writes.dedup();
-
-                ProtocolMethodEffect {
-                    file: function_def.file.clone(),
-                    owner: function_def.owner.clone(),
-                    name: protocol_method_name(&function_def.name),
-                    line: function_def.line,
-                    reads,
-                    writes,
-                }
-            })
-            .collect()
-    }
-
-    fn protocol_call_paths(&self, document: &Document) -> Vec<ProtocolMethodPath> {
-        document
-            .function_defs
-            .iter()
-            .map(|function_def| {
-                let calls = document
-                    .call_sites
-                    .iter()
-                    .filter(|call| {
-                        call.owner == function_def.owner
-                            && call.function == function_def.name
-                            && call.receiver == "self"
-                    })
-                    .map(|call| ProtocolCall {
-                        mid: protocol_method_name(&call.message),
-                        file: function_def.file.clone(),
-                        owner: function_def.owner.clone(),
-                        defn: protocol_method_name(&function_def.name),
-                        line: call.line,
-                        span: call.span,
-                    })
-                    .collect();
-
-                ProtocolMethodPath {
-                    file: function_def.file.clone(),
-                    owner: function_def.owner.clone(),
-                    name: protocol_method_name(&function_def.name),
-                    line: function_def.line,
-                    calls,
-                }
-            })
-            .collect()
+    fn visibility_arg_name(&self, argument: &str) -> String {
+        argument
+            .trim_start_matches(':')
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string()
     }
 
     fn default_function_name(&self, node: Node<'_>, source: &str) -> Option<String> {
@@ -1300,36 +1223,6 @@ pub(crate) trait LanguageProfile {
         )
     }
 
-    fn clone_candidates(&self, document: &Document) -> Vec<CloneCandidate> {
-        let mut out = Vec::new();
-        let mut seen = HashSet::new();
-        let mut fingerprint_cache = HashMap::new();
-
-        for function in &document.function_defs {
-            let candidate = clone_candidate_for(
-                self,
-                document,
-                &function.body,
-                Some("defn"),
-                Some(function.name.as_str()),
-                &mut fingerprint_cache,
-            );
-            clone_add_candidate(&mut out, &mut seen, candidate);
-        }
-
-        let mut nodes = Vec::new();
-        document.root.walk(&mut nodes);
-        for node in nodes {
-            if self.clone_candidate_node(node) {
-                let candidate =
-                    clone_candidate_for(self, document, node, None, None, &mut fingerprint_cache);
-                clone_add_candidate(&mut out, &mut seen, candidate);
-            }
-        }
-
-        out
-    }
-
     #[cfg(test)]
     fn clone_fingerprint(&self, node: &RawNode) -> (String, usize) {
         clone_fingerprint_for_profile(self, node, &mut HashSet::new())
@@ -1350,6 +1243,39 @@ pub(crate) trait LanguageProfile {
     ) -> Option<(String, usize)> {
         None
     }
+}
+
+pub(crate) fn clone_candidates_for_profile<P: LanguageProfile + ?Sized>(
+    profile: &P,
+    document: &Document,
+) -> Vec<CloneCandidate> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut fingerprint_cache = HashMap::new();
+
+    for function in &document.function_defs {
+        let candidate = clone_candidate_for(
+            profile,
+            document,
+            &function.body,
+            Some("defn"),
+            Some(function.name.as_str()),
+            &mut fingerprint_cache,
+        );
+        clone_add_candidate(&mut out, &mut seen, candidate);
+    }
+
+    let mut nodes = Vec::new();
+    document.root.walk(&mut nodes);
+    for node in nodes {
+        if profile.clone_candidate_node(node) {
+            let candidate =
+                clone_candidate_for(profile, document, node, None, None, &mut fingerprint_cache);
+            clone_add_candidate(&mut out, &mut seen, candidate);
+        }
+    }
+
+    out
 }
 
 fn clone_add_candidate(
@@ -1886,20 +1812,6 @@ fn generic_branch_context(node: Node<'_>, source: &str) -> bool {
             && normalize_text(node_text(node, source))
                 .trim_start()
                 .starts_with("if ")
-}
-
-pub(crate) fn protocol_method_name(name: &str) -> String {
-    name.split(['.', ':'])
-        .filter(|part| !part.is_empty())
-        .last()
-        .unwrap_or(name)
-        .to_string()
-}
-
-pub(crate) fn normalize_protocol_state(name: &str) -> String {
-    name.trim_start_matches('@')
-        .trim_end_matches('=')
-        .to_string()
 }
 
 fn clone_node_key(node: &RawNode) -> String {

@@ -58,6 +58,9 @@ fn parse_file_with_options(
         "read_tree_sitter",
         parsed_started.elapsed(),
     );
+    if language == Language::Ruby {
+        return parse_normalized_file(parsed, options, profile, &file_label, total_started);
+    }
     let mut function_defs = Vec::new();
     let mut owner_defs = Vec::new();
     let mut call_sites = Vec::new();
@@ -131,13 +134,8 @@ fn parse_file_with_options(
         started.elapsed(),
     );
     let started = Instant::now();
-    language_profile(language).after_collect_facts(&mut function_defs, &call_sites);
-    profile_parse_phase(
-        profile,
-        &file_label,
-        "after_collect_facts",
-        started.elapsed(),
-    );
+    super::adapters::apply_visibility(language, &mut function_defs, &call_sites);
+    profile_parse_phase(profile, &file_label, "apply_visibility", started.elapsed());
     let started = Instant::now();
     collect_dispatch_sites(
         parsed.tree.root_node(),
@@ -162,28 +160,13 @@ fn parse_file_with_options(
         "collect_equality_dispatch_sites",
         started.elapsed(),
     );
-    let profile = language_profile(language);
     let started = Instant::now();
-    let mut semantic_effect_sites = semantic_effect_sites_from_calls(language, &call_sites);
+    let mut semantic_effect_sites =
+        semantic_effect_sites_from_calls(language, &call_sites, &function_defs);
     profile_parse_phase(
         rust_profile_enabled(),
         &file_label,
         "semantic_effects_from_calls",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    semantic_effect_sites.extend(profile.structural_semantic_effect_sites(
-        parsed.tree.root_node(),
-        &parsed.source,
-        &parsed.file,
-        &function_defs,
-        &state_reads,
-        &state_writes,
-    ));
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "structural_semantic_effects",
         started.elapsed(),
     );
     let started = Instant::now();
@@ -257,10 +240,110 @@ fn parse_file_with_options(
         path_condition_sites: Vec::new(),
         protocol_method_effects: Vec::new(),
         protocol_call_paths: Vec::new(),
+        clone_candidates: Vec::new(),
+        immutable_struct_readers: BTreeMap::new(),
+        immutable_struct_reader_types: BTreeMap::new(),
+        type_aliases: BTreeMap::new(),
+        method_param_types: BTreeMap::new(),
     };
     profile_parse_phase(
         rust_profile_enabled(),
         &file_label,
+        "parse_file_total",
+        total_started.elapsed(),
+    );
+    Ok(document)
+}
+
+fn parse_normalized_file(
+    parsed: ParsedDocument,
+    options: ParseOptions,
+    profile: bool,
+    file_label: &str,
+    total_started: Instant,
+) -> Result<Document> {
+    let started = Instant::now();
+    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, Language::Ruby);
+    profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
+
+    let started = Instant::now();
+    let mut facts = super::normalized_extractor::extract(&parsed.file, &normalized_root);
+    facts
+        .semantic_effect_sites
+        .extend(semantic_effect_sites_from_calls(
+            Language::Ruby,
+            &facts.call_sites,
+            &facts.function_defs,
+        ));
+    dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
+    profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
+
+    let started = Instant::now();
+    let lines = parsed.source.lines().map(ToString::to_string).collect();
+    profile_parse_phase(profile, file_label, "lines", started.elapsed());
+
+    let started = Instant::now();
+    let root = super::normalized_extractor::raw_from_normalized(&normalized_root);
+    profile_parse_phase(
+        profile,
+        file_label,
+        "normalized_raw_root",
+        started.elapsed(),
+    );
+
+    let started = Instant::now();
+    let local_complexity_scores =
+        local_complexity_scores(&parsed.file.to_string_lossy(), &facts.function_defs);
+    profile_parse_phase(
+        profile,
+        file_label,
+        "local_complexity_scores",
+        started.elapsed(),
+    );
+
+    let immutable_struct_readers =
+        reader_sets_to_vecs(ruby_immutable_struct_readers(&parsed.source));
+    let immutable_struct_reader_types = ruby_immutable_struct_reader_types(&parsed.source);
+    let type_aliases = ruby_type_aliases(&parsed.source);
+    let method_param_types = ruby_method_param_types(&parsed.source, &facts.function_defs);
+
+    let document = Document {
+        file: parsed.file.to_string_lossy().to_string(),
+        language: Language::Ruby,
+        source: String::new(),
+        lines,
+        root,
+        normalized_root: if options.normalized_root {
+            normalized_root
+        } else {
+            empty_normalized_root()
+        },
+        function_defs: facts.function_defs,
+        owner_defs: facts.owner_defs,
+        call_sites: facts.call_sites,
+        state_declarations: facts.state_declarations,
+        state_reads: facts.state_reads,
+        state_writes: facts.state_writes,
+        decision_sites: facts.decision_sites,
+        branch_decisions: facts.branch_decisions,
+        branch_arms: facts.branch_arms,
+        dispatch_sites: facts.dispatch_sites,
+        semantic_effect_sites: facts.semantic_effect_sites,
+        local_complexity_scores,
+        predicate_aliases: facts.predicate_aliases,
+        comparison_uses: facts.comparison_uses,
+        path_condition_sites: facts.path_condition_sites,
+        protocol_method_effects: Vec::new(),
+        protocol_call_paths: Vec::new(),
+        clone_candidates: Vec::new(),
+        immutable_struct_readers,
+        immutable_struct_reader_types,
+        type_aliases,
+        method_param_types,
+    };
+    profile_parse_phase(
+        profile,
+        file_label,
         "parse_file_total",
         total_started.elapsed(),
     );
@@ -484,12 +567,25 @@ const GENERIC_SYSTEM_IO_BARE: &[&str] =
 fn semantic_effect_sites_from_calls(
     language: Language,
     call_sites: &[CallSite],
+    function_defs: &[FunctionDef],
 ) -> Vec<SemanticEffectSite> {
     let lexicon = false_simplicity_lexicon(language);
+    let local_methods = function_defs
+        .iter()
+        .map(|function| (function.owner.clone(), function.name.clone()))
+        .collect::<HashSet<_>>();
     call_sites
         .iter()
+        .filter(|call| !local_self_call_to_known_function(call, &local_methods))
         .filter_map(|call| semantic_effect_site_for_call(call, &lexicon))
         .collect()
+}
+
+fn local_self_call_to_known_function(
+    call: &CallSite,
+    local_methods: &HashSet<(String, String)>,
+) -> bool {
+    call.receiver == "self" && local_methods.contains(&(call.owner.clone(), call.message.clone()))
 }
 
 fn semantic_effect_site_for_call(
@@ -551,6 +647,9 @@ fn const_effect_kind_detail(
         .unwrap_or("");
     if base == "Dir" && lexicon.dir_context.contains(&message) {
         return Some(("context_dependency", format!("Dir.{message}")));
+    }
+    if receiver == "URI" && message == "open" {
+        return Some(("hidden_io", "URI.open".to_string()));
     }
     if lexicon.io_consts.contains(&base) || receiver.starts_with("Net::") {
         return Some((
@@ -1454,30 +1553,132 @@ fn ruby_immutable_struct_readers(source: &str) -> BTreeMap<String, BTreeSet<Stri
     readers
 }
 
+fn reader_sets_to_vecs(
+    readers: BTreeMap<String, BTreeSet<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    readers
+        .into_iter()
+        .map(|(owner, fields)| (owner, fields.into_iter().collect()))
+        .collect()
+}
+
+fn ruby_immutable_struct_reader_types(
+    source: &str,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut class_stack = Vec::new();
+    for line in source.lines() {
+        let stripped = line.trim();
+        if let Some(name) = stripped
+            .strip_prefix("class ")
+            .and_then(|rest| rest.split_once("< T::Struct").map(|(name, _)| name.trim()))
+            .filter(|name| ruby_constant_path(name))
+        {
+            class_stack.push(name.to_string());
+            continue;
+        }
+        if let Some(owner) = class_stack.last() {
+            if let Some((field, type_name)) = stripped
+                .strip_prefix("const :")
+                .and_then(|rest| rest.split_once(','))
+                .map(|(field, type_name)| {
+                    (
+                        field
+                            .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                            .next()
+                            .unwrap_or("")
+                            .trim(),
+                        type_name
+                            .trim()
+                            .split(|ch: char| !matches!(ch, ':' | '_' | 'A'..='Z' | 'a'..='z' | '0'..='9'))
+                            .next()
+                            .unwrap_or("")
+                            .trim(),
+                    )
+                })
+                .filter(|(field, type_name)| {
+                    !field.is_empty() && ruby_constant_path(type_name)
+                })
+            {
+                reader_types
+                    .entry(owner.clone())
+                    .or_default()
+                    .insert(field.to_string(), type_name.to_string());
+                continue;
+            }
+        }
+        if !class_stack.is_empty() && stripped.trim_end_matches(';') == "end" {
+            class_stack.pop();
+        }
+    }
+    reader_types
+}
+
+fn ruby_type_aliases(source: &str) -> BTreeMap<String, String> {
+    let mut aliases = BTreeMap::new();
+    for line in source.lines() {
+        let stripped = line.trim();
+        if let Some((name, rest)) = stripped.split_once('=') {
+            let name = name.trim();
+            if !ruby_constant_path(name) {
+                continue;
+            }
+            let rest = rest.trim();
+            let target = if let Some(inner) = rest
+                .strip_prefix("T.type_alias")
+                .and_then(|value| value.split_once('{').map(|(_, right)| right))
+                .and_then(|value| value.split_once('}').map(|(left, _)| left.trim()))
+            {
+                inner
+            } else {
+                rest.split_whitespace().next().unwrap_or("")
+            };
+            if ruby_constant_path(target) {
+                aliases.insert(name.to_string(), target.to_string());
+            }
+        }
+    }
+    aliases
+}
+
+fn ruby_method_param_types(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                ruby_sig_param_types(source, function.line),
+            )
+        })
+        .filter(|(_, param_types)| !param_types.is_empty())
+        .collect()
+}
+
 fn ruby_sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, String> {
     let lines = source.lines().collect::<Vec<_>>();
     let mut sig_lines = Vec::new();
     let mut cursor = function_line.saturating_sub(2);
     while let Some(line) = lines.get(cursor) {
         let stripped = line.trim();
-        if stripped.is_empty() {
-            if sig_lines.is_empty() {
-                break;
-            }
-        } else if sig_lines.is_empty() && !stripped.starts_with("sig") {
-            break;
+        if !stripped.is_empty() {
+            sig_lines.push(*line);
         }
-        sig_lines.push(*line);
         if stripped.starts_with("sig") {
             break;
         }
-        if cursor == 0 || sig_lines.len() >= 8 {
+        if cursor == 0 || sig_lines.len() >= 12 {
             break;
         }
         cursor -= 1;
     }
     sig_lines.reverse();
     let sig = sig_lines.join("\n");
+    if !sig.trim_start().starts_with("sig") {
+        return BTreeMap::new();
+    }
     let Some(params_start) = sig.find("params(").map(|index| index + "params(".len()) else {
         return BTreeMap::new();
     };
@@ -2672,7 +2873,9 @@ fn decision_enclosing_span(profile: &dyn LanguageProfile, node: Node<'_>) -> [us
 
 fn branch_like_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
     profile.branch_node_kinds().contains(&node.kind())
-        || profile.decision_enclosing_node_kinds().contains(&node.kind())
+        || profile
+            .decision_enclosing_node_kinds()
+            .contains(&node.kind())
         || profile.case_node_kinds().contains(&node.kind())
         || matches!(
             node.kind(),

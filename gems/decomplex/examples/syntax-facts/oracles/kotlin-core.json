@@ -33,7 +33,7 @@
             39,
             5
           ],
-          "visibility": null
+          "visibility": "public"
         },
         {
           "line": 6,
@@ -50,7 +50,7 @@
             29,
             5
           ],
-          "visibility": null
+          "visibility": "public"
         }
       ],
       "owners": [

@@ -36,13 +36,14 @@ module Decomplex
         scatter = sts.map { |s| [s.file, s.defn] }.uniq.size
         next if scatter < min_scatter
 
+        ordered_sites = sts.sort_by { |site| [site.file.to_s, site.line.to_i, site.defn.to_s] }
         {
           kind: sts.first.kind,
           members: sts.first.members,
           support: sts.size,
           scatter: scatter,
           rank: sts.size * scatter,
-          sites: sts.map { |s| loc(s) },
+          sites: ordered_sites.map { |s| loc(s) },
           spans: sts.to_h { |s| [loc(s), s.span] }
         }
       end.sort_by { |h| -h[:rank] }

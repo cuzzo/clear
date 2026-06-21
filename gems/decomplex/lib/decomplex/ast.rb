@@ -17,7 +17,7 @@ module Decomplex
 
     def parse(file)
       require_relative "syntax"
-      document = Syntax.parse(file, parser: "tree_sitter")
+      document = Syntax.parse_raw(file, parser: "tree_sitter")
       key = [:tree_sitter, document.object_id]
       normalized_cache.fetch(key) do
         normalized_cache[key] = [TreeSitterNormalizer.new(document).normalize, document.lines]
@@ -26,7 +26,7 @@ module Decomplex
 
     def parse_semantic(file, language: nil)
       require_relative "syntax"
-      document = Syntax.parse(file, language: language, parser: "tree_sitter")
+      document = Syntax.parse_raw(file, language: language, parser: "tree_sitter")
       key = [:semantic_tree_sitter, document.object_id]
       normalized_cache.fetch(key) do
         normalized_cache[key] = [SemanticNormalizer.new(document).normalize, document.lines]

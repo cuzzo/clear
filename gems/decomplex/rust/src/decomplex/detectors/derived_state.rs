@@ -43,7 +43,14 @@ pub fn scan_summaries(summaries: &[MethodSummary]) -> Vec<DerivedStateRow> {
         .iter()
         .flat_map(|method| analyze_method(method))
         .collect::<Vec<_>>();
-    out.sort_by(|a, b| b.gap.cmp(&a.gap));
+    out.sort_by(|a, b| {
+        b.gap
+            .cmp(&a.gap)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.derived_at.cmp(&b.derived_at))
+            .then_with(|| a.derived.cmp(&b.derived))
+            .then_with(|| a.source.cmp(&b.source))
+    });
     out
 }
 

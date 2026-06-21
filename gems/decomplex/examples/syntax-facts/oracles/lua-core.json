@@ -20,7 +20,7 @@
             38,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         },
         {
           "line": 4,
@@ -36,7 +36,7 @@
             11,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         },
         {
           "line": 40,
@@ -51,7 +51,7 @@
             44,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         },
         {
           "line": 46,
@@ -66,7 +66,7 @@
             48,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         }
       ],
       "owners": [

@@ -2039,7 +2039,170 @@
           "last_lineno": 28,
           "last_column": 3,
           "text": "def rich"
-        }
+        },
+        "redundant_nil_guards": [
+          {
+            "at": "facts/nil_guard_rich.rb:rich:3",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "x.nil?",
+            "line": 3,
+            "local": "x",
+            "proof": "x is already proven non-nil on this path",
+            "span": [
+              3,
+              4,
+              3,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:3": [
+                3,
+                4,
+                3,
+                10
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:4",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "y.present?",
+            "line": 4,
+            "local": "y",
+            "proof": "y is already proven non-nil on this path",
+            "span": [
+              4,
+              4,
+              4,
+              14
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:4": [
+                4,
+                4,
+                4,
+                14
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:5",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "x&.foo",
+            "line": 5,
+            "local": "x",
+            "proof": "x is already proven non-nil on this path",
+            "span": [
+              5,
+              4,
+              5,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:5": [
+                5,
+                4,
+                5,
+                10
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:10",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "z.nil?",
+            "line": 10,
+            "local": "z",
+            "proof": "z is already proven non-nil on this path",
+            "span": [
+              10,
+              4,
+              10,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:10": [
+                10,
+                4,
+                10,
+                10
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:13",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "w.nil?",
+            "line": 13,
+            "local": "w",
+            "proof": "w is already proven non-nil on this path",
+            "span": [
+              13,
+              4,
+              13,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:13": [
+                13,
+                4,
+                13,
+                10
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:16",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "obj&.name",
+            "line": 16,
+            "local": "obj",
+            "proof": "obj is already proven non-nil on this path",
+            "span": [
+              16,
+              4,
+              16,
+              13
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:16": [
+                16,
+                4,
+                16,
+                13
+              ]
+            }
+          },
+          {
+            "at": "facts/nil_guard_rich.rb:rich:19",
+            "defn": "rich",
+            "file": "facts/nil_guard_rich.rb",
+            "guard": "b.nil?",
+            "line": 19,
+            "local": "b",
+            "proof": "b is already proven non-nil on this path",
+            "span": [
+              19,
+              4,
+              19,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard_rich.rb:rich:19": [
+                19,
+                4,
+                19,
+                10
+              ]
+            }
+          }
+        ]
       }
     ]
   },

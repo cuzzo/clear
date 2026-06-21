@@ -81,7 +81,7 @@ class SyntaxTest < Minitest::Test
       error = nil
       with_env("DECOMPLEX_TS_RUBY_PATH", nil) do
         error = assert_raises(LoadError) do
-          Decomplex::Syntax.parse(path, parser: "tree_sitter")
+          Decomplex::Syntax.parse_raw(path, parser: "tree_sitter")
         end
       end
       assert_match(/missing Tree-sitter grammar/, error.message)

@@ -88,6 +88,7 @@ module Decomplex
 
       def findings
         @hits.group_by { |hit| [hit.kind, hit.detail] }.map do |(kind, detail), hits|
+          hits = hits.sort_by { |hit| [hit.file.to_s, hit.line.to_i, hit.defn.to_s, Array(hit.span)] }
           units = hits.map { |hit| [hit.file, hit.defn] }.uniq
           sites = hits.map { |hit| "#{hit.file}:#{hit.defn}:#{hit.line}" }.uniq
           spans = {}

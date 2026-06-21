@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Decomplex
   module Syntax
     NilGuardFinding = Struct.new(:file, :defn, :line, :span, :local, :guard,

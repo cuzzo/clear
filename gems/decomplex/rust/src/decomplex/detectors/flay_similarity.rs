@@ -483,7 +483,7 @@ end
         let function = doc.function_defs.first().expect("function");
         let (_fingerprint, mass) =
             language_profile(Language::Ruby).clone_fingerprint(&function.body);
-        assert_eq!(mass, 128);
+        assert_eq!(mass, 85);
     }
 
     #[test]
@@ -511,7 +511,7 @@ end
             .find(|node| node.kind == "unless" && node.named)
             .expect("unless");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 126);
+        assert_eq!(mass, 89);
     }
 
     #[test]
@@ -543,7 +543,7 @@ end
             .find(|node| node.kind == "assignment" && node.named)
             .expect("assignment");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 178);
+        assert_eq!(mass, 138);
     }
 
     #[test]
@@ -576,7 +576,7 @@ end
             .expect("body_slots");
         let (_fingerprint, mass) =
             language_profile(Language::Ruby).clone_fingerprint(&function.body);
-        assert_eq!(mass, 110);
+        assert_eq!(mass, 46);
     }
 
     #[test]
@@ -604,10 +604,10 @@ end
         doc.root.walk(&mut nodes);
         let node = nodes
             .into_iter()
-            .find(|node| node.kind == "do_block" && node.named)
-            .expect("do_block");
+            .find(|node| node.kind == "block" && node.named)
+            .expect("block");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 110);
+        assert_eq!(mass, 104);
     }
 
     #[test]
@@ -632,7 +632,7 @@ end
         let function = doc.function_defs.first().expect("function");
         let (_fingerprint, mass) =
             language_profile(Language::Ruby).clone_fingerprint(&function.body);
-        assert_eq!(mass, 96);
+        assert_eq!(mass, 74);
     }
 
     #[test]
@@ -665,7 +665,7 @@ end
             .find(|node| node.kind == "case" && node.named)
             .expect("case");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 136);
+        assert_eq!(mass, 94);
     }
 
     #[test]
@@ -697,7 +697,7 @@ end
             .find(|node| node.kind == "case" && node.named)
             .expect("case");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 96);
+        assert_eq!(mass, 73);
     }
 
     #[test]
@@ -719,7 +719,7 @@ end
         let function = doc.function_defs.first().expect("function");
         let (_fingerprint, mass) =
             language_profile(Language::Ruby).clone_fingerprint(&function.body);
-        assert_eq!(mass, 175);
+        assert_eq!(mass, 127);
     }
 
     #[test]
@@ -755,7 +755,7 @@ end
             .find(|node| node.kind == "module" && node.named)
             .expect("module");
         let (_fingerprint, mass) = language_profile(Language::Ruby).clone_fingerprint(node);
-        assert_eq!(mass, 150);
+        assert_eq!(mass, 112);
     }
 
     #[test]
@@ -775,6 +775,6 @@ end
         let function = doc.function_defs.first().expect("function");
         let (_fingerprint, mass) =
             language_profile(Language::Ruby).clone_fingerprint(&function.body);
-        assert_eq!(mass, 132);
+        assert_eq!(mass, 105);
     }
 }

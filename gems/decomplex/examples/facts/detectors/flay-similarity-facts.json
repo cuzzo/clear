@@ -9,52 +9,356 @@
       {
         "file": "facts/flay.rb",
         "language": "ruby",
-        "root": {"kind": "program", "text": "", "span": [1, 0, 1, 0], "named": true, "field_name": null, "children": []},
+        "root": {
+          "kind": "program",
+          "text": "",
+          "span": [
+            1,
+            0,
+            1,
+            0
+          ],
+          "named": true,
+          "field_name": null,
+          "children": [
+
+          ]
+        },
         "function_defs": [
           {
             "file": "facts/flay.rb",
             "name": "alpha",
             "owner": "Fixture",
             "line": 1,
-            "span": [1, 0, 5, 3],
+            "span": [
+              1,
+              0,
+              5,
+              3
+            ],
             "visibility": "public",
-            "params": [],
+            "params": [
+
+            ],
             "body": {
               "kind": "body_statement",
               "text": "left = source.fetch(:left)\nright = source.fetch(:right)\ncommit(left, right)",
-              "span": [2, 2, 4, 21],
+              "span": [
+                2,
+                2,
+                4,
+                21
+              ],
               "named": true,
               "field_name": null,
               "children": [
-                {"kind": "assignment", "text": "left = source.fetch(:left)", "span": [2, 2, 2, 28], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "left", "span": [2, 2, 2, 6], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [2, 7, 2, 8], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:left)", "span": [2, 9, 2, 28], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [2, 9, 2, 15], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [2, 16, 2, 21], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:left)", "span": [2, 21, 2, 28], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":left", "span": [2, 22, 2, 27], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "assignment", "text": "right = source.fetch(:right)", "span": [3, 2, 3, 30], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "right", "span": [3, 2, 3, 7], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [3, 8, 3, 9], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:right)", "span": [3, 10, 3, 30], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [3, 10, 3, 16], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [3, 17, 3, 22], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:right)", "span": [3, 22, 3, 30], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":right", "span": [3, 23, 3, 29], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "call", "text": "commit(left, right)", "span": [4, 2, 4, 21], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "commit", "span": [4, 2, 4, 8], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(left, right)", "span": [4, 8, 4, 21], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "left", "span": [4, 9, 4, 13], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "right", "span": [4, 15, 4, 20], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]}
+                {
+                  "kind": "assignment",
+                  "text": "left = source.fetch(:left)",
+                  "span": [
+                    2,
+                    2,
+                    2,
+                    28
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "left",
+                      "span": [
+                        2,
+                        2,
+                        2,
+                        6
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        2,
+                        7,
+                        2,
+                        8
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:left)",
+                      "span": [
+                        2,
+                        9,
+                        2,
+                        28
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            2,
+                            9,
+                            2,
+                            15
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            2,
+                            16,
+                            2,
+                            21
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:left)",
+                          "span": [
+                            2,
+                            21,
+                            2,
+                            28
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":left",
+                              "span": [
+                                2,
+                                22,
+                                2,
+                                27
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "assignment",
+                  "text": "right = source.fetch(:right)",
+                  "span": [
+                    3,
+                    2,
+                    3,
+                    30
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "right",
+                      "span": [
+                        3,
+                        2,
+                        3,
+                        7
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        3,
+                        8,
+                        3,
+                        9
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:right)",
+                      "span": [
+                        3,
+                        10,
+                        3,
+                        30
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            3,
+                            10,
+                            3,
+                            16
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            3,
+                            17,
+                            3,
+                            22
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:right)",
+                          "span": [
+                            3,
+                            22,
+                            3,
+                            30
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":right",
+                              "span": [
+                                3,
+                                23,
+                                3,
+                                29
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "commit(left, right)",
+                  "span": [
+                    4,
+                    2,
+                    4,
+                    21
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "commit",
+                      "span": [
+                        4,
+                        2,
+                        4,
+                        8
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(left, right)",
+                      "span": [
+                        4,
+                        8,
+                        4,
+                        21
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "left",
+                          "span": [
+                            4,
+                            9,
+                            4,
+                            13
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "right",
+                          "span": [
+                            4,
+                            15,
+                            4,
+                            20
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
               ]
             }
           },
@@ -63,45 +367,335 @@
             "name": "beta",
             "owner": "Fixture",
             "line": 7,
-            "span": [7, 0, 11, 3],
+            "span": [
+              7,
+              0,
+              11,
+              3
+            ],
             "visibility": "public",
-            "params": [],
+            "params": [
+
+            ],
             "body": {
               "kind": "body_statement",
               "text": "first = source.fetch(:first)\nsecond = source.fetch(:second)\ncommit(first, second)",
-              "span": [8, 2, 10, 25],
+              "span": [
+                8,
+                2,
+                10,
+                25
+              ],
               "named": true,
               "field_name": null,
               "children": [
-                {"kind": "assignment", "text": "first = source.fetch(:first)", "span": [8, 2, 8, 30], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "first", "span": [8, 2, 8, 7], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [8, 8, 8, 9], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:first)", "span": [8, 10, 8, 30], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [8, 10, 8, 16], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [8, 17, 8, 22], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:first)", "span": [8, 22, 8, 30], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":first", "span": [8, 23, 8, 29], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "assignment", "text": "second = source.fetch(:second)", "span": [9, 2, 9, 32], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "second", "span": [9, 2, 9, 8], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [9, 9, 9, 10], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:second)", "span": [9, 11, 9, 32], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [9, 11, 9, 17], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [9, 18, 9, 23], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:second)", "span": [9, 23, 9, 32], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":second", "span": [9, 24, 9, 31], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "call", "text": "commit(first, second)", "span": [10, 2, 10, 25], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "commit", "span": [10, 2, 10, 8], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(first, second)", "span": [10, 8, 10, 25], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "first", "span": [10, 9, 10, 14], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "second", "span": [10, 16, 10, 22], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]}
+                {
+                  "kind": "assignment",
+                  "text": "first = source.fetch(:first)",
+                  "span": [
+                    8,
+                    2,
+                    8,
+                    30
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "first",
+                      "span": [
+                        8,
+                        2,
+                        8,
+                        7
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        8,
+                        8,
+                        8,
+                        9
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:first)",
+                      "span": [
+                        8,
+                        10,
+                        8,
+                        30
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            8,
+                            10,
+                            8,
+                            16
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            8,
+                            17,
+                            8,
+                            22
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:first)",
+                          "span": [
+                            8,
+                            22,
+                            8,
+                            30
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":first",
+                              "span": [
+                                8,
+                                23,
+                                8,
+                                29
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "assignment",
+                  "text": "second = source.fetch(:second)",
+                  "span": [
+                    9,
+                    2,
+                    9,
+                    32
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "second",
+                      "span": [
+                        9,
+                        2,
+                        9,
+                        8
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        9,
+                        9,
+                        9,
+                        10
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:second)",
+                      "span": [
+                        9,
+                        11,
+                        9,
+                        32
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            9,
+                            11,
+                            9,
+                            17
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            9,
+                            18,
+                            9,
+                            23
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:second)",
+                          "span": [
+                            9,
+                            23,
+                            9,
+                            32
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":second",
+                              "span": [
+                                9,
+                                24,
+                                9,
+                                31
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "commit(first, second)",
+                  "span": [
+                    10,
+                    2,
+                    10,
+                    25
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "commit",
+                      "span": [
+                        10,
+                        2,
+                        10,
+                        8
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(first, second)",
+                      "span": [
+                        10,
+                        8,
+                        10,
+                        25
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "first",
+                          "span": [
+                            10,
+                            9,
+                            10,
+                            14
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "second",
+                          "span": [
+                            10,
+                            16,
+                            10,
+                            22
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
               ]
             }
           },
@@ -110,39 +704,261 @@
             "name": "gamma",
             "owner": "Fixture",
             "line": 13,
-            "span": [13, 0, 17, 3],
+            "span": [
+              13,
+              0,
+              17,
+              3
+            ],
             "visibility": "public",
-            "params": [],
+            "params": [
+
+            ],
             "body": {
               "kind": "body_statement",
               "text": "value = source.fetch(:value)\nsave(value)\nlog(value)",
-              "span": [14, 2, 16, 12],
+              "span": [
+                14,
+                2,
+                16,
+                12
+              ],
               "named": true,
               "field_name": null,
               "children": [
-                {"kind": "assignment", "text": "value = source.fetch(:value)", "span": [14, 2, 14, 30], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "value", "span": [14, 2, 14, 7], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [14, 8, 14, 9], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:value)", "span": [14, 10, 14, 30], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [14, 10, 14, 16], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [14, 17, 14, 22], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:value)", "span": [14, 22, 14, 30], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":value", "span": [14, 23, 14, 29], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "call", "text": "save(value)", "span": [15, 2, 15, 13], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "save", "span": [15, 2, 15, 6], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(value)", "span": [15, 6, 15, 13], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "value", "span": [15, 7, 15, 12], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]},
-                {"kind": "call", "text": "log(value)", "span": [16, 2, 16, 12], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "log", "span": [16, 2, 16, 5], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(value)", "span": [16, 5, 16, 12], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "value", "span": [16, 6, 16, 11], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]}
+                {
+                  "kind": "assignment",
+                  "text": "value = source.fetch(:value)",
+                  "span": [
+                    14,
+                    2,
+                    14,
+                    30
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "value",
+                      "span": [
+                        14,
+                        2,
+                        14,
+                        7
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        14,
+                        8,
+                        14,
+                        9
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:value)",
+                      "span": [
+                        14,
+                        10,
+                        14,
+                        30
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            14,
+                            10,
+                            14,
+                            16
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            14,
+                            17,
+                            14,
+                            22
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:value)",
+                          "span": [
+                            14,
+                            22,
+                            14,
+                            30
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":value",
+                              "span": [
+                                14,
+                                23,
+                                14,
+                                29
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "save(value)",
+                  "span": [
+                    15,
+                    2,
+                    15,
+                    13
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "save",
+                      "span": [
+                        15,
+                        2,
+                        15,
+                        6
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(value)",
+                      "span": [
+                        15,
+                        6,
+                        15,
+                        13
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "value",
+                          "span": [
+                            15,
+                            7,
+                            15,
+                            12
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "log(value)",
+                  "span": [
+                    16,
+                    2,
+                    16,
+                    12
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "log",
+                      "span": [
+                        16,
+                        2,
+                        16,
+                        5
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(value)",
+                      "span": [
+                        16,
+                        5,
+                        16,
+                        12
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "value",
+                          "span": [
+                            16,
+                            6,
+                            16,
+                            11
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
               ]
             }
           },
@@ -151,41 +967,357 @@
             "name": "delta",
             "owner": "Fixture",
             "line": 19,
-            "span": [19, 0, 23, 3],
+            "span": [
+              19,
+              0,
+              23,
+              3
+            ],
             "visibility": "public",
-            "params": [],
+            "params": [
+
+            ],
             "body": {
               "kind": "body_statement",
               "text": "item = source.fetch(:item)\nsave(item)\naudit(item)",
-              "span": [20, 2, 22, 14],
+              "span": [
+                20,
+                2,
+                22,
+                14
+              ],
               "named": true,
               "field_name": null,
               "children": [
-                {"kind": "assignment", "text": "item = source.fetch(:item)", "span": [20, 2, 20, 28], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "item", "span": [20, 2, 20, 6], "named": true, "field_name": null, "children": []},
-                  {"kind": "=", "text": "=", "span": [20, 7, 20, 8], "named": false, "field_name": null, "children": []},
-                  {"kind": "call", "text": "source.fetch(:item)", "span": [20, 9, 20, 28], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "source", "span": [20, 9, 20, 15], "named": true, "field_name": null, "children": []},
-                    {"kind": "identifier", "text": "fetch", "span": [20, 16, 20, 21], "named": true, "field_name": null, "children": []},
-                    {"kind": "argument_list", "text": "(:item)", "span": [20, 21, 20, 28], "named": true, "field_name": null, "children": [
-                      {"kind": "symbol", "text": ":item", "span": [20, 22, 20, 27], "named": true, "field_name": null, "children": []}
-                    ]}
-                  ]}
-                ]},
-                {"kind": "call", "text": "save(item)", "span": [21, 2, 21, 12], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "save", "span": [21, 2, 21, 6], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(item)", "span": [21, 6, 21, 12], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "item", "span": [21, 7, 21, 11], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]},
-                {"kind": "call", "text": "audit(item)", "span": [22, 2, 22, 14], "named": true, "field_name": null, "children": [
-                  {"kind": "identifier", "text": "audit", "span": [22, 2, 22, 7], "named": true, "field_name": null, "children": []},
-                  {"kind": "argument_list", "text": "(item)", "span": [22, 7, 22, 14], "named": true, "field_name": null, "children": [
-                    {"kind": "identifier", "text": "item", "span": [22, 8, 22, 12], "named": true, "field_name": null, "children": []}
-                  ]}
-                ]}
+                {
+                  "kind": "assignment",
+                  "text": "item = source.fetch(:item)",
+                  "span": [
+                    20,
+                    2,
+                    20,
+                    28
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "item",
+                      "span": [
+                        20,
+                        2,
+                        20,
+                        6
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "=",
+                      "text": "=",
+                      "span": [
+                        20,
+                        7,
+                        20,
+                        8
+                      ],
+                      "named": false,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "call",
+                      "text": "source.fetch(:item)",
+                      "span": [
+                        20,
+                        9,
+                        20,
+                        28
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "source",
+                          "span": [
+                            20,
+                            9,
+                            20,
+                            15
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "identifier",
+                          "text": "fetch",
+                          "span": [
+                            20,
+                            16,
+                            20,
+                            21
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "argument_list",
+                          "text": "(:item)",
+                          "span": [
+                            20,
+                            21,
+                            20,
+                            28
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+                            {
+                              "kind": "symbol",
+                              "text": ":item",
+                              "span": [
+                                20,
+                                22,
+                                20,
+                                27
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "save(item)",
+                  "span": [
+                    21,
+                    2,
+                    21,
+                    12
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "save",
+                      "span": [
+                        21,
+                        2,
+                        21,
+                        6
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(item)",
+                      "span": [
+                        21,
+                        6,
+                        21,
+                        12
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "item",
+                          "span": [
+                            21,
+                            7,
+                            21,
+                            11
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "kind": "call",
+                  "text": "audit(item)",
+                  "span": [
+                    22,
+                    2,
+                    22,
+                    14
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+                    {
+                      "kind": "identifier",
+                      "text": "audit",
+                      "span": [
+                        22,
+                        2,
+                        22,
+                        7
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+
+                      ]
+                    },
+                    {
+                      "kind": "argument_list",
+                      "text": "(item)",
+                      "span": [
+                        22,
+                        7,
+                        22,
+                        14
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "item",
+                          "span": [
+                            22,
+                            8,
+                            22,
+                            12
+                          ],
+                          "named": true,
+                          "field_name": null,
+                          "children": [
+
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
               ]
             }
+          }
+        ],
+        "clone_candidates": [
+          {
+            "file": "facts/flay.rb",
+            "line": 2,
+            "span": [
+              2,
+              0,
+              4,
+              1
+            ],
+            "method_name": "alpha",
+            "node_name": "defn",
+            "mass": 22,
+            "fingerprint": "type2(fetch|fetch|commit)",
+            "raw": "def alpha; left = source.fetch(:left); right = source.fetch(:right); commit(left, right); end",
+            "child_fingerprints": [
+
+            ],
+            "child_masses": [
+
+            ]
+          },
+          {
+            "file": "facts/flay.rb",
+            "line": 8,
+            "span": [
+              8,
+              0,
+              10,
+              1
+            ],
+            "method_name": "beta",
+            "node_name": "defn",
+            "mass": 22,
+            "fingerprint": "type2(fetch|fetch|commit)",
+            "raw": "def beta; first = source.fetch(:first); second = source.fetch(:second); commit(first, second); end",
+            "child_fingerprints": [
+
+            ],
+            "child_masses": [
+
+            ]
+          },
+          {
+            "file": "facts/flay.rb",
+            "line": 14,
+            "span": [
+              14,
+              0,
+              16,
+              1
+            ],
+            "method_name": "gamma",
+            "node_name": "defn",
+            "mass": 18,
+            "fingerprint": "type3(fetch|save|log)",
+            "raw": "def gamma; value = source.fetch(:value); save(value); log(value); end",
+            "child_fingerprints": [
+              "fetch(value)",
+              "save(value)",
+              "log(value)"
+            ],
+            "child_masses": [
+              6,
+              6,
+              6
+            ]
+          },
+          {
+            "file": "facts/flay.rb",
+            "line": 20,
+            "span": [
+              20,
+              0,
+              22,
+              1
+            ],
+            "method_name": "delta",
+            "node_name": "defn",
+            "mass": 18,
+            "fingerprint": "type3(fetch|save|audit)",
+            "raw": "def delta; item = source.fetch(:item); save(item); audit(item); end",
+            "child_fingerprints": [
+              "fetch(value)",
+              "save(value)",
+              "audit(value)"
+            ],
+            "child_masses": [
+              6,
+              6,
+              6
+            ]
           }
         ]
       }
@@ -207,8 +1339,18 @@
           "facts/flay.rb:beta:8"
         ],
         "spans": {
-          "facts/flay.rb:alpha:2": [2, 0, 4, 1],
-          "facts/flay.rb:beta:8": [8, 0, 10, 1]
+          "facts/flay.rb:alpha:2": [
+            2,
+            0,
+            4,
+            1
+          ],
+          "facts/flay.rb:beta:8": [
+            8,
+            0,
+            10,
+            1
+          ]
         }
       },
       {
@@ -225,8 +1367,18 @@
           "facts/flay.rb:gamma:14"
         ],
         "spans": {
-          "facts/flay.rb:delta:20": [20, 0, 22, 1],
-          "facts/flay.rb:gamma:14": [14, 0, 16, 1]
+          "facts/flay.rb:delta:20": [
+            20,
+            0,
+            22,
+            1
+          ],
+          "facts/flay.rb:gamma:14": [
+            14,
+            0,
+            16,
+            1
+          ]
         }
       }
     ]

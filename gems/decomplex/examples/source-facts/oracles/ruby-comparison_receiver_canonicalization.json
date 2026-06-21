@@ -1,0 +1,22 @@
+{
+  "syntax": {
+    "comparisons": [
+      {
+        "source": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+        "raw": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+        "canon_source": "fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+        "operator": "==",
+        "function": "tree_sitter?",
+        "line": 5
+      },
+      {
+        "source": "rule.fetch(\"id\") == rule_id",
+        "raw": "rule.fetch(\"id\") == rule_id",
+        "canon_source": "fetch(\"id\") == rule_id",
+        "operator": "==",
+        "function": "dark_arm_result",
+        "line": 9
+      }
+    ]
+  }
+}

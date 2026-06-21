@@ -11,7 +11,6 @@ mod lua;
 mod php;
 mod python;
 mod ruby;
-mod ruby_data;
 mod rust;
 mod swift;
 mod typescript;
@@ -19,7 +18,7 @@ mod zig;
 
 pub(crate) use base::LanguageProfile;
 
-use super::Language;
+use super::{visibility, CloneCandidate, Document, FunctionDef, Language};
 use c::CProfile;
 use cpp::CppProfile;
 use csharp::CSharpProfile;
@@ -70,4 +69,16 @@ pub(crate) fn language_profile(language: Language) -> &'static dyn LanguageProfi
         Language::CSharp => &CSHARP_PROFILE,
         Language::Php => &PHP_PROFILE,
     }
+}
+
+pub(crate) fn apply_visibility(
+    language: Language,
+    functions: &mut [FunctionDef],
+    calls: &[super::CallSite],
+) {
+    visibility::apply_visibility(functions, calls, language_profile(language));
+}
+
+pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
+    base::clone_candidates_for_profile(language_profile(document.language), document)
 }

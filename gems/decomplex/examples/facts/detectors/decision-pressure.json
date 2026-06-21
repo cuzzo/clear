@@ -151,23 +151,6 @@
   },
   "expected": [
     {
-      "contract": ".user",
-      "decisions": 1,
-      "essential": 1,
-      "methods": 1,
-      "sites": [
-        "facts/decision.rb:check:3"
-      ],
-      "spans": {
-        "facts/decision.rb:check:3": [
-          3,
-          2,
-          3,
-          16
-        ]
-      }
-    },
-    {
       "contract": ".name",
       "decisions": 1,
       "essential": 0,
@@ -181,6 +164,23 @@
           0,
           2,
           25
+        ]
+      }
+    },
+    {
+      "contract": ".user",
+      "decisions": 1,
+      "essential": 1,
+      "methods": 1,
+      "sites": [
+        "facts/decision.rb:check:3"
+      ],
+      "spans": {
+        "facts/decision.rb:check:3": [
+          3,
+          2,
+          3,
+          16
         ]
       }
     }

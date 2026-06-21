@@ -72,9 +72,12 @@ pub fn scan_documents(documents: &[Document]) -> PathConditionReport {
 pub(crate) fn fact_sites_for_document(
     document: &Document,
 ) -> Vec<crate::decomplex::syntax::PathConditionSite> {
-    let mut sites = sites_for_document(document);
+    let mut sites = sites_from_document_facts(document);
+    if !document.normalized_root.children.is_empty() {
+        sites.extend(normalized_sites_from_document(document));
+    }
     if sites.is_empty() {
-        sites = normalized_sites_from_document(document);
+        sites = sites_from_raw_facts(document);
     }
     dedupe_sites(sites)
         .into_iter()
@@ -87,12 +90,6 @@ pub(crate) fn fact_sites_for_document(
             span: site.span,
         })
         .collect()
-}
-
-fn sites_for_document(document: &Document) -> Vec<Site> {
-    let mut sites = sites_from_document_facts(document);
-    sites.extend(sites_from_raw_facts(document));
-    sites
 }
 
 fn normalized_sites_from_document(document: &Document) -> Vec<Site> {

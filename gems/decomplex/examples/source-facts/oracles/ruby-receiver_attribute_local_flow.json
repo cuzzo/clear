@@ -1,23 +1,30 @@
 {
   "local_flow": [
     {
+      "boundaries": [],
       "method": "apply",
       "statements": [
         {
-          "reads": [
-            "row"
+          "co_uses": [],
+          "dependencies": [
+            [
+              "repo",
+              "row"
+            ]
           ],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
-        },
-        {
           "reads": [
-            "facts",
             "row"
           ],
           "writes": [
-            "fact"
+            "repo"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "facts",
+              "row"
+            ]
           ],
           "dependencies": [
             [
@@ -29,59 +36,59 @@
               "row"
             ]
           ],
-          "co_uses": [
-            [
-              "facts",
-              "row"
-            ]
+          "reads": [
+            "facts",
+            "row"
+          ],
+          "writes": [
+            "fact"
           ]
         },
         {
-          "reads": [
-            "fact",
-            "row"
-          ],
-          "writes": [],
-          "dependencies": [],
           "co_uses": [
             [
               "fact",
               "row"
             ]
-          ]
-        },
-        {
+          ],
+          "dependencies": [],
           "reads": [
             "fact",
             "row"
           ],
-          "writes": [],
-          "dependencies": [],
+          "writes": []
+        },
+        {
           "co_uses": [
             [
               "fact",
               "row"
             ]
-          ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "fact",
+            "row"
+          ],
+          "writes": []
         },
         {
+          "co_uses": [],
+          "dependencies": [],
           "reads": [
             "row"
           ],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
+          "writes": []
         },
         {
+          "co_uses": [],
+          "dependencies": [],
           "reads": [
             "fact"
           ],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
+          "writes": []
         }
-      ],
-      "boundaries": []
+      ]
     }
   ]
 }

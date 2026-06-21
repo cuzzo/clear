@@ -1553,7 +1553,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if node.kind() != "else" {
             return self.normalize_body(node);
         }
-        if let Some(call) = self.first_dotted_call_descendant(node) {
+        if let Some(call) = self.single_dotted_else_body(node) {
             let trailing = self
                 .source
                 .get(call.end_byte()..node.end_byte())
@@ -3834,29 +3834,67 @@ impl<'source> TreeSitterNormalizer<'source> {
             return None;
         }
         let node = node?;
-        let defaults = self
+        let pre_init = self
             .named_children(node)
             .into_iter()
-            .filter_map(|param| {
-                let name = self.named_field(param, "name")?;
-                let value = self.named_field(param, "value")?;
-                let value = optional_node(self.normalize_node(value));
-                Some(self.wrap(
-                    "LASGN",
-                    vec![
-                        Child::Symbol(node_text(name, self.source).to_string()),
-                        value,
-                    ],
-                    param,
-                ))
-            })
+            .filter_map(|param| self.normalize_parameter_init(param))
             .map(|node| Child::Node(Box::new(node)))
             .collect::<Vec<_>>();
-        if defaults.is_empty() {
+        if pre_init.is_empty() {
             None
         } else {
-            Some(self.wrap("ARGS", defaults, node))
+            Some(self.wrap("ARGS", pre_init, node))
         }
+    }
+
+    fn normalize_parameter_init(&mut self, param: TreeSitterNode<'_>) -> Option<Node> {
+        let name = self.parameter_name(param)?;
+        let value = self
+            .named_field(param, "value")
+            .or_else(|| self.parameter_default_value(param))
+            .and_then(|value| self.normalize_node(value));
+        Some(self.wrap(
+            "LASGN",
+            vec![Child::Symbol(name), optional_node(value)],
+            param,
+        ))
+    }
+
+    fn parameter_name(&self, param: TreeSitterNode<'_>) -> Option<String> {
+        if matches!(
+            param.kind(),
+            "identifier"
+                | "hash_splat_parameter"
+                | "splat_parameter"
+                | "block_parameter"
+                | "keyword_parameter"
+                | "optional_parameter"
+        ) {
+            if let Some(name) = self.identifier_text(param) {
+                return Some(name);
+            }
+        }
+        self.named_field(param, "name")
+            .and_then(|name| self.identifier_text(name))
+            .or_else(|| {
+                self.named_children(param)
+                    .into_iter()
+                    .find_map(|child| self.identifier_text(child))
+            })
+    }
+
+    fn parameter_default_value<'tree>(
+        &self,
+        param: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if !matches!(param.kind(), "optional_parameter" | "keyword_parameter") {
+            return None;
+        }
+        let name = self.parameter_name(param)?;
+        self.named_children(param).into_iter().rev().find(|child| {
+            self.identifier_text(*child).as_deref() != Some(name.as_str())
+                && !matches!(child.kind(), "comment")
+        })
     }
 
     fn normalize_block_parameters(&mut self, block: Option<TreeSitterNode<'_>>) -> Option<Node> {
@@ -6349,17 +6387,46 @@ impl<'source> TreeSitterNormalizer<'source> {
             .unwrap_node(node, self.source, self.named_children(node).len())
     }
 
-    fn first_dotted_call_descendant<'tree>(
+    fn single_dotted_else_body<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        for child in self.named_children(node) {
-            if self.call_node(child) && self.dotted_call(child) {
-                return Some(child);
-            }
-            if let Some(found) = self.first_dotted_call_descendant(child) {
-                return Some(found);
-            }
+        let children = self
+            .named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() != "comment")
+            .collect::<Vec<_>>();
+        if children.len() != 1 {
+            return None;
+        }
+        self.single_dotted_body_node(children[0])
+    }
+
+    fn single_dotted_body_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if if_kind(node.kind())
+            || loop_kind(node.kind()).is_some()
+            || matches!(
+                node.kind(),
+                "if_modifier" | "unless_modifier" | "while_modifier" | "until_modifier"
+            )
+        {
+            return None;
+        }
+        if self.call_node(node) && self.dotted_call(node) {
+            return Some(node);
+        }
+
+        let children = self
+            .named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() != "comment")
+            .collect::<Vec<_>>();
+        if children.len() == 1 && node_text(node, self.source) == node_text(children[0], self.source)
+        {
+            return self.single_dotted_body_node(children[0]);
         }
         None
     }

@@ -175,14 +175,15 @@ module Decomplex
             conf = h[:support].to_f / @support[has]
             next if conf < min_confidence
 
-            hc = cs.find { |c| c.mid == has }
+            hc = cs.select { |c| c.mid == has }
+                   .min_by { |c| [c.line.to_i, Array(c.span), c.mid.to_s] }
             loc = "#{file}:#{defn}:#{hc.line}"
             out << { pair: h[:pair], support: h[:support],
                      confidence: conf.round(2), has: has, missing: miss,
                      at: loc, spans: { loc => hc.span } }
           end
         end
-        out.sort_by { |h| [-h[:confidence], -h[:support]] }
+        out.sort_by { |h| [-h[:confidence], -h[:support], h[:at].to_s] }
       end
     end
   end

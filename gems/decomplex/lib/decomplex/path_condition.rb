@@ -47,20 +47,32 @@ module Decomplex
       def neglected(min_support: 3)
         popular = @groups.select { |_g, s| s.size >= min_support }
                          .map { |g, s| [g, s.size] }
-        out = []
+        out = {}
         @sites.each do |s|
           popular.each do |gs, sup|
             next unless (gs - s.guards).size == 1 && (s.guards - gs).empty?
             next if s.guards == gs
 
-            out << { pattern: gs, support: sup,
-                     missing: (gs - s.guards).first,
-                     at: "#{s.file}:#{s.defn}:#{s.line}",
-                     spans: { "#{s.file}:#{s.defn}:#{s.line}" => s.span },
-                     action: s.action }
+            at = "#{s.file}:#{s.defn}:#{s.line}"
+            row = { pattern: gs, support: sup,
+                    missing: (gs - s.guards).first,
+                    at: at,
+                    spans: { at => s.span },
+                    action: s.action }
+            key = [row[:pattern], row[:support], row[:missing], row[:at]]
+            previous = out[key]
+            out[key] = row if previous.nil? || span_width(row[:spans][at]) > span_width(previous[:spans][at])
           end
         end
-        out.uniq.sort_by { |h| -h[:support] }
+        out.values.sort_by { |h| [-h[:support], h[:at].to_s] }
+      end
+
+      private
+
+      def span_width(span)
+        return 0 unless span
+
+        ((span[2].to_i - span[0].to_i) * 1_000_000) + (span[3].to_i - span[1].to_i)
       end
     end
   end

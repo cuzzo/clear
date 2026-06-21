@@ -175,7 +175,14 @@ impl Report {
         }
 
         let mut out = Vec::new();
-        for ((kind, detail), hits) in groups {
+        for ((kind, detail), mut hits) in groups {
+            hits.sort_by(|a, b| {
+                a.file
+                    .cmp(&b.file)
+                    .then_with(|| a.line.cmp(&b.line))
+                    .then_with(|| a.defn.cmp(&b.defn))
+                    .then_with(|| a.span.cmp(&b.span))
+            });
             let units = hits
                 .iter()
                 .map(|hit| (hit.file.clone(), hit.defn.clone()))

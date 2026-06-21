@@ -195,12 +195,16 @@ fn loop_node(node: &RawNode) -> bool {
     matches!(
         node.kind.as_str(),
         "while"
+            | "WHILE"
             | "until"
+            | "UNTIL"
             | "while_statement"
             | "for"
+            | "FOR"
             | "for_statement"
             | "for_in_statement"
             | "do_block"
+            | "ITER"
     ) || hidden_loop(node)
         || (node.kind == "expression_statement"
             && starts_with_any(node.text.trim_start(), &["for", "while", "loop"]))
@@ -256,7 +260,7 @@ fn has_named_control_child(node: &RawNode, kinds: &[&str]) -> bool {
 fn rescue_node(node: &RawNode) -> bool {
     matches!(
         node.kind.as_str(),
-        "rescue" | "rescue_modifier" | "rescue_clause" | "rescue_body"
+        "rescue" | "RESCUE" | "RESBODY" | "rescue_modifier" | "rescue_clause" | "rescue_body"
     )
 }
 
@@ -311,10 +315,20 @@ fn boolean_node(node: &RawNode) -> bool {
             | "boolean_operator"
             | "conjunction_expression"
             | "disjunction_expression"
-    ) && node
+    ) && (node
         .children
         .iter()
         .any(|child| !child.named && matches!(child.text.as_str(), "&&" | "||" | "and" | "or"))
+        || text_has_boolean_operator(&node.text))
+}
+
+fn text_has_boolean_operator(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("&&")
+        || lower.contains("||")
+        || lower
+            .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .any(|word| matches!(word, "and" | "or"))
 }
 
 fn condition_node(node: &RawNode) -> Option<&RawNode> {

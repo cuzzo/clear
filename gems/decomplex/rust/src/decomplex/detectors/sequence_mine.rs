@@ -346,7 +346,17 @@ impl Report {
                 if confidence < min_confidence {
                     continue;
                 }
-                let Some(has_call) = calls.iter().find(|call| call.mid == has) else {
+                let Some(has_call) =
+                    calls
+                        .iter()
+                        .filter(|call| call.mid == has)
+                        .min_by(|left, right| {
+                            left.line
+                                .cmp(&right.line)
+                                .then_with(|| left.span.cmp(&right.span))
+                                .then_with(|| left.mid.cmp(&right.mid))
+                        })
+                else {
                     continue;
                 };
                 let loc = format!("{}:{}:{}", file, defn, has_call.line);
@@ -368,6 +378,7 @@ impl Report {
                 .partial_cmp(&a.confidence)
                 .unwrap()
                 .then_with(|| b.support.cmp(&a.support))
+                .then_with(|| a.at.cmp(&b.at))
         });
         out
     }

@@ -146,12 +146,13 @@ module Decomplex
             decisions: hs.size,
             essential: ess[contract],
             methods: hs.map { |h| [h.file, h.defn] }.uniq.size,
-            sites: hs.map { |h| "#{h.file}:#{h.defn}:#{h.line}" },
+            sites: hs.sort_by { |h| [h.file.to_s, h.line.to_i, h.defn.to_s] }
+                     .map { |h| "#{h.file}:#{h.defn}:#{h.line}" },
             spans: hs.to_h { |h| ["#{h.file}:#{h.defn}:#{h.line}", h.span] }
           }
         end
         named = rows.reject { |r| r[:contract] == "~local" }
-                    .sort_by { |r| [-r[:decisions], -r[:methods]] }
+                    .sort_by { |r| [-r[:decisions], -r[:methods], r[:contract].to_s] }
         local = rows.select { |r| r[:contract] == "~local" }
         named + local
       end

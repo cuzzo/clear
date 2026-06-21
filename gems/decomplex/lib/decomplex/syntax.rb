@@ -2,6 +2,8 @@
 
 require "set"
 require "rbconfig"
+require "json"
+require "ostruct"
 
 module Decomplex
   module Syntax
@@ -191,7 +193,7 @@ module Decomplex
       end
 
       def visibility(_document, node)
-        modifier_visibility(node)
+        modifier_visibility(node) || :public
       end
 
       def owner_name_from_declaration(document, node)
@@ -2708,6 +2710,21 @@ module Decomplex
     end
 
     require_relative "syntax/adapters"
+    require_relative "syntax/ruby"
+    require_relative "syntax/python"
+    require_relative "syntax/javascript"
+    require_relative "syntax/typescript"
+    require_relative "syntax/go"
+    require_relative "syntax/rust"
+    require_relative "syntax/zig"
+    require_relative "syntax/lua"
+    require_relative "syntax/c"
+    require_relative "syntax/cpp"
+    require_relative "syntax/csharp"
+    require_relative "syntax/java"
+    require_relative "syntax/swift"
+    require_relative "syntax/kotlin"
+    require_relative "syntax/php"
 
     LanguageProfile = TreeSitterLanguageAdapter
 
@@ -2828,6 +2845,15 @@ module Decomplex
       end
     end
 
+    def parse_raw(file, language: nil, parser: ENV.fetch("DECOMPLEX_PARSER", "tree_sitter"))
+      case parser.to_s.tr("-", "_")
+      when "", "tree_sitter", "treesitter"
+        TreeSitterAdapter.new.parse_raw(file, language: language)
+      else
+        raise ArgumentError, "unknown decomplex parser #{parser.inspect}"
+      end
+    end
+
     def document_cache
       @document_cache ||= {}
     end
@@ -2885,6 +2911,15 @@ module Decomplex
       LANGUAGE_PROFILES.fetch(key)
     rescue KeyError
       raise ArgumentError, "unsupported Syntax language profile: #{language.inspect}"
+    end
+
+    def native_fact_document(file, language:)
+      require_relative "native/command"
+
+      source = File.read(file)
+      projection = JSON.parse(Native::Command.run("syntax-facts", "--language", language.to_s, file.to_s))
+      row = Array(projection.fetch("documents")).first || {}
+      FactDocument.new(row, file: file, language: language, source: source, lines: source.lines)
     end
 
     class Document
@@ -3217,6 +3252,13 @@ module Decomplex
 
       def parse(file, language: nil)
         lang = (language || Syntax.language_for(file)).to_sym
+        return Syntax.native_fact_document(file, language: lang) if lang == :ruby
+
+        parse_raw(file, language: lang)
+      end
+
+      def parse_raw(file, language: nil)
+        lang = (language || Syntax.language_for(file)).to_sym
         source = File.read(file)
         parser = parser_for(lang)
         tree = parser.parse(source)
@@ -3472,3 +3514,4 @@ require_relative "syntax/dispatch"
 require_relative "syntax/clone_similarity"
 require_relative "syntax/complexity"
 require_relative "syntax/nil_guards"
+require_relative "syntax/fact_document"

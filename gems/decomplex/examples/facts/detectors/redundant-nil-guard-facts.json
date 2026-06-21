@@ -370,7 +370,32 @@
           "last_lineno": 5,
           "last_column": 3,
           "text": "def check"
-        }
+        },
+        "redundant_nil_guards": [
+          {
+            "at": "facts/nil_guard.rb:check:3",
+            "defn": "check",
+            "file": "facts/nil_guard.rb",
+            "guard": "x.nil?",
+            "line": 3,
+            "local": "x",
+            "proof": "x is already proven non-nil on this path",
+            "span": [
+              3,
+              4,
+              3,
+              10
+            ],
+            "spans": {
+              "facts/nil_guard.rb:check:3": [
+                3,
+                4,
+                3,
+                10
+              ]
+            }
+          }
+        ]
       }
     ]
   },

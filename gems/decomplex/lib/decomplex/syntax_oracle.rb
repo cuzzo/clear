@@ -65,6 +65,10 @@ module Decomplex
         "path_conditions" => rows(document.path_condition_sites, %i[guards action function line span]),
         "protocol_method_effects" => rows(document.protocol_method_effects, %i[owner name line reads writes]),
         "protocol_call_paths" => protocol_call_path_rows(document),
+        "immutable_struct_readers" => normalize_value(document.immutable_struct_readers),
+        "immutable_struct_reader_types" => normalize_value(document.immutable_struct_reader_types),
+        "type_aliases" => normalize_value(document.type_aliases),
+        "method_param_types" => normalize_value(document.respond_to?(:method_param_types) ? document.method_param_types : {}),
         "clone_candidates" => clone_candidate_rows(document),
         "redundant_nil_guards" => rows(document.redundant_nil_guard_findings, %i[defn line span local guard proof]),
         "local_methods" => local_method_rows(document),
@@ -92,6 +96,10 @@ module Decomplex
         protocol_method_effects protocol_call_paths clone_candidates redundant_nil_guards
         local_methods local_complexity_scores
       ]
+      map_sections = %w[
+        immutable_struct_readers immutable_struct_reader_types type_aliases
+        method_param_types
+      ]
       out = {
         "file" => document.fetch("file"),
         "language" => document.fetch("language")
@@ -99,6 +107,9 @@ module Decomplex
       sections.each do |section|
         rows = Array(document.fetch(section)).map { |row| normalize_value(row) }
         out[section] = rows.sort_by { |row| JSON.generate(row) }
+      end
+      map_sections.each do |section|
+        out[section] = normalize_value(document.fetch(section, {}))
       end
       out
     end
@@ -156,6 +167,7 @@ module Decomplex
           "node_name" => candidate.node_name,
           "mass" => candidate.mass,
           "fingerprint" => candidate.fingerprint,
+          "raw" => candidate.raw,
           "child_fingerprints" => normalize_value(candidate.child_fingerprints),
           "child_masses" => normalize_value(candidate.child_masses)
         }
@@ -186,7 +198,12 @@ module Decomplex
       text = source.to_s.strip
       text = text[1..].to_s.strip if text.start_with?("!")
       text = text.sub(/\Aself\./, "").sub(/\A@/, "")
-      text = text.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
+      if (dot_index = text.index("."))
+        receiver = text[0...dot_index]
+        rest = text[(dot_index + 1)..]
+        text = rest if receiver.match?(/\A[A-Za-z_]\w*\z/) &&
+                       (rest.include?(" == ") || rest.include?(" != ") || rest.include?("."))
+      end
       text.gsub(/\s+/, " ").strip
     end
 

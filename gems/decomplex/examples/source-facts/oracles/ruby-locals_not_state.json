@@ -1,18 +1,19 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "build",
-        "owner": "SourceFactLocalsNotState",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "values",
-          "config"
-        ]
-      }
-    ],
     "calls": [
+      {
+        "receiver": "ENV",
+        "message": "[]",
+        "function": "build",
+        "line": 6,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "key"
+        ]
+      },
       {
         "receiver": "self",
         "message": "assert_empty",
@@ -35,18 +36,37 @@
         "control": "always",
         "safe_navigation": false,
         "block": true,
-        "arguments": []
+        "arguments": [
+
+        ]
       }
     ],
-    "state_reads": [
+    "functions": [
       {
-        "receiver": "values",
-        "field": "each",
-        "function": "build",
-        "line": 8
+        "name": "build",
+        "owner": "SourceFactLocalsNotState",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "values",
+          "config"
+        ]
       }
     ],
-    "state_writes": [],
+    "protocol_method_effects": [
+      {
+        "owner": "SourceFactLocalsNotState",
+        "name": "build",
+        "line": 4,
+        "reads": [
+          "assert_empty",
+          "values.each"
+        ],
+        "writes": [
+
+        ]
+      }
+    ],
     "semantic_effects": [
       {
         "kind": "context_dependency",
@@ -61,14 +81,16 @@
         "line": 11
       }
     ],
-    "protocol_method_effects": [
+    "state_reads": [
       {
-        "owner": "SourceFactLocalsNotState",
-        "name": "build",
-        "line": 4,
-        "reads": [],
-        "writes": []
+        "receiver": "values",
+        "field": "each",
+        "function": "build",
+        "line": 8
       }
+    ],
+    "state_writes": [
+
     ]
   },
   "local_flow": [
@@ -76,12 +98,18 @@
       "method": "build",
       "statements": [
         {
-          "reads": [],
+          "reads": [
+
+          ],
           "writes": [
             "key"
           ],
-          "dependencies": [],
-          "co_uses": []
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
         },
         {
           "reads": [
@@ -96,15 +124,23 @@
               "key"
             ]
           ],
-          "co_uses": []
+          "co_uses": [
+
+          ]
         },
         {
-          "reads": [],
+          "reads": [
+
+          ],
           "writes": [
             "total"
           ],
-          "dependencies": [],
-          "co_uses": []
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
         },
         {
           "reads": [
@@ -114,7 +150,12 @@
           "writes": [
             "total"
           ],
-          "dependencies": [],
+          "dependencies": [
+            [
+              "total",
+              "values"
+            ]
+          ],
           "co_uses": [
             [
               "total",
@@ -127,8 +168,12 @@
             "config",
             "path"
           ],
-          "writes": [],
-          "dependencies": [],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
           "co_uses": [
             [
               "config",
@@ -137,10 +182,18 @@
           ]
         },
         {
-          "reads": [],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
+          "reads": [
+            "values"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
         },
         {
           "reads": [
@@ -148,8 +201,12 @@
             "path",
             "total"
           ],
-          "writes": [],
-          "dependencies": [],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
           "co_uses": [
             [
               "config",
@@ -166,7 +223,9 @@
           ]
         }
       ],
-      "boundaries": []
+      "boundaries": [
+
+      ]
     }
   ]
 }

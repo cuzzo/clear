@@ -1,35 +1,5 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "case_arms",
-        "owner": "SourceFactBranchNestedScopeRefs",
-        "line": 10,
-        "visibility": "public",
-        "params": [
-          "edge"
-        ]
-      },
-      {
-        "name": "do_block_branch",
-        "owner": "SourceFactBranchNestedScopeRefs",
-        "line": 19,
-        "visibility": "public",
-        "params": [
-          "components"
-        ]
-      },
-      {
-        "name": "nested_blocks",
-        "owner": "SourceFactBranchNestedScopeRefs",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "edges",
-          "funcs"
-        ]
-      }
-    ],
     "branch_decisions": [
       {
         "function": "case_arms",
@@ -52,8 +22,48 @@
         "line": 5,
         "predicate": "funcs.any? { |fn| effect_list(fn, :writes).any? }",
         "state_refs": [
+          "effect_list(fn, :writes).any?",
           "funcs.any?"
         ]
+      },
+      {
+        "function": "nested_blocks",
+        "line": 7,
+        "predicate": "edge.source == edge.target",
+        "state_refs": [
+          "edge.source",
+          "edge.target"
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "line": 10,
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "params": [
+          "edge"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 19,
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "params": [
+          "components"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "params": [
+          "edges",
+          "funcs"
+        ],
+        "visibility": "public"
       }
     ]
   }

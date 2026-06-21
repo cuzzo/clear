@@ -414,6 +414,75 @@
 
             ]
           }
+        ],
+        "path_condition_sites": [
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 5,
+            "span": [
+              5,
+              8,
+              5,
+              18
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_one"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 8,
+            "span": [
+              8,
+              8,
+              8,
+              18
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_two"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 11,
+            "span": [
+              11,
+              8,
+              11,
+              20
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_three"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 13,
+            "span": [
+              13,
+              6,
+              13,
+              17
+            ],
+            "guards": [
+              "a",
+              "b"
+            ],
+            "action": "commit_four"
+          }
         ]
       }
     ]

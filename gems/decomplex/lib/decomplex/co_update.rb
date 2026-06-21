@@ -57,8 +57,12 @@ module Decomplex
         counts.filter_map do |pair, units|
           next if units.size < min_support
 
+          ordered_units = units.sort_by do |file, defn|
+            writes = @by_unit.fetch([file, defn], [])
+            [file.to_s, writes.map(&:line).compact.min || 0, defn.to_s]
+          end
           { pair: pair, support: units.size,
-            sites: units.map { |f, d| "#{f}:#{d}" } }
+            sites: ordered_units.map { |f, d| "#{f}:#{d}" } }
         end.sort_by { |h| -h[:support] }
       end
 

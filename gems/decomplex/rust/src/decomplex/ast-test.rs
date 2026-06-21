@@ -296,7 +296,7 @@ fn ruby_private_predicate(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -361,7 +361,7 @@ fn ruby_private_collected_names(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -433,7 +433,7 @@ fn ruby_private_scope_collected_names(
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
           require "set"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           root = ARGV.fetch(3) == "true"
@@ -501,7 +501,7 @@ fn ruby_private_ruby_scope_locals(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -571,7 +571,7 @@ fn ruby_private_with_ruby_scope_trace(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           reset = ARGV.fetch(3) == "true"
@@ -661,7 +661,7 @@ fn ruby_private_destructured_parameter_targets_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -750,7 +750,7 @@ fn ruby_private_scope_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           mode = ARGV.fetch(3)
@@ -837,7 +837,7 @@ fn ruby_private_list_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           mode = ARGV.fetch(3)
@@ -930,7 +930,7 @@ fn ruby_private_string(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -1143,7 +1143,7 @@ fn ruby_private_node_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -1228,7 +1228,7 @@ fn ruby_private_inline_def_name_after_receiver(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -1291,7 +1291,7 @@ fn ruby_private_inline_parameter_begin_marker_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -1407,7 +1407,7 @@ fn ruby_private_prepend_inline_parameter_begin_value(
             end
           end
 
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -1476,7 +1476,7 @@ fn ruby_private_local_or_call_for_name_value(
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
           require "set"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           name = ARGV.fetch(3)
@@ -1565,7 +1565,7 @@ fn ruby_private_ruby_vcall_identifier_predicate(
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
           require "set"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           local_names = ARGV.fetch(3).split(",").reject(&:empty?)
@@ -1632,7 +1632,7 @@ fn ruby_private_vcall_identifier_predicate(
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
           require "set"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           local_names = ARGV.fetch(3).split(",").reject(&:empty?)
@@ -1699,7 +1699,7 @@ fn ruby_private_normalize_terminal_statement_value(
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
           require "set"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           local_names = ARGV.fetch(3).split(",").reject(&:empty?)
@@ -1785,7 +1785,7 @@ fn ruby_private_node_list_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -1870,7 +1870,7 @@ fn ruby_private_dotted_call_parts(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -1957,7 +1957,7 @@ fn ruby_private_member_parts(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -2045,7 +2045,7 @@ fn ruby_private_named_field_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           field = ARGV.fetch(3)
@@ -2133,7 +2133,7 @@ fn ruby_private_branch_child_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           condition_kind = ARGV.fetch(3)
@@ -2226,7 +2226,7 @@ fn ruby_private_wrap_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           normalized_source = ARGV.fetch(3) == "true"
@@ -2315,7 +2315,7 @@ fn ruby_private_normalize_method_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           method = ARGV.fetch(3)
@@ -2401,7 +2401,7 @@ fn ruby_private_normalize_return_node_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           elide_symbol = ARGV.fetch(3) == "true"
@@ -2487,7 +2487,7 @@ fn ruby_private_normalize_body_nodes_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -2570,7 +2570,7 @@ fn ruby_private_inline_def_from_argument_list_nil_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
           result = normalizer.send(:inline_def_from_argument_list, nil)
 
@@ -2639,7 +2639,7 @@ fn ruby_private_assignment_target_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -2723,7 +2723,7 @@ fn ruby_private_normalize_multiple_assignment_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -2808,7 +2808,7 @@ fn ruby_private_augmented_assignment_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           operator = ARGV.fetch(3).to_sym
@@ -2894,7 +2894,7 @@ fn ruby_private_logical_operator_assignment_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -2981,7 +2981,7 @@ fn ruby_private_call_arguments_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           function_mode = ARGV.fetch(3)
@@ -3079,7 +3079,7 @@ fn ruby_private_normalize_call_without_block_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           block_mode = ARGV.fetch(3)
@@ -3172,7 +3172,7 @@ fn ruby_private_normalize_patterns_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -3253,7 +3253,7 @@ fn ruby_private_command_arguments_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -3331,7 +3331,7 @@ fn ruby_private_const_for_nil_value(source: &str, language: Language, suffix: &s
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
           result = normalizer.send(:const_for, nil)
 
@@ -3401,7 +3401,7 @@ fn ruby_private_source_before_child_wrap_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           child_kind = ARGV.fetch(3)
@@ -3492,7 +3492,7 @@ fn ruby_private_source_from_nodes_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           first_kind = ARGV.fetch(1)
           first_text = ARGV.fetch(2)
           last_kind = ARGV.fetch(3)
@@ -3582,7 +3582,7 @@ fn ruby_private_source_from_normalized_nodes_value(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           first_kind = ARGV.fetch(1)
           first_text = ARGV.fetch(2)
           last_kind = ARGV.fetch(3)
@@ -3673,7 +3673,7 @@ fn ruby_private_dynamic_string_source_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -3757,7 +3757,7 @@ fn ruby_private_operator_assignment_statement_parts_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -3852,7 +3852,7 @@ fn ruby_private_modifier_parts_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -3953,7 +3953,7 @@ fn ruby_private_visibility_inline_def_statement_predicate(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target = nil
@@ -4260,7 +4260,7 @@ fn ruby_private_prepend_rescue_exception_assignment_value(
             end
           end
 
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           normalizer = Decomplex::Ast::TreeSitterNormalizer.new(document)
           body = node(JSON.parse(ARGV.fetch(1)))
           assignment = node(JSON.parse(ARGV.fetch(2)))
@@ -4387,7 +4387,7 @@ fn ruby_private_same_ts_node_predicate(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           left_kind = ARGV.fetch(1)
           left_text = ARGV.fetch(2)
           left_index = ARGV.fetch(3).to_i
@@ -4467,7 +4467,7 @@ fn ruby_private_parent_named_child_predicate(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           parent_kind = ARGV.fetch(1)
           parent_text = ARGV.fetch(2)
           parent_index = ARGV.fetch(3).to_i
@@ -4544,7 +4544,7 @@ fn ruby_private_node_key_signature(
         .parent()
         .expect("decomplex rust dir should have gem parent");
     let script = r#"
-          document = Decomplex::Syntax.parse(ARGV.fetch(0), parser: "tree_sitter")
+          document = Decomplex::Syntax.parse_raw(ARGV.fetch(0), parser: "tree_sitter")
           target_kind = ARGV.fetch(1)
           target_text = ARGV.fetch(2)
           target_index = ARGV.fetch(3).to_i

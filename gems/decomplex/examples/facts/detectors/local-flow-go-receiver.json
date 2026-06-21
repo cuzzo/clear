@@ -665,6 +665,89 @@
               "tax"
             ]
           }
+        ],
+        "local_methods": [
+          {
+            "boundaries": [
+
+            ],
+            "file": "facts/local_flow_receiver.go",
+            "id": "Worker#Handle",
+            "line": 5,
+            "name": "Handle",
+            "owner": "Worker",
+            "span": [
+              5,
+              0,
+              8,
+              1
+            ],
+            "statements": [
+              {
+                "co_uses": [
+                  [
+                    "price",
+                    "tax"
+                  ]
+                ],
+                "dependencies": [
+                  [
+                    "subtotal",
+                    "price"
+                  ],
+                  [
+                    "subtotal",
+                    "tax"
+                  ]
+                ],
+                "end_line": 6,
+                "index": 0,
+                "line": 6,
+                "reads": [
+                  "price",
+                  "tax"
+                ],
+                "source": "subtotal := price + tax",
+                "span": [
+                  6,
+                  2,
+                  6,
+                  25
+                ],
+                "writes": [
+                  "subtotal"
+                ]
+              },
+              {
+                "co_uses": [
+                  [
+                    "subtotal",
+                    "w"
+                  ]
+                ],
+                "dependencies": [
+
+                ],
+                "end_line": 7,
+                "index": 1,
+                "line": 7,
+                "reads": [
+                  "subtotal",
+                  "w"
+                ],
+                "source": "return Result_init(w, subtotal)",
+                "span": [
+                  7,
+                  2,
+                  7,
+                  33
+                ],
+                "writes": [
+
+                ]
+              }
+            ]
+          }
         ]
       }
     ]

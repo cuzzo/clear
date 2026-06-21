@@ -1,14 +1,9 @@
-use super::{CallSite, FunctionDef};
+use super::{adapters::LanguageProfile, CallSite, FunctionDef};
 
-pub(crate) trait VisibilityAdapter {
-    fn visibility_call(&self, call: &CallSite) -> bool;
-    fn visibility_arg_name(&self, argument: &str) -> String;
-}
-
-pub(crate) fn apply_visibility<A: VisibilityAdapter>(
+pub(crate) fn apply_visibility(
     functions: &mut [FunctionDef],
     calls: &[CallSite],
-    adapter: &A,
+    profile: &dyn LanguageProfile,
 ) {
     let mut owners = functions
         .iter()
@@ -27,7 +22,7 @@ pub(crate) fn apply_visibility<A: VisibilityAdapter>(
             .iter()
             .enumerate()
             .filter_map(|(index, call)| {
-                (call.owner == owner && adapter.visibility_call(call)).then_some(index)
+                (call.owner == owner && profile.visibility_call(call)).then_some(index)
             })
             .collect::<Vec<_>>();
 
@@ -60,7 +55,7 @@ pub(crate) fn apply_visibility<A: VisibilityAdapter>(
                     visibility = call.message.clone();
                 } else {
                     for argument in &call.arguments {
-                        let name = adapter.visibility_arg_name(argument);
+                        let name = profile.visibility_arg_name(argument);
                         for function_index in function_indices.iter().rev() {
                             if functions[*function_index].name == name {
                                 functions[*function_index].visibility = Some(call.message.clone());

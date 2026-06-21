@@ -1,0 +1,14 @@
+{
+  "syntax": {
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactNormalizedBooleanComplexity#eligible?",
+        "score": 2.1,
+        "signals": {
+          "boolean_ops": 3,
+          "branches": 1
+        }
+      }
+    ]
+  }
+}

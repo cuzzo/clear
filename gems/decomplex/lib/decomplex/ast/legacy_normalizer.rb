@@ -244,7 +244,7 @@ module Decomplex
         return normalize_singleton_function(node) if node.kind == "singleton_method"
 
         name = function_name(node)
-        args = normalize_parameters(named_field(node, "parameters"))
+        args = normalize_parameters(function_parameters(node))
         body = with_ruby_scope(node, reset: true) do
           elide_implicit_nil_body(
             prepend_inline_parameter_begin(
@@ -259,7 +259,7 @@ module Decomplex
       def normalize_singleton_function(node)
         receiver = singleton_receiver(node)
         name = singleton_name(node)
-        args = normalize_parameters(named_field(node, "parameters"))
+        args = normalize_parameters(function_parameters(node))
         body = with_ruby_scope(node, reset: true) do
           elide_implicit_nil_body(
             prepend_inline_parameter_begin(
@@ -1603,16 +1603,49 @@ module Decomplex
       def normalize_parameters(node)
         return nil unless ruby? && ts_node?(node)
 
-        defaults = node.named_children.filter_map do |param|
-          name = named_field(param, "name")
-          value = named_field(param, "value")
-          next unless name && value
+        pre_init = node.named_children.filter_map do |param|
+          name = parameter_name(param)
+          next unless name
 
-          wrap(:LASGN, children: [name.text.to_sym, normalize_node(value)], source: param)
+          value = named_field(param, "value") || parameter_default_value(param, name)
+          wrap(:LASGN, children: [name.to_sym, value ? normalize_node(value) : nil], source: param)
         end
-        return nil if defaults.empty?
+        return nil if pre_init.empty?
 
-        wrap(:ARGS, children: defaults, source: node)
+        wrap(:ARGS, children: pre_init, source: node)
+      end
+
+      def function_parameters(node)
+        named_field(node, "parameters") ||
+          node.named_children.find do |child|
+            %w[method_parameters block_parameters lambda_parameters parameters parameter_list].include?(child.kind)
+          end
+      end
+
+      def parameter_name(param)
+        if %w[identifier hash_splat_parameter splat_parameter block_parameter keyword_parameter optional_parameter].include?(param.kind)
+          name = parameter_identifier_text(param)
+          return name if name
+        end
+
+        named_field(param, "name")&.then { |name| parameter_identifier_text(name) } ||
+          param.named_children.filter_map { |child| parameter_identifier_text(child) }.first
+      end
+
+      def parameter_default_value(param, name)
+        return nil unless %w[optional_parameter keyword_parameter].include?(param.kind)
+
+        param.named_children.reverse.find do |child|
+          parameter_identifier_text(child) != name && child.kind != "comment"
+        end
+      end
+
+      def parameter_identifier_text(node)
+        return nil unless ts_node?(node)
+        return node.text.to_s.sub(/\A\*/, "") if IDENTIFIER_KINDS.include?(node.kind)
+        return node.text.to_s if normalization_adapter.identifier_text_node?(node)
+
+        nil
       end
 
       def normalize_block_parameters(block)
@@ -1802,11 +1835,12 @@ module Decomplex
 
       def normalize_leading_function_statement(node)
         name = normalization_adapter.leading_function_name(node).to_s.to_sym
+        args = normalize_parameters(function_parameters(node))
         body = normalization_adapter.leading_function_body(node)
         normalized_body = with_ruby_scope(node, reset: true) do
           elide_tail_returns(normalize_body(body))
         end
-        wrap(:DEFN, children: [name, scope(normalized_body, source: node)], source: node)
+        wrap(:DEFN, children: [name, scope(normalized_body, args: args, source: node)], source: node)
       end
 
       def command_call_statement?(node)

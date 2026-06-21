@@ -550,11 +550,21 @@ fn state_heatmap_findings(report: &state_mesh::StateMeshReport) -> Vec<Value> {
         sites.extend(row.readers.iter().map(site_location));
         sites.extend(row.re_derivations.iter().map(re_derivation_location));
 
-        let spans = row
-            .writers
-            .iter()
-            .chain(row.readers.iter())
-            .map(|site| (site_location(site), json!(site.span)))
+        let mut span_map = BTreeMap::new();
+        for site in row.writers.iter().chain(row.readers.iter()) {
+            let loc = site_location(site);
+            span_map
+                .entry(loc)
+                .and_modify(|span| {
+                    if site.span < *span {
+                        *span = site.span;
+                    }
+                })
+                .or_insert(site.span);
+        }
+        let spans = span_map
+            .into_iter()
+            .map(|(loc, span)| (loc, json!(span)))
             .collect::<Map<_, _>>();
 
         rows.push(json!({

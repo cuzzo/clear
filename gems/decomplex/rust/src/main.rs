@@ -1189,7 +1189,7 @@ fn write_json(value: &serde_json::Value, output: Option<&PathBuf>) -> Result<()>
     if let Some(path) = output {
         std::fs::write(path, text)?;
     } else {
-        println!("{text}");
+        print!("{text}");
     }
     Ok(())
 }
@@ -1223,7 +1223,7 @@ fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBu
     if let Some(path) = output {
         std::fs::write(path, text)?;
     } else {
-        println!("{text}");
+        print!("{text}");
     }
     Ok(())
 }

@@ -270,7 +270,13 @@ impl Report {
 
         let rows: Vec<_> = rows_map
             .into_iter()
-            .map(|(contract, hs)| {
+            .map(|(contract, mut hs)| {
+                hs.sort_by(|a, b| {
+                    a.file
+                        .cmp(&b.file)
+                        .then_with(|| a.line.cmp(&b.line))
+                        .then_with(|| a.defn.cmp(&b.defn))
+                });
                 let mut methods_set = BTreeSet::new();
                 for h in &hs {
                     methods_set.insert((&h.file, &h.defn));
@@ -298,12 +304,19 @@ impl Report {
             b.decisions
                 .cmp(&a.decisions)
                 .then_with(|| b.methods.cmp(&a.methods))
+                .then_with(|| a.contract.cmp(&b.contract))
         });
 
-        let local: Vec<_> = rows
+        let mut local: Vec<_> = rows
             .into_iter()
             .filter(|r| r.contract == "~local")
             .collect();
+        local.sort_by(|a, b| {
+            b.decisions
+                .cmp(&a.decisions)
+                .then_with(|| b.methods.cmp(&a.methods))
+                .then_with(|| a.contract.cmp(&b.contract))
+        });
         named.into_iter().chain(local).collect()
     }
 }

@@ -50,19 +50,3 @@ module Decomplex
     end
   end
 end
-
-require_relative "ruby"
-require_relative "python"
-require_relative "javascript"
-require_relative "typescript"
-require_relative "go"
-require_relative "rust"
-require_relative "zig"
-require_relative "lua"
-require_relative "c"
-require_relative "cpp"
-require_relative "csharp"
-require_relative "java"
-require_relative "swift"
-require_relative "kotlin"
-require_relative "php"

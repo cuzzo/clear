@@ -1,96 +1,85 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "data_carrier?",
-        "owner": "SourceFactMultilinePredicateHelperCalls",
-        "line": 12,
-        "visibility": "public",
-        "params": [
-          "state_count",
-          "public_methods"
-        ]
-      },
-      {
-        "name": "summarize",
-        "owner": "SourceFactMultilinePredicateHelperCalls",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "state_names",
-          "public_funcs"
-        ]
-      }
-    ],
     "calls": [
       {
-        "receiver": "self",
-        "message": "data_carrier?",
-        "function": "summarize",
-        "line": 5,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           "state_count: state_names.size",
           "public_methods: public_funcs.size"
-        ]
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "summarize",
+        "line": 5,
+        "message": "data_carrier?",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "public_methods",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "data_carrier?",
+        "line": 13,
         "message": "positive?",
-        "function": "data_carrier?",
-        "line": 13,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "receiver": "public_methods",
+        "safe_navigation": false
       },
       {
-        "receiver": "state_count",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "data_carrier?",
+        "line": 13,
         "message": "zero?",
-        "function": "data_carrier?",
-        "line": 13,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "receiver": "state_count",
+        "safe_navigation": false
       },
       {
-        "receiver": "state_names",
-        "message": "size",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "summarize",
         "line": 6,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "message": "size",
+        "receiver": "state_names",
+        "safe_navigation": false
       },
       {
-        "receiver": "public_funcs",
-        "message": "size",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "summarize",
         "line": 7,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "message": "size",
+        "receiver": "public_funcs",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 12,
+        "name": "data_carrier?",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "params": [
+          "state_count",
+          "public_methods"
+        ],
+        "visibility": "public"
       },
       {
-        "receiver": "self",
-        "message": "data_carrier",
-        "function": "summarize",
-        "line": 9,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "line": 4,
+        "name": "summarize",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "params": [
+          "state_names",
+          "public_funcs"
+        ],
+        "visibility": "public"
       }
     ]
   }

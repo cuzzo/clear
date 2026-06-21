@@ -217,7 +217,10 @@ module Decomplex
       end
 
       def diagnostic_protocol?(protocol)
-        protocol.any? { |mid| OPTIONAL_DIAGNOSTIC_MIDS.include?(mid) }
+        protocol.any? do |mid|
+          OPTIONAL_DIAGNOSTIC_MIDS.include?(mid) ||
+            OPTIONAL_DIAGNOSTIC_MIDS.include?("#{mid}!")
+        end
       end
 
       def index_protocols_by_pair(protocols)

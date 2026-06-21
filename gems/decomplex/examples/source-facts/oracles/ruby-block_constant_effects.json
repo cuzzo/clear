@@ -2,127 +2,119 @@
   "syntax": {
     "calls": [
       {
-        "receiver": "::File",
-        "message": "file?",
-        "function": "resolve",
-        "line": 8,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           "candidate"
-        ]
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "resolve",
+        "line": 8,
+        "message": "file?",
+        "receiver": "::File",
+        "safe_navigation": false
       },
       {
-        "receiver": "::File",
-        "message": "join",
-        "function": "direct",
-        "line": 12,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           "path",
           "\"x\""
-        ]
-      },
-      {
-        "receiver": "::File",
-        "message": "join",
-        "function": "resolve",
-        "line": 7,
+        ],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
+        "function": "direct",
+        "line": 12,
+        "message": "join",
+        "receiver": "::File",
+        "safe_navigation": false
+      },
+      {
         "arguments": [
           "path",
           "rel"
-        ]
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "resolve",
+        "line": 7,
+        "message": "join",
+        "receiver": "::File",
+        "safe_navigation": false
       },
       {
-        "receiver": "::File",
-        "message": "file?",
-        "function": "direct",
-        "line": 13,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           "path"
-        ]
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "direct",
+        "line": 13,
+        "message": "file?",
+        "receiver": "::File",
+        "safe_navigation": false
       },
       {
-        "receiver": "%w[one two]",
-        "message": "freeze",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "(top-level)",
         "line": 4,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "message": "freeze",
+        "receiver": "%w[one two]",
+        "safe_navigation": false
       },
       {
-        "receiver": "CANDIDATES.map { |rel| ::File.join(path, rel) }",
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "resolve",
+        "line": 7,
         "message": "find",
-        "function": "resolve",
-        "line": 7,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": [
-
-        ]
+        "receiver": "CANDIDATES.map { |rel| ::File.join(path, rel) }",
+        "safe_navigation": false
       },
       {
-        "receiver": "CANDIDATES",
-        "message": "map",
-        "function": "resolve",
-        "line": 7,
+        "arguments": [],
+        "block": true,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": [
-
-        ]
+        "function": "resolve",
+        "line": 7,
+        "message": "map",
+        "receiver": "CANDIDATES",
+        "safe_navigation": false
       }
-    ],
-    "state_reads": [
-
     ],
     "semantic_effects": [
       {
-        "kind": "hidden_io",
         "detail": "File.file?",
         "function": "direct",
+        "kind": "hidden_io",
         "line": 13
       },
       {
-        "kind": "hidden_io",
         "detail": "File.file?",
         "function": "resolve",
+        "kind": "hidden_io",
         "line": 8
       },
       {
-        "kind": "hidden_io",
         "detail": "File.join",
         "function": "direct",
+        "kind": "hidden_io",
         "line": 12
       },
       {
-        "kind": "hidden_io",
         "detail": "File.join",
         "function": "resolve",
+        "kind": "hidden_io",
         "line": 7
       }
-    ]
+    ],
+    "state_reads": []
   }
 }

@@ -2329,7 +2329,7 @@ class AstTest < Minitest::Test
 
   def parse_syntax(file, language)
     with_env("DECOMPLEX_FORCE_LANGUAGE", language.to_s) do
-      Decomplex::Syntax.parse(file, parser: "tree_sitter")
+      Decomplex::Syntax.parse_raw(file, parser: "tree_sitter")
     end
   rescue LoadError => e
     skip e.message

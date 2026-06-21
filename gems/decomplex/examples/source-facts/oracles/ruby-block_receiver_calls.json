@@ -1,161 +1,150 @@
 {
-  "syntax": {
-    "functions": [
-      {
-        "name": "collect",
-        "owner": "SourceFactBlockReceiverCalls",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "items"
-        ]
-      }
-    ],
-    "calls": [
-      {
-        "receiver": "self",
-        "message": "names",
-        "function": "collect",
-        "line": 10,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "item",
-        "message": "name",
-        "function": "collect",
-        "line": 7,
-        "conditional": true,
-        "control": "iterates",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "item",
-        "message": "children",
-        "function": "collect",
-        "line": 8,
-        "conditional": true,
-        "control": "iterates",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "child",
-        "message": "name",
-        "function": "collect",
-        "line": 8,
-        "conditional": true,
-        "control": "iterates",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "items",
-        "message": "flat_map",
-        "function": "collect",
-        "line": 6,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": []
-      },
-      {
-        "receiver": "item.children",
-        "message": "each",
-        "function": "collect",
-        "line": 8,
-        "conditional": true,
-        "control": "iterates",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": []
-      }
-    ],
-    "state_reads": [
-      {
-        "receiver": "item",
-        "field": "children",
-        "function": "collect",
-        "line": 8
-      },
-      {
-        "receiver": "item.children",
-        "field": "each",
-        "function": "collect",
-        "line": 8
-      },
-      {
-        "receiver": "items",
-        "field": "flat_map",
-        "function": "collect",
-        "line": 6
-      },
-      {
-        "receiver": "item",
-        "field": "name",
-        "function": "collect",
-        "line": 7
-      },
-      {
-        "receiver": "child",
-        "field": "name",
-        "function": "collect",
-        "line": 8
-      }
-    ],
-    "semantic_effects": [
-      {
-        "kind": "hidden_mutation",
-        "detail": "<<",
-        "function": "collect",
-        "line": 7
-      }
-    ]
-  },
   "local_flow": [
     {
+      "boundaries": [],
       "method": "collect",
       "statements": [
         {
+          "co_uses": [],
+          "dependencies": [],
           "reads": [],
           "writes": [
             "names"
-          ],
-          "dependencies": [],
-          "co_uses": []
+          ]
         },
         {
-          "reads": [
-            "items",
-            "names"
-          ],
-          "writes": [],
-          "dependencies": [],
           "co_uses": [
             [
               "items",
               "names"
             ]
-          ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "items",
+            "names"
+          ],
+          "writes": []
         },
         {
+          "co_uses": [],
+          "dependencies": [],
           "reads": [
             "names"
           ],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
+          "writes": []
         }
-      ],
-      "boundaries": []
+      ]
     }
-  ]
+  ],
+  "syntax": {
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "collect",
+        "line": 7,
+        "message": "name",
+        "receiver": "item",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "collect",
+        "line": 8,
+        "message": "children",
+        "receiver": "item",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "collect",
+        "line": 8,
+        "message": "name",
+        "receiver": "child",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "collect",
+        "line": 6,
+        "message": "flat_map",
+        "receiver": "items",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": true,
+        "control": "iterates",
+        "function": "collect",
+        "line": 8,
+        "message": "each",
+        "receiver": "item.children",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "collect",
+        "owner": "SourceFactBlockReceiverCalls",
+        "params": [
+          "items"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "collect",
+        "kind": "hidden_mutation",
+        "line": 7
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "children",
+        "function": "collect",
+        "line": 8,
+        "receiver": "item"
+      },
+      {
+        "field": "each",
+        "function": "collect",
+        "line": 8,
+        "receiver": "item.children"
+      },
+      {
+        "field": "flat_map",
+        "function": "collect",
+        "line": 6,
+        "receiver": "items"
+      },
+      {
+        "field": "name",
+        "function": "collect",
+        "line": 7,
+        "receiver": "item"
+      },
+      {
+        "field": "name",
+        "function": "collect",
+        "line": 8,
+        "receiver": "child"
+      }
+    ]
+  }
 }

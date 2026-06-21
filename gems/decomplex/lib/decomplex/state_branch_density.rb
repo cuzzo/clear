@@ -108,6 +108,7 @@ module Decomplex
 
       def findings
         @decisions.group_by { |d| [d.file, d.defn] }.map do |(file, defn), ds|
+          ds = ds.sort_by { |decision| [decision.line.to_i, Array(decision.span)] }
           refs = ds.flat_map(&:state_refs).uniq.sort
           {
             at: "#{file}:#{defn}:#{ds.first.line}",

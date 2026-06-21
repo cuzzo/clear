@@ -1,54 +1,43 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "append_all",
-        "owner": "SourceFactOperatorMutationLocals",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "items"
-        ]
-      }
-    ],
     "calls": [
       {
-        "receiver": "self",
-        "message": "out",
-        "function": "append_all",
-        "line": 7,
+        "arguments": [],
+        "block": true,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "items",
-        "message": "each",
         "function": "append_all",
         "line": 6,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": []
+        "message": "each",
+        "receiver": "items",
+        "safe_navigation": false
       }
     ],
-    "state_reads": [
+    "functions": [
       {
-        "receiver": "items",
-        "field": "each",
-        "function": "append_all",
-        "line": 6
+        "line": 4,
+        "name": "append_all",
+        "owner": "SourceFactOperatorMutationLocals",
+        "params": [
+          "items"
+        ],
+        "visibility": "public"
       }
     ],
     "semantic_effects": [
       {
-        "kind": "hidden_mutation",
         "detail": "<<",
         "function": "append_all",
+        "kind": "hidden_mutation",
         "line": 6
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "each",
+        "function": "append_all",
+        "line": 6,
+        "receiver": "items"
       }
     ]
   }

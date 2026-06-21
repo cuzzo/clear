@@ -89,22 +89,41 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<MethodSum
 
 pub fn scan_documents(documents: &[Document]) -> Vec<MethodSummary> {
     if documents.len() > 1 && parallel::job_count() > 1 {
-        return parallel::map_ordered(documents, |document| {
+        let mut methods: Vec<_> = parallel::map_ordered(documents, |document| {
             Ok(local_methods_for_document(document))
         })
         .expect("local-flow worker failed")
         .into_iter()
         .flatten()
         .collect();
+        sort_method_summaries(&mut methods);
+        return methods;
     }
 
-    documents
+    let mut methods: Vec<_> = documents
         .iter()
         .flat_map(local_methods_for_document)
-        .collect()
+        .collect();
+    sort_method_summaries(&mut methods);
+    methods
+}
+
+fn sort_method_summaries(methods: &mut [MethodSummary]) {
+    methods.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.span.cmp(&b.span))
+            .then_with(|| a.owner.cmp(&b.owner))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 }
 
 fn local_methods_for_document(document: &Document) -> Vec<MethodSummary> {
+    if document.language == Language::Ruby && !document.normalized_root.children.is_empty() {
+        return normalized_local_methods(document);
+    }
+
     let raw = raw_local_methods(document);
     if !raw.is_empty() {
         return raw;

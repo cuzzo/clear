@@ -1,40 +1,53 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "owner_edges",
-        "owner": "SourceFactMemoizedHelperCalls",
-        "line": 4,
-        "visibility": "public",
-        "params": []
-      },
-      {
-        "name": "build_owner_edges",
-        "owner": "SourceFactMemoizedHelperCalls",
-        "line": 8,
-        "visibility": "public",
-        "params": []
-      }
-    ],
     "calls": [
       {
-        "receiver": "self",
-        "message": "build_owner_edges",
-        "function": "owner_edges",
-        "line": 5,
+        "arguments": [
+          "build_owner_edges"
+        ],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
+        "function": "owner_edges",
+        "line": 5,
+        "message": "||",
+        "receiver": "@owner_edges",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
         "block": false,
-        "arguments": []
+        "conditional": false,
+        "control": "always",
+        "function": "owner_edges",
+        "line": 5,
+        "message": "build_owner_edges",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
+        "name": "build_owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "params": [],
+        "visibility": "public"
       }
     ],
     "state_writes": [
       {
-        "receiver": "self",
         "field": "@owner_edges",
         "function": "owner_edges",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       }
     ]
   }

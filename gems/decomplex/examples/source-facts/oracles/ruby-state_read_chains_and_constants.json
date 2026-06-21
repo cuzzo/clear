@@ -2,58 +2,46 @@
   "syntax": {
     "state_reads": [
       {
-        "receiver": "self",
         "field": "@ranked",
         "function": "results",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
         "field": "@top",
         "function": "results",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       },
       {
-        "receiver": "row",
+        "field": "each_with_object",
+        "function": "helper_result",
+        "line": 19,
+        "receiver": "decorate(items)"
+      },
+      {
         "field": "file",
         "function": "results",
-        "line": 6
+        "line": 6,
+        "receiver": "row"
       },
       {
-        "receiver": "language_providers",
         "field": "flat_map",
         "function": "provider_paths",
-        "line": 15
+        "line": 15,
+        "receiver": "language_providers"
       },
       {
-        "receiver": "@ranked.first(@top)",
-        "field": "map",
-        "function": "results",
-        "line": 5
-      },
-      {
-        "receiver": "item",
         "field": "name",
         "function": "helper_result",
-        "line": 20
+        "line": 20,
+        "receiver": "item"
       },
       {
-        "receiver": "Dataset",
-        "field": "new",
-        "function": "build",
-        "line": 11
-      },
-      {
-        "receiver": "provider",
         "field": "path_candidates",
         "function": "provider_paths",
-        "line": 15
-      },
-      {
-        "receiver": "Custom::Sarif",
-        "field": "result",
-        "function": "results",
-        "line": 6
+        "line": 15,
+        "receiver": "provider"
       }
     ]
   }

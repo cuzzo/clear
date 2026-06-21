@@ -77,6 +77,43 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     "kotlin.rb" => "KotlinSyntaxAdapter",
     "php.rb" => "PhpSyntaxAdapter"
   }.freeze
+  SYNTAX_ENGINE_OWNER_FILES = %w[
+    clone_similarity.rb effects.rb protocols.rb
+  ].freeze
+  SYNTAX_ALLOWED_FILES = %w[
+    adapters.rb
+    c.rb
+    clone_similarity.rb
+    complexity.rb
+    contracts.rb
+    cpp.rb
+    csharp.rb
+    dispatch.rb
+    effects.rb
+    fact_document.rb
+    go.rb
+    java.rb
+    javascript.rb
+    kotlin.rb
+    lua.rb
+    nil_guards.rb
+    php.rb
+    protocols.rb
+    python.rb
+    ruby.rb
+    rust.rb
+    swift.rb
+    typescript.rb
+    zig.rb
+  ].freeze
+  SYNTAX_ADAPTER_ENGINE_PATTERNS = {
+    "semantic-effect fact generation belongs in syntax/effects.rb" =>
+      /^\s*def\s+semantic_effect_sites\b/,
+    "ordered-protocol fact generation belongs in syntax/protocols.rb" =>
+      /^\s*def\s+(?:protocol_method_effects|protocol_call_paths)\b/,
+    "clone fact generation belongs in syntax/clone_similarity.rb" =>
+      /^\s*def\s+clone_candidates\b/
+  }.freeze
 
   def test_detectors_do_not_talk_to_tree_sitter_nodes_directly
     offenders = scan_files(DETECTOR_FILES, RAW_TREE_SITTER_PATTERNS)
@@ -148,6 +185,80 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Adapter loader must only load adapters and shared base helpers",
+      offenders
+    )
+  end
+
+  def test_syntax_directory_does_not_gain_unreviewed_helper_files
+    files = Dir.glob(File.join(LIB, "syntax", "**", "*.rb")).map do |path|
+      path.delete_prefix("#{File.join(LIB, "syntax")}/")
+    end.sort
+    unexpected = files - SYNTAX_ALLOWED_FILES.sort
+    missing = SYNTAX_ALLOWED_FILES.sort - files
+    offenders = unexpected.map { |file_name| "#{file_name}: unexpected syntax helper file" } +
+                missing.map { |file_name| "#{file_name}: missing syntax file" }
+
+    assert_empty offenders, format_offenders(
+      "Syntax helper files are an architecture boundary; update this invariant deliberately",
+      offenders
+    )
+  end
+
+  def test_concrete_syntax_adapter_classes_only_live_in_their_own_files
+    files = Dir.glob(File.join(LIB, "syntax", "**", "*.rb"))
+    owner_by_class = LANGUAGE_ADAPTER_FILES.invert.transform_values do |file_name|
+      File.join(LIB, "syntax", file_name)
+    end
+    offenders = files.sort.flat_map do |path|
+      rel = path.delete_prefix("#{ROOT}/")
+      File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        next if line.strip.start_with?("#")
+
+        match = line.match(/^\s*class\s+(\w+SyntaxAdapter)\b/)
+        next unless match
+
+        class_name = match[1]
+        owner = owner_by_class[class_name]
+        next unless owner && File.expand_path(path) != File.expand_path(owner)
+
+        owner_rel = owner.delete_prefix("#{ROOT}/")
+        "#{rel}:#{index + 1}: #{class_name} belongs in #{owner_rel}: #{line.strip}"
+      end
+    end
+
+    assert_empty offenders, format_offenders(
+      "Concrete syntax adapters must not be split across helper files",
+      offenders
+    )
+  end
+
+  def test_concrete_syntax_adapters_do_not_own_detector_fact_engines
+    files = Dir.glob(File.join(LIB, "syntax", "**", "*.rb")).reject do |path|
+      SYNTAX_ENGINE_OWNER_FILES.include?(File.basename(path))
+    end
+    offenders = scan_files(files, SYNTAX_ADAPTER_ENGINE_PATTERNS)
+
+    assert_empty offenders, format_offenders(
+      "Concrete syntax adapters may classify grammar shapes but must not own detector fact engines",
+      offenders
+    )
+  end
+
+  def test_syntax_subfiles_do_not_load_additional_helpers
+    files = Dir.glob(File.join(LIB, "syntax", "**", "*.rb"))
+    offenders = files.sort.flat_map do |path|
+      rel = path.delete_prefix("#{ROOT}/")
+      File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        next if line.strip.start_with?("#")
+
+        next unless line.match?(/^\s*(?:require|require_relative)\b/)
+
+        "#{rel}:#{index + 1}: syntax subfiles must be loaded only by syntax.rb: #{line.strip}"
+      end
+    end
+
+    assert_empty offenders, format_offenders(
+      "Syntax subfiles must not hide behavior behind their own requires",
       offenders
     )
   end

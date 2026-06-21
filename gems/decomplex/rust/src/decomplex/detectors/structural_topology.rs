@@ -46,6 +46,13 @@ pub fn scan_documents(documents: &[Document]) -> StructuralTopologyReport {
     for document in documents {
         methods.extend(methods_for_document(document));
     }
+    methods.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.owner.cmp(&b.owner))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
     let method_by_id = methods
         .iter()
@@ -53,18 +60,25 @@ pub fn scan_documents(documents: &[Document]) -> StructuralTopologyReport {
         .collect::<BTreeMap<_, _>>();
 
     let mut edges = Vec::new();
-    let mut seen = BTreeSet::new();
     for document in documents {
-        for edge in edges_for_document(document, &method_by_id) {
-            if seen.insert((
-                edge.caller.clone(),
-                edge.callee.clone(),
-                edge.r#type.clone(),
-            )) {
-                edges.push(edge);
-            }
-        }
+        edges.extend(edges_for_document(document, &method_by_id));
     }
+    edges.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.span.cmp(&b.span))
+            .then_with(|| a.caller.cmp(&b.caller))
+            .then_with(|| a.callee.cmp(&b.callee))
+    });
+    let mut seen = BTreeSet::new();
+    edges.retain(|edge| {
+        seen.insert((
+            edge.caller.clone(),
+            edge.callee.clone(),
+            edge.r#type.clone(),
+        ))
+    });
 
     StructuralTopologyReport { methods, edges }
 }

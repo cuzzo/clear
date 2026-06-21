@@ -12,12 +12,9 @@ module Decomplex
     )
 
     def self.core_owner_names(language)
-      profile = language_profile(language)
-      return [] unless profile.respond_to?(:effect_lexicon, true)
-
-      lexicon = profile.send(:effect_lexicon)
+      lexicon = effect_lexicon_for(language)
       Array(lexicon&.core_consts)
-    rescue ArgumentError
+    rescue ArgumentError, KeyError
       []
     end
 
@@ -35,7 +32,7 @@ module Decomplex
       private
 
       def effect_lexicon
-        nil
+        Syntax.effect_lexicon_for(language)
       end
 
       def semantic_effect_sites_from_calls(document)
@@ -192,6 +189,40 @@ module Decomplex
       context_bare: [].freeze,
       callback_set: [].freeze,
       core_consts: [].freeze
+    ).freeze
+
+    RUBY_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[send __send__ public_send const_get constantize
+                        instance_variable_get].freeze,
+      meta_mids: %w[define_method define_singleton_method alias_method
+                    class_eval module_eval instance_eval class_exec
+                    module_exec instance_exec eval const_set
+                    instance_variable_set remove_method undef_method
+                    prepend singleton_class binding].freeze,
+      method_obj_mids: %w[method public_method instance_method].freeze,
+      io_consts: %w[File IO Dir FileUtils Open3 Socket TCPSocket UDPSocket
+                    TCPServer UNIXSocket Tempfile Pathname Marshal].freeze,
+      io_bare: %w[puts print warn gets readline readlines system
+                  exec spawn fork sleep open abort exit exit!].freeze,
+      dir_context: %w[pwd getwd home].freeze,
+      context_pairs: {
+        "Time" => %w[now current], "Date" => %w[today current],
+        "DateTime" => %w[now current], "Process" => %w[pid ppid uid gid euid],
+        "Thread" => %w[current list main], "Fiber" => %w[current],
+        "Random" => %w[rand bytes], "GC" => %w[stat count],
+        "ObjectSpace" => %w[each_object count_objects]
+      }.freeze,
+      context_bare: %w[rand srand].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock
+                       mutex atomic reentrant subscribe callback hook].freeze,
+      core_consts: %w[String Symbol Integer Float Numeric Rational Complex
+                      Array Hash Set Range Struct Object BasicObject Kernel
+                      Module Class Comparable Enumerable Enumerator Proc Method
+                      UnboundMethod NilClass TrueClass FalseClass Exception
+                      StandardError RuntimeError ArgumentError TypeError
+                      NameError NoMethodError IO File Dir Time Date DateTime
+                      Regexp MatchData Thread Mutex Fiber Process Math GC
+                      ObjectSpace Marshal Random Encoding].freeze
     ).freeze
 
     PYTHON_EFFECT_LEXICON = EffectLexicon.new(
@@ -406,126 +437,26 @@ module Decomplex
       core_consts: [].freeze
     ).freeze
 
-    class TreeSitterLanguageAdapter
-      private
+    EFFECT_LEXICONS = {
+      ruby: RUBY_EFFECT_LEXICON,
+      rust: RUST_EFFECT_LEXICON,
+      zig: ZIG_EFFECT_LEXICON,
+      python: PYTHON_EFFECT_LEXICON,
+      javascript: JAVASCRIPT_EFFECT_LEXICON,
+      typescript: JAVASCRIPT_EFFECT_LEXICON,
+      go: GO_EFFECT_LEXICON,
+      lua: LUA_EFFECT_LEXICON,
+      c: C_EFFECT_LEXICON,
+      cpp: CPP_EFFECT_LEXICON,
+      csharp: CSHARP_EFFECT_LEXICON,
+      java: JAVA_EFFECT_LEXICON,
+      swift: SWIFT_EFFECT_LEXICON,
+      kotlin: KOTLIN_EFFECT_LEXICON,
+      php: PHP_EFFECT_LEXICON
+    }.freeze
 
-      def effect_lexicon
-        GENERIC_SYSTEM_EFFECT_LEXICON
-      end
-    end
-
-    class RustSyntaxAdapter
-      private
-
-      def effect_lexicon
-        RUST_EFFECT_LEXICON
-      end
-    end
-
-    class ZigSyntaxAdapter
-      private
-
-      def effect_lexicon
-        ZIG_EFFECT_LEXICON
-      end
-    end
-
-    class PythonSyntaxAdapter
-      private
-
-      def effect_lexicon
-        PYTHON_EFFECT_LEXICON
-      end
-    end
-
-    class JavaScriptSyntaxAdapter
-      private
-
-      def effect_lexicon
-        JAVASCRIPT_EFFECT_LEXICON
-      end
-    end
-
-    class TypeScriptSyntaxAdapter
-      private
-
-      def effect_lexicon
-        JAVASCRIPT_EFFECT_LEXICON
-      end
-    end
-
-    class GoSyntaxAdapter
-      private
-
-      def effect_lexicon
-        GO_EFFECT_LEXICON
-      end
-    end
-
-    class LuaSyntaxAdapter
-      private
-
-      def effect_lexicon
-        LUA_EFFECT_LEXICON
-      end
-    end
-
-    class CSyntaxAdapter
-      private
-
-      def effect_lexicon
-        C_EFFECT_LEXICON
-      end
-    end
-
-    class CppSyntaxAdapter
-      private
-
-      def effect_lexicon
-        CPP_EFFECT_LEXICON
-      end
-    end
-
-    class CSharpSyntaxAdapter
-      private
-
-      def effect_lexicon
-        CSHARP_EFFECT_LEXICON
-      end
-    end
-
-    class JavaSyntaxAdapter
-      private
-
-      def effect_lexicon
-        JAVA_EFFECT_LEXICON
-      end
-    end
-
-    class SwiftSyntaxAdapter
-      private
-
-      def effect_lexicon
-        SWIFT_EFFECT_LEXICON
-      end
-    end
-
-    class KotlinSyntaxAdapter
-      private
-
-      def effect_lexicon
-        KOTLIN_EFFECT_LEXICON
-      end
-    end
-
-    class PhpSyntaxAdapter
-      private
-
-      def effect_lexicon
-        PHP_EFFECT_LEXICON
-      end
+    def self.effect_lexicon_for(language)
+      EFFECT_LEXICONS.fetch(language.to_sym, GENERIC_SYSTEM_EFFECT_LEXICON)
     end
   end
 end
-
-require_relative "ruby_effects"

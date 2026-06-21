@@ -161,6 +161,26 @@
         },
         {
           "arguments": [
+            "1"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 42,
+          "message": "+",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "@count",
+          "safe_navigation": false,
+          "span": [
+            42,
+            6,
+            42,
+            17
+          ]
+        },
+        {
+          "arguments": [
             ":active",
             "T::Boolean"
           ],
@@ -285,6 +305,26 @@
         },
         {
           "arguments": [
+            "Symbol"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "(top-level)",
+          "line": 25,
+          "message": "returns",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "params(user: Object, items: Array, callback: Proc)",
+          "safe_navigation": false,
+          "span": [
+            25,
+            8,
+            25,
+            74
+          ]
+        },
+        {
+          "arguments": [
             "\"not ready\""
           ],
           "block": false,
@@ -312,9 +352,9 @@
           "control": "always",
           "function": "process",
           "line": 30,
-          "message": "call",
+          "message": "callback",
           "owner": "RubySyntaxFactsCore",
-          "receiver": "callback",
+          "receiver": "self",
           "safe_navigation": false,
           "span": [
             30,
@@ -326,7 +366,6 @@
         {
           "arguments": [
             "inline_private",
-            "(value)",
             "helper(value)"
           ],
           "block": false,
@@ -431,8 +470,8 @@
             "source: Object"
           ],
           "block": false,
-          "conditional": false,
-          "control": "always",
+          "conditional": true,
+          "control": "iterates",
           "function": "(top-level)",
           "line": 18,
           "message": "params",
@@ -513,8 +552,8 @@
             "callback: Proc"
           ],
           "block": false,
-          "conditional": false,
-          "control": "always",
+          "conditional": true,
+          "control": "iterates",
           "function": "(top-level)",
           "line": 25,
           "message": "params",
@@ -695,6 +734,26 @@
           "block": false,
           "conditional": true,
           "control": "iterates",
+          "function": "(top-level)",
+          "line": 18,
+          "message": "void",
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "params(source: Object)",
+          "safe_navigation": false,
+          "span": [
+            18,
+            8,
+            18,
+            35
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
           "function": "process",
           "line": 49,
           "message": "children",
@@ -725,7 +784,7 @@
             10,
             11,
             10,
-            34
+            23
           ]
         },
         {
@@ -745,7 +804,7 @@
             18,
             2,
             18,
-            37
+            5
           ]
         },
         {
@@ -765,7 +824,7 @@
             25,
             2,
             25,
-            76
+            5
           ]
         },
         {
@@ -784,8 +843,8 @@
           "span": [
             48,
             4,
-            50,
-            7
+            48,
+            18
           ]
         }
       ],
@@ -801,6 +860,19 @@
             4,
             60,
             17
+          ]
+        },
+        {
+          "field": "@count",
+          "function": "process",
+          "line": 42,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            42,
+            6,
+            42,
+            12
           ]
         },
         {
@@ -903,21 +975,8 @@
           "span": [
             48,
             4,
-            50,
-            7
-          ]
-        },
-        {
-          "field": "freeze",
-          "function": "(top-level)",
-          "line": 9,
-          "owner": "RubySyntaxFactsCore",
-          "receiver": "%w[owner admin]",
-          "span": [
-            9,
-            16,
-            9,
-            38
+            48,
+            18
           ]
         },
         {
@@ -960,6 +1019,19 @@
           ]
         },
         {
+          "field": "returns",
+          "function": "(top-level)",
+          "line": 25,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "params(user: Object, items: Array, callback: Proc)",
+          "span": [
+            25,
+            8,
+            25,
+            74
+          ]
+        },
+        {
           "field": "role",
           "function": "process",
           "line": 32,
@@ -970,6 +1042,19 @@
             9,
             32,
             18
+          ]
+        },
+        {
+          "field": "void",
+          "function": "(top-level)",
+          "line": 18,
+          "owner": "RubySyntaxFactsCore",
+          "receiver": "params(source: Object)",
+          "span": [
+            18,
+            8,
+            18,
+            35
           ]
         }
       ],
@@ -1040,7 +1125,7 @@
           "line": 32,
           "members": [
             "\"owner\"",
-            "ADMIN_ROLES",
+            "*ADMIN_ROLES",
             "nil"
           ],
           "predicate": "user.role",
@@ -1054,9 +1139,9 @@
         {
           "enclosing_span": [
             41,
-            4,
-            46,
-            7
+            7,
+            41,
+            38
           ],
           "function": "process",
           "kind": "conjunction",

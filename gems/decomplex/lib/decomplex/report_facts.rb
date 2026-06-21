@@ -64,7 +64,10 @@ module Decomplex
     def json_safe(value)
       case value
       when Hash
-        value.to_h { |key, child| [key.to_s, json_safe(child)] }
+        value.keys.map(&:to_s).sort.each_with_object({}) do |key, out|
+          original = value.key?(key) ? key : value.keys.find { |candidate| candidate.to_s == key }
+          out[key] = json_safe(value.fetch(original))
+        end
       when Array
         value.map { |child| json_safe(child) }
       when Symbol
@@ -84,7 +87,7 @@ module Decomplex
         sites = site_locations(writers + readers) +
                 re_derivations.map { |site| site_location(site) }
         spans = (writers + readers).each_with_object({}) do |site, out|
-          out[site_location(site)] = site["span"]
+          out[site_location(site)] ||= site["span"]
         end
 
         {

@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Decomplex
   module Syntax
     CloneCandidate = Struct.new(

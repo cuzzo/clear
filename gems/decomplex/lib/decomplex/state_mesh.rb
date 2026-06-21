@@ -220,15 +220,18 @@ module Decomplex
 
       fields_obj = {}
       field_norms.sort.each do |fn|
-        ws = (writes_by_field[fn] || []).map { |w|
+        ordered_writes = (writes_by_field[fn] || []).sort_by { |w| [w.file.to_s, w.line.to_i, w.defn.to_s] }
+        ordered_reads = (reads_by_field[fn] || []).sort_by { |r| [r.file.to_s, r.line.to_i, r.defn.to_s] }
+        ordered_rederivations = (reder_by_field[fn] || []).sort_by { |d| [d.file.to_s, d.line.to_i, d.defn.to_s] }
+        ws = ordered_writes.map { |w|
           { "file" => w.file, "defn" => w.defn, "line" => w.line,
             "recv" => w.recv, "span" => w.span }
         }
-        rs = (reads_by_field[fn] || []).map { |r|
+        rs = ordered_reads.map { |r|
           { "file" => r.file, "defn" => r.defn, "line" => r.line,
             "recv" => r.recv, "span" => r.span }
         }
-        ds = (reder_by_field[fn] || []).map { |d|
+        ds = ordered_rederivations.map { |d|
           { "file" => d.file, "defn" => d.defn, "line" => d.line,
             "raw" => d.raw, "predicate" => d.predicate, "canon" => d.canon }
         }
@@ -325,8 +328,8 @@ module Decomplex
         ds = reder_by_field[m.name] || []
         sites = (ws + rs).map { |s| "#{s.file}:#{s.defn}:#{s.line}" } +
                 ds.map { |s| "#{s.file}:#{s.defn}:#{s.line}" }
-        spans = (ws + rs).to_h do |s|
-          ["#{s.file}:#{s.defn}:#{s.line}", s.span]
+        spans = (ws + rs).each_with_object({}) do |s, out|
+          out["#{s.file}:#{s.defn}:#{s.line}"] ||= s.span
         end
         {
           at: sites.first,

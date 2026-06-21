@@ -20,7 +20,7 @@
             42,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         },
         {
           "line": 44,
@@ -50,7 +50,7 @@
             52,
             3
           ],
-          "visibility": null
+          "visibility": "public"
         }
       ],
       "owners": [

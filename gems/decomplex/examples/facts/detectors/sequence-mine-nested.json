@@ -151,25 +151,6 @@
   "expected": {
     "broken": [
       {
-        "at": "facts/sequence_nested.rb:missing_release:5",
-        "confidence": 0.8,
-        "has": "acquire",
-        "missing": "release",
-        "pair": [
-          "acquire",
-          "release"
-        ],
-        "spans": {
-          "facts/sequence_nested.rb:missing_release:5": [
-            5,
-            0,
-            5,
-            15
-          ]
-        },
-        "support": 4
-      },
-      {
         "at": "facts/sequence_nested.rb:missing_acquire:6",
         "confidence": 0.8,
         "has": "release",
@@ -183,6 +164,25 @@
             6,
             0,
             6,
+            15
+          ]
+        },
+        "support": 4
+      },
+      {
+        "at": "facts/sequence_nested.rb:missing_release:5",
+        "confidence": 0.8,
+        "has": "acquire",
+        "missing": "release",
+        "pair": [
+          "acquire",
+          "release"
+        ],
+        "spans": {
+          "facts/sequence_nested.rb:missing_release:5": [
+            5,
+            0,
+            5,
             15
           ]
         },

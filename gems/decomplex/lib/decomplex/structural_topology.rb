@@ -21,10 +21,10 @@ module Decomplex
 
       methods = documents.flat_map do |file, document|
         MethodFacts.new(file, document).methods
-      end
+      end.sort_by { |method| [method.file.to_s, method.line.to_i, method.owner.to_s, method.name.to_s] }
       edges = documents.flat_map do |file, document|
         EdgeFacts.new(file, document, methods).edges
-      end
+      end.sort_by { |edge| [edge.file.to_s, edge.line.to_i, Array(edge.span), edge.caller.to_s, edge.callee.to_s] }
       edges.uniq! { |edge| [edge.caller, edge.callee, edge.type] }
 
       Graph.new(methods, edges)

@@ -418,9 +418,10 @@ impl Report {
     }
 
     fn diagnostic_protocol(&self, protocol: &[String]) -> bool {
-        protocol
-            .iter()
-            .any(|m| OPTIONAL_DIAGNOSTIC_MIDS.contains(&m.as_str()))
+        protocol.iter().any(|m| {
+            OPTIONAL_DIAGNOSTIC_MIDS.contains(&m.as_str())
+                || OPTIONAL_DIAGNOSTIC_MIDS.contains(&format!("{m}!").as_str())
+        })
     }
 
     fn candidate_protocols(

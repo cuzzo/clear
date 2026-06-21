@@ -15,7 +15,7 @@ module Decomplex
     def self.scan(files)
       LocalFlow.scan(files).flat_map do |method|
         analyze(method.file, method.name, assignments(method))
-      end.sort_by { |h| -h[:gap] }
+      end.sort_by { |h| [-h[:gap], h[:file].to_s, h[:derived_at].to_i, h[:derived].to_s, h[:source].to_s] }
     end
 
     def self.assignments(method)
