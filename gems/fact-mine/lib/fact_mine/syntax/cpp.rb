@@ -131,3 +131,72 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class CppNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def implicit_owner_fields?
+        true
+      end
+
+      def source_message_text(message, node)
+        return "#{message}()" if node && node.text.to_s.include?("#{message}()")
+
+        message
+      end
+
+      def initializer_field_reads(node, owner:, owner_fields:, function_name:)
+        return [] unless owner_fields
+
+        reads = []
+        text = node.text.to_s
+        text.to_enum(:scan, /(?:[:,]\s*)([A-Za-z_]\w*)\s*\(\s*0\s*\)/).each do
+          field = Regexp.last_match(1)
+          next unless owner_fields.include?(field)
+
+          start_line = node.first_lineno
+          line_offset = text[0...Regexp.last_match.begin(1)].count("\n")
+          line_text = text.lines[line_offset].to_s
+          column = line_text.index(field).to_i
+          reads << {
+            field: field,
+            receiver: "self",
+            function: function_name,
+            line: start_line + line_offset,
+            span: [start_line + line_offset, column, start_line + line_offset, column + field.length]
+          }
+        end
+        reads
+      end
+
+      def owner_name_span(_name, node, default_span:)
+        struct_keyword_span(node) || default_span
+      end
+
+      def function_visibility(name, node, lines:)
+        current = "private"
+        lines.first(node.first_lineno - 1).each do |line|
+          match = line.match(/^\s*(public|private|protected)\s*:/)
+          next unless match
+
+          current = match[1] == "public" ? "public" : "private"
+        end
+        current
+      end
+
+      def case_predicate_text(text)
+        text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def stream_insertion_operator?(node)
+        node.text.to_s.include?("std::")
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:cpp, CppNormalizedExtractionBehavior)
+  end
+end

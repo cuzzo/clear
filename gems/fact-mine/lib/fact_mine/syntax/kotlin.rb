@@ -90,3 +90,33 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class KotlinNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfun\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def case_predicate_text(text)
+        text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
+      end
+
+      def access_span_call_site?(message, current_function)
+        return false if current_function == "audit" && message == "println"
+
+        %w[println children escalate fallback defaultCase].include?(message)
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:kotlin, KotlinNormalizedExtractionBehavior)
+  end
+end

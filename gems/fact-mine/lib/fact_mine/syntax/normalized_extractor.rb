@@ -13,6 +13,7 @@ module FactMine
       def initialize(file, language:, include_normalized_root: true)
         @file = file.to_s
         @language = language.to_sym
+        @extraction_behavior = Syntax::NormalizedExtractionBehavior.for(@language)
         @include_normalized_root = include_normalized_root
         @root, @lines = Ast.parse(file, language: @language)
         @source = File.read(file)
@@ -113,7 +114,7 @@ module FactMine
         when "XSTR" then scan_command_string(node)
         when "SCLASS" then scan_singleton_class(node)
         when "LASGN" then scan_local_assignment(node)
-        when "FIELD_EXPRESSION", "RAW_ARGUMENT" then scan_zig_literal(node)
+        when "FIELD_EXPRESSION", "RAW_ARGUMENT" then scan_literal_expression(node)
         when "IASGN", "GASGN" then record_state_write(node)
         when "IVAR", "GVAR" then record_state_read_node(node)
         when "LVAR" then record_bare_state_read_node(node)
@@ -176,7 +177,7 @@ module FactMine
         if (predicate = predicate_alias(node, owner))
           @facts.fetch(:predicate_aliases) << predicate
         end
-        record_cpp_initializer_field_reads(node, owner)
+        record_initializer_field_reads(node, owner)
 
         owner_pushed = owner && owner != current_owner
         @owners << owner if owner_pushed
@@ -204,7 +205,7 @@ module FactMine
       end
 
       def scan_yield(node)
-        return scan_children(node) if @language == :python
+        return scan_children(node) unless @extraction_behavior.yield_semantic_effect?(node)
 
         record_semantic_effect(node, "dynamic_dispatch", "yield")
         scan_children(node)
@@ -274,7 +275,7 @@ module FactMine
       def scan_boolean(node)
         if node.type.to_s == "AND"
           members = flatten_and(node).map { |child| normalized_text(child) }
-          members = members.sort if @language == :python
+          members = @extraction_behavior.boolean_decision_members(members, node)
           if members.length >= 2
             @facts.fetch(:decision_sites) << {
               "kind" => "conjunction",
@@ -304,7 +305,12 @@ module FactMine
             if indexed_field
               record_state_write_target("self", indexed_field, node)
             else
-              write_span = @language == :zig ? receiver_field_span(receiver_name, field, node) : span(node)
+              write_span = @extraction_behavior.state_write_span(
+                receiver_name,
+                field,
+                node,
+                default_span: span(node)
+              )
               record_state_write_target(receiver_name, field, node, write_span)
               record_index_assignment_read(receiver, field, node)
             end
@@ -347,10 +353,10 @@ module FactMine
 
         scan(parts[:receiver_node]) if parts[:receiver_node]
         scan(parts[:args_node]) if parts[:args_node]
-        record_go_embedded_member_reads(node)
+        record_embedded_member_reads(node)
 
         call = call_hash(node, parts, block)
-        call = legacy_projected_call(node, call)
+        call = @extraction_behavior.project_call(node, call)
         return if call.fetch("message") == "[]"
 
         if property_read_call?(node, parts)
@@ -373,7 +379,7 @@ module FactMine
 
       def call_hash(node, parts, block)
         {
-          "receiver" => call_receiver_for_hash(parts),
+          "receiver" => @extraction_behavior.call_receiver(parts),
           "message" => parts.fetch(:message),
           "file" => @file,
           "function" => current_function,
@@ -390,64 +396,27 @@ module FactMine
       end
 
       def call_access_span(node)
-        return span(node) if @language == :php
-
         text = node.text.to_s
         open_index = text.rindex("(")
-        return span(node) unless open_index && node.first_lineno == node.last_lineno
-        if text.start_with?("(") && text.end_with?(")") && open_index.zero?
-          return [node.first_lineno, node.first_column + 1, node.first_lineno, node.last_column - 1]
-        end
-
-        [node.first_lineno, node.first_column, node.first_lineno, node.first_column + open_index]
+        computed =
+          if open_index && node.first_lineno == node.last_lineno
+            if text.start_with?("(") && text.end_with?(")") && open_index.zero?
+              [node.first_lineno, node.first_column + 1, node.first_lineno, node.last_column - 1]
+            else
+              [node.first_lineno, node.first_column, node.first_lineno, node.first_column + open_index]
+            end
+          end
+        @extraction_behavior.call_access_span(node, computed_span: computed, full_span: span(node))
       end
 
       def call_site_span(node)
-        parts = call_parts(node)
-        if parts && access_span_call_site?(parts.fetch(:message).to_s)
-          return call_access_span(node)
-        end
-
-        @language == :lua && !lua_full_span_call?(parts) ? call_access_span(node) : span(node)
-      end
-
-      def call_receiver_for_hash(parts)
-        receiver = parts.fetch(:receiver)
-        return receiver unless @language == :c && receiver == "self"
-
-        first_arg = parts.fetch(:arguments).first.to_s
-        field = first_arg[/\Aself->([A-Za-z_]\w*)\z/, 1]
-        field ? "self.#{field}" : receiver
-      end
-
-      def legacy_projected_call(node, call)
-        case @language
-        when :java then java_projected_call(node, call)
-        else call
-        end
-      end
-
-      def java_projected_call(node, call)
-        projected = call.dup
-        text = node.text.to_s.strip
-        if text.match?(/\Athis\.[A-Za-z_]\w+\(/) && !projected.fetch("arguments").empty?
-          projected["message"] = "this"
-          projected["receiver"] = "self"
-        elsif (field = text[/\Athis\.([A-Za-z_]\w*)\.name\(\)/, 1])
-          projected["message"] = field
-          projected["receiver"] = "self"
-        elsif (stream = text[/\ASystem\.(err|out)\.println\(/, 1])
-          projected["message"] = stream
-          projected["receiver"] = "System"
-        elsif (profile_receiver = text[/\A(.+)\.profile\(\)\.name\(\)/, 1])
-          projected["message"] = "profile()"
-          projected["receiver"] = profile_receiver
-        elsif projected.fetch("message") == "name" &&
-              (nested = projected.fetch("receiver").to_s[/\A(.+)\.([A-Za-z_]\w+\(\))\z/, 1])
-          projected["message"] = projected.fetch("receiver").split(".").last
-          projected["receiver"] = nested
-        end
-        projected
+        @extraction_behavior.call_site_span(
+          node,
+          call_parts(node),
+          full_span: span(node),
+          access_span: call_access_span(node),
+          current_function: current_function
+        )
       end
 
       def suppress_call_site?(node, call)
@@ -455,8 +424,7 @@ module FactMine
         receiver = call.fetch("receiver").to_s
         return true if receiver == "self" && message.match?(/\A[A-Z]/) && call.fetch("arguments").empty?
         return true if constant_receiver?(receiver) && call.fetch("arguments").empty? && !call.fetch("block")
-        return true if @language == :python && %w[break continue value].include?(message)
-        return true if @language == :zig && receiver == "std.debug" && message == "print"
+        return true if @extraction_behavior.suppress_call_site?(node, call)
 
         false
       end
@@ -470,19 +438,21 @@ module FactMine
 
       def scan_local_assignment(node)
         field = first_string_or_symbol(node)
-        if @language == :zig && field.to_s.start_with?(".")
-          record_state_write_target(".literal", field.delete_prefix("."), node)
+        writes = @extraction_behavior.local_assignment_writes(field, node, default_span: span(node))
+        unless writes.empty?
+          writes.each { |write| record_state_write_target(write.fetch(:receiver), write.fetch(:field), node, write.fetch(:span)) }
           scan(child_node(node, 1)) if child_node(node, 1)
           return
         end
-        if implicit_owner_field_language? && field && owner_field?(field) && current_function != "(top-level)"
+
+        if @extraction_behavior.implicit_owner_fields? && field && owner_field?(field) && current_function != "(top-level)"
           record_state_write_target("self", field, node, target_name_span(field, node))
         end
         scan(child_node(node, 1)) if child_node(node, 1)
       end
 
-      def scan_zig_literal(node)
-        record_zig_literal_read(node)
+      def scan_literal_expression(node)
+        record_literal_state_reads(node)
         scan_children(node)
       end
 
@@ -566,82 +536,56 @@ module FactMine
         )
       end
 
-      def record_go_embedded_member_reads(node)
-        return unless @language == :go
-        return unless node.first_lineno == node.last_lineno
-
-        text = node.text.to_s
-        text.to_enum(:scan, /\b([a-z]\w*)\.([A-Z]\w*)\b/).each do
-          receiver = Regexp.last_match(1)
-          field = Regexp.last_match(2)
-          index = Regexp.last_match.begin(0)
+      def record_embedded_member_reads(node)
+        @extraction_behavior.embedded_member_reads(node).each do |read|
           push_state_read(
-            "field" => field,
-            "receiver" => receiver,
+            "field" => read.fetch(:field),
+            "receiver" => read.fetch(:receiver),
             "file" => @file,
             "function" => current_function,
-            "line" => node.first_lineno,
-            "span" => [
-              node.first_lineno,
-              node.first_column + index,
-              node.first_lineno,
-              node.first_column + index + Regexp.last_match(0).length
-            ],
+            "line" => read.fetch(:line, node.first_lineno),
+            "span" => read.fetch(:span),
             "owner" => current_owner
           )
         end
       end
 
-      def record_zig_literal_read(node)
-        return unless @language == :zig
-
-        text = normalized_text(node)
-        return unless text.start_with?(".")
-
-        field = text.delete_prefix(".")
-        return unless simple_identifier?(field)
-
-        read_span = zig_literal_span(node, text)
-        push_state_read(
-          "field" => field,
-          "receiver" => ".literal",
-          "file" => @file,
-          "function" => current_function,
-          "line" => node.first_lineno,
-          "span" => read_span,
-          "owner" => current_owner
-        )
-      end
-
-      def zig_literal_span(node, text)
+      def record_literal_state_reads(node)
         node_span = span(node)
-        source = span_source(node_span)
-        index = source.index(text)
-        return node_span unless index && node.first_lineno == node.last_lineno
-
-        [node.first_lineno, node.first_column + index, node.first_lineno, node.first_column + index + text.length]
+        @extraction_behavior.literal_state_reads(
+          node,
+          normalized_text: normalized_text(node),
+          span: node_span,
+          source_text: span_source(node_span)
+        ).each do |read|
+          push_state_read(
+            "field" => read.fetch(:field),
+            "receiver" => read.fetch(:receiver),
+            "file" => @file,
+            "function" => current_function,
+            "line" => read.fetch(:line, node.first_lineno),
+            "span" => read.fetch(:span),
+            "owner" => current_owner
+          )
+        end
       end
 
-      def record_cpp_initializer_field_reads(node, owner)
-        return unless @language == :cpp
-        return unless owner && @owner_fields[owner]
+      def record_initializer_field_reads(node, owner)
+        return unless owner
 
-        text = node.text.to_s
-        text.to_enum(:scan, /(?:[:,]\s*)([A-Za-z_]\w*)\s*\(\s*0\s*\)/).each do
-          field = Regexp.last_match(1)
-          next unless @owner_fields[owner].include?(field)
-
-          start_line = node.first_lineno
-          line_offset = text[0...Regexp.last_match.begin(1)].count("\n")
-          line_text = text.lines[line_offset].to_s
-          column = line_text.index(field).to_i
+        @extraction_behavior.initializer_field_reads(
+          node,
+          owner: owner,
+          owner_fields: @owner_fields[owner],
+          function_name: function_name(node)
+        ).each do |read|
           push_state_read(
-            "field" => field,
-            "receiver" => "self",
+            "field" => read.fetch(:field),
+            "receiver" => read.fetch(:receiver),
             "file" => @file,
-            "function" => function_name(node),
-            "line" => start_line + line_offset,
-            "span" => [start_line + line_offset, column, start_line + line_offset, column + field.length],
+            "function" => read.fetch(:function),
+            "line" => read.fetch(:line),
+            "span" => read.fetch(:span),
             "owner" => owner
           )
         end
@@ -650,21 +594,16 @@ module FactMine
       def record_state_read_for_call(call)
         receiver = call.fetch("receiver")
         message = call.fetch("message")
-        return if @language == :lua && lua_suppressed_state_read?(call)
+        return if @extraction_behavior.suppress_state_read_for_call?(call, span_source: span_source(call.fetch("span")))
         return if %w[callback print println puts].include?(message)
-        return if @language == :lua && !call.fetch("arguments").empty?
-        return if @language == :java && receiver != "self"
-        return if @language == :java && span_source(call.fetch("span")).include?(".name()")
-        return if @language == :zig && receiver == "std" && message == "debug"
-        return if @language == :c && receiver.start_with?("self.") && !call.fetch("arguments").empty?
-        return if suppress_self_call_state_read?(call)
+        return if @extraction_behavior.suppress_self_call_state_read?(call)
         return if receiver == "self" && message.match?(/\A[A-Z]/)
         return if receiver.empty? || constant_receiver?(receiver) ||
                   literal_receiver?(receiver) || receiver.start_with?("@", "$")
         return if message.match?(/\A\d+\z/)
         return if %w[== != === < <= > >= [] []= call].include?(message)
 
-        span_key = @language == :ruby && receiver.include?("(") ? "span" : "access_span"
+        span_key = @extraction_behavior.state_read_span_key(call)
         push_state_read(
           "field" => message,
           "receiver" => receiver,
@@ -726,7 +665,7 @@ module FactMine
       end
 
       def record_branch_decision(node, condition)
-        return if @language == :lua && node.text.to_s.lstrip.start_with?("elseif")
+        return if @extraction_behavior.suppress_branch_decision?(node)
 
         refs = []
         collect_state_refs(condition, refs)
@@ -959,12 +898,7 @@ module FactMine
       end
 
       def normalize_source_text(text)
-        return text unless @language == :php
-
-        text.to_s
-            .gsub(/\$this->/, "this.")
-            .gsub(/\$([A-Za-z_]\w*)->/, '\1.')
-            .gsub(/\$([A-Za-z_]\w*)/, '\1')
+        @extraction_behavior.normalize_source_text(text)
       end
 
       def receiver_text(node)
@@ -1012,19 +946,11 @@ module FactMine
       end
 
       def source_message_text(message, node)
-        return "#{message}()" if %i[cpp rust].include?(@language) &&
-                                node &&
-                                node.text.to_s.include?("#{message}()")
-
-        message
+        @extraction_behavior.source_message_text(message, node)
       end
 
       def self_member_receiver(message)
-        case @language
-        when :c then "self->#{message}"
-        when :ruby, :rust, :swift, :lua, :go then "self.#{message}"
-        else "this.#{message}"
-        end
+        @extraction_behavior.self_member_receiver(message)
       end
 
       def current_receiver_aliases
@@ -1141,12 +1067,8 @@ module FactMine
       end
 
       def owner_name_span(name, node)
-        return span(node) if @language == :rust && node.type.to_s == "STRUCT_ITEM"
-
-        if %i[c rust zig].include?(@language)
-          struct_span = struct_keyword_span(node)
-          return struct_span if struct_span
-        end
+        behavior_span = @extraction_behavior.owner_name_span(name, node, default_span: span(node))
+        return behavior_span if behavior_span
         return span(node) if name.to_s.empty?
 
         lines = node.text.to_s.lines
@@ -1178,30 +1100,11 @@ module FactMine
       end
 
       def owner_for_function(name, node)
-        return current_owner unless current_owner == @file_owner
-
-        text = node.text.to_s
-        return text[/\Afunction\s+([A-Za-z_]\w*)[:]/, 1] || current_owner if text.start_with?("function ")
-
-        case @language
-        when :c
-          name[/\A([A-Z]\w*)_/, 1] || current_owner
-        when :go
-          text[/\Afunc\s*\(\s*[A-Za-z_]\w*\s+\*?([A-Za-z_]\w*)\s*\)/, 1] || current_owner
-        when :zig
-          text[/\A(?:pub\s+)?fn\s+\w+\s*\(\s*self\s*:\s*\*?([A-Za-z_]\w*)/, 1] || current_owner
-        else
-          current_owner
-        end
+        @extraction_behavior.owner_for_function(name, node, current_owner: current_owner, file_owner: @file_owner)
       end
 
       def receiver_aliases_for_function(node)
-        text = node.text.to_s
-        aliases = {}
-        if (receiver = text[/\Afunc\s*\(\s*([A-Za-z_]\w*)\s+\*?[A-Za-z_]\w*\s*\)/, 1])
-          aliases[receiver] = "self"
-        end
-        aliases
+        @extraction_behavior.receiver_aliases_for_function(node)
       end
 
       def collect_owner_fields(owner, node)
@@ -1245,7 +1148,7 @@ module FactMine
       end
 
       def implicit_owner_field_language?
-        %i[cpp csharp].include?(@language)
+        @extraction_behavior.implicit_owner_fields?
       end
 
       def target_name_span(name, node)
@@ -1257,40 +1160,11 @@ module FactMine
       end
 
       def function_visibility(name, node)
-        text = node.text.to_s.strip
-        return "private" if @language == :c && text.start_with?("static ")
-        return cpp_visibility_from_context(node) if @language == :cpp
-        return "private" if text.match?(/\A(?:private|protected)\b/)
-        return "public" if text.match?(/\Apublic\b/) || text.start_with?("pub ")
-        return "private" if @language == :go && name.match?(/\A[a-z_]/)
-        return "private" if @language == :python && name.start_with?("_") && !name.start_with?("__")
-        return "private" if name.start_with?("#")
-        return "private" if %i[rust zig].include?(@language)
-
-        "public"
-      end
-
-      def cpp_visibility_from_context(node)
-        current = "private"
-        @lines.first(node.first_lineno - 1).each do |line|
-          match = line.match(/^\s*(public|private|protected)\s*:/)
-          next unless match
-
-          current = match[1] == "public" ? "public" : "private"
-        end
-        current
+        @extraction_behavior.function_visibility(name, node, lines: @lines)
       end
 
       def function_name_from_text(text)
-        source = text.to_s.strip
-        return source[/\A(?:pub\s+)?fn\s+([A-Za-z_]\w*)\b/, 1] if %i[rust zig].include?(@language)
-        return source[/\Afunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(/, 1] if @language == :go
-        return source[/\bfun\s+([A-Za-z_]\w*)\s*\(/, 1] if @language == :kotlin
-        return source[/\bfunc\s+([A-Za-z_]\w*)\s*\(/, 1] if @language == :swift
-        return source[/\bfunction\s+([A-Za-z_]\w*)\s*\(/, 1] if @language == :php
-
-        before_paren = source.split("(", 2).first.to_s.strip
-        before_paren.split(/\s+/).last.to_s.sub(/\A[*&]+/, "")
+        @extraction_behavior.function_name_from_text(text)
       end
 
       def function_params_from_signature(text)
@@ -1302,19 +1176,7 @@ module FactMine
       end
 
       def parameter_list_source(source)
-        open_index = source.index("(")
-        return "" unless open_index
-
-        if @language == :go && source.start_with?("func (")
-          receiver_close = matching_paren_index(source, open_index)
-          open_index = source.index("(", receiver_close.to_i + 1)
-          return "" unless open_index
-        end
-
-        close_index = matching_paren_index(source, open_index)
-        return "" unless close_index
-
-        source[(open_index + 1)...close_index].to_s
+        @extraction_behavior.parameter_list_source(source)
       end
 
       def matching_paren_index(source, open_index)
@@ -1350,31 +1212,11 @@ module FactMine
       end
 
       def parameter_name_from_signature(param)
-        text = param.to_s.strip
-        return nil if text.empty?
-        return text if text.match?(/\A&(?:mut\s+)?self\z/)
-
-        text = text.sub(/\A(?:public|private|protected|readonly|mut|var|let|const|final)\s+/, "")
-        text = text.sub(/=.*\z/, "").strip
-        text = text.split(":", 2).first.strip if text.include?(":") && !text.include?("::")
-        if text.include?("$")
-          return text[/\$([A-Za-z_]\w*)/, 1]
-        end
-
-        tokens = text.scan(/[A-Za-z_]\w*[!?]?/)
-        return tokens.first&.delete_suffix("?") if @language == :go
-
-        tokens.last&.delete_suffix("?")
+        @extraction_behavior.parameter_name_from_signature(param)
       end
 
       def property_read_call?(node, parts)
-        return false if @language == :ruby
-        return false if node.type.to_s == "VCALL"
-        return false unless parts.fetch(:arguments).empty?
-        text = node.text.to_s
-        return false if text.include?("(") && !(text.start_with?("(") && text.end_with?(")"))
-
-        true
+        @extraction_behavior.property_read_call?(node, parts)
       end
 
       def predicate_alias(node, owner)
@@ -1475,86 +1317,27 @@ module FactMine
         if case_source
           return [] if case_source == "default"
           return split_case_source(case_source) if case_source.include?(",")
-          return [java_case_pattern(case_source)] if case_source.start_with?("\"", "'")
+          return [@extraction_behavior.case_pattern_display(case_source)] if case_source.start_with?("\"", "'")
         end
 
         pattern_values = child_nodes(patterns).map do |child|
-          record_zig_literal_read(child)
+          record_literal_state_reads(child)
           normalized_text(child)
         end.reject(&:empty?).reject { |pattern| pattern == "default" }
-        @language == :zig ? pattern_values.first(1) : pattern_values
+        @extraction_behavior.case_pattern_values(pattern_values)
       end
 
       def split_case_source(source)
-        return [source] if @language == :go
-
-        source.split(",").map(&:strip).reject(&:empty?).map { |pattern| java_case_pattern(pattern) }
-      end
-
-      def java_case_pattern(pattern)
-        @language == :java ? "case #{pattern}" : pattern
+        @extraction_behavior.split_case_source(source)
       end
 
       def case_predicate_text(value)
         text = normalized_text(value)
-        return text[1...-1] if %i[cpp kotlin].include?(@language) && text.start_with?("(") && text.end_with?(")")
-
-        text
-      end
-
-      def access_span_call_site?(message)
-        case @language
-        when :kotlin
-          return false if current_function == "audit" && message == "println"
-
-          %w[println children escalate fallback defaultCase].include?(message)
-        when :swift
-          message == "fallback"
-        else
-          false
-        end
-      end
-
-      def lua_full_span_call?(parts)
-        message = parts.fetch(:message).to_s
-        receiver = parts.fetch(:receiver).to_s
-        return true if %w[publish send callback].include?(message)
-        return true if message == "print" && current_function == "audit"
-        return true if receiver == "self.sink" && message == "send"
-
-        false
-      end
-
-      def lua_suppressed_state_read?(call)
-        receiver = call.fetch("receiver").to_s
-        message = call.fetch("message").to_s
-        return true if %w[children].include?(message)
-        return true if receiver == message
-        return true if span_source(call.fetch("span")).include?("=")
-        return true if receiver.match?(/\A(?:0|status|sink|name)\z/)
-
-        false
+        @extraction_behavior.case_predicate_text(text)
       end
 
       def boolean_enclosing_span(node)
-        return span(node) if @language == :ruby
-
-        @decision_spans.last || span(node)
-      end
-
-      def suppress_self_call_state_read?(call)
-        return false unless call.fetch("receiver") == "self"
-
-        case @language
-        when :ruby
-          true
-        when :python
-          %w[break continue len open value].include?(call.fetch("message"))
-        when :c, :cpp, :csharp, :java, :kotlin
-          !call.fetch("arguments").empty?
-        else
-          false
-        end
+        @extraction_behavior.boolean_enclosing_span(node, node_span: span(node), decision_span: @decision_spans.last)
       end
 
       def predicate_container_node?(node)
@@ -1618,14 +1401,16 @@ module FactMine
         when "CALL", "QCALL"
           parts = call_parts(node)
           if parts
-            unless parts[:message].to_s == "[]" || constant_receiver?(parts[:receiver]) || java_method_state_ref?(node, parts)
+            unless parts[:message].to_s == "[]" ||
+                   constant_receiver?(parts[:receiver]) ||
+                   @extraction_behavior.method_state_ref?(node, parts)
               refs << state_ref_text(node, parts)
             end
           end
           child_nodes(node).each { |child| collect_state_refs(child, refs) }
         when "FIELD_EXPRESSION", "RAW_ARGUMENT"
           text = normalized_text(node)
-          refs << ".literal.#{text.delete_prefix(".")}" if @language == :zig && text.start_with?(".")
+          refs.concat(@extraction_behavior.literal_state_refs(node, normalized_text: text))
           child_nodes(node).each { |child| collect_state_refs(child, refs) }
         else
           child_nodes(node).each { |child| collect_state_refs(child, refs) }
@@ -1645,9 +1430,7 @@ module FactMine
       end
 
       def wrap_branch_predicate?(branch)
-        return false if %i[csharp go kotlin swift zig ruby lua].include?(@language)
-
-        branch.text.to_s.match?(/\b(?:if|switch|while|for)\s*\(/)
+        @extraction_behavior.wrap_branch_predicate?(branch)
       end
 
       def state_ref_text(node, parts)
@@ -1659,18 +1442,7 @@ module FactMine
       end
 
       def explicit_self_state_ref(node, message)
-        text = node.text.to_s.strip
-        if @language == :go
-          receiver = text[/\A([A-Za-z_]\w*)\./, 1]
-          return "#{receiver}.#{message}" if receiver
-        end
-        return "this.#{message}" if text.start_with?("this.")
-
-        message
-      end
-
-      def java_method_state_ref?(node, parts)
-        @language == :java && parts.fetch(:receiver) != "self" && node.text.to_s.include?("(")
+        @extraction_behavior.explicit_self_state_ref(node, message)
       end
 
       def literal_receiver?(receiver)
@@ -1693,7 +1465,7 @@ module FactMine
       end
 
       def stream_insertion_operator?(node)
-        @language == :cpp && node.text.to_s.include?("std::")
+        @extraction_behavior.stream_insertion_operator?(node)
       end
 
       def block_like_hash?(node)

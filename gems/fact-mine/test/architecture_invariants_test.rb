@@ -62,6 +62,7 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     kotlin.rb
     lua.rb
     nil_guards.rb
+    normalized_extraction_behavior.rb
     normalized_extractor.rb
     passes.rb
     php.rb
@@ -256,9 +257,12 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
   end
 
   def test_generic_normalized_extractor_does_not_reference_concrete_languages
-    extractor = File.join(LIB, "syntax", "normalized_extractor.rb")
+    generic_extraction_files = %w[
+      normalized_extraction_behavior.rb
+      normalized_extractor.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
     offenders = scan_files(
-      [extractor],
+      generic_extraction_files,
       "generic normalized fact extraction must not branch on concrete languages" => CONCRETE_LANGUAGE_TOKENS
     )
 

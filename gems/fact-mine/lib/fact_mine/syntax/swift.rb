@@ -72,3 +72,27 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class SwiftNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfunc\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def access_span_call_site?(message, _current_function)
+        message == "fallback"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:swift, SwiftNormalizedExtractionBehavior)
+  end
+end

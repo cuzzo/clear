@@ -222,3 +222,101 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class GoNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def embedded_member_reads(node)
+        return [] unless node.first_lineno == node.last_lineno
+
+        reads = []
+        text = node.text.to_s
+        text.to_enum(:scan, /\b([a-z]\w*)\.([A-Z]\w*)\b/).each do
+          receiver = Regexp.last_match(1)
+          field = Regexp.last_match(2)
+          index = Regexp.last_match.begin(0)
+          reads << {
+            field: field,
+            receiver: receiver,
+            line: node.first_lineno,
+            span: [
+              node.first_lineno,
+              node.first_column + index,
+              node.first_lineno,
+              node.first_column + index + Regexp.last_match(0).length
+            ]
+          }
+        end
+        reads
+      end
+
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        return current_owner unless current_owner == file_owner
+
+        node.text.to_s[/\Afunc\s*\(\s*[A-Za-z_]\w*\s+\*?([A-Za-z_]\w*)\s*\)/, 1] || current_owner
+      end
+
+      def receiver_aliases_for_function(node)
+        aliases = {}
+        receiver = node.text.to_s[/\Afunc\s*\(\s*([A-Za-z_]\w*)\s+\*?[A-Za-z_]\w*\s*\)/, 1]
+        aliases[receiver] = "self" if receiver
+        aliases
+      end
+
+      def function_visibility(name, node, lines:)
+        return "private" if name.match?(/\A[a-z_]/)
+
+        super
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\Afunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def parameter_list_source(source)
+        open_index = source.index("(")
+        return "" unless open_index
+
+        if source.start_with?("func (")
+          receiver_close = matching_paren_index(source, open_index)
+          open_index = source.index("(", receiver_close.to_i + 1)
+          return "" unless open_index
+        end
+
+        close_index = matching_paren_index(source, open_index)
+        return "" unless close_index
+
+        source[(open_index + 1)...close_index].to_s
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip
+        return nil if text.empty?
+
+        tokens = text.scan(/[A-Za-z_]\w*[!?]?/)
+        tokens.first&.delete_suffix("?")
+      end
+
+      def split_case_source(source)
+        [source]
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def explicit_self_state_ref(node, message)
+        receiver = node.text.to_s.strip[/\A([A-Za-z_]\w*)\./, 1]
+        return "#{receiver}.#{message}" if receiver
+
+        super
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:go, GoNormalizedExtractionBehavior)
+  end
+end

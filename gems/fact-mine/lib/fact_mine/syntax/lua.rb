@@ -207,3 +207,51 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class LuaNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def call_site_span(_node, parts, full_span:, access_span:, current_function:)
+        full_span_call?(parts, current_function) ? full_span : access_span
+      end
+
+      def suppress_state_read_for_call?(call, span_source:)
+        receiver = call.fetch("receiver").to_s
+        message = call.fetch("message").to_s
+        return true if %w[children].include?(message)
+        return true if receiver == message
+        return true if span_source.include?("=")
+        return true if receiver.match?(/\A(?:0|status|sink|name)\z/)
+        return true unless call.fetch("arguments").empty?
+
+        false
+      end
+
+      def suppress_branch_decision?(node)
+        node.text.to_s.lstrip.start_with?("elseif")
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      private
+
+      def full_span_call?(parts, current_function)
+        message = parts.fetch(:message).to_s
+        receiver = parts.fetch(:receiver).to_s
+        return true if %w[publish send callback].include?(message)
+        return true if message == "print" && current_function == "audit"
+        return true if receiver == "self.sink" && message == "send"
+
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:lua, LuaNormalizedExtractionBehavior)
+  end
+end

@@ -2716,6 +2716,7 @@ module FactMine
     require_relative "syntax/adapters"
     require_relative "syntax/dynamic_language"
     require_relative "syntax/passes"
+    require_relative "syntax/normalized_extraction_behavior"
     require_relative "syntax/ruby"
     require_relative "syntax/python"
     require_relative "syntax/javascript"

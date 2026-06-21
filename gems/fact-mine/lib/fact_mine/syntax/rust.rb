@@ -76,3 +76,37 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class RustNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def source_message_text(message, node)
+        return "#{message}()" if node && node.text.to_s.include?("#{message}()")
+
+        message
+      end
+
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def owner_name_span(_name, node, default_span:)
+        return default_span if node.type.to_s == "STRUCT_ITEM"
+
+        struct_keyword_span(node) || default_span
+      end
+
+      def function_visibility(_name, node, lines:)
+        return "public" if node.text.to_s.strip.start_with?("pub ")
+
+        "private"
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\A(?:pub\s+)?fn\s+([A-Za-z_]\w*)\b/, 1] || super
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:rust, RustNormalizedExtractionBehavior)
+  end
+end

@@ -95,3 +95,48 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class CNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def call_receiver(parts)
+        receiver = parts.fetch(:receiver)
+        return receiver unless receiver == "self"
+
+        first_arg = parts.fetch(:arguments).first.to_s
+        field = first_arg[/\Aself->([A-Za-z_]\w*)\z/, 1]
+        field ? "self.#{field}" : receiver
+      end
+
+      def self_member_receiver(message)
+        "self->#{message}"
+      end
+
+      def suppress_state_read_for_call?(call, span_source:)
+        call.fetch("receiver").to_s.start_with?("self.") && !call.fetch("arguments").empty?
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def owner_name_span(_name, node, default_span:)
+        struct_keyword_span(node) || default_span
+      end
+
+      def owner_for_function(name, node, current_owner:, file_owner:)
+        return current_owner unless current_owner == file_owner
+
+        name[/\A([A-Z]\w*)_/, 1] || current_owner
+      end
+
+      def function_visibility(name, node, lines:)
+        return "private" if node.text.to_s.strip.start_with?("static ")
+
+        super
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:c, CNormalizedExtractionBehavior)
+  end
+end

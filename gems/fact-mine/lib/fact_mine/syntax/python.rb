@@ -427,3 +427,33 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class PythonNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def yield_semantic_effect?(_node)
+        false
+      end
+
+      def boolean_decision_members(members, _node)
+        members.sort
+      end
+
+      def suppress_call_site?(_node, call)
+        %w[break continue value].include?(call.fetch("message").to_s)
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && %w[break continue len open value].include?(call.fetch("message"))
+      end
+
+      def function_visibility(name, node, lines:)
+        return "private" if name.start_with?("_") && !name.start_with?("__")
+
+        super
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:python, PythonNormalizedExtractionBehavior)
+  end
+end

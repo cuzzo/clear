@@ -887,3 +887,35 @@ module FactMine
 
   end
 end
+
+module FactMine
+  module Syntax
+    class RubyNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def property_read_call?(_node, _parts)
+        false
+      end
+
+      def state_read_span_key(call)
+        call.fetch("receiver").to_s.include?("(") ? "span" : "access_span"
+      end
+
+      def boolean_enclosing_span(_node, node_span:, decision_span:)
+        node_span
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:ruby, RubyNormalizedExtractionBehavior)
+  end
+end

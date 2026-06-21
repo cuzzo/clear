@@ -84,3 +84,53 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class JavaNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def project_call(node, call)
+        projected = call.dup
+        text = node.text.to_s.strip
+        if text.match?(/\Athis\.[A-Za-z_]\w+\(/) && !projected.fetch("arguments").empty?
+          projected["message"] = "this"
+          projected["receiver"] = "self"
+        elsif (field = text[/\Athis\.([A-Za-z_]\w*)\.name\(\)/, 1])
+          projected["message"] = field
+          projected["receiver"] = "self"
+        elsif (stream = text[/\ASystem\.(err|out)\.println\(/, 1])
+          projected["message"] = stream
+          projected["receiver"] = "System"
+        elsif (profile_receiver = text[/\A(.+)\.profile\(\)\.name\(\)/, 1])
+          projected["message"] = "profile()"
+          projected["receiver"] = profile_receiver
+        elsif projected.fetch("message") == "name" &&
+              (nested = projected.fetch("receiver").to_s[/\A(.+)\.([A-Za-z_]\w+\(\))\z/, 1])
+          projected["message"] = projected.fetch("receiver").split(".").last
+          projected["receiver"] = nested
+        end
+        projected
+      end
+
+      def suppress_state_read_for_call?(call, span_source:)
+        return true if call.fetch("receiver") != "self"
+        return true if span_source.include?(".name()")
+
+        false
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def case_pattern_display(pattern)
+        "case #{pattern}"
+      end
+
+      def method_state_ref?(node, parts)
+        parts.fetch(:receiver) != "self" && node.text.to_s.include?("(")
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:java, JavaNormalizedExtractionBehavior)
+  end
+end

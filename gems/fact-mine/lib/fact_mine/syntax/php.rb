@@ -523,3 +523,26 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class PhpNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def call_access_span(_node, computed_span:, full_span:)
+        full_span
+      end
+
+      def normalize_source_text(text)
+        text.to_s
+            .gsub(/\$this->/, "this.")
+            .gsub(/\$([A-Za-z_]\w*)->/, '\1.')
+            .gsub(/\$([A-Za-z_]\w*)/, '\1')
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfunction\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:php, PhpNormalizedExtractionBehavior)
+  end
+end

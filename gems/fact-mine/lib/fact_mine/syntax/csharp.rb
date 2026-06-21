@@ -105,3 +105,23 @@ module FactMine
     end
   end
 end
+
+module FactMine
+  module Syntax
+    class CsharpNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def implicit_owner_fields?
+        true
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:csharp, CsharpNormalizedExtractionBehavior)
+  end
+end

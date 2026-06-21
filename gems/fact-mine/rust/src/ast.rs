@@ -7,7 +7,12 @@ use std::path::Path;
 use tree_sitter::{Language as TreeSitterLanguage, Node as TreeSitterNode, Parser};
 
 mod adapters;
+mod ruby_normalization;
 use adapters::{normalization_adapter, AstNormalizationAdapter, NamedChildrenAction};
+pub(crate) use ruby_normalization::{
+    dynamic_constant_pattern_text, dynamic_exception_constant_text, dynamic_instance_variable_text,
+    ruby_exception_constant_text, ruby_variable_name_text,
+};
 
 pub type Span = [usize; 4];
 const COMPARISON_OPERATORS: &[&str] = &["==", "!=", "===", "!==", "<", "<=", ">", ">="];
@@ -190,26 +195,6 @@ impl RawNode {
 
 pub fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn ruby_exception_constant_text(text: &str) -> bool {
-    let mut parts = text.split("::");
-    let Some(first) = parts.next() else {
-        return false;
-    };
-    let mut first_chars = first.chars();
-    if !matches!(first_chars.next(), Some(ch) if ch.is_ascii_uppercase()) {
-        return false;
-    }
-    if !first_chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
-        return false;
-    }
-    parts.all(|part| {
-        !part.is_empty()
-            && part
-                .chars()
-                .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    })
 }
 
 pub fn span(node: TreeSitterNode<'_>) -> Span {
@@ -816,8 +801,8 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize(mut self, root: TreeSitterNode<'_>) -> Node {
         self.root_span = Some(span(root));
-        let children = if self.ruby() {
-            self.with_ruby_scope(root, true, |normalizer| normalizer.normalize_children(root))
+        let children = if self.dynamic_syntax_enabled() {
+            self.with_dynamic_scope(root, true, |normalizer| normalizer.normalize_children(root))
         } else {
             self.normalize_children(root)
         };
@@ -1089,7 +1074,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         let name = self.function_name(node)?;
         let args = self.normalize_parameters(self.parameters_child(node));
-        let body = self.with_ruby_scope(node, true, |normalizer| {
+        let body = self.with_dynamic_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
                 .or_else(|| normalizer.block_child(node))?;
@@ -1115,7 +1100,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .leading_function_name(target)
             .map(|name| node_text(name, self.source).to_string())?;
         let body_node = self.leading_function_body(target);
-        let body = self.with_ruby_scope(target, true, |normalizer| {
+        let body = self.with_dynamic_scope(target, true, |normalizer| {
             let body = body_node.and_then(|body| normalizer.normalize_body(body));
             normalizer.elide_tail_returns(body)
         });
@@ -1136,7 +1121,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .and_then(|child| self.normalize_node(child))
             .unwrap_or_else(|| self.wrap("SELF", Vec::new(), node));
         let args = self.normalize_parameters(self.parameters_child(node));
-        let body = self.with_ruby_scope(node, true, |normalizer| {
+        let body = self.with_dynamic_scope(node, true, |normalizer| {
             let body_node = normalizer
                 .named_field(node, "body")
                 .or_else(|| normalizer.block_child(node))?;
@@ -1273,7 +1258,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(target, "body")
             .or_else(|| self.block_child(target))
             .or_else(|| self.named_children(target).into_iter().last())?;
-        let body = self.with_ruby_scope(target, false, |normalizer| {
+        let body = self.with_dynamic_scope(target, false, |normalizer| {
             normalizer.normalize_body(body_node).map(dynamic_scope)
         });
         let scope = self.scope(body, None, target);
@@ -1479,7 +1464,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "alternative")
             .or_else(|| self.explicit_alternative(node))
             .or_else(|| {
-                if self.ruby() {
+                if self.dynamic_syntax_enabled() {
                     None
                 } else {
                     self.branch_child(node, condition_raw, 1)
@@ -1673,13 +1658,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             } else if pattern_wrapper && pattern_children.is_empty() && integer_text(&pattern_text)
             {
                 normalized.push(self.wrap("INTEGER", Vec::new(), pattern));
-            } else if self.ruby()
+            } else if self.dynamic_syntax_enabled()
                 && pattern_wrapper
                 && pattern_children.is_empty()
-                && ruby_constant_text(&pattern_text)
+                && dynamic_constant_pattern_text(&pattern_text)
             {
                 normalized.push(self.wrap("CONST", vec![Child::Symbol(pattern_text)], pattern));
-            } else if self.ruby()
+            } else if self.dynamic_syntax_enabled()
                 && pattern_wrapper
                 && pattern_children.is_empty()
                 && bare_identifier_text(&pattern_text)
@@ -1795,7 +1780,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .filter_map(|child| self.normalize_return_value(child))
             .collect::<Vec<_>>();
         if elide_symbol
-            && self.ruby()
+            && self.dynamic_syntax_enabled()
             && children.len() == 1
             && self.symbol_literal_node(children.first())
         {
@@ -2029,13 +2014,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             direct_parts.or_else(|| self.infix_statement_parts(node))?;
         let left = self.normalize_node(left_raw);
         let right = self.normalize_node(right_raw);
-        if self.ruby() && operator == "=~" && self.regex_literal(Some(right_raw)) {
+        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw)) {
             return Some(self.wrap(
                 "MATCH3",
                 vec![optional_node(right), optional_node(left)],
                 node,
             ));
-        } else if self.ruby() && operator == "=~" {
+        } else if self.dynamic_syntax_enabled() && operator == "=~" {
             return Some(self.wrap(
                 "CALL",
                 vec![
@@ -2062,13 +2047,13 @@ impl<'source> TreeSitterNormalizer<'source> {
         let (left_raw, operator, right_raw) = self.infix_statement_parts(node)?;
         let left = self.normalize_node(left_raw);
         let right = self.normalize_node(right_raw);
-        if self.ruby() && operator == "=~" && self.regex_literal(Some(right_raw)) {
+        if self.dynamic_syntax_enabled() && operator == "=~" && self.regex_literal(Some(right_raw)) {
             return Some(self.wrap(
                 "MATCH3",
                 vec![optional_node(right), optional_node(left)],
                 node,
             ));
-        } else if self.ruby() && operator == "=~" {
+        } else if self.dynamic_syntax_enabled() && operator == "=~" {
             return Some(self.wrap(
                 "CALL",
                 vec![
@@ -2549,7 +2534,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let call = self.normalize_call_without_block(call_source, block)?;
         let args = self.normalize_block_parameters(block);
         let body = block.and_then(|block| {
-            self.with_ruby_scope(block, false, |normalizer| {
+            self.with_dynamic_scope(block, false, |normalizer| {
                 let body_node = normalizer
                     .named_field(block, "body")
                     .or_else(|| normalizer.block_child(block))
@@ -2566,7 +2551,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_argument_list_call(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        if !self.ruby() || node.kind() != "argument_list" {
+        if !self.dynamic_syntax_enabled() || node.kind() != "argument_list" {
             return None;
         }
         let target = {
@@ -2607,7 +2592,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if !self.ruby() || !self.argument_list_element_reference(node) {
+        if !self.dynamic_syntax_enabled() || !self.argument_list_element_reference(node) {
             return None;
         }
         let target = {
@@ -2641,7 +2626,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_argument_list_unary_not(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        if !self.ruby() || !self.argument_list_unary_not(node) {
+        if !self.dynamic_syntax_enabled() || !self.argument_list_unary_not(node) {
             return None;
         }
         let target = {
@@ -2668,7 +2653,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        if !self.ruby() || node.kind() != "argument_list" {
+        if !self.dynamic_syntax_enabled() || node.kind() != "argument_list" {
             return None;
         }
         let target = {
@@ -2685,7 +2670,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let block = self.call_block(target)?;
         let call = self.normalize_argument_list_call(node)?;
         let args = self.normalize_block_parameters(Some(block));
-        let body = self.with_ruby_scope(block, false, |normalizer| {
+        let body = self.with_dynamic_scope(block, false, |normalizer| {
             let body_node = normalizer
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
@@ -2708,7 +2693,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let call = self.normalize_call_without_block(call_source, block)?;
         let args = self.normalize_block_parameters(block);
         let body = block.and_then(|block| {
-            self.with_ruby_scope(block, false, |normalizer| {
+            self.with_dynamic_scope(block, false, |normalizer| {
                 let body_node = normalizer
                     .named_field(block, "body")
                     .or_else(|| normalizer.block_child(block))
@@ -2732,7 +2717,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(call);
         };
         let args = self.normalize_block_parameters(Some(block));
-        let body = self.with_ruby_scope(block, false, |normalizer| {
+        let body = self.with_dynamic_scope(block, false, |normalizer| {
             let body_node = normalizer
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
@@ -3046,7 +3031,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .iter()
             .filter_map(|child| {
                 if child.kind() == "exceptions"
-                    && ruby_exception_constant_text(node_text(*child, self.source))
+                    && dynamic_exception_constant_text(node_text(*child, self.source))
                 {
                     Some(self.normalize_const(*child))
                 } else {
@@ -3216,7 +3201,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .unwrap_or_default();
         let block = self.call_block(target);
         let call_source = block.map(|block| self.source_before_child(node, block));
-        if self.ruby() && node_text(function, self.source) == "yield" {
+        if self.dynamic_syntax_enabled() && node_text(function, self.source) == "yield" {
             let children = vec![list_or_nil(args, args_node.unwrap_or(node), self)];
             if let Some(source) = call_source.as_ref() {
                 return Some(self.wrap_from_source_node("YIELD", children, source));
@@ -3237,7 +3222,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(call);
         };
         let block_args = self.normalize_block_parameters(Some(block));
-        let body = self.with_ruby_scope(block, false, |normalizer| {
+        let body = self.with_dynamic_scope(block, false, |normalizer| {
             let body_node = normalizer
                 .named_field(block, "body")
                 .or_else(|| normalizer.block_child(block))
@@ -3388,7 +3373,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .into_iter()
             .filter_map(|arg| self.normalize_node(arg))
             .collect::<Vec<_>>();
-        if self.ruby() && self.self_node(receiver) {
+        if self.dynamic_syntax_enabled() && self.self_node(receiver) {
             return Some(self.wrap(
                 "FCALL",
                 vec![
@@ -3475,10 +3460,10 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_terminal_statement(&self, node: TreeSitterNode<'_>) -> Node {
         let text = node_text(node, self.source).trim();
-        if self.ruby() && text == "yield" {
+        if self.dynamic_syntax_enabled() && text == "yield" {
             return self.wrap("YIELD", vec![Child::Nil], node);
         }
-        if ruby_instance_variable_text(text) {
+        if dynamic_instance_variable_text(text) {
             return self.wrap("IVAR", vec![Child::String(text.to_string())], node);
         }
         if text.starts_with('$') {
@@ -3507,7 +3492,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.wrap("ZLIST", Vec::new(), node);
         }
         if bare_identifier_text(text) {
-            if self.ruby() && !self.ruby_local_name(text) {
+            if self.dynamic_syntax_enabled() && !self.dynamic_local_name(text) {
                 return self.wrap("VCALL", vec![Child::Symbol(text.to_string())], node);
             }
             return self.wrap("LVAR", vec![Child::String(text.to_string())], node);
@@ -3551,7 +3536,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         let key_text = node_text(key, self.source);
         let key_lit = self.wrap("LIT", vec![Child::Symbol(key_text.to_string())], key);
-        if self.ruby() && key.kind() == "hash_key_symbol" && value_raw.is_none() {
+        if self.dynamic_syntax_enabled() && key.kind() == "hash_key_symbol" && value_raw.is_none() {
             let value = self.local_or_call_for_name(key_text, key);
             return Some(self.wrap(
                 "HASH",
@@ -3822,7 +3807,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_identifier_with_name(&mut self, node: TreeSitterNode<'_>, name: String) -> Node {
-        if self.ruby_vcall_identifier(node, &name) || self.vcall_identifier(node, &name) {
+        if self.dynamic_vcall_identifier(node, &name) || self.vcall_identifier(node, &name) {
             self.wrap("VCALL", vec![Child::Symbol(name)], node)
         } else {
             self.wrap("LVAR", vec![Child::String(name)], node)
@@ -4079,157 +4064,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
     }
 
-    fn with_ruby_scope<T>(
-        &mut self,
-        node: TreeSitterNode<'_>,
-        reset: bool,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        if !self.ruby() {
-            return f(self);
-        }
-        let previous = self.local_stack.clone();
-        if reset {
-            self.local_stack.clear();
-        }
-        self.local_stack.push(self.ruby_scope_locals(node));
-        let result = f(self);
-        self.local_stack = previous;
-        result
-    }
-
-    fn ruby_scope_locals(&self, node: TreeSitterNode<'_>) -> BTreeSet<String> {
-        let mut locals = BTreeSet::new();
-        self.collect_ruby_scope_locals(node, &mut locals, true);
-        locals
-    }
-
-    fn collect_ruby_scope_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-        root: bool,
-    ) {
-        if !root && self.ruby_scope_boundary(node) {
-            return;
-        }
-        self.collect_ruby_parameter_locals(node, locals);
-        self.collect_ruby_assignment_locals(node, locals);
-        for child in self.named_children(node) {
-            if !self.ruby_scope_child_boundary(child) {
-                self.collect_ruby_scope_locals(child, locals, false);
-            }
-        }
-    }
-
-    fn collect_ruby_parameter_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if !matches!(
-            node.kind(),
-            "method_parameters" | "block_parameters" | "lambda_parameters"
-        ) {
-            return;
-        }
-
-        for child in self.named_children(node) {
-            self.collect_identifier_names(child, locals);
-        }
-    }
-
-    fn collect_ruby_assignment_locals(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if node.kind() == "exception_variable" {
-            self.collect_identifier_names(node, locals);
-            return;
-        }
-
-        if !self.ruby_assignment_node(node) {
-            return;
-        }
-
-        if let Some(left) = self.assignment_left(node) {
-            self.collect_assignment_target_names(left, locals);
-        }
-    }
-
-    fn collect_assignment_target_names(
-        &self,
-        node: TreeSitterNode<'_>,
-        locals: &mut BTreeSet<String>,
-    ) {
-        if let Some(name) = self.identifier_text(node) {
-            locals.insert(name);
-            return;
-        }
-        if matches!(
-            node.kind(),
-            "left_assignment_list"
-                | "expression_list"
-                | "splat"
-                | "splat_parameter"
-                | "rest_assignment"
-        ) {
-            for child in self.named_children(node) {
-                self.collect_assignment_target_names(child, locals);
-            }
-        }
-    }
-
-    fn collect_identifier_names(&self, node: TreeSitterNode<'_>, locals: &mut BTreeSet<String>) {
-        if let Some(name) = self.identifier_text(node) {
-            locals.insert(name);
-        }
-        for child in self.raw_named_children(node) {
-            self.collect_identifier_names(child, locals);
-        }
-    }
-
-    fn ruby_scope_boundary(&self, node: TreeSitterNode<'_>) -> bool {
-        if matches!(node.kind(), "block" | "do_block")
-            && node
-                .parent()
-                .map(|parent| parent.kind() == "lambda")
-                .unwrap_or(false)
-        {
-            return false;
-        }
-        matches!(
-            node.kind(),
-            "singleton_class" | "lambda" | "block" | "do_block"
-        ) || function_kind(node.kind())
-            || self.class_node(node)
-            || self.module_node(node)
-    }
-
-    fn ruby_scope_child_boundary(&self, node: TreeSitterNode<'_>) -> bool {
-        self.ruby_scope_boundary(node)
-    }
-
-    fn ruby_vcall_identifier(&self, node: TreeSitterNode<'_>, name: &str) -> bool {
-        self.ruby()
-            && self.identifier_kind(node.kind())
-            && !self.assignment_lhs(node)
-            && !self.ruby_definition_identifier(node)
-            && !self.ruby_local_name(name)
-    }
-
-    fn ruby_local_name(&self, name: &str) -> bool {
-        self.local_stack
-            .iter()
-            .rev()
-            .any(|scope| scope.contains(name))
-    }
-
-    fn ruby(&self) -> bool {
-        self.normalization_adapter.ruby()
-    }
-
     fn instance_variable(&self, node: TreeSitterNode<'_>) -> bool {
         self.normalization_adapter
             .instance_variable(node, self.source)
@@ -4248,7 +4082,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         if !self.identifier_kind(node.kind()) {
             return false;
         }
-        if self.ruby() && self.ruby_local_name(name) {
+        if self.dynamic_syntax_enabled() && self.dynamic_local_name(name) {
             return false;
         }
         let Some(parent) = node.parent() else {
@@ -4287,54 +4121,6 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         false
-    }
-
-    fn ruby_definition_identifier(&self, node: TreeSitterNode<'_>) -> bool {
-        let Some(parent) = self.parent_node(node) else {
-            return false;
-        };
-        if matches!(parent.kind(), "method" | "singleton_method") {
-            let name = self.named_field(parent, "name").or_else(|| {
-                self.named_children(parent)
-                    .into_iter()
-                    .find(|child| self.identifier_kind(child.kind()))
-            });
-            return name
-                .map(|name| self.same_ts_node(name, node))
-                .unwrap_or(false);
-        }
-        matches!(
-            parent.kind(),
-            "method_parameters"
-                | "block_parameters"
-                | "lambda_parameters"
-                | "optional_parameter"
-                | "keyword_parameter"
-                | "block_parameter"
-        )
-    }
-
-    fn ruby_assignment_node(&self, node: TreeSitterNode<'_>) -> bool {
-        if matches!(node.kind(), "assignment" | "operator_assignment") {
-            return true;
-        }
-        if node.kind() == "pattern"
-            && node
-                .children(&mut node.walk())
-                .any(|child| !child.is_named() && node_text(child, self.source) == "=")
-        {
-            return true;
-        }
-        let raw_named = self.raw_named_children(node);
-        if node.kind() == "block_body"
-            && raw_named.len() == 1
-            && raw_named[0].kind() == "assignment"
-        {
-            return true;
-        }
-
-        matches!(node.kind(), "body_statement" | "block_body" | "statement")
-            && self.has_assignment_operator_child(node)
     }
 
     fn self_node(&self, node: TreeSitterNode<'_>) -> bool {
@@ -4706,7 +4492,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn inline_def_from_argument_list(&mut self, args: Option<TreeSitterNode<'_>>) -> Option<Node> {
-        if !self.ruby() {
+        if !self.dynamic_syntax_enabled() {
             return None;
         }
         self.inline_def_from_source(args?)
@@ -4726,7 +4512,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn inline_def_from_source(&mut self, source: TreeSitterNode<'_>) -> Option<Node> {
-        if !self.ruby() {
+        if !self.dynamic_syntax_enabled() {
             return None;
         }
         if let Some(method) = self
@@ -4742,7 +4528,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         let body = self.inline_def_body(source);
         let receiver = self.inline_def_receiver(source);
-        let normalized_body = self.with_ruby_scope(source, true, |normalizer| {
+        let normalized_body = self.with_dynamic_scope(source, true, |normalizer| {
             let body = body.and_then(|body| normalizer.normalize_body(body));
             normalizer.elide_tail_returns(body)
         });
@@ -5620,7 +5406,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn scalar_argument_list_value(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let text = node_text(node, self.source).trim();
-        if self.ruby() && text == "yield" {
+        if self.dynamic_syntax_enabled() && text == "yield" {
             return Some(self.wrap("YIELD", vec![Child::Nil], node));
         }
         if text == "nil" {
@@ -5641,7 +5427,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(self.wrap("INTEGER", vec![Child::Integer(value)], node));
         }
         if bare_identifier_text(text) {
-            if self.ruby() && !self.ruby_local_name(text) {
+            if self.dynamic_syntax_enabled() && !self.dynamic_local_name(text) {
                 Some(self.wrap("VCALL", vec![Child::Symbol(text.to_string())], node))
             } else {
                 Some(self.wrap("LVAR", vec![Child::String(text.to_string())], node))
@@ -5652,7 +5438,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn local_or_call_for_name(&self, name: &str, source: TreeSitterNode<'_>) -> Node {
-        if self.ruby() && !self.ruby_local_name(name) {
+        if self.dynamic_syntax_enabled() && !self.dynamic_local_name(name) {
             self.wrap("VCALL", vec![Child::Symbol(name.to_string())], source)
         } else {
             self.wrap("LVAR", vec![Child::String(name.to_string())], source)
@@ -5754,7 +5540,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn inline_parameter_begin_marker(&self, function_node: TreeSitterNode<'_>) -> Option<Node> {
-        if !self.ruby() {
+        if !self.dynamic_syntax_enabled() {
             return None;
         }
 
@@ -6589,14 +6375,6 @@ fn integer_text(text: &str) -> bool {
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }
 
-fn ruby_constant_text(text: &str) -> bool {
-    let mut chars = text.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_uppercase() && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
 fn dynamic_scope(mut node: Node) -> Node {
     if matches!(
         node.r#type.as_str(),
@@ -6788,12 +6566,6 @@ fn exact_bare_identifier_text(text: &str) -> bool {
     true
 }
 
-fn ruby_instance_variable_text(text: &str) -> bool {
-    text.strip_prefix('@')
-        .map(exact_bare_identifier_text)
-        .unwrap_or(false)
-}
-
 fn exact_integer_text(text: &str) -> bool {
     let digits = text.strip_prefix('-').unwrap_or(text);
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
@@ -6815,25 +6587,6 @@ fn heredoc_marker_text(text: &str) -> bool {
             };
             first == '_' || first.is_ascii_alphabetic()
         })
-}
-
-fn ruby_variable_name_text(text: &str) -> bool {
-    let mut chars = text.chars().peekable();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    while let Some(ch) = chars.next() {
-        if matches!(ch, '!' | '?' | '=') {
-            return chars.peek().is_none();
-        }
-        if !(ch == '_' || ch.is_ascii_alphanumeric()) {
-            return false;
-        }
-    }
-    true
 }
 
 fn comparison_operator_from_text(text: &str) -> Option<String> {
