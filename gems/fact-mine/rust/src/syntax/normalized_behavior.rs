@@ -168,6 +168,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    fn node_state_reads(&self, _node: &Node) -> Vec<NormalizedStateRead> {
+        Vec::new()
+    }
+
     fn initializer_field_reads(
         &self,
         _node: &Node,

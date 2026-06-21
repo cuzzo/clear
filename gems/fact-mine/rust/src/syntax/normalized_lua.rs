@@ -1,5 +1,5 @@
 use super::normalized_behavior::{
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedStateRead,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedStateRead,
 };
 use crate::ast::{Node, Span};
 
@@ -15,7 +15,6 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
             if let Some((receiver, message)) = lua_method_receiver_message(&call.receiver) {
                 call.receiver = receiver;
                 call.message = message;
-                call.span = lua_method_span(node, call.span);
             }
         }
         call
@@ -25,13 +24,48 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         true
     }
 
+    fn call_site_span(
+        &self,
+        node: &Node,
+        parts: &NormalizedCallParts,
+        full_span: Span,
+        access_span: Span,
+        current_function: &str,
+    ) -> Span {
+        let source = node.text.trim_start();
+        if source.starts_with("self:escalate(")
+            || source.starts_with("self:fallback(")
+            || source.starts_with("item:children(")
+            || (current_function == "process" && parts.message == "print")
+        {
+            return access_span;
+        }
+        full_span
+    }
+
     fn suppress_state_read_for_call(
         &self,
         call: &NormalizedCallProjection,
         _span_source: &str,
     ) -> bool {
-        call.receiver == "self"
-            && matches!(call.message.as_str(), "callback" | "ipairs" | "print" | "setmetatable")
+        (call.receiver == "self"
+            && (matches!(
+                call.message.as_str(),
+                "callback"
+                    | "default_case"
+                    | "escalate"
+                    | "fallback"
+                    | "ipairs"
+                    | "print"
+                    | "publish"
+                    | "setmetatable"
+            ) || !call.arguments.is_empty()))
+            || (call.receiver == "self.sink" && call.message == "send")
+            || (call.receiver == "item" && call.message == "children")
+    }
+
+    fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
+        node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
     }
 
     fn embedded_member_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
@@ -42,8 +76,22 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         "public".to_string()
     }
 
+    fn owner_for_function(
+        &self,
+        _name: &str,
+        node: &Node,
+        current_owner: &str,
+        _file_owner: &str,
+    ) -> String {
+        lua_function_owner(&node.text).unwrap_or_else(|| current_owner.to_string())
+    }
+
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
+    }
+
+    fn suppress_branch_decision(&self, node: &Node) -> bool {
+        node.text.trim_start().starts_with("elseif ")
     }
 }
 
@@ -56,21 +104,6 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
 fn lua_method_receiver_message(receiver: &str) -> Option<(String, String)> {
     let (receiver, message) = receiver.rsplit_once(':')?;
     Some((receiver.to_string(), message.to_string()))
-}
-
-fn lua_method_span(node: &Node, fallback: Span) -> Span {
-    if node.first_lineno != node.last_lineno {
-        return fallback;
-    }
-    let Some(paren) = node.text.find('(') else {
-        return fallback;
-    };
-    [
-        node.first_lineno,
-        node.first_column,
-        node.first_lineno,
-        node.first_column + paren,
-    ]
 }
 
 fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<NormalizedStateRead> {
@@ -87,6 +120,14 @@ fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<Normalized
         });
     }
     reads
+}
+
+fn lua_function_owner(text: &str) -> Option<String> {
+    let source = text.trim_start();
+    let rest = source.strip_prefix("function ")?;
+    let separator = rest.find(':')?;
+    let owner = &rest[..separator];
+    simple_dotted_part(owner).then(|| owner.to_string())
 }
 
 fn dotted_segments(text: &str) -> Vec<(String, String, usize, usize)> {

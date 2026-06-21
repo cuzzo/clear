@@ -98,6 +98,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan(&mut self, node: &Node) {
+        self.record_behavior_node_reads(node);
         match node.r#type.as_str() {
             "CLASS" | "MODULE" => self.scan_owner(node),
             "DEFN" | "DEFS" => self.scan_function(node),
@@ -736,6 +737,12 @@ impl<'a> Extractor<'a> {
             .behavior
             .literal_state_reads(node, &text, node_span, &source)
         {
+            self.push_behavior_read(read, node);
+        }
+    }
+
+    fn record_behavior_node_reads(&mut self, node: &Node) {
+        for read in self.behavior.node_state_reads(node) {
             self.push_behavior_read(read, node);
         }
     }

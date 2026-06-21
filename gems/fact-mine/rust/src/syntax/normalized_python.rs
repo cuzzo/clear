@@ -1,5 +1,6 @@
 use super::normalized_behavior::{
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedStateRead,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedStateRead,
 };
 use crate::ast::{Node, Span};
 
@@ -10,12 +11,33 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         format!("self.{message}")
     }
 
+    fn yield_semantic_effect(&self, _node: &Node) -> bool {
+        false
+    }
+
+    fn boolean_decision_members(&self, mut members: Vec<String>, _node: &Node) -> Vec<String> {
+        members.sort();
+        members
+    }
+
     fn function_visibility(&self, name: &str, _node: &Node, _lines: &[String]) -> String {
         if name.starts_with('_') && !name.starts_with("__") {
             "private".to_string()
         } else {
             "public".to_string()
         }
+    }
+
+    fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
+        let text = param
+            .split('=')
+            .next()
+            .unwrap_or(param)
+            .split(':')
+            .next()
+            .unwrap_or(param)
+            .trim();
+        (!text.is_empty()).then(|| text.trim_start_matches('*').to_string())
     }
 
     fn state_read_uses_access_span(&self, _call: &NormalizedCallProjection) -> bool {
@@ -30,11 +52,29 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         call.receiver == "self" && matches!(call.message.as_str(), "callback" | "len" | "open")
     }
 
+    fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
+        node.r#type != "VCALL"
+            && parts.arguments.is_empty()
+            && (!node.text.contains('(') || parenthesized_property_read(&node.text))
+    }
+
     fn embedded_member_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
         dotted_member_reads(&node.text, node.first_lineno, node.first_column)
             .into_iter()
             .filter(|read| read.field != "_lock" && !read.field.ends_with("_lock"))
             .collect()
+    }
+
+    fn node_state_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
+        if node.r#type != "EXPRESSION_STATEMENT" || !node.text.contains('=') {
+            return Vec::new();
+        }
+        let rhs = node.text.split_once('=').map(|(_, rhs)| rhs).unwrap_or("");
+        dotted_member_reads(rhs, node.first_lineno, node.first_column + node.text.len() - rhs.len())
+    }
+
+    fn ternary_children_conditional(&self, _node: &Node) -> bool {
+        false
     }
 
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
@@ -53,7 +93,7 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
 }
 
 fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<NormalizedStateRead> {
-    if text.contains('=') || text.contains(':') {
+    if text.contains('=') && !text.contains('.') {
         return Vec::new();
     }
     let mut reads = Vec::new();
@@ -66,6 +106,13 @@ fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<Normalized
         });
     }
     reads
+}
+
+fn parenthesized_property_read(text: &str) -> bool {
+    let source = text.trim();
+    source.starts_with('(')
+        && source.ends_with(')')
+        && !source[1..source.len().saturating_sub(1)].contains('(')
 }
 
 fn dotted_segments(text: &str) -> Vec<(String, String, usize, usize)> {

@@ -10,6 +10,10 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         message.to_string()
     }
 
+    fn explicit_self_state_ref(&self, _node: &Node, message: &str) -> String {
+        format!("this.{message}")
+    }
+
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
         let text = node.text.trim_start();
         if text.starts_with("public ") {
@@ -41,8 +45,20 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         true
     }
 
+    fn field_name_from_declaration(&self, node: &Node) -> Option<String> {
+        if node.r#type != "FIELD_DECLARATION" {
+            return None;
+        }
+        node.text
+            .trim_end_matches(';')
+            .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .filter(|part| !part.is_empty())
+            .next_back()
+            .map(str::to_string)
+    }
+
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
-        true
+        false
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
