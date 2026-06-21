@@ -5,7 +5,6 @@ use super::{
     StateDeclaration, StateRead, StateWrite,
 };
 use crate::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
-use crate::syntax::complexity::local_complexity_scores;
 use anyhow::{Context, Result};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -55,209 +54,34 @@ fn parse_file_with_options(
         "read_tree_sitter",
         parsed_started.elapsed(),
     );
-    if language == Language::Ruby {
-        return parse_normalized_file(parsed, options, profile, &file_label, total_started);
-    }
-    let mut function_defs = Vec::new();
-    let mut owner_defs = Vec::new();
-    let mut call_sites = Vec::new();
-    let mut state_declarations = Vec::new();
-    let mut state_reads = Vec::new();
-    let mut state_writes = Vec::new();
-    let mut decision_sites = Vec::new();
-    let mut branch_decisions = Vec::new();
-    let mut branch_arms = Vec::new();
-    let mut dispatch_sites = Vec::new();
-    let mut predicate_aliases = Vec::new();
-    let mut comparison_uses = Vec::new();
-    let mut seen_writes = HashSet::new();
-    let mut seen_reads = HashSet::new();
-    let mut seen_calls = HashSet::new();
-    let mut seen_decisions = HashSet::new();
-    let context = ContextState::new(file_owner(&parsed.file));
-    let started = Instant::now();
-    collect_facts(
-        parsed.tree.root_node(),
-        &parsed.source,
-        &parsed.file,
+    parse_normalized_file(
+        parsed,
         language,
-        &context,
-        &mut function_defs,
-        &mut owner_defs,
-        &mut call_sites,
-        &mut state_declarations,
-        &mut state_reads,
-        &mut state_writes,
-        &mut decision_sites,
-        &mut branch_decisions,
-        &mut branch_arms,
-        &mut predicate_aliases,
-        &mut comparison_uses,
-        &mut seen_writes,
-        &mut seen_reads,
-        &mut seen_calls,
-        &mut seen_decisions,
-    );
-    profile_parse_phase(profile, &file_label, "collect_facts", started.elapsed());
-    let started = Instant::now();
-    collect_implicit_state_accesses(
-        parsed.tree.root_node(),
-        &parsed.source,
-        &parsed.file,
-        language,
-        &context,
-        &function_defs,
-        &state_declarations,
-        &mut state_reads,
-        &mut state_writes,
-        &mut seen_reads,
-        &mut seen_writes,
-    );
-    profile_parse_phase(
+        options,
         profile,
         &file_label,
-        "collect_implicit_state_accesses",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    super::adapters::apply_visibility(language, &mut function_defs, &call_sites);
-    profile_parse_phase(profile, &file_label, "apply_visibility", started.elapsed());
-    let started = Instant::now();
-    collect_dispatch_sites(
-        parsed.tree.root_node(),
-        &parsed.source,
-        &parsed.file,
-        language,
-        &context,
-        &call_sites,
-        &mut dispatch_sites,
-    );
-    profile_parse_phase(
-        profile,
-        &file_label,
-        "collect_dispatch_sites",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    collect_equality_dispatch_sites(&comparison_uses, &call_sites, &mut dispatch_sites);
-    profile_parse_phase(
-        profile,
-        &file_label,
-        "collect_equality_dispatch_sites",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    let mut semantic_effect_sites =
-        effects::semantic_effect_sites_from_calls(language, &call_sites, &function_defs);
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "semantic_effects_from_calls",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    effects::dedup_semantic_effect_sites(&mut semantic_effect_sites);
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "dedup_semantic_effects",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    let local_complexity_scores =
-        local_complexity_scores(&parsed.file.to_string_lossy(), &function_defs);
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "local_complexity_scores",
-        started.elapsed(),
-    );
-
-    let started = Instant::now();
-    let lines = parsed.source.lines().map(ToString::to_string).collect();
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "lines",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    let root = RawNode::from_tree_sitter(parsed.tree.root_node(), &parsed.source);
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "raw_root",
-        started.elapsed(),
-    );
-    let started = Instant::now();
-    let normalized_root = if options.normalized_root {
-        normalize_tree(parsed.tree.root_node(), &parsed.source, language)
-    } else {
-        empty_normalized_root()
-    };
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "normalized_root",
-        started.elapsed(),
-    );
-
-    let document = Document {
-        file: parsed.file.to_string_lossy().to_string(),
-        language,
-        source: String::new(),
-        lines,
-        root,
-        normalized_root,
-        function_defs,
-        owner_defs,
-        call_sites,
-        state_declarations,
-        state_reads,
-        state_writes,
-        decision_sites,
-        branch_decisions,
-        branch_arms,
-        dispatch_sites,
-        semantic_effect_sites,
-        local_complexity_scores,
-        predicate_aliases,
-        comparison_uses,
-        path_condition_sites: Vec::new(),
-        protocol_method_effects: Vec::new(),
-        protocol_call_paths: Vec::new(),
-        clone_candidates: Vec::new(),
-        immutable_struct_readers: BTreeMap::new(),
-        immutable_struct_reader_types: BTreeMap::new(),
-        type_aliases: BTreeMap::new(),
-        method_param_types: BTreeMap::new(),
-    };
-    profile_parse_phase(
-        rust_profile_enabled(),
-        &file_label,
-        "parse_file_total",
-        total_started.elapsed(),
-    );
-    Ok(document)
+        total_started,
+    )
 }
 
 fn parse_normalized_file(
     parsed: ParsedDocument,
+    language: Language,
     options: ParseOptions,
     profile: bool,
     file_label: &str,
     total_started: Instant,
 ) -> Result<Document> {
     let started = Instant::now();
-    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, Language::Ruby);
+    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
     let started = Instant::now();
-    let behavior = normalized_behavior::behavior(Language::Ruby);
+    let behavior = normalized_behavior::behavior(language);
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &normalized_root, behavior).run();
     let metadata =
-        passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, Language::Ruby, behavior)
+        passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, language, behavior)
             .enrich(&mut facts);
     profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
 
@@ -276,7 +100,7 @@ fn parse_normalized_file(
 
     let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
-        language: Language::Ruby,
+        language,
         source: String::new(),
         lines,
         root,

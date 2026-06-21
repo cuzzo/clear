@@ -57,9 +57,7 @@ pub(crate) fn method_effects_from_document_facts(document: &Document) -> Vec<Pro
 pub(crate) fn call_paths_from_document_facts(document: &Document) -> Vec<ProtocolMethodPath> {
     let mut out = Vec::new();
     for function_def in &document.function_defs {
-        let paths = function_body_node(&function_def.body)
-            .map(|body| protocol_paths_for_raw(document, function_def, body))
-            .unwrap_or_else(|| vec![simple_protocol_calls(document, function_def)]);
+        let paths = vec![simple_protocol_calls(document, function_def)];
         let paths = if paths.is_empty() {
             vec![Vec::new()]
         } else {

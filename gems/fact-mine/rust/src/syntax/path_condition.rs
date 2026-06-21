@@ -75,8 +75,7 @@ pub(crate) fn fact_sites_for_document(
     let mut sites = sites_from_document_facts(document);
     if !document.normalized_root.children.is_empty() {
         sites.extend(normalized_sites_from_document(document));
-    }
-    if sites.is_empty() {
+    } else if sites.is_empty() {
         sites = sites_from_raw_facts(document);
     }
     dedupe_sites(sites)

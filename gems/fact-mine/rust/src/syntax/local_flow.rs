@@ -120,7 +120,7 @@ fn sort_method_summaries(methods: &mut [MethodSummary]) {
 }
 
 fn local_methods_for_document(document: &Document) -> Vec<MethodSummary> {
-    if document.language == Language::Ruby && !document.normalized_root.children.is_empty() {
+    if !document.normalized_root.children.is_empty() {
         return normalized_local_methods(document);
     }
 
