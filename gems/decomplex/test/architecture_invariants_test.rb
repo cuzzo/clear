@@ -89,6 +89,7 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     cpp.rb
     csharp.rb
     dispatch.rb
+    dynamic_language.rb
     effects.rb
     fact_document.rb
     go.rb
@@ -97,6 +98,7 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     kotlin.rb
     lua.rb
     nil_guards.rb
+    passes.rb
     php.rb
     protocols.rb
     python.rb
@@ -112,7 +114,9 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     "ordered-protocol fact generation belongs in syntax/protocols.rb" =>
       /^\s*def\s+(?:protocol_method_effects|protocol_call_paths)\b/,
     "clone fact generation belongs in syntax/clone_similarity.rb" =>
-      /^\s*def\s+clone_candidates\b/
+      /^\s*def\s+clone_candidates\b/,
+    "stateful syntax enrichment belongs in syntax/passes.rb" =>
+      /^\s*def\s+after_structural_facts\b/
   }.freeze
 
   def test_detectors_do_not_talk_to_tree_sitter_nodes_directly

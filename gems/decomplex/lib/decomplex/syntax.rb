@@ -196,6 +196,10 @@ module Decomplex
         modifier_visibility(node) || :public
       end
 
+      def visibility_events(_document, _facts)
+        []
+      end
+
       def owner_name_from_declaration(document, node)
         if (class_owner_node_kinds + module_owner_node_kinds).include?(node.kind)
           named_field(node, "name")&.text ||
@@ -324,8 +328,7 @@ module Decomplex
         true
       end
 
-      def after_structural_facts(document, out)
-        record_implicit_state_accesses(document, out) if implicit_state_accesses?
+      def after_structural_facts(_document, _out)
       end
 
       def decision_site_facts(document, node, stack)
@@ -2710,6 +2713,8 @@ module Decomplex
     end
 
     require_relative "syntax/adapters"
+    require_relative "syntax/dynamic_language"
+    require_relative "syntax/passes"
     require_relative "syntax/ruby"
     require_relative "syntax/python"
     require_relative "syntax/javascript"
@@ -3275,12 +3280,7 @@ module Decomplex
       end
 
       def decision_sites(document)
-        profile = syntax_profile(document.language)
-        out = []
-        walk(document, profile) do |node, stack|
-          out.concat(profile.decision_site_facts(document, node, stack))
-        end
-        out
+        stateless_syntax_pass(document).decision_sites
       end
 
       def state_writes(document)
@@ -3292,19 +3292,11 @@ module Decomplex
       end
 
       def branch_decisions(document, immutable_readers:, immutable_reader_types:, type_aliases:)
-        profile = syntax_profile(document.language)
-        out = []
-        walk(document, profile) do |node, stack|
-          out.concat(profile.branch_decision_facts(
-            document,
-            node,
-            stack,
-            immutable_readers: immutable_readers,
-            immutable_reader_types: immutable_reader_types,
-            type_aliases: type_aliases
-          ))
-        end
-        out
+        stateful_syntax_pass(document).branch_decisions(
+          immutable_readers: immutable_readers,
+          immutable_reader_types: immutable_reader_types,
+          type_aliases: type_aliases
+        )
       end
 
       def function_defs(document)
@@ -3328,80 +3320,61 @@ module Decomplex
       end
 
       def structural_facts(document)
-        @structural_fact_cache ||= {}
-        @structural_fact_cache[document.object_id] ||= begin
-          profile = syntax_profile(document.language)
-          out = {
-            function_defs: [],
-            owner_defs: [],
-            call_sites: [],
-            state_declarations: [],
-            state_param_origins: [],
-            state_reads: [],
-            state_writes: []
-          }
-          walk(document, profile) do |node, stack|
-            facts = profile.structural_facts_for_node(document, node, stack)
-            facts.each do |key, values|
-              out.fetch(key).concat(values)
-            end
-          end
-          profile.after_structural_facts(document, out)
-          out[:function_defs].uniq! { |fn| [fn.file, fn.owner, fn.name, fn.line] }
-          out[:owner_defs].uniq! { |owner| [owner.file, owner.name, owner.kind] }
-          out[:call_sites].uniq! { |call| [call.file, call.owner, call.function, call.span, call.receiver, call.message] }
-          out[:state_declarations].uniq! { |decl| [decl.file, decl.owner, decl.field] }
-          out[:state_param_origins].uniq! { |origin| [origin.file, origin.owner, origin.function, origin.field, origin.param] }
-          out[:state_reads].uniq! { |read| [read.file, read.owner, read.function, read.span, read.receiver, read.field] }
-          out[:state_writes].uniq! { |write| [write.file, write.owner, write.function, write.span, write.receiver, write.field] }
-          out
-        end
+        stateful_syntax_pass(document).structural_facts
       end
 
       def branch_arms(document)
-        profile = syntax_profile(document.language)
-        out = []
-        walk(document, profile) do |node, stack|
-          out.concat(profile.branch_arm_facts(document, node, stack))
-        end
-        out
+        stateless_syntax_pass(document).branch_arms
       end
 
       def predicate_defs(document)
-        profile = syntax_profile(document.language)
-        document.function_defs.filter_map { |function_def| profile.predicate_def(document, function_def) }
+        stateless_syntax_pass(document).predicate_defs
       end
 
       def comparison_sites(document)
-        profile = syntax_profile(document.language)
-        out = []
-        walk(document, profile) do |node, stack|
-          out.concat(profile.comparison_site_facts(document, node, stack))
-        end
-        out
+        stateless_syntax_pass(document).comparison_sites
       end
 
       def local_methods(document)
-        syntax_profile(document.language).local_methods(document)
+        stateless_syntax_pass(document).local_methods
       end
 
       def path_condition_sites(document)
-        syntax_profile(document.language).path_condition_sites(document)
+        stateless_syntax_pass(document).path_condition_sites
       end
 
       def immutable_struct_readers(document)
-        syntax_profile(document.language).immutable_struct_readers(document)
+        stateful_syntax_pass(document).immutable_struct_readers
       end
 
       def immutable_struct_reader_types(document)
-        syntax_profile(document.language).immutable_struct_reader_types(document)
+        stateful_syntax_pass(document).immutable_struct_reader_types
       end
 
       def type_aliases(document)
-        syntax_profile(document.language).type_aliases(document)
+        stateful_syntax_pass(document).type_aliases
       end
 
       private
+
+      def stateless_syntax_pass(document)
+        @stateless_syntax_pass_cache ||= {}
+        @stateless_syntax_pass_cache[document.object_id] ||= StatelessSyntaxPass.new(
+          document: document,
+          profile: syntax_profile(document.language),
+          walker: method(:walk)
+        )
+      end
+
+      def stateful_syntax_pass(document)
+        @stateful_syntax_pass_cache ||= {}
+        @stateful_syntax_pass_cache[document.object_id] ||= StatefulSyntaxPass.new(
+          document: document,
+          profile: syntax_profile(document.language),
+          stateless_pass: stateless_syntax_pass(document),
+          walker: method(:walk)
+        )
+      end
 
       def syntax_profile(language)
         raise ArgumentError, "missing Syntax language profile context" if language.nil?

@@ -18,6 +18,8 @@ module Decomplex
     ).freeze
 
     class RubySyntaxAdapter < TreeSitterLanguageAdapter
+      include DynamicLanguageSyntax
+
       FUNCTION_NODE_KINDS = %w[method].freeze
       CALL_NODE_KINDS = %w[call].freeze
       CLASS_OWNER_NODE_KINDS = %w[class].freeze
@@ -177,69 +179,36 @@ module Decomplex
         ruby_state_variable_target(lhs) || super
       end
 
-      def after_structural_facts(document, out)
-        super
-        apply_ruby_visibility!(out)
+      def visibility_events(_document, facts)
+        ruby_visibility_calls(facts.fetch(:call_sites)).map do |call|
+          VisibilityEvent.new(
+            owner: call.owner,
+            visibility: call.message.to_sym,
+            line: call.line,
+            span: call.span,
+            target_names: call.arguments.to_a.map { |arg| ruby_visibility_arg_name(arg) }.reject(&:empty?)
+          )
+        end
       end
 
       def descend_into_children?(node, stack)
         return false if node.kind == "lambda"
         return false if ruby_stabby_lambda_node?(node)
-        return false if ruby_nested_local_scope?(node) && stack.any? { |frame| frame[:function] }
+        return false if dynamic_nested_local_scope?(node) && stack.any? { |frame| frame[:function] }
 
         true
       end
 
       def predicate_def(_document, function_def)
-        expression = ruby_single_expression_function_body(function_def.body) ||
-                     ruby_predicate_expression_body(function_def.body)
-        return nil unless expression
-
-        body = normalize_text(expression.text).delete_suffix(";").strip
-        return nil if body.empty? || body == "nil" || body.length > 200
-        return nil unless predicate_body?(body)
-
-        PredicateDef.new(
-          file: function_def.file,
-          name: function_def.name,
-          owner: function_def.owner,
-          body: body,
-          line: function_def.line,
-          span: function_def.span
-        )
+        dynamic_predicate_def(function_def)
       end
 
       def local_methods(document)
-        document.function_defs.map do |function_def|
-          statements = ruby_function_body_statements(function_def.body)
-          local_names = ruby_local_names(function_def, statements)
-          local_statements = statements.each_with_index.map do |statement, index|
-            ruby_local_statement(statement, index, local_names)
-          end
-          owner = ruby_local_flow_owner(document, function_def.owner)
-
-          LocalMethod.new(
-            id: "#{owner}##{function_def.name}",
-            owner: owner,
-            name: function_def.name,
-            file: function_def.file,
-            line: function_def.line,
-            span: function_def.span,
-            node: function_def.body,
-            statements: local_statements,
-            boundaries: ruby_structural_boundaries(document, local_statements)
-          )
-        end
+        dynamic_local_methods(document)
       end
 
       def path_condition_sites(document)
-        out = []
-        document.function_defs.each do |function_def|
-          ruby_function_body_statements(function_def.body).each do |statement|
-            ruby_path_walk(document, statement, function_def.name, [], out)
-          end
-        end
-        out.uniq { |site| [site.guards, site.action, site.file, site.function, site.line] }
+        dynamic_path_condition_sites(document)
       end
 
       def immutable_struct_readers(document)
@@ -319,15 +288,6 @@ module Decomplex
         line_text(document, node).strip
       end
 
-      def ruby_single_expression_function_body(node)
-        body = ruby_method_body_wrapper(node)
-        return ruby_endless_method_expression(node) unless body
-
-        return nil unless body
-
-        ruby_single_expression_body_child(body)
-      end
-
       def ruby_endless_method_expression(node)
         return nil unless ts_node?(node)
         return nil unless %w[method singleton_method].include?(node.kind)
@@ -356,179 +316,42 @@ module Decomplex
         end
       end
 
-      def ruby_single_expression_body_child(body)
-        named = body.named_children.reject { |child| child.kind == "comment" }
-        return body if named.empty?
-        return named.first if named.size == 1
-        return named.first if ruby_heredoc_body?(body, named)
-
-        nil
+      def dynamic_method_body_wrapper(node)
+        ruby_method_body_wrapper(node)
       end
 
-      def ruby_predicate_expression_body(node)
-        body = ruby_method_body_wrapper(node)
-        return nil unless body
-
-        expression = ruby_single_expression_body_child(body)
-        return expression if expression
-
-        source = normalize_text(body.text).delete_suffix(";").strip
-        return body if ruby_flat_predicate_body_statement?(body, source)
-
-        nil
+      def dynamic_endless_function_expression(node)
+        ruby_endless_method_expression(node)
       end
 
-      def ruby_flat_predicate_body_statement?(body, source)
+      def dynamic_hidden_if?(node)
+        hidden_if?(node)
+      end
+
+      def dynamic_hidden_modifier_if?(node)
+        hidden_modifier_if?(node)
+      end
+
+      def dynamic_hidden_case?(node)
+        hidden_case?(node)
+      end
+
+      def dynamic_modifier_if_node_kind?(kind)
+        %w[if_modifier unless_modifier].include?(kind)
+      end
+
+      def dynamic_flat_predicate_body_statement?(body, source)
         body.kind == "body_statement" &&
-          predicate_body?(source) &&
+          dynamic_predicate_body?(source) &&
           COMPARISON_OPERATORS.include?(direct_operator(body))
       end
 
-      def predicate_body?(source)
-        text = source.to_s
-        lower = text.downcase
-        %w[true false].include?(lower) ||
-          lower.include?("true") ||
-          lower.include?("false") ||
-          lower.include?("null") ||
-          lower.include?("nil") ||
-          text.include?("==") ||
-          text.include?("!=") ||
-          text.include?("&&") ||
-          text.include?("||") ||
-          lower.include?(" and ") ||
-          lower.include?(" or ")
-      end
-
-      def ruby_heredoc_body?(_body, named_children)
+      def dynamic_heredoc_body?(_body, named_children)
         named_children.first&.kind == "call" &&
           named_children[1..].to_a.all? { |child| child.kind == "heredoc_body" }
       end
 
-      def ruby_function_body_statements(node)
-        body = ruby_method_body_wrapper(node)
-        return [] unless body
-
-        named = body.named_children.reject { |child| child.kind == "comment" }
-        return [] if named.empty? && body.text.to_s.strip.empty?
-        return [body] if hidden_if?(body) || hidden_modifier_if?(body) || hidden_case?(body)
-        return [body] if ruby_flat_assignment_statement?(body)
-        return [body] if named.empty? || ruby_heredoc_body?(body, named)
-
-        named
-      end
-
-      def ruby_local_names(function_def, statements)
-        names = Set.new(function_def.params.to_a.map(&:to_s))
-        statements.each do |statement|
-          ruby_walk_local(statement) do |node|
-            names.add(node.text.to_s) if ruby_local_write_identifier?(node)
-          end
-        end
-        names
-      end
-
-      def ruby_local_statement(node, index, local_names)
-        reads = ruby_local_reads(node, local_names).uniq
-        writes = ruby_local_writes(node).uniq
-        LocalStatement.new(
-          index: index,
-          line: line(node),
-          end_line: span(node)[2],
-          span: span(node),
-          source: normalize_text(node.text),
-          reads: reads.to_set,
-          writes: writes.to_set,
-          dependencies: ruby_assignment_dependencies(node, local_names),
-          co_uses: reads.sort.combination(2).map { |left, right| [left, right] }
-        )
-      end
-
-      def ruby_local_reads(node, local_names)
-        reads = []
-        ruby_walk_local(node) do |child|
-          reads << child.text.to_s if ruby_local_read_identifier?(child, local_names)
-        end
-        reads
-      end
-
-      def ruby_local_writes(node)
-        writes = []
-        ruby_walk_local(node) do |child|
-          writes << child.text.to_s if ruby_local_write_identifier?(child)
-        end
-        writes
-      end
-
-      def ruby_assignment_dependencies(node, local_names)
-        deps = []
-        if ruby_flat_assignment_statement?(node)
-          lhs = node.named_children.first
-          rhs = node.named_children[1]
-          ruby_local_reads(rhs, local_names).uniq.each do |read|
-            deps << [lhs.text.to_s, read] unless lhs.text.to_s == read
-          end
-          return deps.uniq
-        end
-
-        ruby_walk_local(node) do |child|
-          next unless child.kind == "assignment"
-
-          lhs = child.named_children.first
-          rhs = child.named_children[1]
-          next unless lhs&.kind == "identifier" && rhs
-
-          ruby_local_reads(rhs, local_names).uniq.each do |read|
-            deps << [lhs.text.to_s, read] unless lhs.text.to_s == read
-          end
-        end
-        deps.uniq
-      end
-
-      def ruby_structural_boundaries(document, statements)
-        statements.each_cons(2).filter_map do |left, right|
-          boundary = ruby_source_boundary(document, left.end_line + 1, right.line - 1)
-          next unless boundary
-
-          LocalBoundary.new(
-            before_index: left.index,
-            after_index: right.index,
-            line: boundary[:line],
-            kind: boundary[:kind],
-            text: boundary[:text]
-          )
-        end
-      end
-
-      def ruby_source_boundary(document, first_line, last_line)
-        return nil if first_line > last_line
-
-        blank = nil
-        (first_line..last_line).each do |line_number|
-          text = document.lines[line_number - 1].to_s
-          stripped = text.strip
-          return { line: line_number, kind: :comment, text: stripped } if stripped.start_with?("#")
-
-          blank ||= { line: line_number, kind: :blank, text: stripped } if stripped.empty?
-        end
-        blank
-      end
-
-      def ruby_walk_local(node, &block)
-        return unless ts_node?(node)
-
-        stack = [node]
-        until stack.empty?
-          current = stack.pop
-          next unless ts_node?(current)
-          next if current != node && ruby_nested_local_scope?(current)
-
-          yield current
-          current.children.reverse_each { |child| stack << child }
-        end
-      end
-
-      def ruby_nested_local_scope?(node)
+      def dynamic_nested_local_scope?(node)
         %w[class module method singleton_method lambda].include?(node.kind)
       end
 
@@ -539,24 +362,24 @@ module Decomplex
         node.kind == "block" && prev_sibling(node)&.kind == "->"
       end
 
-      def ruby_local_read_identifier?(node, local_names)
+      def dynamic_local_read_identifier?(node, local_names)
         return false unless node.kind == "identifier"
         return false unless local_names.include?(node.text.to_s)
-        return false if ruby_local_write_identifier?(node)
+        return false if dynamic_local_write_identifier?(node)
         return false if ruby_declaration_name?(node, parent_node(node))
-        return false if ruby_call_message_identifier?(node)
+        return false if dynamic_call_message_identifier?(node)
         return false if ruby_unary_assertion_argument?(node)
 
         true
       end
 
-      def ruby_local_write_identifier?(node)
+      def dynamic_local_write_identifier?(node)
         return false unless node.kind == "identifier"
 
         parent = parent_node(node)
         (parent&.kind == "assignment" && parent.named_children.first == node) ||
           (parent&.kind == "left_assignment_list" && parent_node(parent)&.kind == "assignment") ||
-          (ruby_flat_assignment_statement?(parent) && parent.named_children.first == node)
+          (dynamic_flat_assignment_statement?(parent) && parent.named_children.first == node)
       end
 
       def ruby_unparenthesized_member_argument_target(node)
@@ -582,14 +405,14 @@ module Decomplex
         true
       end
 
-      def ruby_flat_assignment_statement?(node)
+      def dynamic_flat_assignment_statement?(node)
         return false unless ts_node?(node) && node.kind == "body_statement"
 
         node.children.count { |child| !child.named? && child.text == "=" } == 1 &&
           node.named_children.size >= 2
       end
 
-      def ruby_call_message_identifier?(node)
+      def dynamic_call_message_identifier?(node)
         parent = parent_node(node)
         return false unless parent&.kind == "call"
 
@@ -597,124 +420,8 @@ module Decomplex
           (named_field(parent, "receiver").nil? && parent.named_children.first == node)
       end
 
-      def ruby_local_flow_owner(document, owner)
+      def dynamic_local_flow_owner(document, owner)
         owner.to_s == file_owner(document.file) ? "(top-level)" : owner
-      end
-
-      def ruby_path_walk(document, node, function, guards, out)
-        return unless ts_node?(node)
-
-        if ruby_path_if_node?(node)
-          ruby_path_walk_if(document, node, function, guards, out)
-          return
-        end
-
-        if guards.size >= 2 && ruby_path_action_node?(node)
-          record_ruby_path_condition(document, node, function, guards, out)
-          return
-        end
-
-        node.children.each { |child| ruby_path_walk(document, child, function, guards, out) }
-      end
-
-      def ruby_path_walk_if(document, node, function, guards, out)
-        condition = ruby_path_condition(node)
-        atoms = ruby_path_condition_atoms(condition)
-        then_guards = ruby_unless_node?(node) ? ruby_negate_guards(atoms) : atoms
-        else_guards = ruby_unless_node?(node) ? atoms : ruby_negate_guards(atoms)
-
-        ruby_path_body_nodes(ruby_path_then_body(node)).each do |child|
-          ruby_path_walk(document, child, function, guards + then_guards, out)
-        end
-        ruby_path_body_nodes(ruby_path_else_body(node)).each do |child|
-          ruby_path_walk(document, child, function, guards + else_guards, out)
-        end
-        ruby_path_walk(document, condition, function, guards, out)
-      end
-
-      def ruby_path_if_node?(node)
-        return false unless ts_node?(node)
-        return true if node.named? && %w[if unless if_modifier unless_modifier].include?(node.kind)
-
-        hidden_if?(node) || hidden_modifier_if?(node)
-      end
-
-      def ruby_unless_node?(node)
-        node.kind.to_s.include?("unless") || first_token_kind(node) == "unless"
-      end
-
-      def ruby_path_condition(node)
-        if hidden_modifier_if?(node) || %w[if_modifier unless_modifier].include?(node.kind)
-          node.named_children.last
-        elsif hidden_if?(node)
-          node.named_children.first
-        else
-          node.named_children.first
-        end
-      end
-
-      def ruby_path_then_body(node)
-        if hidden_modifier_if?(node) || %w[if_modifier unless_modifier].include?(node.kind)
-          node.named_children.first
-        else
-          node.named_children.find { |child| child.kind == "then" } || node.named_children[1]
-        end
-      end
-
-      def ruby_path_else_body(node)
-        return nil if hidden_modifier_if?(node) || %w[if_modifier unless_modifier].include?(node.kind)
-
-        node.named_children.find { |child| child.kind == "else" } ||
-          node.named_children.find { |child| child.kind == "elsif" } ||
-          node.named_children[2]
-      end
-
-      def ruby_path_body_nodes(node)
-        return [] unless ts_node?(node)
-
-        return [node] if ruby_path_action_node?(node) || ruby_path_if_node?(node)
-
-        node.named_children.reject { |child| child.kind == "comment" }
-      end
-
-      def ruby_path_condition_atoms(condition)
-        return [] unless ts_node?(condition)
-
-        flatten_boolean_and(condition).map do |atom|
-          text, negated = ruby_path_canon_polarity(decision_member_text(atom))
-          [text, negated]
-        end
-      end
-
-      def ruby_path_canon_polarity(text)
-        source = text.to_s.strip
-        return [source[1..].to_s.strip, true] if source.start_with?("!")
-
-        [source, false]
-      end
-
-      def ruby_negate_guards(guards)
-        guards.map { |text, negated| [text, !negated] }
-      end
-
-      def ruby_path_action_node?(node)
-        return true if (PATH_ACTION_NODE_KINDS + ASSIGNMENT_NODE_KINDS + %w[binary]).include?(node.kind)
-
-        ruby_flat_assignment_statement?(node)
-      end
-
-      def record_ruby_path_condition(document, node, function, guards, out)
-        members = guards.map { |text, negated| "#{negated ? "!" : ""}#{text}" }.uniq.sort
-        return if members.size < 2
-
-        out << PathConditionSite.new(
-          guards: members,
-          action: normalize_text(node.text)[0, 80],
-          file: document.file,
-          function: function,
-          line: line(node),
-          span: span(node)
-        )
       end
 
       def hidden_ruby_owner_declaration?(node)
@@ -1158,37 +865,6 @@ module Decomplex
           end
         end
         aliases
-      end
-
-      def apply_ruby_visibility!(out)
-        functions_by_owner = out.fetch(:function_defs).group_by(&:owner)
-        calls_by_owner = out.fetch(:call_sites).group_by(&:owner)
-        functions_by_owner.each do |owner, functions|
-          calls = Array(calls_by_owner[owner])
-
-          visibility = :public
-          events = (functions + ruby_visibility_calls(calls)).sort_by do |event|
-            [event.line, event.is_a?(CallSite) ? 0 : 1]
-          end
-
-          events.each do |event|
-            if event.is_a?(FunctionDef)
-              event.visibility ||= event.name.to_s.include?(".") ? :public : visibility
-            elsif event.arguments.to_a.empty?
-              visibility = event.message.to_sym
-            else
-              event.arguments.each do |arg|
-                name = ruby_visibility_arg_name(arg)
-                functions.reverse_each do |function|
-                  next unless function.name.to_s == name
-
-                  function.visibility = event.message.to_sym
-                  break
-                end
-              end
-            end
-          end
-        end
       end
 
       def ruby_visibility_calls(calls)
