@@ -467,10 +467,7 @@ pub fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
     if !document.clone_candidates.is_empty() {
         return document.clone_candidates.clone();
     }
-    clone_similarity::clone_candidates_for_profile(
-        adapters::language_profile(document.language),
-        document,
-    )
+    clone_similarity::clone_candidates(document)
 }
 
 pub fn core_owner_names(document: &Document) -> &'static [&'static str] {

@@ -378,6 +378,15 @@ fn syntax_language_profile_trait_does_not_expose_detector_fact_engines() {
         ),
         ("ordered-protocol path generation", "protocol_call_paths("),
         ("clone candidate generation", "clone_candidates("),
+        ("raw clone candidate hook", "fn clone_candidate_node"),
+        (
+            "raw clone fingerprint child hook",
+            "fn clone_fingerprint_children",
+        ),
+        (
+            "raw clone child fingerprint hook",
+            "fn clone_child_fingerprint",
+        ),
         ("clone fingerprint generation", "fn clone_fingerprint("),
         ("post-collection fact mutation", "after_collect_facts("),
     ];
@@ -407,6 +416,9 @@ fn concrete_syntax_adapters_do_not_define_detector_fact_engines() {
         "fn protocol_method_effects",
         "fn protocol_call_paths",
         "fn clone_candidates",
+        "fn clone_candidate_node",
+        "fn clone_fingerprint_children",
+        "fn clone_child_fingerprint",
         "fn after_collect_facts",
         "RawProtocolAdapter",
         "RawProtocolShape",
@@ -556,6 +568,9 @@ fn clone_similarity_does_not_depend_on_parser_or_concrete_languages() {
     let source = production_source(&fs::read_to_string(&path).expect("read clone similarity"));
     let forbidden = [
         "tree_sitter",
+        "RawNode",
+        "document.root",
+        "LanguageProfile",
         "Language::",
         "Ruby",
         "Python",
@@ -566,6 +581,9 @@ fn clone_similarity_does_not_depend_on_parser_or_concrete_languages() {
         "Lua",
         "Php",
         "CSharp",
+        "default_clone_candidate_node",
+        "raw_clone",
+        "T::Struct",
     ];
     let offenders = forbidden
         .into_iter()
@@ -575,7 +593,50 @@ fn clone_similarity_does_not_depend_on_parser_or_concrete_languages() {
 
     assert!(
         offenders.is_empty(),
-        "Clone similarity must consume normalized/raw syntax facts through profile hooks, not parser or concrete-language APIs:\n{}",
+        "Clone similarity must consume only normalized syntax facts, not parser, profile-hook, or concrete-language APIs:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn parse_file_routes_all_languages_through_normalized_passes() {
+    let path = crate_src().join("syntax/tree_sitter_adapter.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read tree_sitter_adapter"));
+    let parse_file_source = source
+        .split_once("fn parse_file_with_options")
+        .and_then(|(_, rest)| {
+            rest.split_once("fn parse_normalized_file")
+                .map(|(body, _)| body)
+        })
+        .unwrap_or("");
+    let forbidden = [
+        "collect_facts(",
+        "collect_dispatch_sites(",
+        "collect_implicit_state_accesses(",
+        "apply_visibility(",
+        "RawNode::from_tree_sitter",
+    ];
+    let missing = [
+        "parse_normalized_file(",
+        "normalize_tree(",
+        "StatelessSyntaxPass::normalized",
+        "StatefulSyntaxPass::new",
+    ];
+    let mut offenders = forbidden
+        .into_iter()
+        .filter(|pattern| parse_file_source.contains(pattern))
+        .map(|pattern| format!("forbidden raw collection path: {pattern}"))
+        .collect::<Vec<_>>();
+    offenders.extend(
+        missing
+            .into_iter()
+            .filter(|pattern| !source.contains(pattern))
+            .map(|pattern| format!("missing normalized pipeline call: {pattern}")),
+    );
+
+    assert!(
+        offenders.is_empty(),
+        "parse_file must normalize every language, then run stateless/stateful normalized passes:\n{}",
         offenders.join("\n")
     );
 }

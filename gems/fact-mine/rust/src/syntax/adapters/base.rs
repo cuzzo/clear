@@ -4,7 +4,7 @@ use super::super::tree_sitter_adapter::{
     Target,
 };
 use super::super::{CallSite, Language};
-use crate::ast::{node_text, normalize_text, span, RawNode};
+use crate::ast::{node_text, normalize_text, span};
 use std::collections::HashSet;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
@@ -1110,22 +1110,6 @@ pub(crate) trait LanguageProfile {
                 .trim_start_matches("->")
                 .to_string(),
         )
-    }
-
-    fn clone_candidate_node(&self, node: &RawNode) -> bool {
-        crate::syntax::clone_similarity::default_clone_candidate_node(node)
-    }
-
-    fn clone_fingerprint_children<'a>(&self, node: &'a RawNode) -> Vec<&'a RawNode> {
-        node.children.iter().collect()
-    }
-
-    fn clone_child_fingerprint(
-        &self,
-        _parent: &RawNode,
-        _child: &RawNode,
-    ) -> Option<(String, usize)> {
-        None
     }
 }
 
