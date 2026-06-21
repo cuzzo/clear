@@ -1,0 +1,47 @@
+{
+  "syntax": {
+    "branch_decisions": [
+      {
+        "function": "checks",
+        "line": 5,
+        "predicate": "External::Risk.enabled?",
+        "state_refs": [
+          "External::Risk.enabled?"
+        ]
+      },
+      {
+        "function": "checks",
+        "line": 6,
+        "predicate": "External::Risk.load_config",
+        "state_refs": [
+          "External::Risk.load_config"
+        ]
+      },
+      {
+        "function": "checks",
+        "line": 7,
+        "predicate": "lines.any? { |hit| !hit.nil? }",
+        "state_refs": [
+          "hit.nil?",
+          "lines.any?"
+        ]
+      },
+      {
+        "function": "checks",
+        "line": 9,
+        "predicate": "::File.extname(path).downcase",
+        "state_refs": [
+          "::File.extname(path).downcase"
+        ]
+      },
+      {
+        "function": "rescued_case",
+        "line": 18,
+        "predicate": "::File.extname(path).downcase",
+        "state_refs": [
+          "::File.extname(path).downcase"
+        ]
+      }
+    ]
+  }
+}

@@ -185,6 +185,10 @@ pub(crate) trait LanguageProfile {
         EMPTY_NODE_KINDS
     }
 
+    fn local_flow_statement_expansion_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
     fn identifier_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
@@ -286,6 +290,10 @@ pub(crate) trait LanguageProfile {
     }
 
     fn branch_node_kinds(&self) -> &[&str] {
+        EMPTY_NODE_KINDS
+    }
+
+    fn decision_enclosing_node_kinds(&self) -> &[&str] {
         EMPTY_NODE_KINDS
     }
 

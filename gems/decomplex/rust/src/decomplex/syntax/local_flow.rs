@@ -235,6 +235,19 @@ fn raw_function_body_statements<'a>(
     {
         return vec![body];
     }
+    if named.len() == 1
+        && profile
+            .local_flow_statement_expansion_node_kinds()
+            .contains(&named[0].kind.as_str())
+    {
+        let expanded = raw_named_children(named[0])
+            .into_iter()
+            .filter(|child| !raw_comment_node(child))
+            .collect::<Vec<_>>();
+        if !expanded.is_empty() {
+            return expanded;
+        }
+    }
     named
 }
 
@@ -369,6 +382,8 @@ fn raw_local_writes(node: &RawNode, profile: &dyn LanguageProfile) -> BTreeSet<S
         Vec::new()
     } else if profile.language() == Language::Python {
         python_textual_local_writes(&source)
+    } else if profile.language() == Language::Ruby {
+        ruby_textual_local_writes(&source)
     } else {
         textual_local_writes(&source)
     };
@@ -637,6 +652,9 @@ fn raw_local_write_node(
             {
                 return false;
             }
+            if raw_field_like_node(lhs, profile) && raw_contains_node(lhs, node) {
+                return false;
+            }
             if raw_contains_node(lhs, node) {
                 return true;
             }
@@ -774,6 +792,13 @@ fn raw_python_with_alias_read(
 fn python_textual_local_writes(source: &str) -> Vec<String> {
     match split_assignment(source) {
         Some((_lhs, ":=")) => Vec::new(),
+        _ => textual_local_writes(source),
+    }
+}
+
+fn ruby_textual_local_writes(source: &str) -> Vec<String> {
+    match split_assignment(source) {
+        Some((lhs, _operator)) if lhs.contains('@') || lhs.contains('$') => Vec::new(),
         _ => textual_local_writes(source),
     }
 }
@@ -1030,7 +1055,6 @@ fn raw_collect_assignment_lhs_write_targets(
         return;
     }
     if raw_field_like_node(lhs, profile) {
-        raw_collect_member_receiver_targets(lhs, profile, out);
         return;
     }
     if raw_local_identifier_text(lhs, profile).is_some() {
@@ -1053,27 +1077,6 @@ fn raw_collect_assignment_lhs_write_targets(
 
 fn raw_node_key(node: &RawNode) -> usize {
     node as *const RawNode as usize
-}
-
-fn raw_collect_member_receiver_targets(
-    node: &RawNode,
-    profile: &dyn LanguageProfile,
-    out: &mut HashSet<usize>,
-) {
-    let Some(receiver) = raw_named_children(node).first().copied() else {
-        return;
-    };
-    if raw_local_identifier_text(receiver, profile).is_some() {
-        out.insert(raw_node_key(receiver));
-        return;
-    }
-    if raw_indexed_lhs_node(receiver, profile) || raw_field_like_node(receiver, profile) {
-        raw_collect_member_receiver_targets(receiver, profile, out);
-        return;
-    }
-    for child in raw_named_children(receiver) {
-        raw_collect_member_receiver_targets(child, profile, out);
-    }
 }
 
 fn raw_collect_local_identifier_nodes(

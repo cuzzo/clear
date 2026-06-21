@@ -58,7 +58,7 @@ class SourceFactsOracleTest < Minitest::Test
       "state_param_origins" => %w[field receiver owner param function line],
       "state_reads" => %w[receiver field function line],
       "state_writes" => %w[receiver field function line],
-      "decisions" => %w[kind members function line predicate],
+      "decisions" => %w[kind members function line predicate enclosing_span],
       "branch_decisions" => %w[function line predicate state_refs],
       "branch_arms" => %w[function kind line decision_line predicate member body],
       "dispatch_sites" => %w[variant_set arm_members outside function line],

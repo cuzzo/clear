@@ -1,0 +1,87 @@
+{
+  "local_flow": [
+    {
+      "method": "apply",
+      "statements": [
+        {
+          "reads": [
+            "row"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "facts",
+            "row"
+          ],
+          "writes": [
+            "fact"
+          ],
+          "dependencies": [
+            [
+              "fact",
+              "facts"
+            ],
+            [
+              "fact",
+              "row"
+            ]
+          ],
+          "co_uses": [
+            [
+              "facts",
+              "row"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "fact",
+            "row"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "fact",
+              "row"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "fact",
+            "row"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": [
+            [
+              "fact",
+              "row"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "row"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [
+            "fact"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        }
+      ],
+      "boundaries": []
+    }
+  ]
+}

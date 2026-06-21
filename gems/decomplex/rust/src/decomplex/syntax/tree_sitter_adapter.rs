@@ -1313,7 +1313,7 @@ fn collect_branch_state_refs(
             normalized_state_ref_field(&target.field)
         };
         let receiver = target.receiver.trim_start_matches('$');
-        if namespace_receiver(receiver) || constant_like_state_ref(receiver, &field) {
+        if skip_state_ref(profile, receiver, &field) {
             // Constants and type namespaces are not mutable object state.
         } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
@@ -1336,9 +1336,32 @@ fn collect_branch_state_refs(
             .branch_nested_scope_node_kinds()
             .contains(&child.kind())
         {
+            collect_branch_nested_scope_state_refs(profile, child, source, out);
             continue;
         }
         collect_branch_state_refs(profile, child, source, context, out);
+    }
+}
+
+fn collect_branch_nested_scope_state_refs(
+    profile: &dyn LanguageProfile,
+    node: Node<'_>,
+    source: &str,
+    out: &mut BTreeSet<String>,
+) {
+    if profile.language() != Language::Ruby {
+        return;
+    }
+    if let Some(target) = profile.state_read_target(node, source) {
+        let receiver = target.receiver.trim_start_matches('$');
+        if simple_identifier(receiver) {
+            out.insert(format!("{receiver}.{}", target.field));
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_branch_nested_scope_state_refs(profile, child, source, out);
     }
 }
 
@@ -1629,8 +1652,16 @@ fn normalized_state_ref_field(field: &str) -> String {
         .to_string()
 }
 
+fn skip_state_ref(profile: &dyn LanguageProfile, receiver: &str, field: &str) -> bool {
+    if profile.language() == Language::Ruby {
+        return constant_like_state_ref(receiver, field);
+    }
+    namespace_receiver(receiver) || constant_like_state_ref(receiver, field)
+}
+
 fn constant_like_state_ref(receiver: &str, field: &str) -> bool {
-    constant_namespace_receiver(receiver) || (receiver.is_empty() && starts_uppercase(field))
+    (constant_namespace_receiver(receiver) && starts_uppercase(field))
+        || (receiver.is_empty() && starts_uppercase(field))
 }
 
 fn starts_uppercase(value: &str) -> bool {
@@ -1971,9 +2002,7 @@ fn record_state_read(
         return;
     }
     let target = normalize_target_receiver(target, context);
-    if namespace_receiver(&target.receiver)
-        || constant_like_state_ref(&target.receiver, &target.field)
-    {
+    if skip_state_ref(profile, &target.receiver, &target.field) {
         return;
     }
 
@@ -2643,6 +2672,7 @@ fn decision_enclosing_span(profile: &dyn LanguageProfile, node: Node<'_>) -> [us
 
 fn branch_like_node(profile: &dyn LanguageProfile, node: Node<'_>) -> bool {
     profile.branch_node_kinds().contains(&node.kind())
+        || profile.decision_enclosing_node_kinds().contains(&node.kind())
         || profile.case_node_kinds().contains(&node.kind())
         || matches!(
             node.kind(),

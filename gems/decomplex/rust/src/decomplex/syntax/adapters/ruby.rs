@@ -67,6 +67,10 @@ impl LanguageProfile for RubyProfile {
         ruby_data::NESTED_STATEMENT_WRAPPER_NODE_KINDS
     }
 
+    fn local_flow_statement_expansion_node_kinds(&self) -> &[&str] {
+        ruby_data::LOCAL_FLOW_STATEMENT_EXPANSION_NODE_KINDS
+    }
+
     fn identifier_node_kinds(&self) -> &[&str] {
         ruby_data::IDENTIFIER_NODE_KINDS
     }
@@ -101,6 +105,10 @@ impl LanguageProfile for RubyProfile {
 
     fn branch_node_kinds(&self) -> &[&str] {
         ruby_data::BRANCH_NODE_KINDS
+    }
+
+    fn decision_enclosing_node_kinds(&self) -> &[&str] {
+        ruby_data::DECISION_ENCLOSING_NODE_KINDS
     }
 
     fn case_node_kinds(&self) -> &[&str] {
@@ -155,6 +163,10 @@ impl LanguageProfile for RubyProfile {
         ruby_data::BRANCH_NESTED_SCOPE_NODE_KINDS
     }
 
+    fn field_like_dot_wrapper_node_kinds(&self) -> &[&str] {
+        ruby_data::FIELD_LIKE_DOT_WRAPPER_NODE_KINDS
+    }
+
     fn call_target<'tree>(&self, node: Node<'tree>, source: &str) -> Option<CallTarget<'tree>> {
         if node.kind() == "call" && ruby_single_command_argument_call(node, source) {
             return None;
@@ -168,7 +180,9 @@ impl LanguageProfile for RubyProfile {
                 .or_else(|| ruby_bare_call_target(node, source)),
             _ => None,
         }?;
-        if ruby_whole_body_implicit_self_chain(node, source) {
+        if ruby_whole_body_implicit_self_chain(node, source)
+            && !ruby_implicit_self_iterator_call_target(&target)
+        {
             return None;
         }
         if target.arguments.is_empty() && !ruby_call_has_block(node) {
@@ -340,15 +354,45 @@ impl LanguageProfile for RubyProfile {
     }
 
     fn state_read_target(&self, node: Node<'_>, source: &str) -> Option<Target> {
-        let target = ruby_state_variable_target(node, source)
-            .or_else(|| self.default_state_read_target(node, source))?;
-        if ruby_whole_body_implicit_self_chain(node, source) {
-            return None;
-        }
-        if ruby_direct_flat_map_block_statement(node, source) {
+        let mut statement_call = false;
+        let target = if let Some(target) = ruby_statement_call_state_read_target(self, node, source)
+        {
+            statement_call = true;
+            target
+        } else if let Some(target) = ruby_explicit_receiver_body_state_read_target(node, source) {
+            statement_call = true;
+            target
+        } else if let Some(target) = ruby_single_call_wrapper_state_read_target(self, node, source) {
+            statement_call = true;
+            target
+        } else {
+            ruby_state_variable_target(node, source)
+                .or_else(|| self.default_state_read_target(node, source))?
+        };
+        if ruby_whole_body_implicit_self_chain(node, source)
+            && !ruby_implicit_self_iterator_state_read(&target)
+        {
             return None;
         }
         if ruby_sorbet_signature_payload_node(node, source) {
+            return None;
+        }
+        if ruby_safe_navigation_call(node, source) && ruby_stateful_receiver_chain(&target.receiver) {
+            return None;
+        }
+        if ruby_core_effect_receiver(&target.receiver) {
+            return None;
+        }
+        if ruby_implicit_self_result_receiver(&target.receiver, &target.field) {
+            return None;
+        }
+        if statement_call && ruby_self_helper_state_read(&target) {
+            return None;
+        }
+        if !statement_call && ruby_non_statement_state_read_target(&target) {
+            return None;
+        }
+        if ruby_complex_state_receiver(&target.receiver) {
             return None;
         }
         if ruby_chained_element_predicate_read_target(&target) {
@@ -650,6 +694,9 @@ fn ruby_whole_body_implicit_self_chain(node: Node<'_>, source: &str) -> bool {
     if !ruby_implicit_self_call_receiver(node, source) {
         return false;
     }
+    if ruby_call_has_block(node) {
+        return false;
+    }
     let Some(parent) = node.parent() else {
         return false;
     };
@@ -747,6 +794,125 @@ fn ruby_bare_body_call_target<'tree>(node: Node<'tree>, source: &str) -> Option<
         return None;
     }
     Some(CallTarget::new("self".to_string(), message, Vec::new()))
+}
+
+fn ruby_single_call_wrapper_state_read_target(
+    adapter: &RubyProfile,
+    node: Node<'_>,
+    source: &str,
+) -> Option<Target> {
+    if node.kind() != "body_statement" {
+        return None;
+    }
+    let named: Vec<_> = named_children(node)
+        .into_iter()
+        .filter(|child| child.kind() != "comment")
+        .collect();
+    if named.len() != 1 || named[0].kind() != "call" {
+        return None;
+    }
+    if normalize_text(node_text(named[0], source)) != normalize_text(node_text(node, source)) {
+        return None;
+    }
+    adapter.state_read_target(named[0], source)
+}
+
+fn ruby_explicit_receiver_body_state_read_target(node: Node<'_>, source: &str) -> Option<Target> {
+    if !ruby_explicit_receiver_body_read_node(node, source) {
+        return None;
+    }
+    let mut cursor = node.walk();
+    if !node
+        .children(&mut cursor)
+        .any(|child| !child.is_named() && node_text(child, source) == ".")
+    {
+        return None;
+    }
+    let children = named_children(node);
+    let receiver = *children.first()?;
+    let message = *children.get(1)?;
+    if ruby_implicit_self_receiver_node(receiver, source) {
+        return None;
+    }
+    if !matches!(
+        receiver.kind(),
+        "self" | "constant" | "identifier" | "scope_resolution" | "call"
+    ) && !ruby_constant_constructor_call(receiver, source)
+    {
+        return None;
+    }
+    if !matches!(message.kind(), "identifier" | "constant") {
+        return None;
+    }
+    Some(Target {
+        receiver: normalize_text(node_text(receiver, source)),
+        field: node_text(message, source).to_string(),
+    })
+}
+
+fn ruby_statement_call_state_read_target(
+    adapter: &RubyProfile,
+    node: Node<'_>,
+    source: &str,
+) -> Option<Target> {
+    let statement_node = if matches!(node.kind(), "body_statement" | "block_body") {
+        node
+    } else if node.kind() == "call" {
+        let parent = node.parent()?;
+        if !matches!(parent.kind(), "body_statement" | "block_body") {
+            return None;
+        }
+        if normalize_text(node_text(parent, source)) != normalize_text(node_text(node, source)) {
+            return None;
+        }
+        node
+    } else {
+        return None;
+    };
+    let target = adapter.call_target(statement_node, source)?;
+    Some(Target {
+        receiver: target.receiver,
+        field: target.message,
+    })
+}
+
+fn ruby_explicit_receiver_body_read_node(node: Node<'_>, source: &str) -> bool {
+    if node.kind() == "block_body" {
+        return true;
+    }
+    if node.kind() != "body_statement" {
+        return false;
+    }
+    if node.parent().map(|parent| parent.kind()) == Some("do_block") {
+        return true;
+    }
+    let stripped = node_text(node, source).trim_start();
+    if matches!(first_child_kind(node), Some("def" | "class" | "module"))
+        || stripped.starts_with("def ")
+        || stripped.starts_with("class ")
+        || stripped.starts_with("module ")
+    {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let has_dot = node
+        .children(&mut cursor)
+        .any(|child| !child.is_named() && node_text(child, source) == ".");
+    has_dot
+}
+
+fn ruby_implicit_self_receiver_node(node: Node<'_>, source: &str) -> bool {
+    if node.kind() != "call" || node.child_by_field_name("receiver").is_some() {
+        return false;
+    }
+    let message = node
+        .child_by_field_name("method")
+        .or_else(|| named_children(node).into_iter().next())
+        .map(|method| node_text(method, source).to_string());
+    message
+        .as_deref()
+        .map(ruby_simple_call_text)
+        .unwrap_or(false)
 }
 
 fn ruby_explicit_receiver_body_call_target<'tree>(
@@ -1512,6 +1678,15 @@ fn ruby_embedded_text_node(node: Node<'_>) -> bool {
     false
 }
 
+fn ruby_interpolated_indexed_state_variable(node: Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    parent.kind() == "element_reference"
+        && named_children(parent).first().copied() == Some(node)
+        && ruby_embedded_text_node(parent)
+}
+
 fn ruby_valid_call_target(target: &CallTarget<'_>) -> bool {
     if calls::invalid_message_text(&target.message) {
         return false;
@@ -1526,13 +1701,110 @@ fn ruby_state_variable_target(node: Node<'_>, source: &str) -> Option<Target> {
     if !matches!(node.kind(), "instance_variable" | "global_variable") {
         return None;
     }
-    if ruby_embedded_text_node(node) {
+    if ruby_embedded_text_node(node) && !ruby_interpolated_indexed_state_variable(node) {
         return None;
     }
     Some(Target {
         receiver: "self".to_string(),
         field: node_text(node, source).to_string(),
     })
+}
+
+fn ruby_complex_state_receiver(receiver: &str) -> bool {
+    let text = receiver.trim();
+    text.is_empty()
+        || text.contains('\n')
+        || text.contains('{')
+        || text.contains('}')
+        || text.starts_with('%')
+        || text.starts_with('[')
+        || text.starts_with('"')
+        || text.starts_with('\'')
+}
+
+fn ruby_core_effect_receiver(receiver: &str) -> bool {
+    let base = receiver
+        .trim()
+        .trim_start_matches("::")
+        .split("::")
+        .next()
+        .unwrap_or("");
+    ruby_data::CORE_EFFECT_RECEIVER_BASES.contains(&base)
+}
+
+fn ruby_self_helper_state_read(target: &Target) -> bool {
+    target.receiver == "self" && !target.field.starts_with('@') && !target.field.starts_with('$')
+}
+
+fn ruby_implicit_self_iterator_call_target(target: &CallTarget<'_>) -> bool {
+    ruby_implicit_self_iterator_read(&target.receiver, &target.message)
+}
+
+fn ruby_implicit_self_iterator_state_read(target: &Target) -> bool {
+    ruby_implicit_self_iterator_read(&target.receiver, &target.field)
+}
+
+fn ruby_implicit_self_iterator_read(receiver: &str, field: &str) -> bool {
+    ruby_data::IMPLICIT_SELF_ITERATOR_STATE_READ_MESSAGES.contains(&field)
+        && receiver
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_lowercase() || ch == '_')
+            .unwrap_or(false)
+}
+
+fn ruby_non_statement_state_read_target(target: &Target) -> bool {
+    ruby_simple_constant_receiver(&target.receiver)
+        || ruby_simple_state_receiver(&target.receiver)
+        || ruby_indexed_state_receiver(&target.receiver)
+}
+
+fn ruby_simple_state_receiver(receiver: &str) -> bool {
+    let text = receiver.trim();
+    (text.starts_with('@') || text.starts_with('$'))
+        && !text.contains('.')
+        && !text.contains('(')
+        && !text.contains('[')
+}
+
+fn ruby_indexed_state_receiver(receiver: &str) -> bool {
+    receiver.trim().starts_with('@') && receiver.contains('[')
+}
+
+fn ruby_stateful_receiver_chain(receiver: &str) -> bool {
+    let text = receiver.trim();
+    text.starts_with('@') || text.starts_with('$')
+}
+
+fn ruby_implicit_self_result_receiver(receiver: &str, field: &str) -> bool {
+    if field.ends_with('?') {
+        return false;
+    }
+    let text = receiver.trim();
+    let Some(paren) = text.find('(') else {
+        return false;
+    };
+    let head = &text[..paren];
+    !head.contains('.')
+        && !head.contains("::")
+        && head
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_lowercase() || ch == '_')
+            .unwrap_or(false)
+}
+
+fn ruby_simple_constant_receiver(receiver: &str) -> bool {
+    let text = receiver.trim().trim_start_matches("::");
+    !text.is_empty()
+        && !text.contains("::")
+        && !text.contains('.')
+        && !text.contains('(')
+        && ruby_starts_uppercase(text)
+}
+
+fn ruby_starts_uppercase(value: &str) -> bool {
+    matches!(value.chars().next(), Some(ch) if ch.is_ascii_uppercase())
 }
 
 fn ruby_chained_element_predicate_target(target: &CallTarget<'_>) -> bool {
@@ -1588,26 +1860,6 @@ fn ruby_call_has_block(node: Node<'_>) -> bool {
     named_children(node)
         .into_iter()
         .any(|child| matches!(child.kind(), "do_block" | "block"))
-}
-
-fn ruby_direct_flat_map_block_statement(node: Node<'_>, source: &str) -> bool {
-    if node.kind() != "call" {
-        return false;
-    }
-    let Some(method) = node.child_by_field_name("method") else {
-        return false;
-    };
-    if node_text(method, source) != "flat_map" {
-        return false;
-    }
-    let Some(parent) = node.parent() else {
-        return false;
-    };
-    parent.kind() == "body_statement"
-        && named_children(parent).first().copied() == Some(node)
-        && named_children(node)
-            .iter()
-            .any(|child| child.kind() == "do_block" || child.kind() == "block")
 }
 
 fn ruby_case_pattern_texts(patterns: &[Node<'_>], source: &str) -> Vec<String> {

@@ -52,7 +52,7 @@ module Decomplex
       DEFAULT_CASE_PATTERNS = %w[_ default else].freeze
       BOOLEAN_AND_OPERATORS = %w[&& and].freeze
       BOOLEAN_CONTAINER_NODE_KINDS = %w[binary].freeze
-      BOOLEAN_WRAPPER_NODE_KINDS = %w[body_statement pattern argument_list].freeze
+      BOOLEAN_WRAPPER_NODE_KINDS = %w[body_statement block_body pattern argument_list].freeze
       PARENTHESIZED_PATTERN_NODE_KINDS = %w[pattern].freeze
       ACCESSOR_CALL_NODE_KINDS = %w[call].freeze
       BLOCK_ARGUMENT_NODE_KINDS = %w[block do_block lambda].freeze
@@ -97,16 +97,20 @@ module Decomplex
       end
 
       def call_target(document, node)
-        case node.kind
-        when "call"
-          ruby_proc_call_target(node) || ruby_call_target(node)
-        when "body_statement", "block_body"
-          ruby_bare_body_call_target(node)
-        when "identifier"
-          ruby_bare_call_target(node)
-        else
-          super
-        end
+        target =
+          case node.kind
+          when "call"
+            ruby_proc_call_target(node) || ruby_call_target(node)
+          when "body_statement", "block_body"
+            ruby_bare_body_call_target(node)
+          when "identifier"
+            ruby_bare_call_target(node)
+          else
+            super
+          end
+        return nil if target && ruby_chained_element_predicate?(target[:receiver], target[:message])
+
+        target
       end
     end
 
@@ -141,16 +145,19 @@ module Decomplex
       end
 
       def state_read_target(node)
-        if (target = ruby_single_call_wrapper_state_read_target(node))
-          return target
+        target = ruby_single_call_wrapper_state_read_target(node)
+
+        if target.nil? && ruby_explicit_receiver_body_read_node?(node) &&
+           (call_target = ruby_explicit_receiver_body_call_target(node))
+          target = { receiver: call_target[:receiver], field: call_target[:message] }
         end
 
-        if ruby_explicit_receiver_body_read_node?(node) &&
-           (target = ruby_explicit_receiver_body_call_target(node))
-          return { receiver: target[:receiver], field: target[:message] }
-        end
+        target ||= ruby_unparenthesized_member_argument_target(node) || ruby_state_variable_target(node) || super
+        return nil unless target
+        return nil if ruby_non_state_receiver?(target[:receiver])
+        return nil if ruby_chained_element_predicate?(target[:receiver], target[:field])
 
-        ruby_unparenthesized_member_argument_target(node) || ruby_state_variable_target(node) || super
+        target
       end
 
       def ruby_single_call_wrapper_state_read_target(node)
@@ -691,7 +698,7 @@ module Decomplex
       end
 
       def ruby_path_action_node?(node)
-        return true if %w[call assignment operator_assignment binary].include?(node.kind)
+        return true if (PATH_ACTION_NODE_KINDS + ASSIGNMENT_NODE_KINDS + %w[binary]).include?(node.kind)
 
         ruby_flat_assignment_statement?(node)
       end
@@ -794,15 +801,48 @@ module Decomplex
 
         receiver, message = node.named_children
         return nil unless receiver && message
-        return nil unless %w[self constant identifier].include?(receiver.kind) ||
+        return nil if ruby_implicit_self_call_receiver?(receiver)
+        return nil unless %w[self constant identifier scope_resolution call].include?(receiver.kind) ||
                           ruby_constant_constructor_call?(receiver)
         return nil unless %w[identifier constant].include?(message.kind)
 
         {
           receiver: normalize_text(receiver.text),
           message: message.text,
-          arguments: []
+          arguments: ruby_argument_texts(node)
         }
+      end
+
+      def ruby_non_state_receiver?(receiver)
+        text = receiver.to_s
+        return true if text.empty?
+        return true if text.match?(/[\n{}]/)
+        return true if text.start_with?("%", "[", "\"", "'")
+        return true if ruby_core_effect_receiver?(text)
+
+        false
+      end
+
+      def ruby_core_effect_receiver?(receiver)
+        base = receiver.to_s.sub(/\A::/, "").split("::").first
+        RUBY_EFFECT_LEXICON.io_consts.include?(base) ||
+          RUBY_EFFECT_LEXICON.context_pairs.key?(base) ||
+          base == "ENV"
+      end
+
+      def ruby_implicit_self_call_receiver?(receiver)
+        return false unless ts_node?(receiver) && receiver.kind == "call"
+        return false if named_field(receiver, "receiver")
+
+        method = named_field(receiver, "method") ||
+                 receiver.named_children.find { |child| %w[identifier constant].include?(child.kind) }
+        ruby_simple_call_text?(method&.text)
+      end
+
+      def ruby_chained_element_predicate?(receiver, message)
+        message.to_s.end_with?("?") &&
+          receiver.to_s.include?(".") &&
+          receiver.to_s.match?(/\[(?::|"|')/)
       end
 
       def ruby_explicit_receiver_body_read_node?(node)
@@ -989,10 +1029,18 @@ module Decomplex
 
       def ruby_state_variable_node?(node)
         return false unless ts_node?(node)
-        return false if ruby_embedded_text_node?(node)
+        return false if ruby_embedded_text_node?(node) && !ruby_interpolated_indexed_state_variable?(node)
         return true if %w[instance_variable global_variable].include?(node.kind)
 
         node.named_children.empty? && node.text.to_s.match?(/\A[@$][A-Za-z_]\w*[!?=]?\z/)
+      end
+
+      def ruby_interpolated_indexed_state_variable?(node)
+        parent = parent_node(node)
+        return false unless parent&.kind == "element_reference"
+        return false unless parent.named_children.first == node
+
+        ruby_embedded_text_node?(parent)
       end
 
       def ruby_embedded_text_node?(node)

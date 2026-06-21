@@ -1,0 +1,60 @@
+{
+  "syntax": {
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@ranked",
+        "function": "results",
+        "line": 5
+      },
+      {
+        "receiver": "self",
+        "field": "@top",
+        "function": "results",
+        "line": 5
+      },
+      {
+        "receiver": "row",
+        "field": "file",
+        "function": "results",
+        "line": 6
+      },
+      {
+        "receiver": "language_providers",
+        "field": "flat_map",
+        "function": "provider_paths",
+        "line": 15
+      },
+      {
+        "receiver": "@ranked.first(@top)",
+        "field": "map",
+        "function": "results",
+        "line": 5
+      },
+      {
+        "receiver": "item",
+        "field": "name",
+        "function": "helper_result",
+        "line": 20
+      },
+      {
+        "receiver": "Dataset",
+        "field": "new",
+        "function": "build",
+        "line": 11
+      },
+      {
+        "receiver": "provider",
+        "field": "path_candidates",
+        "function": "provider_paths",
+        "line": 15
+      },
+      {
+        "receiver": "Custom::Sarif",
+        "field": "result",
+        "function": "results",
+        "line": 6
+      }
+    ]
+  }
+}

@@ -1793,7 +1793,11 @@ module Decomplex
 
       def branch_decision_wrapper_for_real_branch?(node)
         return false unless ts_node?(node)
-        return false if branch_node_kinds.include?(node.kind) || hidden_match?(node) || hidden_case?(node)
+        if hidden_case?(node)
+          first_named = node.named_children.first
+          return ts_node?(first_named) && branch_node_kinds.include?(first_named.kind)
+        end
+        return false if branch_node_kinds.include?(node.kind) || hidden_match?(node)
         return false unless hidden_if?(node) || hidden_modifier_if?(node)
 
         first_named = node.named_children.first

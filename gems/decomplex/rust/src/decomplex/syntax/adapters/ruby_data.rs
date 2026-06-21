@@ -12,6 +12,7 @@ pub(crate) const PARAMETER_LIST_NODE_KINDS: &[&str] = &["method_parameters"];
 pub(crate) const PARAMETER_IDENTIFIER_NODE_KINDS: &[&str] = &["identifier"];
 pub(crate) const FUNCTION_BODY_NODE_KINDS: &[&str] = &["body_statement", "do_block"];
 pub(crate) const NESTED_STATEMENT_WRAPPER_NODE_KINDS: &[&str] = &["body_statement"];
+pub(crate) const LOCAL_FLOW_STATEMENT_EXPANSION_NODE_KINDS: &[&str] = &["hash"];
 pub(crate) const IDENTIFIER_NODE_KINDS: &[&str] = &["identifier", "constant"];
 pub(crate) const ASSIGNMENT_NODE_KINDS: &[&str] = &["assignment", "operator_assignment"];
 pub(crate) const INDEXED_LHS_NODE_KINDS: &[&str] = &["element_assignment", "element_reference"];
@@ -31,6 +32,7 @@ pub(crate) const BRANCH_NODE_KINDS: &[&str] = &[
     "until",
     "for",
 ];
+pub(crate) const DECISION_ENCLOSING_NODE_KINDS: &[&str] = &["do_block"];
 pub(crate) const CASE_NODE_KINDS: &[&str] = &["case"];
 pub(crate) const CASE_ARM_NODE_KINDS: &[&str] = &["when"];
 pub(crate) const CASE_PATTERN_NODE_KINDS: &[&str] = &["pattern"];
@@ -40,11 +42,12 @@ pub(crate) const DEFAULT_CASE_PATTERNS: &[&str] = &["_", "default", "else"];
 pub(crate) const BOOLEAN_AND_OPERATORS: &[&str] = &["&&", "and"];
 pub(crate) const BOOLEAN_CONTAINER_NODE_KINDS: &[&str] = &["binary"];
 pub(crate) const BOOLEAN_WRAPPER_NODE_KINDS: &[&str] =
-    &["body_statement", "pattern", "argument_list"];
+    &["body_statement", "block_body", "pattern", "argument_list"];
 pub(crate) const ACCESSOR_CALL_NODE_KINDS: &[&str] = &["call"];
 pub(crate) const ARGUMENT_LIST_NODE_KINDS: &[&str] = &["argument_list"];
 pub(crate) const BLOCK_ARGUMENT_NODE_KINDS: &[&str] = &["do_block", "block"];
 pub(crate) const BRANCH_NESTED_SCOPE_NODE_KINDS: &[&str] = &["block"];
+pub(crate) const FIELD_LIKE_DOT_WRAPPER_NODE_KINDS: &[&str] = &["call"];
 
 pub(crate) const CALL_SHAPE: CallShape = CallShape {
     default_receiver: "self",
@@ -78,7 +81,34 @@ pub(crate) const STATIC_SEMANTIC_EFFECTS: &[StaticNodeEffect] = &[
         detail: "backtick",
     },
 ];
+pub(crate) const CORE_EFFECT_RECEIVER_BASES: &[&str] = &[
+    "File",
+    "IO",
+    "Dir",
+    "FileUtils",
+    "Open3",
+    "Socket",
+    "TCPSocket",
+    "UDPSocket",
+    "TCPServer",
+    "UNIXSocket",
+    "Tempfile",
+    "Pathname",
+    "Marshal",
+    "Time",
+    "Date",
+    "DateTime",
+    "Process",
+    "Thread",
+    "Fiber",
+    "Random",
+    "GC",
+    "ObjectSpace",
+    "ENV",
+];
 pub(crate) const BARE_BODY_NON_CALL_MESSAGES: &[&str] = &["true", "false", "nil", "self"];
+pub(crate) const IMPLICIT_SELF_ITERATOR_STATE_READ_MESSAGES: &[&str] =
+    &["each", "filter_map", "flat_map", "map", "reject", "select"];
 pub(crate) const EMBEDDED_TEXT_NODE_KINDS: &[&str] = &[
     "string",
     "string_content",

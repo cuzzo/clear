@@ -810,7 +810,14 @@ fn project_source_syntax(fixture: &Path, expected: &Value) -> Result<Value> {
                 }
                 "state_reads" => &["receiver", "field", "function", "line"][..],
                 "state_writes" => &["receiver", "field", "function", "line"][..],
-                "decisions" => &["kind", "members", "function", "line", "predicate"][..],
+                "decisions" => &[
+                    "kind",
+                    "members",
+                    "function",
+                    "line",
+                    "predicate",
+                    "enclosing_span",
+                ][..],
                 "branch_decisions" => &["function", "line", "predicate", "state_refs"][..],
                 "branch_arms" => &[
                     "function",

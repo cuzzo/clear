@@ -142,7 +142,13 @@
         ],
         "function": "route",
         "line": 15,
-        "predicate": "user.role"
+        "predicate": "user.role",
+        "enclosing_span": [
+          15,
+          4,
+          22,
+          7
+        ]
       },
       {
         "kind": "conjunction",
@@ -152,7 +158,13 @@
         ],
         "function": "route",
         "line": 9,
-        "predicate": "@status == :ready && user.active?"
+        "predicate": "@status == :ready && user.active?",
+        "enclosing_span": [
+          9,
+          4,
+          13,
+          7
+        ]
       }
     ],
     "branch_decisions": [
