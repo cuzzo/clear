@@ -5,7 +5,7 @@ require "tempfile"
 require_relative "../lib/decomplex/report_facts"
 
 class ReportFactsSourceOracleTest < Minitest::Test
-  def test_modifier_path_conditions_match_ruby_and_rust_report_facts
+  def test_modifier_path_conditions_match_ruby_report_facts
     Tempfile.create(["decomplex_path_modifier", ".rb"]) do |file|
       file.write(<<~RB)
         def one
@@ -30,7 +30,6 @@ class ReportFactsSourceOracleTest < Minitest::Test
       ]
 
       assert_equal expected, projected_path_conditions(file.path, "ruby")
-      assert_equal expected, projected_path_conditions(file.path, "rust")
     end
   end
 

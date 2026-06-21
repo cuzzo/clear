@@ -1,0 +1,563 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/fact-mine/examples/syntax-facts/csharp/core.cs",
+      "language": "csharp",
+      "functions": [
+        {
+          "line": 17,
+          "name": "Process",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            17,
+            4,
+            53,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 55,
+          "name": "Audit",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            55,
+            4,
+            60,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 62,
+          "name": "Ready",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+
+          ],
+          "span": [
+            62,
+            4,
+            65,
+            5
+          ],
+          "visibility": "private"
+        }
+      ],
+      "owners": [
+        {
+          "kind": "class",
+          "line": 4,
+          "name": "CSharpSyntaxFactsCore",
+          "span": [
+            4,
+            0,
+            66,
+            1
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "arguments": [
+            "Status.Busy"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "Process",
+          "line": 40,
+          "message": "Publish",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            40,
+            12,
+            40,
+            32
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "Process",
+          "line": 44,
+          "message": "WriteLine",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "Console",
+          "safe_navigation": false,
+          "span": [
+            44,
+            12,
+            44,
+            42
+          ]
+        },
+        {
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "Audit",
+          "line": 58,
+          "message": "Send",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "sink",
+          "safe_navigation": false,
+          "span": [
+            58,
+            8,
+            58,
+            33
+          ]
+        },
+        {
+          "arguments": [
+            "account"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "Process",
+          "line": 21,
+          "message": "callback",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            21,
+            8,
+            21,
+            25
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "Audit",
+          "line": 57,
+          "message": "WriteLine",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "Console",
+          "safe_navigation": false,
+          "span": [
+            57,
+            8,
+            57,
+            31
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "Process",
+          "line": 27,
+          "message": "Escalate",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            27,
+            16,
+            27,
+            30
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "Process",
+          "line": 30,
+          "message": "Fallback",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            30,
+            16,
+            30,
+            30
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "Process",
+          "line": 33,
+          "message": "DefaultCase",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            33,
+            16,
+            33,
+            33
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "Process",
+          "line": 49,
+          "message": "Children",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            49,
+            12,
+            49,
+            27
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "Active",
+          "function": "Process",
+          "line": 20,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            20,
+            40,
+            20,
+            51
+          ]
+        },
+        {
+          "field": "Children",
+          "function": "Process",
+          "line": 49,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "item",
+          "span": [
+            49,
+            12,
+            49,
+            25
+          ]
+        },
+        {
+          "field": "Name",
+          "function": "Process",
+          "line": 19,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "user.Profile",
+          "span": [
+            19,
+            19,
+            19,
+            36
+          ]
+        },
+        {
+          "field": "Profile",
+          "function": "Process",
+          "line": 19,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            19,
+            19,
+            19,
+            31
+          ]
+        },
+        {
+          "field": "Ready",
+          "function": "Process",
+          "line": 37,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            37,
+            42,
+            37,
+            52
+          ]
+        },
+        {
+          "field": "Role",
+          "function": "Process",
+          "line": 23,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            23,
+            16,
+            23,
+            25
+          ]
+        },
+        {
+          "field": "Send",
+          "function": "Audit",
+          "line": 58,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "sink",
+          "span": [
+            58,
+            8,
+            58,
+            17
+          ]
+        },
+        {
+          "field": "count",
+          "function": "Ready",
+          "line": 64,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            64,
+            15,
+            64,
+            20
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "Audit",
+          "line": 58,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            58,
+            8,
+            58,
+            12
+          ]
+        },
+        {
+          "field": "status",
+          "function": "Audit",
+          "line": 59,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            59,
+            15,
+            59,
+            21
+          ]
+        },
+        {
+          "field": "status",
+          "function": "Process",
+          "line": 37,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            37,
+            12,
+            37,
+            23
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "count",
+          "function": "(top-level)",
+          "line": 13,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            13,
+            8,
+            13,
+            22
+          ]
+        },
+        {
+          "field": "count",
+          "function": "Process",
+          "line": 39,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            39,
+            12,
+            39,
+            27
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "(top-level)",
+          "line": 14,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            14,
+            8,
+            14,
+            24
+          ]
+        },
+        {
+          "field": "status",
+          "function": "(top-level)",
+          "line": 12,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            12,
+            8,
+            12,
+            28
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            23,
+            8,
+            35,
+            9
+          ],
+          "function": "Process",
+          "kind": "case_dispatch",
+          "line": 23,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.Role",
+          "span": [
+            23,
+            8,
+            35,
+            9
+          ]
+        },
+        {
+          "enclosing_span": [
+            37,
+            8,
+            45,
+            9
+          ],
+          "function": "Process",
+          "kind": "conjunction",
+          "line": 37,
+          "members": [
+            "this.status == Status.Idle",
+            "user.Ready"
+          ],
+          "predicate": "this.status == Status.Idle && user.Ready",
+          "span": [
+            37,
+            12,
+            37,
+            52
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "Process",
+          "line": 23,
+          "predicate": "user.Role",
+          "span": [
+            23,
+            8,
+            35,
+            9
+          ],
+          "state_refs": [
+            "user.Role"
+          ]
+        },
+        {
+          "function": "Process",
+          "line": 37,
+          "predicate": "this.status == Status.Idle && user.Ready",
+          "span": [
+            37,
+            8,
+            45,
+            9
+          ],
+          "state_refs": [
+            "this.status",
+            "user.Ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "Console.WriteLine",
+          "function": "Audit",
+          "kind": "hidden_io",
+          "line": 57,
+          "span": [
+            57,
+            8,
+            57,
+            31
+          ]
+        },
+        {
+          "detail": "Console.WriteLine",
+          "function": "Process",
+          "kind": "hidden_io",
+          "line": 44,
+          "span": [
+            44,
+            12,
+            44,
+            42
+          ]
+        }
+      ],
+      "predicate_bodies": [
+
+      ]
+    }
+  ]
+}

@@ -158,7 +158,6 @@ if ARGV[0] == "detector"
 
   engine = "ruby"
   json = false
-  compare = false
   benchmark = false
   detector_options = {}
   args = args.reject do |arg|
@@ -168,9 +167,6 @@ if ARGV[0] == "detector"
       true
     when "--json"
       json = true
-      true
-    when "--compare-engines"
-      compare = true
       true
     when "--benchmark"
       benchmark = true
@@ -191,18 +187,7 @@ if ARGV[0] == "detector"
   files = collect_files(args)
   abort no_files_message if files.empty?
 
-  if compare
-    ok, ruby_json, rust_json = Decomplex::DetectorRunner.compare(detector, files, **detector_options)
-    unless ok
-      warn "decomplex detector #{detector} output differs between ruby and rust engines"
-      warn "--- ruby"
-      warn ruby_json
-      warn "--- rust"
-      warn rust_json
-      exit 1
-    end
-    puts ruby_json
-  elsif json
+  if json
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     output = Decomplex::DetectorRunner.canonical_json(detector, files, engine: engine, **detector_options)
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
@@ -212,7 +197,7 @@ if ARGV[0] == "detector"
     end
     print output
   else
-    abort "decomplex detector currently requires --json or --compare-engines"
+    abort "decomplex detector currently requires --json"
   end
   exit 0
 end
@@ -394,7 +379,6 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
       decomplex facts [--engine=ruby|rust] [--output=FILE] [--benchmark] [--jobs=N] FILE_OR_DIR ...
       decomplex render-report --from-stdin|--input=FILE [--format=markdown|sarif|json] [--output=FILE]
       decomplex detector DETECTOR --engine=ruby|rust --json [--benchmark] [--mass=N] [--fuzzy=N] [--jobs=N] FILE_OR_DIR ...
-      decomplex detector DETECTOR --compare-engines [--mass=N] [--fuzzy=N] [--jobs=N] FILE_OR_DIR ...
       decomplex state-mesh [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex state-branches [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex temporal-ordering [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...

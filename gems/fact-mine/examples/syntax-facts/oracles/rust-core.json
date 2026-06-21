@@ -1,0 +1,784 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/fact-mine/examples/syntax-facts/rust/core.rs",
+      "language": "rust",
+      "functions": [
+        {
+          "line": 12,
+          "name": "new",
+          "owner": "RustSyntaxFactsCore",
+          "params": [
+            "status"
+          ],
+          "span": [
+            12,
+            4,
+            14,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 16,
+          "name": "process",
+          "owner": "RustSyntaxFactsCore",
+          "params": [
+            "&mut self",
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            16,
+            4,
+            44,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 46,
+          "name": "audit",
+          "owner": "RustSyntaxFactsCore",
+          "params": [
+            "&self",
+            "name"
+          ],
+          "span": [
+            46,
+            4,
+            50,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 52,
+          "name": "ready",
+          "owner": "RustSyntaxFactsCore",
+          "params": [
+            "&self"
+          ],
+          "span": [
+            52,
+            4,
+            54,
+            5
+          ],
+          "visibility": "private"
+        }
+      ],
+      "owners": [
+        {
+          "kind": "impl",
+          "line": 11,
+          "name": "RustSyntaxFactsCore",
+          "span": [
+            11,
+            0,
+            55,
+            1
+          ]
+        },
+        {
+          "kind": "struct",
+          "line": 1,
+          "name": "RustSyntaxFactsCore",
+          "span": [
+            1,
+            0,
+            4,
+            1
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "arguments": [
+            "&account"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 24,
+          "message": "callback",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            24,
+            8,
+            24,
+            26
+          ]
+        },
+        {
+          "arguments": [
+            "Status::Busy"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 34,
+          "message": "publish",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            34,
+            12,
+            34,
+            38
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 36,
+          "message": "warn",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            36,
+            12,
+            36,
+            34
+          ]
+        },
+        {
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 48,
+          "message": "send",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            48,
+            8,
+            48,
+            33
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 43,
+          "message": "Some",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            43,
+            8,
+            43,
+            18
+          ]
+        },
+        {
+          "arguments": [
+            "name.clone()",
+            "user.active()"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 23,
+          "message": "new",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "Account",
+          "safe_navigation": false,
+          "span": [
+            23,
+            22,
+            23,
+            63
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 27,
+          "message": "escalate",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            27,
+            41,
+            27,
+            60
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 28,
+          "message": "fallback",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            28,
+            27,
+            28,
+            46
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 29,
+          "message": "default_case",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            29,
+            17,
+            29,
+            40
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 49,
+          "message": "status",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            49,
+            8,
+            49,
+            21
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "name",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile()",
+          "safe_navigation": false,
+          "span": [
+            22,
+            19,
+            22,
+            40
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "profile",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            22,
+            19,
+            22,
+            33
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "to_string",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile().name()",
+          "safe_navigation": false,
+          "span": [
+            22,
+            19,
+            22,
+            52
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 23,
+          "message": "active",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            23,
+            49,
+            23,
+            62
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 23,
+          "message": "clone",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "name",
+          "safe_navigation": false,
+          "span": [
+            23,
+            35,
+            23,
+            47
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 26,
+          "message": "role",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            26,
+            14,
+            26,
+            25
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 32,
+          "message": "ready",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "safe_navigation": false,
+          "span": [
+            32,
+            50,
+            32,
+            62
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 40,
+          "message": "children",
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            40,
+            12,
+            40,
+            27
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "active",
+          "function": "process",
+          "line": 23,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            23,
+            49,
+            23,
+            60
+          ]
+        },
+        {
+          "field": "children",
+          "function": "process",
+          "line": 40,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "item",
+          "span": [
+            40,
+            12,
+            40,
+            25
+          ]
+        },
+        {
+          "field": "clone",
+          "function": "process",
+          "line": 23,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "name",
+          "span": [
+            23,
+            35,
+            23,
+            45
+          ]
+        },
+        {
+          "field": "count",
+          "function": "ready",
+          "line": 53,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            53,
+            8,
+            53,
+            18
+          ]
+        },
+        {
+          "field": "default_case",
+          "function": "process",
+          "line": 29,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            29,
+            17,
+            29,
+            34
+          ]
+        },
+        {
+          "field": "escalate",
+          "function": "process",
+          "line": 27,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            27,
+            41,
+            27,
+            54
+          ]
+        },
+        {
+          "field": "fallback",
+          "function": "process",
+          "line": 28,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            28,
+            27,
+            28,
+            40
+          ]
+        },
+        {
+          "field": "name",
+          "function": "process",
+          "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile()",
+          "span": [
+            22,
+            19,
+            22,
+            38
+          ]
+        },
+        {
+          "field": "profile",
+          "function": "process",
+          "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            22,
+            19,
+            22,
+            31
+          ]
+        },
+        {
+          "field": "publish",
+          "function": "process",
+          "line": 34,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            34,
+            12,
+            34,
+            24
+          ]
+        },
+        {
+          "field": "ready",
+          "function": "process",
+          "line": 32,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            32,
+            50,
+            32,
+            60
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 26,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            26,
+            14,
+            26,
+            23
+          ]
+        },
+        {
+          "field": "send",
+          "function": "audit",
+          "line": 48,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            48,
+            8,
+            48,
+            17
+          ]
+        },
+        {
+          "field": "status",
+          "function": "audit",
+          "line": 49,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            49,
+            8,
+            49,
+            19
+          ]
+        },
+        {
+          "field": "to_string",
+          "function": "process",
+          "line": 22,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "user.profile().name()",
+          "span": [
+            22,
+            19,
+            22,
+            50
+          ]
+        },
+        {
+          "field": "warn",
+          "function": "process",
+          "line": 36,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            36,
+            12,
+            36,
+            21
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "count",
+          "function": "process",
+          "line": 33,
+          "owner": "RustSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            33,
+            12,
+            33,
+            27
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            26,
+            8,
+            30,
+            9
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 26,
+          "members": [
+            "Role::Guest",
+            "Role::Owner | Role::Admin"
+          ],
+          "predicate": "user.role()",
+          "span": [
+            26,
+            8,
+            30,
+            9
+          ]
+        },
+        {
+          "enclosing_span": [
+            32,
+            8,
+            37,
+            9
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 32,
+          "members": [
+            "matches!(self.status, Status::Idle)",
+            "user.ready()"
+          ],
+          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
+          "span": [
+            32,
+            11,
+            32,
+            62
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "process",
+          "line": 26,
+          "predicate": "user.role()",
+          "span": [
+            26,
+            8,
+            30,
+            9
+          ],
+          "state_refs": [
+            "user.role"
+          ]
+        },
+        {
+          "function": "process",
+          "line": 32,
+          "predicate": "matches!(self.status, Status::Idle) && user.ready()",
+          "span": [
+            32,
+            8,
+            37,
+            9
+          ],
+          "state_refs": [
+            "user.ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "callback",
+          "function": "process",
+          "kind": "callback_inversion",
+          "line": 24,
+          "span": [
+            24,
+            8,
+            24,
+            26
+          ]
+        }
+      ],
+      "predicate_bodies": [
+
+      ]
+    }
+  ]
+}

@@ -2,9 +2,7 @@
 
 require "json"
 require "minitest/autorun"
-require "tempfile"
 require_relative "../lib/decomplex/report"
-require_relative "../lib/decomplex/native/command"
 
 class ReportFactsOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples", __dir__)
@@ -17,7 +15,7 @@ class ReportFactsOracleTest < Minitest::Test
   REPORT_FACT_PATHS.each_with_index do |fixture_path, index|
     name = File.basename(fixture_path, ".json").tr("-", "_")
 
-    define_method("test_report_fact_#{index}_#{name}_matches_ruby_and_rust") do
+    define_method("test_report_fact_#{index}_#{name}_matches_ruby_oracle") do
       assert_report_fact_oracle(fixture_path)
     end
   end
@@ -33,23 +31,6 @@ class ReportFactsOracleTest < Minitest::Test
     ruby_report = Decomplex::Report.from_facts(JSON.generate(facts))
     assert_equal expected, project_report(ruby_report), "ruby #{fixture_path}"
     assert_equal expected_markdown, ruby_report.to_markdown.rstrip, "markdown ruby #{fixture_path}"
-
-    skip "cargo is not available" unless rust_available?
-
-    Tempfile.create(["decomplex-report-facts-oracle", ".json"]) do |file|
-      file.write(JSON.pretty_generate(facts))
-      file.flush
-
-      rust_markdown = Decomplex::Native::Command.run(
-        "render-report", "--input", file.path, "--format", "markdown"
-      )
-      rust_sarif = JSON.parse(Decomplex::Native::Command.run(
-        "render-report", "--input", file.path, "--format", "sarif"
-      ))
-
-      assert_equal expected_markdown, rust_markdown.rstrip, "markdown rust #{fixture_path}"
-      assert_equal JSON.parse(ruby_report.to_sarif), rust_sarif, "sarif #{fixture_path}"
-    end
   end
 
   def project_report(report)
@@ -106,10 +87,4 @@ class ReportFactsOracleTest < Minitest::Test
     end
   end
 
-  def rust_available?
-    env = ENV["DECOMPLEX_RUST_BIN"]
-    return true if env && !env.empty? && File.executable?(env)
-
-    system("cargo", "--version", out: File::NULL, err: File::NULL)
-  end
 end

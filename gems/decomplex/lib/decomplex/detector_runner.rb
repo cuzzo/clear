@@ -165,18 +165,6 @@ module Decomplex
       JSON.generate(canonicalize(run_fact_fixture(path, engine: engine))) << "\n"
     end
 
-    def compare(detector, files, **options)
-      ruby_json = canonical_json(detector, files, engine: "ruby", **options)
-      rust_json = canonical_json(detector, files, engine: "rust", **options)
-      [ruby_json == rust_json, ruby_json, rust_json]
-    end
-
-    def compare_fact_fixture(path)
-      ruby_json = canonical_json_from_fact_fixture(path, engine: "ruby")
-      rust_json = canonical_json_from_fact_fixture(path, engine: "rust")
-      [ruby_json == rust_json, ruby_json, rust_json]
-    end
-
     def detector_names
       DETECTORS.keys
     end

@@ -8,7 +8,6 @@ use decomplex_rust::decomplex::detectors::{
 };
 use decomplex_rust::decomplex::report::Report;
 use decomplex_rust::decomplex::syntax::{Document, Language, LocalComplexityScore};
-use decomplex_rust::decomplex::syntax_oracle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -197,57 +196,6 @@ fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
     }
 }
 
-#[test]
-fn ruby_source_fact_examples_match_oracles() -> Result<()> {
-    let examples_root = examples_root();
-    let mut failures = Vec::new();
-
-    for fixture in source_fact_fixture_paths(&examples_root)? {
-        let name = file_stem(&fixture)?;
-        let oracle_path = examples_root
-            .join("source-facts")
-            .join("oracles")
-            .join(format!("ruby-{name}.json"));
-        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)
-            .with_context(|| format!("read {}", oracle_path.display()))?;
-        let mut actual = Map::new();
-        if let Some(syntax_expected) = expected.get("syntax") {
-            actual.insert(
-                "syntax".to_string(),
-                project_source_syntax(&fixture, syntax_expected)?,
-            );
-        }
-        if expected.get("local_flow").is_some() {
-            actual.insert(
-                "local_flow".to_string(),
-                project_local_flow(&value(local_flow::scan_files(
-                    &[fixture.clone()],
-                    Language::Ruby,
-                )?)?),
-            );
-        }
-
-        let actual = Value::Object(actual);
-        if actual != expected {
-            failures.push(format!(
-                "{}\nexpected: {}\nactual:   {}",
-                fixture.display(),
-                expected,
-                actual
-            ));
-        }
-    }
-
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        bail!(
-            "ruby source-facts oracle failures:\n{}",
-            failures.join("\n\n")
-        )
-    }
-}
-
 fn examples_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples")
 }
@@ -304,19 +252,6 @@ fn local_flow_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
     for entry in fs::read_dir(&root)? {
         let path = entry?.path();
         if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    Ok(paths)
-}
-
-fn source_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
-    let root = examples_root.join("source-facts").join("ruby");
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(&root)? {
-        let path = entry?.path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("rb") {
             paths.push(path);
         }
     }
@@ -779,97 +714,6 @@ fn project_detector_output(detector: &str, output: Value) -> Value {
         }),
         _ => scrub_locations(&output),
     }
-}
-
-fn project_source_syntax(fixture: &Path, expected: &Value) -> Result<Value> {
-    let projection = syntax_oracle::project_files(&[fixture.to_path_buf()], Language::Ruby)?;
-    let document = array(field(&projection, "documents"))
-        .first()
-        .cloned()
-        .unwrap_or(Value::Null);
-    let mut out = Map::new();
-    if let Some(object) = expected.as_object() {
-        for key in object.keys() {
-            let keys = match key.as_str() {
-                "functions" => &["name", "owner", "line", "visibility", "params"][..],
-                "owners" => &["name", "kind", "line"][..],
-                "calls" => &[
-                    "receiver",
-                    "message",
-                    "function",
-                    "line",
-                    "conditional",
-                    "control",
-                    "safe_navigation",
-                    "block",
-                    "arguments",
-                ][..],
-                "state_declarations" => &["field", "owner", "type", "line"][..],
-                "state_param_origins" => {
-                    &["field", "receiver", "owner", "param", "function", "line"][..]
-                }
-                "state_reads" => &["receiver", "field", "function", "line"][..],
-                "state_writes" => &["receiver", "field", "function", "line"][..],
-                "decisions" => &[
-                    "kind",
-                    "members",
-                    "function",
-                    "line",
-                    "predicate",
-                    "enclosing_span",
-                ][..],
-                "branch_decisions" => &["function", "line", "predicate", "state_refs"][..],
-                "branch_arms" => &[
-                    "function",
-                    "kind",
-                    "line",
-                    "decision_line",
-                    "predicate",
-                    "member",
-                    "body",
-                ][..],
-                "dispatch_sites" => {
-                    &["variant_set", "arm_members", "outside", "function", "line"][..]
-                }
-                "semantic_effects" => &["kind", "detail", "function", "line"][..],
-                "predicate_bodies" => &["name", "owner", "body", "line"][..],
-                "comparisons" => &[
-                    "source",
-                    "raw",
-                    "canon_source",
-                    "operator",
-                    "function",
-                    "line",
-                ][..],
-                "path_conditions" => &["guards", "action", "function", "line"][..],
-                "protocol_method_effects" => &["owner", "name", "line", "reads", "writes"][..],
-                "protocol_call_paths" => &["owner", "name", "line", "calls"][..],
-                "clone_candidates" => &[
-                    "method_name",
-                    "node_name",
-                    "line",
-                    "mass",
-                    "fingerprint",
-                    "child_fingerprints",
-                    "child_masses",
-                ][..],
-                "redundant_nil_guards" => &["defn", "line", "local", "guard", "proof"][..],
-                "local_methods" => &[
-                    "id",
-                    "owner",
-                    "name",
-                    "line",
-                    "statements",
-                    "boundaries",
-                    "local_contract_assignments",
-                ][..],
-                "local_complexity_scores" => &["id", "score", "signals"][..],
-                _ => bail!("unsupported source syntax section: {key}"),
-            };
-            out.insert(key.clone(), rows(field(&document, key), keys));
-        }
-    }
-    Ok(Value::Object(out))
 }
 
 fn project_local_flow(output: &Value) -> Value {
