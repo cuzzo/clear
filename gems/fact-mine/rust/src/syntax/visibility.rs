@@ -68,3 +68,81 @@ pub(crate) fn apply_visibility(
         }
     }
 }
+
+pub(crate) fn apply_normalized_visibility(functions: &mut [FunctionDef], calls: &[CallSite]) {
+    let mut owners = functions
+        .iter()
+        .map(|function| function.owner.clone())
+        .collect::<Vec<_>>();
+    owners.sort();
+    owners.dedup();
+
+    for owner in owners {
+        apply_normalized_visibility_for_owner(functions, calls, &owner);
+    }
+}
+
+fn apply_normalized_visibility_for_owner(
+    functions: &mut [FunctionDef],
+    calls: &[CallSite],
+    owner: &str,
+) {
+    let function_indices = functions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, function)| (function.owner == owner).then_some(index))
+        .collect::<Vec<_>>();
+    let mut events = Vec::new();
+    for index in &function_indices {
+        events.push((functions[*index].line, 1_u8, *index));
+    }
+    for (index, call) in calls.iter().enumerate() {
+        if call.owner == owner
+            && call.receiver == "self"
+            && matches!(call.message.as_str(), "public" | "protected" | "private")
+        {
+            events.push((call.line, 0_u8, index));
+        }
+    }
+    events.sort();
+
+    let mut current = "public".to_string();
+    for (_, kind, index) in events {
+        if kind == 1 {
+            let function = &mut functions[index];
+            if function.name.contains('.') {
+                function.visibility = Some("public".to_string());
+            } else if function.visibility.as_deref() == Some("public") {
+                function.visibility = Some(current.clone());
+            }
+            continue;
+        }
+
+        let call = &calls[index];
+        if call.arguments.is_empty() {
+            current = call.message.clone();
+        } else {
+            for argument in &call.arguments {
+                let target = normalized_visibility_argument_name(argument);
+                for function_index in function_indices.iter().rev() {
+                    if functions[*function_index].name == target {
+                        functions[*function_index].visibility = Some(call.message.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn normalized_visibility_argument_name(argument: &str) -> String {
+    argument
+        .trim()
+        .trim_start_matches(':')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_string()
+}

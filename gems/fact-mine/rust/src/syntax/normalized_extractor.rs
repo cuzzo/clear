@@ -71,7 +71,6 @@ impl Extractor {
     }
 
     fn finish(mut self) -> NormalizedFacts {
-        self.apply_visibility();
         dedupe_decision_sites(&mut self.facts.decision_sites);
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
@@ -180,7 +179,11 @@ impl Extractor {
     fn scan_singleton_class(&mut self, node: &Node) {
         if let Some(receiver) = child_node(node, 0).map(normalized_text) {
             if receiver != "self" {
-                self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
+                self.record_semantic_effect(
+                    node,
+                    "metaprogramming",
+                    &format!("class << {receiver}"),
+                );
             }
         }
         self.scan_children(node);
@@ -361,7 +364,11 @@ impl Extractor {
             self.record_state_read_for_call(&call);
             self.record_state_write_for_mutating_call(&call);
             if call.receiver == "self" && node.text.contains(".(") {
-                self.record_semantic_effect(node, "dynamic_dispatch", &format!("{}.call", call.message));
+                self.record_semantic_effect(
+                    node,
+                    "dynamic_dispatch",
+                    &format!("{}.call", call.message),
+                );
             }
             self.facts.call_sites.push(call);
         }
@@ -626,81 +633,6 @@ impl Extractor {
         }
     }
 
-    fn apply_visibility(&mut self) {
-        let mut owners = BTreeSet::new();
-        for function in &self.facts.function_defs {
-            owners.insert(function.owner.clone());
-        }
-        for owner in owners {
-            self.apply_visibility_for_owner(&owner);
-        }
-    }
-
-    fn apply_visibility_for_owner(&mut self, owner: &str) {
-        let mut events = Vec::new();
-        for (index, function) in self.facts.function_defs.iter().enumerate() {
-            if function.owner == owner {
-                events.push(VisibilityEvent::Function {
-                    line: function.line,
-                    order: 1,
-                    index,
-                });
-            }
-        }
-        for call in self.facts.call_sites.iter().filter(|call| {
-            call.owner == owner
-                && call.receiver == "self"
-                && matches!(call.message.as_str(), "public" | "protected" | "private")
-        }) {
-            events.push(VisibilityEvent::Call {
-                line: call.line,
-                order: 0,
-                message: call.message.clone(),
-                arguments: call.arguments.clone(),
-            });
-        }
-        events.sort_by_key(VisibilityEvent::sort_key);
-
-        let mut current = "public".to_string();
-        for event in events {
-            match event {
-                VisibilityEvent::Call {
-                    message,
-                    arguments,
-                    ..
-                } => {
-                    if arguments.is_empty() {
-                        current = message;
-                    } else {
-                        for argument in arguments {
-                            let target = visibility_argument_name(&argument);
-                            self.set_visibility(owner, &target, &message);
-                        }
-                    }
-                }
-                VisibilityEvent::Function { index, .. } => {
-                    let function = &mut self.facts.function_defs[index];
-                    if function.name.contains('.') {
-                        function.visibility = Some("public".to_string());
-                    } else if function.visibility.as_deref() == Some("public") {
-                        function.visibility = Some(current.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    fn set_visibility(&mut self, owner: &str, target: &str, visibility: &str) {
-        for function in self
-            .facts
-            .function_defs
-            .iter_mut()
-            .filter(|function| function.owner == owner && function.name == target)
-        {
-            function.visibility = Some(visibility.to_string());
-        }
-    }
-
     fn current_owner(&self) -> String {
         self.owners
             .last()
@@ -741,28 +673,6 @@ struct CallParts<'a> {
     arguments: Vec<String>,
     receiver_node: Option<&'a Node>,
     args_node: Option<&'a Node>,
-}
-
-enum VisibilityEvent {
-    Call {
-        line: usize,
-        order: usize,
-        message: String,
-        arguments: Vec<String>,
-    },
-    Function {
-        line: usize,
-        order: usize,
-        index: usize,
-    },
-}
-
-impl VisibilityEvent {
-    fn sort_key(&self) -> (usize, usize) {
-        match self {
-            Self::Call { line, order, .. } | Self::Function { line, order, .. } => (*line, *order),
-        }
-    }
 }
 
 fn call_parts(node: &Node) -> Option<CallParts<'_>> {
@@ -1088,9 +998,27 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
 fn mutating_receiver_message(message: &str) -> bool {
     matches!(
         message,
-        "<<" | "[]=" | "add" | "append" | "clear" | "collect!" | "compact!" | "concat"
-            | "delete" | "delete_if" | "fill" | "filter!" | "keep_if" | "merge!" | "move"
-            | "push" | "reject!" | "replace" | "shift" | "store" | "unshift" | "update"
+        "<<" | "[]="
+            | "add"
+            | "append"
+            | "clear"
+            | "collect!"
+            | "compact!"
+            | "concat"
+            | "delete"
+            | "delete_if"
+            | "fill"
+            | "filter!"
+            | "keep_if"
+            | "merge!"
+            | "move"
+            | "push"
+            | "reject!"
+            | "replace"
+            | "shift"
+            | "store"
+            | "unshift"
+            | "update"
             | "write"
     ) || (message.ends_with('!') && !matches!(message, "!=" | "!~"))
 }
@@ -1102,18 +1030,6 @@ fn block_like_hash(node: &Node) -> bool {
 
 fn normalized_ternary_if(node: &Node) -> bool {
     node.r#type == "IF" && node.text.contains(" ? ") && node.text.contains(" : ")
-}
-
-fn visibility_argument_name(argument: &str) -> String {
-    argument
-        .trim()
-        .trim_start_matches(':')
-        .trim_matches('"')
-        .trim_matches('\'')
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string()
 }
 
 fn normalize_comparison_source(source: &str) -> String {

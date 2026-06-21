@@ -18,7 +18,7 @@ mod zig;
 
 pub(crate) use base::LanguageProfile;
 
-use super::{visibility, CloneCandidate, Document, FunctionDef, Language};
+use super::{visibility, FunctionDef, Language};
 use c::CProfile;
 use cpp::CppProfile;
 use csharp::CSharpProfile;
@@ -77,8 +77,4 @@ pub(crate) fn apply_visibility(
     calls: &[super::CallSite],
 ) {
     visibility::apply_visibility(functions, calls, language_profile(language));
-}
-
-pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
-    base::clone_candidates_for_profile(language_profile(document.language), document)
 }

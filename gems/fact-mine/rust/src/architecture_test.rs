@@ -178,13 +178,17 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "adapters/swift.rs",
         "adapters/typescript.rs",
         "adapters/zig.rs",
+        "clone_similarity.rs",
         "complexity.rs",
+        "effects.rs",
         "local_flow.rs",
         "normalized_extractor.rs",
+        "passes.rs",
         "path_condition.rs",
         "protocols.rs",
         "raw_tree.rs",
         "redundant_nil_guard.rs",
+        "ruby_metadata.rs",
         "tree_sitter_adapter.rs",
         "visibility.rs",
     ];
@@ -372,6 +376,7 @@ fn syntax_language_profile_trait_does_not_expose_detector_fact_engines() {
         ),
         ("ordered-protocol path generation", "protocol_call_paths("),
         ("clone candidate generation", "clone_candidates("),
+        ("clone fingerprint generation", "fn clone_fingerprint("),
         ("post-collection fact mutation", "after_collect_facts("),
     ];
     let offenders = forbidden
@@ -492,6 +497,9 @@ fn syntax_adapter_loader_does_not_forward_detector_fact_engines() {
         "structural_semantic",
         "method_effects",
         "call_paths",
+        "CloneCandidate",
+        "clone_candidates",
+        "clone_similarity",
     ];
     let offenders = forbidden
         .into_iter()
@@ -502,6 +510,70 @@ fn syntax_adapter_loader_does_not_forward_detector_fact_engines() {
     assert!(
         offenders.is_empty(),
         "syntax/adapters/mod.rs must only select profiles and apply syntax-level helpers; detector fact derivation belongs outside adapters:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn clone_similarity_engine_does_not_live_in_adapters() {
+    let adapters = crate_src().join("syntax/adapters");
+    let forbidden = [
+        "fn clone_candidates_for_profile",
+        "fn clone_add_candidate",
+        "fn clone_candidate_for",
+        "fn clone_fuzzy_children_for",
+        "fn clone_fingerprint_for_profile",
+        "fn clone_fingerprint_call",
+        "fn clone_call_message",
+        "fn clone_terminal_token",
+        "CLONE_CANDIDATE_KINDS",
+        "CLONE_LITERAL_KINDS",
+        "CLONE_CALL_KINDS",
+    ];
+    let mut offenders = Vec::new();
+
+    for path in rust_files_recursive(&adapters) {
+        let source = production_source(&fs::read_to_string(&path).expect("read syntax adapter"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Clone similarity is a shared syntax engine; adapters may expose hooks but must not own the engine:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn clone_similarity_does_not_depend_on_parser_or_concrete_languages() {
+    let path = crate_src().join("syntax/clone_similarity.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read clone similarity"));
+    let forbidden = [
+        "tree_sitter",
+        "Language::",
+        "Ruby",
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "Swift",
+        "Kotlin",
+        "Lua",
+        "Php",
+        "CSharp",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Clone similarity must consume normalized/raw syntax facts through profile hooks, not parser or concrete-language APIs:\n{}",
         offenders.join("\n")
     );
 }
@@ -544,6 +616,84 @@ fn normalized_extractor_does_not_depend_on_concrete_languages_or_tree_sitter() {
     assert!(
         offenders.is_empty(),
         "Normalized extraction must consume only the normalized schema, not concrete language/parser APIs:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn normalized_extractor_does_not_own_stateful_enrichment() {
+    let path = crate_src().join("syntax/normalized_extractor.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read normalized extractor"));
+    let forbidden = [
+        "apply_visibility",
+        "VisibilityEvent",
+        "false_simplicity_lexicon",
+        "semantic_effect_sites_from_calls",
+        "ruby_immutable",
+        "ruby_type_alias",
+        "ruby_sig_param",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Normalized extraction must remain stateless; stateful enrichment belongs in syntax/passes.rs and role modules:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn tree_sitter_adapter_does_not_own_stateful_enrichment_engines() {
+    let path = crate_src().join("syntax/tree_sitter_adapter.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read tree_sitter_adapter"));
+    let forbidden = [
+        "fn semantic_effect_sites_from_calls",
+        "fn dedup_semantic_effect_sites",
+        "fn ruby_immutable",
+        "fn reader_sets_to_vecs",
+        "fn ruby_type_alias",
+        "fn ruby_method_param_types",
+        "fn ruby_sig_param_types",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "tree_sitter_adapter.rs should parse and orchestrate passes, not own stateful fact engines:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn rust_syntax_passes_do_not_touch_parser_internals() {
+    let checked = [
+        crate_src().join("syntax/passes.rs"),
+        crate_src().join("syntax/effects.rs"),
+        crate_src().join("syntax/ruby_metadata.rs"),
+    ];
+    let forbidden = ["tree_sitter", "RawNode", "document.root"];
+    let mut offenders = Vec::new();
+
+    for path in checked {
+        let source = production_source(&fs::read_to_string(&path).expect("read pass file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Stateful pass modules must consume facts/source metadata, not parser internals:\n{}",
         offenders.join("\n")
     );
 }

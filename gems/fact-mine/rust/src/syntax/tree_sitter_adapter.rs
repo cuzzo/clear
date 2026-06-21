@@ -1,11 +1,8 @@
 use super::{
-    adapters::{
-        false_simplicity_lexicon::{false_simplicity_lexicon, FalseSimplicityLexicon},
-        language_profile, LanguageProfile,
-    },
-    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, Document,
-    FunctionDef, Language, OwnerDef, PredicateAlias, SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite,
+    adapters::{language_profile, LanguageProfile},
+    effects, passes, ruby_metadata, BranchArm, BranchDecision, CallSite, ComparisonUse,
+    DecisionSite, DispatchSite, Document, FunctionDef, Language, OwnerDef, PredicateAlias,
+    StateDeclaration, StateRead, StateWrite,
 };
 use crate::ast::{line, node_text, normalize_text, normalize_tree, span, RawNode};
 use crate::syntax::complexity::local_complexity_scores;
@@ -77,18 +74,7 @@ fn parse_file_with_options(
     let mut seen_reads = HashSet::new();
     let mut seen_calls = HashSet::new();
     let mut seen_decisions = HashSet::new();
-    let mut context = ContextState::new(file_owner(&parsed.file));
-    if language == Language::Ruby {
-        let started = Instant::now();
-        context.immutable_readers = ruby_immutable_struct_readers(&parsed.source);
-        profile_parse_phase(
-            profile,
-            &file_label,
-            "ruby_immutable_readers",
-            started.elapsed(),
-        );
-    }
-
+    let context = ContextState::new(file_owner(&parsed.file));
     let started = Instant::now();
     collect_facts(
         parsed.tree.root_node(),
@@ -162,7 +148,7 @@ fn parse_file_with_options(
     );
     let started = Instant::now();
     let mut semantic_effect_sites =
-        semantic_effect_sites_from_calls(language, &call_sites, &function_defs);
+        effects::semantic_effect_sites_from_calls(language, &call_sites, &function_defs);
     profile_parse_phase(
         rust_profile_enabled(),
         &file_label,
@@ -170,7 +156,7 @@ fn parse_file_with_options(
         started.elapsed(),
     );
     let started = Instant::now();
-    dedup_semantic_effect_sites(&mut semantic_effect_sites);
+    effects::dedup_semantic_effect_sites(&mut semantic_effect_sites);
     profile_parse_phase(
         rust_profile_enabled(),
         &file_label,
@@ -267,15 +253,9 @@ fn parse_normalized_file(
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
     let started = Instant::now();
-    let mut facts = super::normalized_extractor::extract(&parsed.file, &normalized_root);
-    facts
-        .semantic_effect_sites
-        .extend(semantic_effect_sites_from_calls(
-            Language::Ruby,
-            &facts.call_sites,
-            &facts.function_defs,
-        ));
-    dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
+    let mut facts = passes::StatelessSyntaxPass::normalized(&parsed.file, &normalized_root).run();
+    let metadata = passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, Language::Ruby)
+        .enrich(&mut facts);
     profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
 
     let started = Instant::now();
@@ -290,22 +270,6 @@ fn parse_normalized_file(
         "normalized_raw_root",
         started.elapsed(),
     );
-
-    let started = Instant::now();
-    let local_complexity_scores =
-        local_complexity_scores(&parsed.file.to_string_lossy(), &facts.function_defs);
-    profile_parse_phase(
-        profile,
-        file_label,
-        "local_complexity_scores",
-        started.elapsed(),
-    );
-
-    let immutable_struct_readers =
-        reader_sets_to_vecs(ruby_immutable_struct_readers(&parsed.source));
-    let immutable_struct_reader_types = ruby_immutable_struct_reader_types(&parsed.source);
-    let type_aliases = ruby_type_aliases(&parsed.source);
-    let method_param_types = ruby_method_param_types(&parsed.source, &facts.function_defs);
 
     let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
@@ -329,17 +293,17 @@ fn parse_normalized_file(
         branch_arms: facts.branch_arms,
         dispatch_sites: facts.dispatch_sites,
         semantic_effect_sites: facts.semantic_effect_sites,
-        local_complexity_scores,
+        local_complexity_scores: metadata.local_complexity_scores,
         predicate_aliases: facts.predicate_aliases,
         comparison_uses: facts.comparison_uses,
         path_condition_sites: facts.path_condition_sites,
         protocol_method_effects: Vec::new(),
         protocol_call_paths: Vec::new(),
         clone_candidates: Vec::new(),
-        immutable_struct_readers,
-        immutable_struct_reader_types,
-        type_aliases,
-        method_param_types,
+        immutable_struct_readers: metadata.ruby.immutable_struct_readers,
+        immutable_struct_reader_types: metadata.ruby.immutable_struct_reader_types,
+        type_aliases: metadata.ruby.type_aliases,
+        method_param_types: metadata.ruby.method_param_types,
     };
     profile_parse_phase(
         profile,
@@ -559,144 +523,6 @@ fn collect_facts(
             seen_decisions,
         );
     }
-}
-
-const GENERIC_SYSTEM_IO_BARE: &[&str] =
-    &["print", "println", "eprintln", "printf", "puts", "panic"];
-
-fn semantic_effect_sites_from_calls(
-    language: Language,
-    call_sites: &[CallSite],
-    function_defs: &[FunctionDef],
-) -> Vec<SemanticEffectSite> {
-    let lexicon = false_simplicity_lexicon(language);
-    let local_methods = function_defs
-        .iter()
-        .map(|function| (function.owner.clone(), function.name.clone()))
-        .collect::<HashSet<_>>();
-    call_sites
-        .iter()
-        .filter(|call| !local_self_call_to_known_function(call, &local_methods))
-        .filter_map(|call| semantic_effect_site_for_call(call, &lexicon))
-        .collect()
-}
-
-fn local_self_call_to_known_function(
-    call: &CallSite,
-    local_methods: &HashSet<(String, String)>,
-) -> bool {
-    call.receiver == "self" && local_methods.contains(&(call.owner.clone(), call.message.clone()))
-}
-
-fn semantic_effect_site_for_call(
-    call: &CallSite,
-    lexicon: &FalseSimplicityLexicon,
-) -> Option<SemanticEffectSite> {
-    let message = call.message.as_str();
-    let (kind, detail) = if effect_callback_call(call, message, lexicon) {
-        ("callback_inversion", message.to_string())
-    } else if lexicon.meta_mids.contains(&message) {
-        ("metaprogramming", message.to_string())
-    } else if lexicon.dispatch_mids.contains(&message) {
-        ("dynamic_dispatch", message.to_string())
-    } else if message == "call" && !call.receiver.is_empty() {
-        if method_object_receiver(&call.receiver, lexicon) {
-            ("dynamic_dispatch", "method(...).call".to_string())
-        } else if variable_receiver(&call.receiver) {
-            ("dynamic_dispatch", format!("{}.call", call.receiver))
-        } else {
-            return None;
-        }
-    } else if let Some((kind, detail)) = const_effect_kind_detail(call, message, lexicon) {
-        (kind, detail)
-    } else if call.receiver == "self"
-        && (lexicon.io_bare.contains(&message) || GENERIC_SYSTEM_IO_BARE.contains(&message))
-    {
-        ("hidden_io", message.to_string())
-    } else if call.receiver == "self" && lexicon.context_bare.contains(&message) {
-        ("context_dependency", message.to_string())
-    } else if message.len() > 1 && message.ends_with('!') && !matches!(message, "!=" | "!~") {
-        ("hidden_mutation", message.to_string())
-    } else {
-        return None;
-    };
-
-    Some(SemanticEffectSite {
-        kind: kind.to_string(),
-        detail,
-        file: call.file.clone(),
-        function: call.function.clone(),
-        line: call.line,
-        span: call.span,
-    })
-}
-
-fn const_effect_kind_detail(
-    call: &CallSite,
-    message: &str,
-    lexicon: &FalseSimplicityLexicon,
-) -> Option<(&'static str, String)> {
-    let receiver = call.receiver.as_str();
-    if receiver.is_empty() || receiver == "self" {
-        return None;
-    }
-    let base = receiver
-        .trim_start_matches("::")
-        .split("::")
-        .next()
-        .unwrap_or("");
-    if base == "Dir" && lexicon.dir_context.contains(&message) {
-        return Some(("context_dependency", format!("Dir.{message}")));
-    }
-    if receiver == "URI" && message == "open" {
-        return Some(("hidden_io", "URI.open".to_string()));
-    }
-    if lexicon.io_consts.contains(&base) || receiver.starts_with("Net::") {
-        return Some((
-            "hidden_io",
-            format!("{}.{}", receiver.trim_start_matches("::"), message),
-        ));
-    }
-    if receiver == "ENV" {
-        return Some(("context_dependency", "ENV".to_string()));
-    }
-    if lexicon
-        .context_pairs
-        .iter()
-        .any(|(name, mids)| *name == base && mids.contains(&message))
-    {
-        return Some(("context_dependency", format!("{base}.{message}")));
-    }
-    None
-}
-
-fn effect_callback_call(call: &CallSite, message: &str, lexicon: &FalseSimplicityLexicon) -> bool {
-    (call.block || call.arguments.iter().any(|arg| arg.starts_with('&')))
-        && effect_callback_name(message, lexicon)
-        && !lexicon.meta_mids.contains(&message)
-}
-
-fn effect_callback_name(message: &str, lexicon: &FalseSimplicityLexicon) -> bool {
-    lexicon.callback_set.contains(&message)
-        || message.starts_with("with_")
-        || message.starts_with("around_")
-        || message.starts_with("on_")
-        || message.starts_with("before_")
-        || message.starts_with("after_")
-        || message.ends_with("_hook")
-}
-
-fn method_object_receiver(receiver: &str, lexicon: &FalseSimplicityLexicon) -> bool {
-    lexicon
-        .method_obj_mids
-        .iter()
-        .any(|name| receiver.contains(name))
-}
-
-fn variable_receiver(receiver: &str) -> bool {
-    let mut chars = receiver.chars();
-    matches!(chars.next(), Some(first) if first == '@' || first == '$' || first == '_' || first.is_ascii_lowercase())
-        && chars.all(|ch| ch == '_' || ch == '!' || ch == '?' || ch.is_ascii_alphanumeric())
 }
 
 fn collect_dispatch_sites(
@@ -1418,7 +1244,12 @@ fn collect_branch_state_refs(
             // Function-local bindings are not object state, even when a
             // language permits bare predicate-style method calls.
         } else if profile.language() == Language::Ruby
-            && ruby_immutable_param_state_read(receiver, &field, context)
+            && ruby_metadata::immutable_param_state_read(
+                receiver,
+                &field,
+                &context.param_types,
+                &context.immutable_readers,
+            )
         {
             // Sorbet T::Struct readers on typed params are immutable data reads,
             // not mutable object state.
@@ -1464,20 +1295,6 @@ fn collect_branch_nested_scope_state_refs(
     }
 }
 
-fn dedup_semantic_effect_sites(sites: &mut Vec<SemanticEffectSite>) {
-    let mut seen = HashSet::new();
-    sites.retain(|site| {
-        seen.insert((
-            site.kind.clone(),
-            site.detail.clone(),
-            site.file.clone(),
-            site.function.clone(),
-            site.line,
-            site.span,
-        ))
-    });
-}
-
 fn branch_local_ref(
     node: Node<'_>,
     source: &str,
@@ -1488,228 +1305,6 @@ fn branch_local_ref(
     (receiver.is_empty() || matches!(receiver, "self" | "this"))
         && context.locals.contains(field)
         && normalize_text(node_text(node, source)) == field
-}
-
-fn ruby_immutable_param_state_read(receiver: &str, field: &str, context: &ContextState) -> bool {
-    if receiver.is_empty() || matches!(receiver, "self" | "this") {
-        return false;
-    }
-    let Some(param) = receiver.split('.').next() else {
-        return false;
-    };
-    let Some(type_name) = context.param_types.get(param) else {
-        return false;
-    };
-    let field = field.trim_end_matches('?');
-    ruby_immutable_reader(type_name, field, &context.immutable_readers)
-}
-
-fn ruby_immutable_reader(
-    type_name: &str,
-    field: &str,
-    readers: &BTreeMap<String, BTreeSet<String>>,
-) -> bool {
-    let short = type_name.split("::").last().unwrap_or(type_name);
-    readers
-        .get(type_name)
-        .or_else(|| readers.get(short))
-        .map(|fields| fields.contains(field))
-        .unwrap_or(false)
-}
-
-fn ruby_immutable_struct_readers(source: &str) -> BTreeMap<String, BTreeSet<String>> {
-    let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut class_stack = Vec::new();
-    for line in source.lines() {
-        let stripped = line.trim();
-        if let Some(name) = stripped
-            .strip_prefix("class ")
-            .and_then(|rest| rest.split_once("< T::Struct").map(|(name, _)| name.trim()))
-            .filter(|name| ruby_constant_path(name))
-        {
-            class_stack.push(name.to_string());
-            continue;
-        }
-        if let Some(owner) = class_stack.last() {
-            if let Some(field) = stripped
-                .strip_prefix("const :")
-                .and_then(|rest| {
-                    rest.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-                        .next()
-                })
-                .filter(|field| !field.is_empty())
-            {
-                readers
-                    .entry(owner.clone())
-                    .or_default()
-                    .insert(field.to_string());
-                continue;
-            }
-        }
-        if !class_stack.is_empty() && stripped.trim_end_matches(';') == "end" {
-            class_stack.pop();
-        }
-    }
-    readers
-}
-
-fn reader_sets_to_vecs(
-    readers: BTreeMap<String, BTreeSet<String>>,
-) -> BTreeMap<String, Vec<String>> {
-    readers
-        .into_iter()
-        .map(|(owner, fields)| (owner, fields.into_iter().collect()))
-        .collect()
-}
-
-fn ruby_immutable_struct_reader_types(
-    source: &str,
-) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-    let mut class_stack = Vec::new();
-    for line in source.lines() {
-        let stripped = line.trim();
-        if let Some(name) = stripped
-            .strip_prefix("class ")
-            .and_then(|rest| rest.split_once("< T::Struct").map(|(name, _)| name.trim()))
-            .filter(|name| ruby_constant_path(name))
-        {
-            class_stack.push(name.to_string());
-            continue;
-        }
-        if let Some(owner) = class_stack.last() {
-            if let Some((field, type_name)) = stripped
-                .strip_prefix("const :")
-                .and_then(|rest| rest.split_once(','))
-                .map(|(field, type_name)| {
-                    (
-                        field
-                            .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-                            .next()
-                            .unwrap_or("")
-                            .trim(),
-                        type_name
-                            .trim()
-                            .split(|ch: char| !matches!(ch, ':' | '_' | 'A'..='Z' | 'a'..='z' | '0'..='9'))
-                            .next()
-                            .unwrap_or("")
-                            .trim(),
-                    )
-                })
-                .filter(|(field, type_name)| {
-                    !field.is_empty() && ruby_constant_path(type_name)
-                })
-            {
-                reader_types
-                    .entry(owner.clone())
-                    .or_default()
-                    .insert(field.to_string(), type_name.to_string());
-                continue;
-            }
-        }
-        if !class_stack.is_empty() && stripped.trim_end_matches(';') == "end" {
-            class_stack.pop();
-        }
-    }
-    reader_types
-}
-
-fn ruby_type_aliases(source: &str) -> BTreeMap<String, String> {
-    let mut aliases = BTreeMap::new();
-    for line in source.lines() {
-        let stripped = line.trim();
-        if let Some((name, rest)) = stripped.split_once('=') {
-            let name = name.trim();
-            if !ruby_constant_path(name) {
-                continue;
-            }
-            let rest = rest.trim();
-            let target = if let Some(inner) = rest
-                .strip_prefix("T.type_alias")
-                .and_then(|value| value.split_once('{').map(|(_, right)| right))
-                .and_then(|value| value.split_once('}').map(|(left, _)| left.trim()))
-            {
-                inner
-            } else {
-                rest.split_whitespace().next().unwrap_or("")
-            };
-            if ruby_constant_path(target) {
-                aliases.insert(name.to_string(), target.to_string());
-            }
-        }
-    }
-    aliases
-}
-
-fn ruby_method_param_types(
-    source: &str,
-    functions: &[FunctionDef],
-) -> BTreeMap<String, BTreeMap<String, String>> {
-    functions
-        .iter()
-        .map(|function| {
-            (
-                function.name.clone(),
-                ruby_sig_param_types(source, function.line),
-            )
-        })
-        .filter(|(_, param_types)| !param_types.is_empty())
-        .collect()
-}
-
-fn ruby_sig_param_types(source: &str, function_line: usize) -> BTreeMap<String, String> {
-    let lines = source.lines().collect::<Vec<_>>();
-    let mut sig_lines = Vec::new();
-    let mut cursor = function_line.saturating_sub(2);
-    while let Some(line) = lines.get(cursor) {
-        let stripped = line.trim();
-        if !stripped.is_empty() {
-            sig_lines.push(*line);
-        }
-        if stripped.starts_with("sig") {
-            break;
-        }
-        if cursor == 0 || sig_lines.len() >= 12 {
-            break;
-        }
-        cursor -= 1;
-    }
-    sig_lines.reverse();
-    let sig = sig_lines.join("\n");
-    if !sig.trim_start().starts_with("sig") {
-        return BTreeMap::new();
-    }
-    let Some(params_start) = sig.find("params(").map(|index| index + "params(".len()) else {
-        return BTreeMap::new();
-    };
-    let rest = &sig[params_start..];
-    let Some(params_end) = rest.find(')') else {
-        return BTreeMap::new();
-    };
-    rest[..params_end]
-        .split(',')
-        .filter_map(|part| {
-            let (name, type_name) = part.split_once(':')?;
-            let name = name.trim();
-            let type_name = type_name.trim();
-            (ruby_identifier(name) && ruby_constant_path(type_name))
-                .then(|| (name.to_string(), type_name.to_string()))
-        })
-        .collect()
-}
-
-fn ruby_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn ruby_constant_path(value: &str) -> bool {
-    value.split("::").all(|part| {
-        let mut chars = part.chars();
-        matches!(chars.next(), Some(ch) if ch.is_ascii_uppercase())
-            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    })
 }
 
 fn declared_state_index(declarations: &[StateDeclaration]) -> BTreeMap<String, BTreeSet<String>> {
@@ -2015,7 +1610,7 @@ fn node_context<'a>(
         next.receiver = profile.function_receiver_name(node, source);
         next.locals = profile.function_params(node, source).into_iter().collect();
         next.param_types = if language == Language::Ruby {
-            ruby_sig_param_types(source, line(node))
+            ruby_metadata::sig_param_types(source, line(node))
         } else {
             BTreeMap::new()
         };

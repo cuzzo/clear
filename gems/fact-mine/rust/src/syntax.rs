@@ -1,11 +1,15 @@
 pub(crate) mod adapters;
+pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
+pub(crate) mod effects;
 pub mod local_flow;
 pub(crate) mod normalized_extractor;
+pub(crate) mod passes;
 pub mod path_condition;
 pub(crate) mod protocols;
 pub(crate) mod raw_tree;
 pub mod redundant_nil_guard;
+pub(crate) mod ruby_metadata;
 pub mod tree_sitter_adapter;
 pub(crate) mod visibility;
 
@@ -461,7 +465,10 @@ pub fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
     if !document.clone_candidates.is_empty() {
         return document.clone_candidates.clone();
     }
-    adapters::clone_candidates(document)
+    clone_similarity::clone_candidates_for_profile(
+        adapters::language_profile(document.language),
+        document,
+    )
 }
 
 pub fn core_owner_names(document: &Document) -> &'static [&'static str] {

@@ -1,6 +1,7 @@
+use super::super::clone_similarity::default_clone_candidate_node;
 use super::super::tree_sitter_adapter::Target;
 use super::super::Language;
-use super::base::{default_clone_candidate_node, LanguageProfile};
+use super::base::LanguageProfile;
 use crate::ast::RawNode;
 use tree_sitter::{Language as TreeSitterLanguage, Node};
 
