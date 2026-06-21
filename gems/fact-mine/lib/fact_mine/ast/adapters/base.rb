@@ -12,24 +12,17 @@ module FactMine
       ].freeze
       CLASS_KINDS = %w[class class_definition class_declaration class_specifier].freeze
       COMMON_ASSIGNMENT_OPERATORS = %w[= += -= *= /= %=].freeze
-      RUBY_ASSIGNMENT_OPERATORS = (COMMON_ASSIGNMENT_OPERATORS + %w[**= &&= ||= &= |= ^= <<= >>=]).freeze
-      PYTHON_ASSIGNMENT_OPERATORS = (COMMON_ASSIGNMENT_OPERATORS + %w[//= **= @= &= |= ^= <<= >>= :=]).freeze
-      LUA_ASSIGNMENT_OPERATORS = %w[=].freeze
-      TYPESCRIPT_ASSIGNMENT_OPERATORS = (
-        COMMON_ASSIGNMENT_OPERATORS + %w[**= <<= >>= >>>= &= |= ^= &&= ||= ??=]
-      ).freeze
       OPERATOR_CALL_OPERATORS = %w[+ - * / % ** | & ^ << >> =~ !~].freeze
-      BOOLEAN_EXPRESSION_KINDS = %w[binary binary_expression boolean_operator].freeze
+      BOOLEAN_EXPRESSION_KINDS = %w[binary binary_expression boolean_operator conjunction_expression].freeze
       COMPARISON_EXPRESSION_KINDS = %w[binary binary_expression comparison_operator].freeze
       DOTTED_EXPRESSION_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
-      PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS = (DOTTED_EXPRESSION_WRAPPER_KINDS + %w[expression_statement]).freeze
       LITERAL_CONTAINER_KINDS = %w[string delimited_symbol regex regex_literal].freeze
       LITERAL_FRAGMENT_KINDS = %w[string_content escape_sequence interpolation string_fragment].freeze
       CASE_ARGUMENT_WHEN_KINDS = %w[
         when switch_case case_clause expression_case case_statement switch_section
         switch_block_statement_group switch_entry when_entry match_arm
       ].freeze
-      CASE_ELSE_KINDS = %w[else switch_default].freeze
+      CASE_ELSE_KINDS = %w[default_case default_statement else switch_default].freeze
       CASE_DEFAULT_PATTERN_KINDS = %w[case_pattern match_pattern pattern].freeze
       ADAPTER_FUNCTION_KINDS = %w[
         method function_definition function_declaration method_definition
@@ -44,17 +37,12 @@ module FactMine
         identifier simple_identifier property_identifier field_identifier shorthand_property_identifier
       ].freeze
       LEADING_FUNCTION_WRAPPER_KINDS = %w[body_statement statement].freeze
-      PYTHON_LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
-      LUA_LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
       OWNER_STATEMENT_NESTED_KIND = %w[class class_definition class_declaration module].freeze
       LEADING_OWNER_WRAPPER_KINDS = %w[body_statement statement].freeze
-      PYTHON_LEADING_OWNER_WRAPPER_KINDS = %w[block].freeze
       IF_NODE_KINDS = %w[if if_statement if_modifier unless unless_modifier if_expression conditional].freeze
-      LEADING_IF_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
-      PYTHON_LEADING_IF_WRAPPER_KINDS = %w[block].freeze
-      LUA_LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+      LEADING_IF_WRAPPER_KINDS = %w[body_statement block block_body expression_statement statement].freeze
       LEADING_CASE_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
-      LEADING_LOOP_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
+      LEADING_LOOP_WRAPPER_KINDS = %w[body_statement block block_body expression_statement statement].freeze
       RESCUE_BODY_WRAPPER_KINDS = %w[body_statement block_body statement].freeze
       ENSURE_BODY_WRAPPER_KINDS = %w[body_statement block_body statement].freeze
       ARRAY_LITERAL_WRAPPER_KINDS = %w[
@@ -75,33 +63,12 @@ module FactMine
       HEREDOC_BODY_WRAPPER_KINDS = %w[body_statement block_body statement then].freeze
       INTERPOLATED_STATEMENT_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
       CONCATENATED_STRING_WRAPPER_KINDS = %w[body_statement block_body statement argument_list].freeze
-      PYTHON_CONCATENATED_STRING_WRAPPER_KINDS = (CONCATENATED_STRING_WRAPPER_KINDS + %w[block expression_statement]).freeze
       CONCATENATED_STRING_NODE_KINDS = %w[chained_string concatenated_string].freeze
       UNWRAP_KINDS = %w[
         parenthesized_expression parenthesized_statements expression_statement statement
         case_pattern match_pattern pattern
       ].freeze
-      PYTHON_BODY_FIELD_KINDS = %w[
-        elif_clause else_clause for_statement function_definition if_statement
-        try_statement while_statement with_statement
-      ].freeze
       QUESTION_COLON_TERNARY_KINDS = %w[body_statement block_body statement argument_list conditional].freeze
-      TYPESCRIPT_TERNARY_KINDS = (QUESTION_COLON_TERNARY_KINDS + %w[ternary_expression]).freeze
-
-      class << self
-        def for(document)
-          case document&.language&.to_sym
-          when :ruby then RubyTreeSitterNormalizationAdapter.new(document)
-          when :python then PythonTreeSitterNormalizationAdapter.new(document)
-          when :lua then LuaTreeSitterNormalizationAdapter.new(document)
-          when :typescript, :javascript then TypeScriptTreeSitterNormalizationAdapter.new(document)
-          when :rust then RustTreeSitterNormalizationAdapter.new(document)
-          else
-            raise UnsupportedLanguageError,
-                  "unsupported AST normalization language #{document&.language.inspect}"
-          end
-        end
-      end
 
       attr_reader :document
 
@@ -109,11 +76,11 @@ module FactMine
         @document = document
       end
 
-      def ruby?
+      def yield_statement?(_node)
         false
       end
 
-      def yield_statement?(_node)
+      def identifier_yield?(_node)
         false
       end
 
@@ -121,10 +88,169 @@ module FactMine
         false
       end
 
+      def with_local_scope(_node, reset: false)
+        yield
+      end
+
+      def local_name?(_name)
+        false
+      end
+
+      def definition_identifier?(_node, helpers:)
+        false
+      end
+
+      def implicit_call_identifier?(node, helpers:)
+        return false unless helpers.__send__(:local_identifier?, node)
+        return false if helpers.__send__(:assignment_lhs?, node)
+        return false if helpers.__send__(:assignment_rhs?, node)
+
+        parent = helpers.__send__(:parent_node, node)
+        return false unless helpers.__send__(:ts_node?, parent)
+        return false if %w[method method_parameters parameter_list argument_list arguments].include?(parent.kind)
+        return false if helpers.__send__(:member_read_node?, parent)
+        return false if helpers.__send__(:dotted_expression?, parent)
+
+        return true if %w[body_statement block_body then].include?(parent.kind) &&
+                       helpers.__send__(:parent_named_child?, parent, node)
+        return true if %w[if_modifier unless_modifier].include?(parent.kind) &&
+                       helpers.__send__(:same_ts_node?, parent.named_children.first, node)
+
+        false
+      end
+
+      def logical_operator_assignment?(_left, _operator, helpers:)
+        false
+      end
+
       def explicit_alternative(node)
-        node.named_children.find { |child| %w[else else_clause else_statement].include?(child.kind) }
+        alternative = node.named_children.find { |child| %w[else else_clause else_statement].include?(child.kind) }
+        return nil unless alternative
+        return alternative unless alternative.kind == "else" && alternative.named_children.empty?
+
+        index = node.named_children.index(alternative)
+        node.named_children[index.to_i + 1] || alternative
       rescue StandardError
         nil
+      end
+
+      def branch_child_fallback?
+        true
+      end
+
+      def special_if_statement?(_node)
+        false
+      end
+
+      def normalize_special_if(_node, helpers:)
+        nil
+      end
+
+      def typed_assignment_statement?(_node)
+        false
+      end
+
+      def normalize_typed_assignment_statement(_node, helpers:)
+        nil
+      end
+
+      def normalize_parameters(_node, helpers:)
+        nil
+      end
+
+      def normalize_block_parameters(_block, helpers:)
+        nil
+      end
+
+      def text_loop_statement?(node)
+        %w[expression_statement labeled_statement].include?(node.kind) &&
+          node.text.to_s.lstrip.start_with?("for ")
+      rescue StandardError
+        false
+      end
+
+      def normalize_text_loop_statement(node, helpers:)
+        body = helpers.__send__(:block_child, node) ||
+               node.named_children.reverse.find { |child| child.kind == "block_expression" }
+        cond = node.named_children.find { |child| child != body }
+        helpers.__send__(
+          :wrap,
+          :FOR,
+          children: [helpers.__send__(:normalize_node, cond), helpers.__send__(:normalize_body, body)],
+          source: node
+        )
+      end
+
+      def normalize_operator_call_override(_node, _left, _operator, _right, helpers:)
+        nil
+      end
+
+      def element_reference_override(_node, _receiver, _arguments, helpers:)
+        nil
+      end
+
+      def hash_pair_value_override(_key, _value, helpers:)
+        nil
+      end
+
+      def argument_list_call?(_node)
+        false
+      end
+
+      def argument_list_element_reference?(_node)
+        false
+      end
+
+      def callable_yield?(_function)
+        false
+      end
+
+      def callable_constant_as_function?(_function, helpers:)
+        false
+      end
+
+      def elide_single_symbol_return?(_children, _elide_symbol)
+        false
+      end
+
+      def case_pattern_prefix(_node)
+        []
+      end
+
+      def normalize_case_pattern_override(_pattern, helpers:)
+        nil
+      end
+
+      def argument_list_unary_not?(_node)
+        false
+      end
+
+      def normalize_dynamic_scope(node, helpers:)
+        node
+      end
+
+      def inline_def_source?(_source)
+        false
+      end
+
+      def normalize_tail_returns(node, helpers:)
+        node
+      end
+
+      def normalize_implicit_nil_body(node, helpers:)
+        node
+      end
+
+      def inline_parameter_begin(_function_node)
+        nil
+      end
+
+      def local_or_call_for_name(name, source, helpers:)
+        helpers.__send__(:wrap, :LVAR, children: [name], source: source)
+      end
+
+      def call_arguments_from_text?(_node)
+        false
       end
 
       def unary_not_expression?(node)
@@ -334,7 +460,7 @@ module FactMine
         return false unless target
 
         !target.children.first&.named? &&
-          %w[while until].include?(target.children.first&.kind.to_s) &&
+          %w[while until for].include?(target.children.first&.kind.to_s) &&
           target.named_children.size >= 2
       rescue StandardError
         false

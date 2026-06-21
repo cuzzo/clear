@@ -33,7 +33,7 @@ class AstTest < Minitest::Test
       if_node = nodes_of_type(root, "IF").find { |node| node.text.include?("test_env.LUA_V") }
 
       refute_nil if_node
-      assert_equal "ELSEIF_STATEMENT", if_node.children[2].type.to_s
+      assert_equal "IF", if_node.children[2].type.to_s
     end
   end
 
@@ -93,7 +93,7 @@ class AstTest < Minitest::Test
 
       refute_nil defn
       assert_equal "BLOCK", body.type.to_s
-      assert_equal %w[YIELD EXPRESSION_STATEMENT], body.children.map(&:type).map(&:to_s)
+      assert_equal %w[YIELD VCALL], body.children.map(&:type).map(&:to_s)
     end
   end
 
@@ -407,12 +407,9 @@ class AstTest < Minitest::Test
     end
   end
 
-  def test_tree_sitter_normalizer_rejects_unsupported_normalization_languages
-    error = assert_raises(FactMine::Ast::UnsupportedLanguageError) do
-      FactMine::Ast::TreeSitterNormalizationAdapter.for(fake_document(:go))
-    end
-
-    assert_includes error.message, ":go"
+  def test_tree_sitter_normalizer_uses_base_adapter_for_languages_without_specific_quirks
+    assert_instance_of FactMine::Ast::TreeSitterNormalizationAdapter,
+                       FactMine::Ast::TreeSitterNormalizationAdapter.for(fake_document(:go))
   end
 
   def test_parse_semantic_returns_language_neutral_ruby_facts
@@ -2078,11 +2075,11 @@ class AstTest < Minitest::Test
   def test_lua_call_arguments_with_keyed_table_preserve_argument_list
     with_language_file("assert.same(install, { bin = { P\"bin/binfile\" } })\n", ".lua", :lua) do |file|
       root, = parse_language(file, :lua)
-      call = nodes_of_type(root, "FUNCTION_CALL").find { |node| node.text.start_with?("assert.same") }
+      call = nodes_of_type(root, "CALL").find { |node| node.text.start_with?("assert.same") }
 
       refute_nil call
-      arguments = call.children[1]
-      assert_equal "ARGUMENTS", arguments.type.to_s
+      arguments = call.children[2]
+      assert_equal "LIST", arguments.type.to_s
       assert_equal %w[LVAR HASH], arguments.children.map(&:type).map(&:to_s)
       assert_equal "install", arguments.children.first.children.first
     end

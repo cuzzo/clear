@@ -5,6 +5,21 @@ require_relative "base"
 module FactMine
   module Ast
     class PythonTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      ASSIGNMENT_OPERATORS = (COMMON_ASSIGNMENT_OPERATORS + %w[//= **= @= &= |= ^= <<= >>= :=]).freeze
+      DOTTED_EXPRESSION_WRAPPER_KINDS = (
+        TreeSitterNormalizationAdapter::DOTTED_EXPRESSION_WRAPPER_KINDS + %w[expression_statement]
+      ).freeze
+      LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
+      LEADING_OWNER_WRAPPER_KINDS = %w[block].freeze
+      LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+      CONCATENATED_STRING_WRAPPER_KINDS = (
+        TreeSitterNormalizationAdapter::CONCATENATED_STRING_WRAPPER_KINDS + %w[block expression_statement]
+      ).freeze
+      BODY_FIELD_KINDS = %w[
+        elif_clause else_clause for_statement function_definition if_statement
+        try_statement while_statement with_statement
+      ].freeze
+
       def yield_statement?(node)
         (%w[body_statement block block_body expression_statement statement].include?(node.kind) &&
           node.children.first&.text == "yield")
@@ -29,7 +44,7 @@ module FactMine
       end
 
       def leading_function_statement?(node)
-        leading_function_statement_with_keyword?(node, "def", PYTHON_LEADING_FUNCTION_WRAPPER_KINDS)
+        leading_function_statement_with_keyword?(node, "def", LEADING_FUNCTION_WRAPPER_KINDS)
       end
 
       def leading_function_body(node)
@@ -39,7 +54,7 @@ module FactMine
       end
 
       def leading_owner_target(node)
-        return node if PYTHON_LEADING_OWNER_WRAPPER_KINDS.include?(node.kind)
+        return node if LEADING_OWNER_WRAPPER_KINDS.include?(node.kind)
 
         super
       rescue StandardError
@@ -47,7 +62,7 @@ module FactMine
       end
 
       def leading_if_target(node)
-        if PYTHON_LEADING_IF_WRAPPER_KINDS.include?(node.kind)
+        if LEADING_IF_WRAPPER_KINDS.include?(node.kind)
           child = exact_single_named_child(node, kinds: %w[if_statement])
           return child if child
         end
@@ -184,6 +199,27 @@ module FactMine
         false
       end
 
+      def typed_assignment_statement?(node)
+        return false unless %w[expression_statement statement].include?(node.kind)
+        return false unless node.children.any? { |child| !child.named? && child.text == ":" }
+        return false unless node.children.any? { |child| !child.named? && child.text == "=" }
+
+        node.named_children.size >= 3
+      rescue StandardError
+        false
+      end
+
+      def normalize_typed_assignment_statement(node, helpers:)
+        left = node.named_children.first
+        right = node.named_children.last
+        helpers.__send__(
+          :wrap,
+          :LASGN,
+          children: [helpers.__send__(:target_name, left), helpers.__send__(:normalize_node, right)],
+          source: node
+        )
+      end
+
       private
 
       def flattened_try_block?(node, clauses:)
@@ -196,7 +232,7 @@ module FactMine
 
       def python_body_field(node, name)
         return nil unless %w[body consequence].include?(name.to_s)
-        return nil unless PYTHON_BODY_FIELD_KINDS.include?(node.kind)
+        return nil unless BODY_FIELD_KINDS.include?(node.kind)
 
         node.named_children.find { |child| child.kind == "block" }
       rescue StandardError
@@ -204,7 +240,7 @@ module FactMine
       end
 
       def assignment_operators
-        PYTHON_ASSIGNMENT_OPERATORS
+        ASSIGNMENT_OPERATORS
       end
 
       def operator_call_expression_kinds
@@ -212,11 +248,11 @@ module FactMine
       end
 
       def concatenated_string_wrapper_kinds
-        PYTHON_CONCATENATED_STRING_WRAPPER_KINDS
+        CONCATENATED_STRING_WRAPPER_KINDS
       end
 
       def dotted_expression_wrapper_kinds
-        PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS
+        DOTTED_EXPRESSION_WRAPPER_KINDS
       end
     end
 

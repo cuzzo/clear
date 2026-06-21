@@ -62,6 +62,7 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     kotlin.rb
     lua.rb
     nil_guards.rb
+    normalized_extractor.rb
     passes.rb
     php.rb
     protocols.rb
@@ -82,6 +83,28 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     "stateful syntax enrichment belongs in syntax/passes.rb" =>
       /^\s*def\s+after_structural_facts\b/
   }.freeze
+  CONCRETE_LANGUAGE_TOKENS = /\b(?:ruby|python|lua|typescript|javascript|rust|zig|swift|kotlin|php|go|java|csharp|cpp)\b/i
+  AST_GENERIC_FILES = %w[
+    ast/normalizer.rb
+    ast/adapters/base.rb
+  ].freeze
+  AST_ALLOWED_FILES = %w[
+    cache.rb
+    node.rb
+    source_map.rb
+    semantic_node.rb
+    semantic_normalizer.rb
+    legacy_normalizer.rb
+    normalizer.rb
+    adapters.rb
+    adapters/base.rb
+    adapters/lua.rb
+    adapters/python.rb
+    adapters/ruby.rb
+    adapters/rust.rb
+    adapters/typescript.rb
+    adapters/zig.rb
+  ].freeze
 
   def test_detector_specific_syntax_extensions_do_not_live_in_syntax_rb
     syntax_rb = File.join(LIB, "syntax.rb")
@@ -199,6 +222,48 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Syntax subfiles must not hide behavior behind their own requires",
+      offenders
+    )
+  end
+
+  def test_generic_ast_normalizer_files_do_not_reference_concrete_languages
+    files = AST_GENERIC_FILES.map { |file_name| File.join(LIB, file_name) }
+    offenders = scan_files(
+      files,
+      "generic AST normalizer code must not branch on concrete languages" => CONCRETE_LANGUAGE_TOKENS
+    )
+
+    assert_empty offenders, format_offenders(
+      "Concrete AST normalization behavior belongs in lib/fact_mine/ast/adapters/<language>.rb",
+      offenders
+    )
+  end
+
+  def test_ast_directory_does_not_gain_unreviewed_helper_files
+    ast_root = File.join(LIB, "ast")
+    files = Dir.glob(File.join(ast_root, "**", "*.rb")).map do |path|
+      path.delete_prefix("#{ast_root}/")
+    end.sort
+    unexpected = files - AST_ALLOWED_FILES.sort
+    missing = AST_ALLOWED_FILES.sort - files
+    offenders = unexpected.map { |file_name| "#{file_name}: unexpected AST helper file" } +
+                missing.map { |file_name| "#{file_name}: missing AST file" }
+
+    assert_empty offenders, format_offenders(
+      "AST helper files are an architecture boundary; update this invariant deliberately",
+      offenders
+    )
+  end
+
+  def test_generic_normalized_extractor_does_not_reference_concrete_languages
+    extractor = File.join(LIB, "syntax", "normalized_extractor.rb")
+    offenders = scan_files(
+      [extractor],
+      "generic normalized fact extraction must not branch on concrete languages" => CONCRETE_LANGUAGE_TOKENS
+    )
+
+    assert_empty offenders, format_offenders(
+      "Concrete normalized extraction quirks belong in the language syntax adapter files",
       offenders
     )
   end

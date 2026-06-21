@@ -4,6 +4,7 @@ require "set"
 require "rbconfig"
 require "json"
 require "ostruct"
+require_relative "ast"
 
 module FactMine
   module Syntax
@@ -2927,6 +2928,14 @@ module FactMine
       FactDocument.new(row, file: file, language: language, source: source, lines: source.lines)
     end
 
+    def normalized_fact_document(file, language:)
+      NormalizedExtractor.fact_document(file, language: language)
+    end
+
+    def syntax_pipeline
+      ENV.fetch("FACT_MINE_SYNTAX_PIPELINE", "normalized").tr("-", "_")
+    end
+
     class Document
       attr_reader :file, :language, :source, :lines, :root, :adapter
 
@@ -3257,7 +3266,19 @@ module FactMine
 
       def parse(file, language: nil)
         lang = (language || Syntax.language_for(file)).to_sym
-        return Syntax.native_fact_document(file, language: lang) if lang == :ruby
+
+        case Syntax.syntax_pipeline
+        when "", "normalized"
+          return Syntax.normalized_fact_document(file, language: lang)
+        when "legacy"
+          return Syntax.native_fact_document(file, language: lang) if lang == :ruby
+        when "native"
+          return Syntax.native_fact_document(file, language: lang)
+        when "raw"
+          # Fall through to the raw Tree-sitter adapter path below.
+        else
+          raise ArgumentError, "unknown FactMine syntax pipeline #{Syntax.syntax_pipeline.inspect}"
+        end
 
         parse_raw(file, language: lang)
       end
@@ -3488,3 +3509,4 @@ require_relative "syntax/clone_similarity"
 require_relative "syntax/complexity"
 require_relative "syntax/nil_guards"
 require_relative "syntax/fact_document"
+require_relative "syntax/normalized_extractor"

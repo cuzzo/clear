@@ -5,6 +5,10 @@ require_relative "base"
 module FactMine
   module Ast
     class LuaTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      ASSIGNMENT_OPERATORS = %w[=].freeze
+      LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
+      LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+
       def explicit_alternative(node)
         node.named_children.find { |child| %w[elseif_statement else else_statement].include?(child.kind) }
       rescue StandardError
@@ -37,7 +41,7 @@ module FactMine
       end
 
       def leading_function_statement?(node)
-        leading_function_statement_with_keyword?(node, "function", LUA_LEADING_FUNCTION_WRAPPER_KINDS)
+        leading_function_statement_with_keyword?(node, "function", LEADING_FUNCTION_WRAPPER_KINDS)
       end
 
       def leading_function_body(node)
@@ -47,12 +51,35 @@ module FactMine
       end
 
       def leading_if_target(node)
-        if LUA_LEADING_IF_WRAPPER_KINDS.include?(node.kind)
+        if LEADING_IF_WRAPPER_KINDS.include?(node.kind)
           child = exact_single_named_child(node, kinds: %w[if_statement])
           return child if child
         end
 
         super
+      end
+
+      def special_if_statement?(node)
+        node.kind == "if_statement"
+      rescue StandardError
+        false
+      end
+
+      def normalize_special_if(node, helpers:)
+        named = node.named_children
+        cond = named.first
+        positive = named.find { |child| child.kind == "block" }
+        alternatives = named.drop_while { |child| child != positive }.drop(1)
+        helpers.__send__(
+          :wrap,
+          :IF,
+          children: [
+            helpers.__send__(:normalize_node, cond),
+            helpers.__send__(:normalize_body, positive),
+            normalize_lua_alternatives(alternatives, helpers: helpers)
+          ],
+          source: node
+        )
       end
 
       def array_literal_target(node)
@@ -132,6 +159,30 @@ module FactMine
 
       private
 
+      def normalize_lua_alternatives(nodes, helpers:)
+        return nil if nodes.empty?
+
+        current = nodes.first
+        rest = nodes.drop(1)
+        if current.kind == "elseif_statement"
+          cond = current.named_children.first
+          positive = current.named_children.find { |child| child.kind == "block" }
+          return helpers.__send__(
+            :wrap,
+            :IF,
+            children: [
+              helpers.__send__(:normalize_node, cond),
+              helpers.__send__(:normalize_body, positive),
+              normalize_lua_alternatives(rest, helpers: helpers)
+            ],
+            source: current
+          )
+        end
+        return helpers.__send__(:normalize_else_or_branch, current) if current.kind == "else_statement"
+
+        normalize_lua_alternatives(rest, helpers: helpers)
+      end
+
       def lua_positional_table_arguments(node)
         return nil unless node&.kind == "arguments"
         return nil unless bracketed?(node, "{", "}")
@@ -164,7 +215,7 @@ module FactMine
       private
 
       def assignment_operators
-        LUA_ASSIGNMENT_OPERATORS
+        ASSIGNMENT_OPERATORS
       end
 
       def operator_call_expression_kinds
