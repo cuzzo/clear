@@ -211,6 +211,7 @@ module FactMine
         apply_visibility_events!
         append_effects_from_calls!
         dedupe_semantic_effects!
+        append_dispatch_facts!
         append_protocol_facts!
         append_normalized_local_facts!
         append_normalized_extension_facts!
@@ -303,6 +304,43 @@ module FactMine
         end
       end
 
+      def append_dispatch_facts!
+        derived = @profile.dispatch_sites(fact_document_view).map do |site|
+          site.to_h.transform_keys(&:to_s).tap do |row|
+            row["arm_members"] = row.fetch("arm_members").transform_keys(&:to_s)
+          end
+        end
+        @row["dispatch_sites"] = merge_dispatch_sites(@row.fetch("dispatch_sites") + derived)
+      end
+
+      def merge_dispatch_sites(sites)
+        sites.each_with_object({}) do |site, out|
+          normalized = normalized_dispatch_site(site)
+          out[dispatch_site_key(normalized)] ||= normalized
+        end.values
+      end
+
+      def normalized_dispatch_site(site)
+        site = site.transform_keys(&:to_s)
+        site.merge(
+          "variant_set" => Array(site.fetch("variant_set")).map(&:to_s).sort,
+          "arm_members" => site.fetch("arm_members").transform_keys(&:to_s).to_h do |member, values|
+            [member, Array(values).map(&:to_s).sort]
+          end,
+          "outside" => Array(site.fetch("outside")).map(&:to_s).sort
+        )
+      end
+
+      def dispatch_site_key(site)
+        [
+          site.fetch("file"),
+          site.fetch("function"),
+          site.fetch("line"),
+          site.fetch("span"),
+          site.fetch("variant_set")
+        ]
+      end
+
       def append_normalized_extension_facts!
         if Syntax.const_defined?(:CloneSimilarityAnalyzer, false)
           @row["clone_candidates"] = Syntax::CloneSimilarityAnalyzer.scan_normalized_row(@row)
@@ -328,12 +366,19 @@ module FactMine
           function_defs: object_rows("functions"),
           state_reads: object_rows("state_reads"),
           state_writes: object_rows("state_writes"),
-          call_sites: object_rows("calls")
+          call_sites: object_rows("calls"),
+          branch_arms: branch_arm_rows
         )
       end
 
       def object_rows(key)
         @row.fetch(key).map { |row| OpenStruct.new(row.transform_keys(&:to_sym)) }
+      end
+
+      def branch_arm_rows
+        object_rows("branch_arms").each do |row|
+          row.kind = row.kind.to_sym if row.kind
+        end
       end
 
       def functions

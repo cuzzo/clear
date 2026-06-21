@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     JAVA_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnull\b/,
         /\binstanceof\b/,
@@ -25,7 +26,7 @@ module FactMine
       meta_mids: %w[invoke setAccessible newInstance Proxy].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Lock AtomicReference].freeze,
-      io_bare: %w[throw].freeze,
+      io_bare: %w[throw print].freeze,
       dir_context: %w[getProperty getenv].freeze,
       context_pairs: {
         "System" => %w[currentTimeMillis nanoTime getenv getProperty],
@@ -158,11 +159,23 @@ module FactMine
       end
 
       def case_pattern_display(pattern)
-        "case #{pattern}"
+        pattern.to_s.start_with?("\"", "'") ? "case #{pattern}" : pattern
       end
 
       def method_state_ref?(node, parts)
         parts.fetch(:receiver) != "self" && node.text.to_s.include?("(")
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
     end
 

@@ -126,7 +126,8 @@ module FactMine
         end
         return [calls] if conditional_calls.empty?
 
-        conditional_calls.map { |call| (always_calls + [call]).sort_by(&:line) }
+        conditional_calls.map { |call| (always_calls + [call]).sort_by(&:line) } +
+          [always_calls.sort_by(&:line)]
       end
 
       def protocol_conditional_body?(node)

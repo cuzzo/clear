@@ -202,6 +202,7 @@ module FactMine
       def typed_assignment_statement?(node)
         return false unless %w[block expression_statement statement].include?(node.kind)
         return false if node.kind == "block" && node.text.to_s.lines.size > 1
+        return false if %w[if elif else for while with try except finally match case].include?(node.children.first&.kind.to_s)
         return false unless node.children.any? { |child| !child.named? && child.text == ":" }
 
         node.named_children.size >= 2

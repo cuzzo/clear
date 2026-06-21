@@ -73,12 +73,15 @@ module FactMine
       def self.scan_normalized_row(row)
         new(OpenStruct.new(
           file: row.fetch("file"),
+          language: row.fetch("language", "unknown"),
           normalized_root: row.fetch("normalized_root")
         )).scan.map(&:to_h)
       end
 
       def initialize(document)
         @document = document
+        language = document.respond_to?(:language) ? document.language : :unknown
+        @behavior = Syntax::NormalizedExtractionBehavior.for(language)
         @parents = {}
       end
 
@@ -130,6 +133,7 @@ module FactMine
         return false unless normalized_node?(node)
         return false if SKIP_TYPES.include?(node_type(node))
         return false unless CANDIDATE_TYPES.include?(node_type(node))
+        return false if @behavior.suppress_clone_candidate?(node, ancestors: ancestors_for(node))
 
         node_children(node).any?
       end
@@ -327,6 +331,16 @@ module FactMine
 
       def set_parent(node, parent)
         @parents[node.object_id] = parent
+      end
+
+      def ancestors_for(node)
+        out = []
+        current = parent_of(node)
+        while current
+          out << current
+          current = parent_of(current)
+        end
+        out
       end
     end
   end

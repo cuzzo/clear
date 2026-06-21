@@ -453,5 +453,4 @@ end
         );
         assert!(out.iter().any(|finding| finding.clone_type == "type3"));
     }
-
 }

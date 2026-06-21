@@ -410,7 +410,7 @@ class AstTest < Minitest::Test
 
   def test_tree_sitter_normalizer_uses_base_adapter_for_languages_without_specific_quirks
     assert_instance_of FactMine::Ast::TreeSitterNormalizationAdapter,
-                       FactMine::Ast::TreeSitterNormalizationAdapters.for(fake_document(:go))
+                       FactMine::Ast::TreeSitterNormalizationAdapters.for(fake_document(:swift))
   end
 
   def test_parse_semantic_returns_language_neutral_ruby_facts

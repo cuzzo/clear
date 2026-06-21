@@ -77,9 +77,10 @@ module FactMine
         if branch_node?(node)
           process_branch(node, function, known)
         elsif assignment_node?(node)
+          target = assignment_subject(node)
           inspect_node(child_node(node, 1), function, known)
           next_known = known.dup
-          next_known.delete(subject_key(child_node(node, 0)).to_s)
+          next_known.delete(target) if target
           Flow.new(known: next_known, terminated: false)
         else
           inspect_node(node, function, known)
@@ -175,7 +176,26 @@ module FactMine
         fact = @behavior.nil_guard_fact(call_message(node), subject)
         return NilFact.new(local: fact.fetch(:local), non_nil_when_true: fact.fetch(:non_nil_when_true)) if fact
 
-        comparison_nil_fact(node)
+        unary_not_fact(node) || comparison_nil_fact(node)
+      end
+
+      def unary_not_fact(node)
+        return nil unless node_type(node) == "OPCALL"
+        return nil unless scalar_child(node, 1).to_s == "!"
+
+        inner = nil_fact(child_node(node, 0))
+        return nil unless inner
+
+        NilFact.new(local: inner.local, non_nil_when_true: !inner.non_nil_when_true)
+      end
+
+      def assignment_subject(node)
+        case node_type(node)
+        when "LASGN", "DASGN", "IASGN", "GASGN"
+          scalar_child(node, 0).to_s
+        else
+          subject_key(child_node(node, 0))
+        end
       end
 
       def comparison_nil_fact(node)
@@ -271,6 +291,21 @@ module FactMine
         case node_type(node)
         when "LVAR", "DVAR", "IVAR", "GVAR"
           scalar_child(node, 0).to_s
+        when "SELF"
+          "self"
+        when "VCALL", "FCALL"
+          args = child_node(node, 1)
+          return nil if args && !node_children(args).empty?
+
+          scalar_child(node, 0).to_s
+        when "CALL", "QCALL"
+          receiver = subject_key(child_node(node, 0))
+          message = scalar_child(node, 1).to_s
+          args = child_node(node, 2)
+          return nil if receiver.to_s.empty? || message.empty?
+          return nil if args && !node_children(args).empty?
+
+          "#{receiver}.#{message}"
         else
           text = compact_text(node)
           text if text.match?(/\A[@$]?[A-Za-z_]\w*[!?]?\z/)
@@ -278,7 +313,11 @@ module FactMine
       end
 
       def nil_literal?(node)
-        node_type(node) == "NIL"
+        return true if node_type(node) == "NIL"
+
+        node_type(node) == "LIST" &&
+          node_children(node).size == 1 &&
+          nil_literal?(node_children(node).first)
       end
 
       def flatten_boolean(node, type)

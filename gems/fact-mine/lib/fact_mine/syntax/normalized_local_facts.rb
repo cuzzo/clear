@@ -12,6 +12,7 @@ module FactMine
       def initialize(row, language:, file:, lines:)
         @row = row
         @language = language.to_sym
+        @behavior = NormalizedExtractionBehavior.for(@language)
         @file = file
         @lines = lines
       end
@@ -75,10 +76,12 @@ module FactMine
         scope = function_scope(function)
         body = child_node(scope, 2)
         return [] unless normalized_node?(body)
-        return node_children(body) if node_type(body) == "BLOCK"
-        return node_children(body) if node_type(body) == "HASH" && node_children(body).all? { |child| node_type(child) == "HASH" }
+        return executable_statements(node_children(body)) if node_type(body) == "BLOCK"
+        if node_type(body) == "HASH" && node_children(body).all? { |child| node_type(child) == "HASH" }
+          return executable_statements(node_children(body))
+        end
 
-        [body]
+        executable_statements([body])
       end
 
       def function_scope(function)
@@ -150,13 +153,13 @@ module FactMine
           when "LASGN", "DASGN"
             next if keyword_argument_assignment?(child)
 
-            name = scalar_child(child, 0).to_s
+            name = normalize_local_name(scalar_child(child, 0).to_s)
             writes << name unless name.empty?
           when "IASGN", "GASGN"
             name = scalar_child(child, 0).to_s.delete_prefix("@").delete_prefix("$")
             writes << name unless name.empty?
           when "LVAR", "DVAR"
-            name = scalar_child(child, 0).to_s
+            name = normalize_local_name(scalar_child(child, 0).to_s)
             writes << name if for_target?(child) && !name.empty?
           when "AS_PATTERN_TARGET"
             name = compact_text(child)
@@ -245,6 +248,14 @@ module FactMine
           blank ||= { line: line_number, kind: :blank, text: stripped } if stripped.empty?
         end
         blank
+      end
+
+      def executable_statements(statements)
+        statements.reject { |statement| comment_statement?(statement) }
+      end
+
+      def comment_statement?(node)
+        compact_text(node).start_with?("#", "//", "--")
       end
 
       def path_condition_rows(local_method_rows)
@@ -343,11 +354,21 @@ module FactMine
                  node_children(node).sum { |child| score_node(child, nesting: nesting + 1, signals: signals) }
         end
 
-        return score_children(node, nesting: nesting, signals: signals) if loop_node?(node)
+        if loop_node?(node)
+          signals[:loops] += 1
+          return score_children(node, nesting: nesting, signals: signals)
+        end
 
         if case_node?(node)
           signals[:cases] += 1
           return 0.5 + node_children(node).sum { |child| score_node(child, nesting: nesting + 1, signals: signals) }
+        end
+
+        return score_children(node, nesting: nesting, signals: signals) if when_node?(node)
+
+        if rescue_node?(node)
+          signals[:rescues] += 1
+          return score_children(node, nesting: nesting, signals: signals)
         end
 
         return score_children(node, nesting: nesting, signals: signals) if early_exit_node?(node)
@@ -443,7 +464,15 @@ module FactMine
       end
 
       def case_node?(node)
-        %w[CASE CASE2 WHEN].include?(node_type(node))
+        %w[CASE CASE2].include?(node_type(node))
+      end
+
+      def when_node?(node)
+        node_type(node) == "WHEN"
+      end
+
+      def rescue_node?(node)
+        %w[RESCUE RESBODY ENSURE].include?(node_type(node))
       end
 
       def early_exit_node?(node)
@@ -465,13 +494,17 @@ module FactMine
       def local_identifier(node)
         case node_type(node)
         when "LVAR", "DVAR"
-          scalar_child(node, 0).to_s
+          normalize_local_name(scalar_child(node, 0).to_s)
         when "WITH_CLAUSE"
           text = compact_text(node)
           text if node_children(node).empty? && simple_local_name?(text)
         else
           nil
         end
+      end
+
+      def normalize_local_name(name)
+        name.to_s.delete_prefix("$")
       end
 
       def simple_local_name?(name)
@@ -514,7 +547,8 @@ module FactMine
       end
 
       def compact_text(node)
-        value_for(node, "text").to_s.tr("\u00A0", " ").strip.gsub(/\s+/, " ")
+        text = value_for(node, "text").to_s.tr("\u00A0", " ").strip.gsub(/\s+/, " ")
+        @behavior.normalize_source_text(text)
       end
 
       def value_for(node, key)

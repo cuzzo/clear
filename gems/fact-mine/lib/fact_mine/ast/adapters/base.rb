@@ -31,7 +31,7 @@ module FactMine
       STATEMENT_BLOCK_PARENT_KINDS = %w[
         method_declaration constructor_declaration function_declaration function_body
         if_statement while_statement for_statement enhanced_for_statement try_statement
-        catch_clause finally_clause do_statement lambda_expression
+        catch_clause finally_clause do_statement lambda_expression function_item
       ].freeze
       IDENTIFIER_KINDS = %w[
         identifier simple_identifier property_identifier field_identifier shorthand_property_identifier
@@ -40,7 +40,7 @@ module FactMine
       OWNER_STATEMENT_NESTED_KIND = %w[class class_definition class_declaration module].freeze
       LEADING_OWNER_WRAPPER_KINDS = %w[body_statement statement].freeze
       IF_NODE_KINDS = %w[if if_statement if_modifier unless unless_modifier if_expression conditional].freeze
-      LEADING_IF_WRAPPER_KINDS = %w[body_statement block block_body expression_statement statement].freeze
+      LEADING_IF_WRAPPER_KINDS = %w[body_statement block block_body expression_statement statement statements].freeze
       LEADING_CASE_WRAPPER_KINDS = %w[body_statement block block_body statement].freeze
       LEADING_LOOP_WRAPPER_KINDS = %w[body_statement block block_body expression_statement statement].freeze
       RESCUE_BODY_WRAPPER_KINDS = %w[body_statement block_body statement].freeze

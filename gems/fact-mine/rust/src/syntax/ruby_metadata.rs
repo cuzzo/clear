@@ -18,38 +18,6 @@ pub(crate) fn extract(source: &str, functions: &[FunctionDef]) -> RubyMetadata {
     }
 }
 
-pub(crate) fn immutable_param_state_read(
-    receiver: &str,
-    field: &str,
-    param_types: &BTreeMap<String, String>,
-    immutable_readers: &BTreeMap<String, BTreeSet<String>>,
-) -> bool {
-    if receiver.is_empty() || matches!(receiver, "self" | "this") {
-        return false;
-    }
-    let Some(param) = receiver.split('.').next() else {
-        return false;
-    };
-    let Some(type_name) = param_types.get(param) else {
-        return false;
-    };
-    let field = field.trim_end_matches('?');
-    immutable_reader(type_name, field, immutable_readers)
-}
-
-fn immutable_reader(
-    type_name: &str,
-    field: &str,
-    readers: &BTreeMap<String, BTreeSet<String>>,
-) -> bool {
-    let short = type_name.split("::").last().unwrap_or(type_name);
-    readers
-        .get(type_name)
-        .or_else(|| readers.get(short))
-        .map(|fields| fields.contains(field))
-        .unwrap_or(false)
-}
-
 pub(crate) fn immutable_struct_reader_sets(source: &str) -> BTreeMap<String, BTreeSet<String>> {
     let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut class_stack = Vec::new();

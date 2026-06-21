@@ -52,6 +52,11 @@ impl LocalComplexityScorer {
                 + self.score_children(node, nesting + 1, signals);
         }
 
+        if normalized_iterator(node) {
+            *signals.entry("loops".to_string()).or_insert(0) += 1;
+            return self.score_children(node, nesting, signals);
+        }
+
         if loop_node(node) {
             *signals.entry("loops".to_string()).or_insert(0) += 1;
             if nesting > 0 {
@@ -204,7 +209,6 @@ fn loop_node(node: &RawNode) -> bool {
             | "for_statement"
             | "for_in_statement"
             | "do_block"
-            | "ITER"
     ) || hidden_loop(node)
         || (node.kind == "expression_statement"
             && starts_with_any(node.text.trim_start(), &["for", "while", "loop"]))
@@ -225,6 +229,10 @@ fn hidden_loop(node: &RawNode) -> bool {
         .first()
         .map(|child| !child.named && matches!(child.kind.as_str(), "for" | "while" | "loop"))
         .unwrap_or(false)
+}
+
+fn normalized_iterator(node: &RawNode) -> bool {
+    node.kind == "ITER"
 }
 
 fn starts_with_any(text: &str, words: &[&str]) -> bool {

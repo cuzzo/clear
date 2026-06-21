@@ -25,7 +25,7 @@ module FactMine
       meta_mids: %w[transmute from_raw_parts from_raw_parts_mut].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[std tokio fs env process net io].freeze,
-      io_bare: %w[panic todo unimplemented unreachable].freeze,
+      io_bare: %w[panic todo unimplemented unreachable print].freeze,
       dir_context: %w[current_dir home_dir].freeze,
       context_pairs: {
         "SystemTime" => %w[now],
@@ -150,6 +150,17 @@ module FactMine
 
       def function_name_from_text(text)
         text.to_s.strip[/\A(?:pub\s+)?fn\s+([A-Za-z_]\w*)\b/, 1] || super
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "is_some"
+          { local: subject, non_nil_when_true: true }
+        when "is_none"
+          { local: subject, non_nil_when_true: false }
+        end
       end
     end
 

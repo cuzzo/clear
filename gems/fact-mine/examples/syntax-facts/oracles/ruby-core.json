@@ -1207,6 +1207,18 @@
           ]
         },
         {
+          "detail": "callback",
+          "function": "process",
+          "kind": "callback_inversion",
+          "line": 30,
+          "span": [
+            30,
+            4,
+            30,
+            22
+          ]
+        },
+        {
           "detail": "callback.call",
           "function": "process",
           "kind": "dynamic_dispatch",

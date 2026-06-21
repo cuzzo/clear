@@ -23,7 +23,7 @@ module FactMine
       BLOCK_KINDS = %w[
         block body_statement statement_block statement_list class_body
         switch_body match_block then block_body control_structure_body function_body
-        statements
+        statements compound_statement declaration_list
       ].freeze
       IF_KINDS = %w[if if_statement if_modifier unless unless_modifier if_expression conditional].freeze
       LOOP_KINDS = {
@@ -372,7 +372,12 @@ module FactMine
 
       def normalize_when(node)
         patterns = normalize_patterns(node)
-        body = normalize_body(when_body(node))
+        body_nodes = when_body_nodes(node)
+        body = if body_nodes.any?
+                 normalize_body_nodes(body_nodes, source: source_from_nodes(body_nodes.first, body_nodes.last))
+               else
+                 normalize_body(when_body(node))
+               end
         wrap(:WHEN, children: [list(patterns, source: node), body, nil], source: node)
       end
 
@@ -754,7 +759,7 @@ module FactMine
 
       def wrapped_return_statement?(node)
         return false unless ts_node?(node)
-        return false unless %w[body_statement block_body statement block].include?(node.kind)
+        return false unless %w[body_statement block_body statement block statement_list].include?(node.kind)
         return false if node.text.to_s.include?("\n")
 
         keyword = node.children.first
@@ -1115,20 +1120,28 @@ module FactMine
       end
 
       def when_body(node)
-        if %w[
-          case_statement default_case default_statement expression_case switch_case
-          switch_section switch_block_statement_group switch_entry case_clause
-        ].include?(node.kind)
-          body = node.named_children.reverse.find do |child|
-            (BLOCK_KINDS.include?(child.kind) || statement_node?(child)) &&
-              !%w[break break_statement continue_statement].include?(child.kind)
-          end
-          return body if body
-        end
+        body_nodes = when_body_nodes(node)
+        return source_from_nodes(body_nodes.first, body_nodes.last) if body_nodes.size > 1
+        return body_nodes.first if body_nodes.one?
 
         named_field(node, "body") || named_field(node, "consequence") ||
           named_field(node, "value") ||
           node.named_children.reverse.find { |child| BLOCK_KINDS.include?(child.kind) || statement_node?(child) }
+      end
+
+      def when_body_nodes(node)
+        if %w[
+          case_statement default_case default_statement expression_case switch_case
+          switch_section switch_block_statement_group switch_entry case_clause
+        ].include?(node.kind)
+          body = node.named_children.select do |child|
+            (BLOCK_KINDS.include?(child.kind) || statement_node?(child)) &&
+              !%w[break break_statement continue_statement].include?(child.kind)
+          end
+          return body
+        end
+
+        []
       end
 
       def link_when_chain(whens, fallback = nil)
@@ -1170,7 +1183,7 @@ module FactMine
       end
 
       def boolean_statement?(node)
-        return false unless %w[body_statement block_body statement argument_list].include?(node.kind)
+        return false unless %w[body_statement block_body statement argument_list expression_list].include?(node.kind)
         return false unless %w[&& || and or].include?(binary_operator(node))
         return false if node.named_children.size < 2
 
@@ -1852,7 +1865,7 @@ module FactMine
         return false unless ts_node?(node)
         return false unless %w[
           body_statement block block_body control_structure_body expression_list
-          expression_statement statement statements then
+          expression_statement statement statement_list statements then
         ].include?(node.kind)
         return false if assignment_lhs?(node) || assignment_rhs?(node)
         return false if call_block(node)
@@ -2457,8 +2470,16 @@ module FactMine
         return [] if source.empty?
 
         split_call_arguments(source).map do |argument|
+          scalar = scalar_argument_from_text(node, argument)
+          next scalar if scalar
+
           wrap(:RAW_ARGUMENT, children: [], source: raw_argument_source(node, argument))
         end
+      end
+
+      def scalar_argument_from_text(node, text)
+        source = raw_argument_source(node, text)
+        scalar_argument_list_value(source)
       end
 
       def split_call_arguments(source)

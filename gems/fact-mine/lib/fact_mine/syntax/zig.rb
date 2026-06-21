@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     ZIG_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnull\b/,
         /@typeInfo\b/,
@@ -25,7 +26,7 @@ module FactMine
       meta_mids: %w[typeInfo TypeOf ptrCast intFromPtr ptrFromInt eval].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[std os fs process net Thread Mutex Atomic].freeze,
-      io_bare: %w[panic unreachable].freeze,
+      io_bare: %w[panic unreachable print].freeze,
       dir_context: [].freeze,
       context_pairs: {
         "time" => %w[timestamp nanoTimestamp milliTimestamp]
@@ -208,6 +209,18 @@ module FactMine
 
       def wrap_branch_predicate?(_branch)
         false
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
 
       private

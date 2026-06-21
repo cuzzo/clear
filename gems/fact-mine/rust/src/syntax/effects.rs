@@ -128,9 +128,11 @@ fn const_effect_kind_detail(
 }
 
 fn effect_callback_call(call: &CallSite, message: &str, lexicon: &FalseSimplicityLexicon) -> bool {
-    (call.block || call.arguments.iter().any(|arg| arg.starts_with('&')))
-        && effect_callback_name(message, lexicon)
+    effect_callback_name(message, lexicon)
         && !lexicon.meta_mids.contains(&message)
+        && (!lexicon.callback_requires_block
+            || call.block
+            || call.arguments.iter().any(|arg| arg.starts_with('&')))
 }
 
 fn effect_callback_name(message: &str, lexicon: &FalseSimplicityLexicon) -> bool {

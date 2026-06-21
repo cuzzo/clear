@@ -4,7 +4,7 @@ module FactMine
   module Syntax
     PHP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/i].freeze,
-      guard_mids: %w[is_null is_a].freeze,
+      guard_mids: %w[isNull isSome is_null is_a].freeze,
       type_guard_patterns: [
         /\bnull\b/i,
         /\b(?:is_null|isset|empty|is_a|instanceof)\s*(?:\(|\b)/
@@ -558,6 +558,7 @@ module FactMine
         text.to_s
             .gsub(/\$this->/, "this.")
             .gsub(/\$([A-Za-z_]\w*)->/, '\1.')
+            .gsub(/->|::/, ".")
             .gsub(/\$([A-Za-z_]\w*)/, '\1')
       end
 
@@ -581,6 +582,21 @@ module FactMine
 
       def function_name_from_text(text)
         text.to_s.strip[/\bfunction\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def case_pattern_display(pattern)
+        normalize_source_text(pattern.to_s)
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull", "is_null"
+          { local: subject, non_nil_when_true: false }
+        end
       end
     end
 

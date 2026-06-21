@@ -1,6 +1,6 @@
 use super::{
     adapters::{language_profile, LanguageProfile},
-    effects, passes, ruby_metadata, BranchArm, BranchDecision, CallSite, ComparisonUse,
+    effects, normalized_behavior, passes, BranchArm, BranchDecision, CallSite, ComparisonUse,
     DecisionSite, DispatchSite, Document, FunctionDef, Language, OwnerDef, PredicateAlias,
     StateDeclaration, StateRead, StateWrite,
 };
@@ -253,9 +253,12 @@ fn parse_normalized_file(
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
     let started = Instant::now();
-    let mut facts = passes::StatelessSyntaxPass::normalized(&parsed.file, &normalized_root).run();
-    let metadata = passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, Language::Ruby)
-        .enrich(&mut facts);
+    let behavior = normalized_behavior::behavior(Language::Ruby);
+    let mut facts =
+        passes::StatelessSyntaxPass::normalized(&parsed.file, &normalized_root, behavior).run();
+    let metadata =
+        passes::StatefulSyntaxPass::new(&parsed.file, &parsed.source, Language::Ruby, behavior)
+            .enrich(&mut facts);
     profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
 
     let started = Instant::now();
@@ -300,10 +303,10 @@ fn parse_normalized_file(
         protocol_method_effects: Vec::new(),
         protocol_call_paths: Vec::new(),
         clone_candidates: Vec::new(),
-        immutable_struct_readers: metadata.ruby.immutable_struct_readers,
-        immutable_struct_reader_types: metadata.ruby.immutable_struct_reader_types,
-        type_aliases: metadata.ruby.type_aliases,
-        method_param_types: metadata.ruby.method_param_types,
+        immutable_struct_readers: metadata.syntax.immutable_struct_readers,
+        immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
+        type_aliases: metadata.syntax.type_aliases,
+        method_param_types: metadata.syntax.method_param_types,
     };
     profile_parse_phase(
         profile,
@@ -1232,27 +1235,13 @@ fn collect_branch_state_refs(
     out: &mut BTreeSet<String>,
 ) {
     if let Some(target) = profile.state_read_target(node, source) {
-        let field = if profile.language() == Language::Ruby {
-            target.field.clone()
-        } else {
-            normalized_state_ref_field(&target.field)
-        };
+        let field = normalized_state_ref_field(&target.field);
         let receiver = target.receiver.trim_start_matches('$');
         if skip_state_ref(profile, receiver, &field) {
             // Constants and type namespaces are not mutable object state.
         } else if branch_local_ref(node, source, receiver, &field, context) {
             // Function-local bindings are not object state, even when a
             // language permits bare predicate-style method calls.
-        } else if profile.language() == Language::Ruby
-            && ruby_metadata::immutable_param_state_read(
-                receiver,
-                &field,
-                &context.param_types,
-                &context.immutable_readers,
-            )
-        {
-            // Sorbet T::Struct readers on typed params are immutable data reads,
-            // not mutable object state.
         } else if receiver.is_empty() || receiver == "self" {
             out.insert(field);
         } else {
@@ -1274,25 +1263,11 @@ fn collect_branch_state_refs(
 }
 
 fn collect_branch_nested_scope_state_refs(
-    profile: &dyn LanguageProfile,
-    node: Node<'_>,
-    source: &str,
-    out: &mut BTreeSet<String>,
+    _profile: &dyn LanguageProfile,
+    _node: Node<'_>,
+    _source: &str,
+    _out: &mut BTreeSet<String>,
 ) {
-    if profile.language() != Language::Ruby {
-        return;
-    }
-    if let Some(target) = profile.state_read_target(node, source) {
-        let receiver = target.receiver.trim_start_matches('$');
-        if simple_identifier(receiver) {
-            out.insert(format!("{receiver}.{}", target.field));
-        }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_branch_nested_scope_state_refs(profile, child, source, out);
-    }
 }
 
 fn branch_local_ref(
@@ -1441,18 +1416,16 @@ fn implicit_assignment_lhs(profile: &dyn LanguageProfile, node: Node<'_>) -> boo
     profile.assignment_lhs_node(node)
 }
 
+fn skip_state_ref(profile: &dyn LanguageProfile, receiver: &str, field: &str) -> bool {
+    let _ = profile;
+    namespace_receiver(receiver) || constant_like_state_ref(receiver, field)
+}
+
 fn normalized_state_ref_field(field: &str) -> String {
     field
         .trim_start_matches('@')
         .trim_start_matches('$')
         .to_string()
-}
-
-fn skip_state_ref(profile: &dyn LanguageProfile, receiver: &str, field: &str) -> bool {
-    if profile.language() == Language::Ruby {
-        return constant_like_state_ref(receiver, field);
-    }
-    namespace_receiver(receiver) || constant_like_state_ref(receiver, field)
 }
 
 fn constant_like_state_ref(receiver: &str, field: &str) -> bool {
@@ -1609,11 +1582,7 @@ fn node_context<'a>(
         next.owner = Some(owner);
         next.receiver = profile.function_receiver_name(node, source);
         next.locals = profile.function_params(node, source).into_iter().collect();
-        next.param_types = if language == Language::Ruby {
-            ruby_metadata::sig_param_types(source, line(node))
-        } else {
-            BTreeMap::new()
-        };
+        next.param_types = BTreeMap::new();
         if let Some(receiver) = &next.receiver {
             next.locals.insert(receiver.clone());
         }

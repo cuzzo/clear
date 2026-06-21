@@ -57,7 +57,6 @@ pub fn scan_documents_with_summaries(
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
     let assignment_maps = build_assignment_maps(&methods);
-    let methods_by_file = methods_by_file(&methods);
 
     for document in documents {
         for call in &document.call_sites {
@@ -79,8 +78,23 @@ pub fn scan_documents_with_summaries(
             }
         }
 
-        if let Some(methods) = methods_by_file.get(&document.file) {
-            guard.extend(rescue_nil_hits(document, methods, &assignment_maps));
+        for effect in &document.semantic_effect_sites {
+            if effect.kind != "eliminable_guard" {
+                continue;
+            }
+            let empty = BTreeMap::new();
+            let assignment_map = assignment_maps
+                .get(&(effect.file.clone(), effect.function.clone()))
+                .unwrap_or(&empty);
+            if let Some(contract) = contract_of(&effect.detail, assignment_map, 0) {
+                guard.push(Hit {
+                    contract,
+                    file: effect.file.clone(),
+                    defn: effect.function.clone(),
+                    line: effect.line,
+                    span: effect.span,
+                });
+            }
         }
     }
 
@@ -129,54 +143,11 @@ fn build_assignment_maps(
         .collect()
 }
 
-fn methods_by_file<'a>(methods: &'a [MethodSummary]) -> BTreeMap<String, Vec<&'a MethodSummary>> {
-    let mut out: BTreeMap<String, Vec<&MethodSummary>> = BTreeMap::new();
-    for method in methods {
-        out.entry(method.file.clone()).or_default().push(method);
-    }
-    out
-}
-
 fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
     local_flow::local_contract_assignments(method)
         .into_iter()
         .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0).map(|c| (name, c)))
         .collect()
-}
-
-fn rescue_nil_hits(
-    document: &Document,
-    methods: &[&MethodSummary],
-    assignment_maps: &BTreeMap<(String, String), BTreeMap<String, String>>,
-) -> Vec<Hit> {
-    let mut out = Vec::new();
-    for method in methods {
-        let empty = BTreeMap::new();
-        let assignment_map = assignment_maps
-            .get(&(method.file.clone(), method.name.clone()))
-            .unwrap_or(&empty);
-        for statement in &method.statements {
-            if !statement.source.contains("rescue nil") {
-                continue;
-            }
-            let Some(call) = document.call_sites.iter().find(|candidate| {
-                candidate.function == method.name && inside_span(candidate.span, statement.span)
-            }) else {
-                continue;
-            };
-            let Some(contract) = contract_of(&call_expression(call), assignment_map, 0) else {
-                continue;
-            };
-            out.push(Hit {
-                contract,
-                file: method.file.clone(),
-                defn: method.name.clone(),
-                line: statement.line,
-                span: statement.span,
-            });
-        }
-    }
-    out
 }
 
 fn contract_of(
@@ -223,21 +194,6 @@ fn contract_of(
     }
 
     None
-}
-
-fn call_expression(call: &CallSite) -> String {
-    [call.receiver.as_str(), call.message.as_str()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn inside_span(inner: Span, outer: Span) -> bool {
-    let starts_after_or_at =
-        (inner[0] > outer[0]) || (inner[0] == outer[0] && inner[1] >= outer[1]);
-    let ends_before_or_at = (inner[2] < outer[2]) || (inner[2] == outer[2] && inner[3] <= outer[3]);
-    starts_after_or_at && ends_before_or_at
 }
 
 struct Report {

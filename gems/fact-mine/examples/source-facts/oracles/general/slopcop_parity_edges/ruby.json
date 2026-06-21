@@ -248,7 +248,8 @@
         "score": 1.1,
         "signals": {
           "boolean_ops": 0,
-          "branches": 1
+          "branches": 1,
+          "loops": 3
         }
       },
       {
@@ -256,7 +257,8 @@
         "score": 1.9,
         "signals": {
           "boolean_ops": 2,
-          "branches": 1
+          "branches": 1,
+          "loops": 1
         }
       }
     ],

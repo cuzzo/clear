@@ -1,6 +1,7 @@
 use super::{
-    effects, normalized_extractor, ruby_metadata, visibility, FunctionDef, Language,
-    LocalComplexityScore,
+    effects,
+    normalized_behavior::{NormalizedLanguageBehavior, SyntaxMetadata},
+    normalized_extractor, visibility, Language, LocalComplexityScore,
 };
 use crate::ast::Node;
 use crate::syntax::complexity::local_complexity_scores;
@@ -10,39 +11,52 @@ use std::path::Path;
 pub(crate) struct StatelessSyntaxPass<'a> {
     file: &'a Path,
     normalized_root: &'a Node,
+    behavior: &'a dyn NormalizedLanguageBehavior,
 }
 
 impl<'a> StatelessSyntaxPass<'a> {
-    pub(crate) fn normalized(file: &'a Path, normalized_root: &'a Node) -> Self {
+    pub(crate) fn normalized(
+        file: &'a Path,
+        normalized_root: &'a Node,
+        behavior: &'a dyn NormalizedLanguageBehavior,
+    ) -> Self {
         Self {
             file,
             normalized_root,
+            behavior,
         }
     }
 
     pub(crate) fn run(&self) -> normalized_extractor::NormalizedFacts {
-        normalized_extractor::extract(self.file, self.normalized_root)
+        normalized_extractor::extract(self.file, self.normalized_root, self.behavior)
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
-    pub(crate) ruby: ruby_metadata::RubyMetadata,
+    pub(crate) syntax: SyntaxMetadata,
 }
 
 pub(crate) struct StatefulSyntaxPass<'a> {
     file: &'a Path,
     source: &'a str,
     language: Language,
+    behavior: &'a dyn NormalizedLanguageBehavior,
 }
 
 impl<'a> StatefulSyntaxPass<'a> {
-    pub(crate) fn new(file: &'a Path, source: &'a str, language: Language) -> Self {
+    pub(crate) fn new(
+        file: &'a Path,
+        source: &'a str,
+        language: Language,
+        behavior: &'a dyn NormalizedLanguageBehavior,
+    ) -> Self {
         Self {
             file,
             source,
             language,
+            behavior,
         }
     }
 
@@ -65,15 +79,9 @@ impl<'a> StatefulSyntaxPass<'a> {
                 &self.file.to_string_lossy(),
                 &facts.function_defs,
             ),
-            ruby: self.ruby_metadata(&facts.function_defs),
-        }
-    }
-
-    fn ruby_metadata(&self, functions: &[FunctionDef]) -> ruby_metadata::RubyMetadata {
-        if self.language == Language::Ruby {
-            ruby_metadata::extract(self.source, functions)
-        } else {
-            ruby_metadata::RubyMetadata::default()
+            syntax: self
+                .behavior
+                .syntax_metadata(self.source, &facts.function_defs),
         }
     }
 }

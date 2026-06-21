@@ -218,6 +218,43 @@ fn state_branch_density_detector_does_not_own_ruby_source_mining() {
 }
 
 #[test]
+fn decision_pressure_detector_uses_semantic_effect_facts_for_eliminable_guards() {
+    let path = crate_src().join("detectors/decision_pressure.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read decision_pressure.rs"));
+    for pattern in [
+        "rescue nil",
+        "statement.source",
+        "fn rescue_nil_hits",
+        "fn inside_span",
+    ] {
+        assert!(
+            !source.contains(pattern),
+            "{} belongs in normalized semantic effects, not decision_pressure",
+            pattern
+        );
+    }
+}
+
+#[test]
+fn state_branch_density_detector_does_not_classify_raw_branch_keywords() {
+    let path = crate_src().join("detectors/state_branch_density.rs");
+    let source =
+        production_source(&fs::read_to_string(&path).expect("read state_branch_density.rs"));
+    for pattern in [
+        "\"unless\"",
+        "\"until\"",
+        "strip_prefix(prefix)",
+        "starts_with(char::is_whitespace)",
+    ] {
+        assert!(
+            !source.contains(pattern),
+            "{} belongs in normalized branch facts, not state_branch_density",
+            pattern
+        );
+    }
+}
+
+#[test]
 fn flay_similarity_detector_does_not_own_clone_fingerprint_grammar() {
     let path = crate_src().join("detectors/flay_similarity.rs");
     let source = production_source(&fs::read_to_string(&path).expect("read flay_similarity.rs"));

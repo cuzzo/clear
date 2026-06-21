@@ -1,7 +1,7 @@
 use super::{
-    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
-    OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite,
+    normalized_behavior::NormalizedLanguageBehavior, BranchArm, BranchDecision, CallSite,
+    ComparisonUse, DecisionSite, DispatchSite, FunctionDef, OwnerDef, PathConditionSite,
+    PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration, StateRead, StateWrite,
 };
 use crate::ast::{self, Child, Node, Span};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -25,14 +25,19 @@ pub(crate) struct NormalizedFacts {
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
 }
 
-pub(crate) fn extract(file: &Path, root: &Node) -> NormalizedFacts {
-    let mut extractor = Extractor::new(file);
+pub(crate) fn extract(
+    file: &Path,
+    root: &Node,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> NormalizedFacts {
+    let mut extractor = Extractor::new(file, behavior);
     extractor.scan_root(root);
     extractor.finish()
 }
 
-struct Extractor {
+struct Extractor<'a> {
     file: String,
+    behavior: &'a dyn NormalizedLanguageBehavior,
     file_owner: String,
     owners: Vec<String>,
     functions: Vec<String>,
@@ -44,8 +49,8 @@ struct Extractor {
     seen_effects: HashSet<(String, String, String, usize, Span)>,
 }
 
-impl Extractor {
-    fn new(file: &Path) -> Self {
+impl<'a> Extractor<'a> {
+    fn new(file: &Path, behavior: &'a dyn NormalizedLanguageBehavior) -> Self {
         let file = file.to_string_lossy().to_string();
         let file_owner = Path::new(&file)
             .file_stem()
@@ -54,6 +59,7 @@ impl Extractor {
             .to_string();
         Self {
             file,
+            behavior,
             file_owner,
             owners: Vec::new(),
             functions: Vec::new(),
@@ -82,6 +88,7 @@ impl Extractor {
             "DEFN" | "DEFS" => self.scan_function(node),
             "HASH" if block_like_hash(node) => {}
             "IF" | "UNLESS" => self.scan_if(node),
+            "RESCUE" => self.scan_rescue(node),
             "CASE" | "CASE2" => self.scan_case(node),
             "AND" | "OR" => self.scan_boolean(node),
             "CALL" | "QCALL" | "FCALL" | "VCALL" => self.record_call_node(node, false),
@@ -164,6 +171,17 @@ impl Extractor {
                 self.with_control("iterates", |this| this.scan(body));
             }
         }
+    }
+
+    fn scan_rescue(&mut self, node: &Node) {
+        let body = child_node(node, 0);
+        let resbody = child_node(node, 1);
+        if let (Some(body), Some(resbody)) = (body, resbody) {
+            if nil_rescue_fallback(resbody) {
+                self.record_semantic_effect(node, "eliminable_guard", &normalized_text(body));
+            }
+        }
+        self.scan_children(node);
     }
 
     fn scan_yield(&mut self, node: &Node) {
@@ -453,7 +471,7 @@ impl Extractor {
     }
 
     fn record_state_write_for_mutating_call(&mut self, call: &CallSite) {
-        if !mutating_receiver_message(&call.message) {
+        if !self.behavior.mutating_receiver_message(&call.message) {
             return;
         }
         let Some(field) = state_receiver_field(&call.receiver) else {
@@ -717,6 +735,19 @@ fn child_node(node: &Node, index: usize) -> Option<&Node> {
 
 fn child_nodes(node: &Node) -> Vec<&Node> {
     node.children.iter().filter_map(ast::node).collect()
+}
+
+fn nil_rescue_fallback(node: &Node) -> bool {
+    if node.r#type == "NIL" {
+        return true;
+    }
+    let children = child_nodes(node);
+    if node.r#type == "RESBODY" {
+        if let Some(child) = children.get(1) {
+            return nil_rescue_fallback(child);
+        }
+    }
+    children.len() == 1 && nil_rescue_fallback(children[0])
 }
 
 fn child_symbol(node: &Node, index: usize) -> Option<String> {
@@ -995,34 +1026,6 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
     None
 }
 
-fn mutating_receiver_message(message: &str) -> bool {
-    matches!(
-        message,
-        "<<" | "[]="
-            | "add"
-            | "append"
-            | "clear"
-            | "collect!"
-            | "compact!"
-            | "concat"
-            | "delete"
-            | "delete_if"
-            | "fill"
-            | "filter!"
-            | "keep_if"
-            | "merge!"
-            | "move"
-            | "push"
-            | "reject!"
-            | "replace"
-            | "shift"
-            | "store"
-            | "unshift"
-            | "update"
-            | "write"
-    ) || (message.ends_with('!') && !matches!(message, "!=" | "!~"))
-}
-
 fn block_like_hash(node: &Node) -> bool {
     let text = node.text.trim();
     text.starts_with('{') && !text.contains("=>") && !text.contains(':')
@@ -1103,7 +1106,7 @@ fn raw_kind(node: &Node) -> &str {
         "IVAR" => "instance_variable",
         "GVAR" => "global_variable",
         "LIST" | "ZLIST" => "argument_list",
-        "ITER" => "block",
+        "ITER" => "ITER",
         "BLOCK" => "body_statement",
         "CALL" | "QCALL" | "FCALL" | "VCALL" => "call",
         "TRUE" => "true",

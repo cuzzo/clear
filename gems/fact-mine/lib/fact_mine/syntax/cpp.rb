@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     CPP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\b(?:nullptr|NULL)\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\b(?:nullptr|NULL)\b/,
         /\b(?:dynamic_cast|typeid)\s*[<(]/,
@@ -25,7 +26,7 @@ module FactMine
       meta_mids: %w[reinterpret_cast const_cast dlsym dlopen].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[std filesystem fstream iostream thread mutex atomic].freeze,
-      io_bare: %w[throw abort exit assert system].freeze,
+      io_bare: %w[throw abort exit assert system print].freeze,
       dir_context: %w[current_path].freeze,
       context_pairs: {
         "chrono" => %w[now],
@@ -218,11 +219,22 @@ module FactMine
 
           current = match[1] == "public" ? "public" : "private"
         end
+        lines[node.first_lineno - 1].to_s[0...node.first_column.to_i].to_s.scan(/\b(public|private|protected)\s*:/) do
+          current = Regexp.last_match(1) == "public" ? "public" : "private"
+        end
         current
       end
 
       def case_predicate_text(text)
         text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def case_pattern_display(pattern)
+        pattern.to_s.sub(/\AAST::/, "AST.")
       end
 
       def suppress_self_call_state_read?(call)
@@ -231,6 +243,18 @@ module FactMine
 
       def stream_insertion_operator?(node)
         node.text.to_s.include?("std::")
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
     end
 

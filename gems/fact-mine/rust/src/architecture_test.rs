@@ -182,7 +182,9 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "complexity.rs",
         "effects.rs",
         "local_flow.rs",
+        "normalized_behavior.rs",
         "normalized_extractor.rs",
+        "normalized_ruby.rs",
         "passes.rs",
         "path_condition.rs",
         "protocols.rs",
@@ -675,6 +677,8 @@ fn tree_sitter_adapter_does_not_own_stateful_enrichment_engines() {
 #[test]
 fn rust_syntax_passes_do_not_touch_parser_internals() {
     let checked = [
+        crate_src().join("syntax/normalized_behavior.rs"),
+        crate_src().join("syntax/normalized_ruby.rs"),
         crate_src().join("syntax/passes.rs"),
         crate_src().join("syntax/effects.rs"),
         crate_src().join("syntax/ruby_metadata.rs"),

@@ -32,6 +32,13 @@ module Decomplex
             dispatch << hit(contract, call) if contract
           end
         end
+        document.semantic_effect_sites.each do |effect|
+          next unless effect.kind.to_s == "eliminable_guard"
+
+          asgmap = assignment_maps.fetch(effect.function, {})
+          contract = contract_of(effect.detail, asgmap)
+          guard << hit(contract, effect) if contract
+        end
       end
       guard.uniq! { |hit| [hit.contract, hit.file, hit.defn, hit.line] }
       Report.new(guard, dispatch)

@@ -100,6 +100,9 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     normalizer.rb
     adapters.rb
     adapters/base.rb
+    adapters/c.rb
+    adapters/go.rb
+    adapters/kotlin.rb
     adapters/lua.rb
     adapters/python.rb
     adapters/ruby.rb

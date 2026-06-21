@@ -118,6 +118,10 @@ module FactMine
         false
       end
 
+      def suppress_clone_candidate?(_node, ancestors:)
+        false
+      end
+
       def ternary_children_conditional?(_node)
         true
       end

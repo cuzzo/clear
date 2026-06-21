@@ -4,7 +4,7 @@ module FactMine
   module Syntax
     JAVASCRIPT_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\b(?:null|undefined)\b/].freeze,
-      guard_mids: %w[isNull].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\btypeof\b/,
         /\binstanceof\b/,
@@ -25,7 +25,7 @@ module FactMine
       meta_mids: %w[eval Function defineProperty defineProperties setPrototypeOf].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[console Console fs process Deno Bun].freeze,
-      io_bare: %w[setTimeout setInterval fetch require import].freeze,
+      io_bare: %w[setTimeout setInterval fetch require import print].freeze,
       dir_context: [].freeze,
       context_pairs: {
         "Date" => %w[now],
@@ -113,6 +113,18 @@ module FactMine
 
       def explicit_self_state_ref(_node, message)
         "this.#{message}"
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
     end
 

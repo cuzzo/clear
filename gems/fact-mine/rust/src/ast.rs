@@ -394,7 +394,13 @@ const IF_NODE_KINDS: &[&str] = &[
     "if_expression",
     "conditional",
 ];
-const LEADING_IF_WRAPPER_KINDS: &[&str] = &["body_statement", "block", "block_body", "statement"];
+const LEADING_IF_WRAPPER_KINDS: &[&str] = &[
+    "body_statement",
+    "block",
+    "block_body",
+    "statement",
+    "statements",
+];
 const PYTHON_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
 const LUA_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
 const LEADING_CASE_WRAPPER_KINDS: &[&str] = &["body_statement", "block", "block_body", "statement"];
@@ -454,6 +460,7 @@ const STATEMENT_BLOCK_PARENT_KINDS: &[&str] = &[
     "method_declaration",
     "constructor_declaration",
     "function_declaration",
+    "function_item",
     "function_body",
     "if_statement",
     "while_statement",
@@ -1835,7 +1842,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn wrapped_return_statement(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(
             node.kind(),
-            "body_statement" | "block_body" | "statement" | "block"
+            "body_statement" | "block_body" | "statement" | "block" | "statement_list"
         ) && !node_text(node, self.source).contains('\n')
             && node
                 .children(&mut node.walk())
@@ -4848,7 +4855,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn boolean_statement(&self, node: TreeSitterNode<'_>) -> bool {
         if !matches!(
             node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
+            "body_statement" | "block_body" | "statement" | "argument_list" | "expression_list"
         ) {
             return false;
         }
@@ -5895,6 +5902,8 @@ impl<'source> TreeSitterNormalizer<'source> {
                     | "block"
                     | "do_block"
                     | "class_body"
+                    | "compound_statement"
+                    | "declaration_list"
                     | "function_body"
                     | "match_block"
                     | "statement_block"
@@ -6251,6 +6260,8 @@ impl<'source> TreeSitterNormalizer<'source> {
                     | "then"
                     | "block_body"
                     | "control_structure_body"
+                    | "compound_statement"
+                    | "declaration_list"
                     | "function_body"
                     | "statements"
             )

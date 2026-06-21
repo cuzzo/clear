@@ -11,6 +11,7 @@ pub(crate) struct FalseSimplicityLexicon {
     pub(crate) context_pairs: &'static [(&'static str, &'static [&'static str])],
     pub(crate) context_bare: &'static [&'static str],
     pub(crate) callback_set: &'static [&'static str],
+    pub(crate) callback_requires_block: bool,
     pub(crate) core_consts: &'static [&'static str],
 }
 
@@ -375,6 +376,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: RUBY_CONTEXT_PAIRS,
             context_bare: &["rand", "srand"],
             callback_set: RUBY_CALLBACK_SET,
+            callback_requires_block: false,
             core_consts: RUBY_CORE_CONSTS,
         },
         Language::Python => FalseSimplicityLexicon {
@@ -405,6 +407,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: PYTHON_CONTEXT_PAIRS,
             context_bare: &["random", "randint", "randrange"],
             callback_set: COMMON_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::JavaScript | Language::TypeScript => FalseSimplicityLexicon {
@@ -423,6 +426,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: JS_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: COMMON_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Go => FalseSimplicityLexicon {
@@ -442,6 +446,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: GO_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: GO_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Rust => FalseSimplicityLexicon {
@@ -461,6 +466,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: RUST_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: RUST_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Zig => FalseSimplicityLexicon {
@@ -482,6 +488,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: ZIG_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: ZIG_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Lua => FalseSimplicityLexicon {
@@ -501,6 +508,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: LUA_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: COMMON_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::C => FalseSimplicityLexicon {
@@ -516,6 +524,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: EMPTY_PAIRS,
             context_bare: &["rand", "time", "clock"],
             callback_set: C_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Cpp => FalseSimplicityLexicon {
@@ -543,6 +552,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: CPP_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: CPP_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::CSharp => FalseSimplicityLexicon {
@@ -571,6 +581,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: CSHARP_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: CSHARP_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Java => FalseSimplicityLexicon {
@@ -601,6 +612,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: JAVA_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: JAVA_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Swift => FalseSimplicityLexicon {
@@ -637,6 +649,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: SWIFT_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: SWIFT_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Kotlin => FalseSimplicityLexicon {
@@ -672,6 +685,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: KOTLIN_CONTEXT_PAIRS,
             context_bare: EMPTY,
             callback_set: KOTLIN_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
         Language::Php => FalseSimplicityLexicon {
@@ -708,6 +722,7 @@ pub(crate) fn false_simplicity_lexicon(language: Language) -> FalseSimplicityLex
             context_pairs: PHP_CONTEXT_PAIRS,
             context_bare: &["time", "microtime", "random_int", "rand", "mt_rand"],
             callback_set: COMMON_CALLBACK_SET,
+            callback_requires_block: true,
             core_consts: EMPTY,
         },
     }

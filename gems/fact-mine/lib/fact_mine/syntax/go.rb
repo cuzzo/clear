@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     GO_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnil\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnil\b/,
         /\.\(type\)/,
@@ -351,6 +352,18 @@ module FactMine
         return "#{receiver}.#{message}" if receiver
 
         super
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
     end
 

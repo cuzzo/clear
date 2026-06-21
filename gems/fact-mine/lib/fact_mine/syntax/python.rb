@@ -4,7 +4,7 @@ module FactMine
   module Syntax
     PYTHON_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bNone\b/].freeze,
-      guard_mids: %w[is_none is_some].freeze,
+      guard_mids: %w[isNull isSome is_none is_some].freeze,
       type_guard_patterns: [
         /\b(?:isinstance|issubclass|hasattr)\s*\(/,
         /\bis\s+(?:not\s+)?None\b/,
@@ -459,7 +459,7 @@ module FactMine
       end
 
       def suppress_call_site?(_node, call)
-        %w[break continue value].include?(call.fetch("message").to_s)
+        %w[break continue].include?(call.fetch("message").to_s)
       end
 
       def suppress_self_call_state_read?(call)
@@ -485,6 +485,17 @@ module FactMine
         text = text.sub(/\A\*+/, "")
         name = text[/\A([A-Za-z_]\w*)\s*:/, 1]
         name || super
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome", "is_some"
+          { local: subject, non_nil_when_true: true }
+        when "isNull", "is_none"
+          { local: subject, non_nil_when_true: false }
+        end
       end
     end
 

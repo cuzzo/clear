@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     C_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bNULL\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bNULL\b/,
         /\bsizeof\s*\(/,
@@ -24,7 +25,7 @@ module FactMine
       meta_mids: %w[setjmp longjmp va_start va_arg].freeze,
       method_obj_mids: %w[method].freeze,
       io_consts: %w[FILE DIR pthread mutex atomic].freeze,
-      io_bare: %w[printf fprintf fopen open read write close system exec abort exit assert puts].freeze,
+      io_bare: %w[printf fprintf fopen open read write close system exec abort exit assert puts print].freeze,
       dir_context: %w[getcwd getenv].freeze,
       context_pairs: {}.freeze,
       context_bare: %w[rand time clock].freeze,
@@ -149,6 +150,11 @@ module FactMine
       def owner_for_function(name, node, current_owner:, file_owner:)
         return current_owner unless current_owner == file_owner
 
+        params = parameter_list_source(node.text.to_s)
+        first = params.split(",", 2).first.to_s.strip
+        typed_self = first[/\A(?:const\s+)?(?:struct\s+)?([A-Za-z_]\w*)\s*\*\s*self\z/, 1]
+        return typed_self if typed_self
+
         name[/\A([A-Z]\w*)_/, 1] || current_owner
       end
 
@@ -168,6 +174,22 @@ module FactMine
 
       def wrap_branch_predicate?(_branch)
         true
+      end
+
+      def case_pattern_display(pattern)
+        pattern.to_s.sub(/\AAST_([A-Z]\w*)\z/, 'AST.\1')
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
       end
     end
 

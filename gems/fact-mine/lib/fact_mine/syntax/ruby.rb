@@ -1101,7 +1101,31 @@ module FactMine
         false
       end
 
+      def suppress_clone_candidate?(node, ancestors:)
+        return false if %w[DEFN DEFS].include?(normalized_node_type(node))
+        return false if ancestors.any? { |ancestor| %w[DEFN DEFS].include?(normalized_node_type(ancestor)) }
+
+        ancestors.any? do |ancestor|
+          normalized_node_type(ancestor) == "CLASS" &&
+            normalized_node_text(ancestor).match?(/<\s*T::Struct\b/)
+        end
+      end
+
       private
+
+      def normalized_node_type(node)
+        return node["type"].to_s if node.is_a?(Hash)
+        return node.type.to_s if node.respond_to?(:type)
+
+        ""
+      end
+
+      def normalized_node_text(node)
+        return node["text"].to_s if node.is_a?(Hash)
+        return node.text.to_s if node.respond_to?(:text)
+
+        ""
+      end
 
       def visibility_argument_name(argument)
         argument.to_s.strip

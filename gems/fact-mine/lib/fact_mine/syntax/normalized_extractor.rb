@@ -115,6 +115,7 @@ module FactMine
         when "CALL", "QCALL", "FCALL", "VCALL" then record_call_node(node, block: false)
         when "ITER" then scan_iter(node)
         when "FOR", "WHILE", "UNTIL" then scan_loop(node)
+        when "RESCUE" then scan_rescue(node)
         when "YIELD" then scan_yield(node)
         when "XSTR" then scan_command_string(node)
         when "SCLASS" then scan_singleton_class(node)
@@ -221,6 +222,15 @@ module FactMine
         child_nodes(node).each do |child|
           with_control("iterates") { scan(child) }
         end
+      end
+
+      def scan_rescue(node)
+        body = child_node(node, 0)
+        resbody = child_node(node, 1)
+        if nil_rescue_fallback?(resbody) && body
+          record_semantic_effect(node, "eliminable_guard", normalized_text(body))
+        end
+        scan_children(node)
       end
 
       def scan_yield(node)
@@ -893,6 +903,16 @@ module FactMine
         node.children.select { |child| ast_node?(child) }
       end
 
+      def nil_rescue_fallback?(node)
+        return false unless ast_node?(node)
+        return true if node.type.to_s == "NIL"
+
+        children = child_nodes(node)
+        return nil_rescue_fallback?(children[1]) if node.type.to_s == "RESBODY" && children[1]
+
+        children.size == 1 && nil_rescue_fallback?(children.first)
+      end
+
       def child_symbol(node, index)
         child = node.children[index]
         return child.to_s if child.is_a?(String) || child.is_a?(Symbol)
@@ -1337,7 +1357,7 @@ module FactMine
         if case_source
           return [] if case_source == "default"
           return split_case_source(case_source) if case_source.include?(",")
-          return [@extraction_behavior.case_pattern_display(case_source)] if case_source.start_with?("\"", "'")
+          return [@extraction_behavior.case_pattern_display(case_source)]
         end
 
         pattern_values = child_nodes(patterns).map do |child|

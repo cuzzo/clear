@@ -145,6 +145,21 @@
             "safe_navigation": false,
             "block": false
           }
+        ],
+        "semantic_effect_sites": [
+          {
+            "kind": "eliminable_guard",
+            "detail": "candidate.name",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "line": 2,
+            "span": [
+              2,
+              0,
+              2,
+              25
+            ]
+          }
         ]
       }
     ]
