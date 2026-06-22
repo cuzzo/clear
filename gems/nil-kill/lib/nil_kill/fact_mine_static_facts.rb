@@ -378,9 +378,66 @@ module NilKill
             span: node_span(node)
           )
         end
+        out.concat(source_typed_state_declarations)
         out.concat(tlet_state_declarations)
         out.concat(ruby_t_struct_state_declarations)
         out
+      end
+
+      def source_typed_state_declarations
+        case @language
+        when "python" then python_source_typed_state_declarations
+        when "typescript", "javascript" then typescript_source_typed_state_declarations
+        else []
+        end
+      end
+
+      def python_source_typed_state_declarations
+        @document.lines.each_with_index.filter_map do |line, idx|
+          line_no = idx + 1
+          stripped = line.strip
+          match = stripped.match(/\A(?:self|cls)\.([A-Za-z_]\w*)\s*:\s*([^=#]+?)(?:\s*=.*)?(?:#.*)?\z/)
+          next unless match
+
+          owner = owner_record_for_line(line_no)&.name.to_s
+          next if owner.empty?
+
+          typed_state_declaration(match[1], owner, match[2], line, line_no)
+        end
+      end
+
+      def typescript_source_typed_state_declarations
+        @document.lines.each_with_index.filter_map do |line, idx|
+          line_no = idx + 1
+          owner = owner_record_for_line(line_no)&.name.to_s
+          next if owner.empty?
+
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("//")
+          next if stripped.include?("(")
+
+          match = stripped.match(
+            /\A(?:(?:public|private|protected|readonly|static|declare|override|abstract)\s+)*(?:accessor\s+)?([A-Za-z_$]\w*)[?!]?\s*:\s*([^=;{]+)/
+          )
+          next unless match
+
+          typed_state_declaration(match[1], owner, match[2], line, line_no)
+        end
+      end
+
+      def typed_state_declaration(field, owner, type, line, line_no)
+        type = type.to_s.split("#", 2).first.to_s.split("//", 2).first.to_s.delete_suffix(";")
+        type = normalize_text(type)
+        return nil if type.empty?
+
+        FactMine::Syntax::StateDeclaration.new(
+          field: field.to_s,
+          owner: owner.to_s,
+          type: type,
+          file: @document.file,
+          line: line_no,
+          span: source_line_span(line, line_no)
+        )
       end
 
       def tlet_state_declarations
@@ -416,10 +473,21 @@ module NilKill
 
       def method_signature(fn)
         signature = fn.respond_to?(:signature) ? fn.signature.to_s : ""
+        signature = source_signature_for(fn) if signature.empty?
         return signature if @language != "ruby"
 
         signature = ruby_signature_before_line(fn.line) if signature.empty?
         signature.strip.start_with?("sig ") ? signature : ""
+      end
+
+      def source_signature_for(fn)
+        case @language
+        when "python", "typescript", "javascript"
+          line = method_header_text(fn).strip
+          line.empty? ? "" : line
+        else
+          ""
+        end
       end
 
       def ruby_signature_before_line(line)
@@ -478,7 +546,8 @@ module NilKill
       end
 
       def python_method_type_definition(fn)
-        typed = python_signature_types(fn.signature)
+        signature = method_signature(fn)
+        typed = python_signature_types(signature)
         return nil if typed[:params].empty? && typed[:return_type].to_s.empty?
 
         {
@@ -490,14 +559,15 @@ module NilKill
           "owner" => fn.owner.to_s,
           "name" => fn.name.to_s,
           "line" => fn.line,
-          "signature" => fn.signature.to_s,
+          "signature" => signature,
           "return_type" => typed[:return_type],
           "params" => typed[:params],
         }
       end
 
       def typescript_method_type_definition(fn)
-        typed = typescript_signature_types(fn.signature)
+        signature = method_signature(fn)
+        typed = typescript_signature_types(signature)
         return nil if typed[:params].empty? && typed[:return_type].to_s.empty?
 
         {
@@ -509,7 +579,7 @@ module NilKill
           "owner" => fn.owner.to_s,
           "name" => fn.name.to_s,
           "line" => fn.line,
-          "signature" => fn.signature.to_s,
+          "signature" => signature,
           "return_type" => typed[:return_type],
           "params" => typed[:params],
         }
@@ -1843,10 +1913,14 @@ module NilKill
           return owner if owner
         end
 
+        owner_record_for_line(line)&.name || file_owner
+      end
+
+      def owner_record_for_line(line)
         Array(@facts[:owner_defs]).select do |owner|
           span = Array(owner.span)
           span[0].to_i <= line.to_i && span[2].to_i >= line.to_i
-        end.max_by { |owner| Array(owner.span)[0].to_i }&.name || file_owner
+        end.max_by { |owner| Array(owner.span)[0].to_i }
       end
 
       def qualified_owner(parent, name)
@@ -1972,6 +2046,12 @@ module NilKill
 
       def normalize_text(text)
         text.to_s.strip.gsub(/\s+/, " ")
+      end
+
+      def source_line_span(line, line_no)
+        text = line.to_s.chomp
+        start_column = line.to_s.index(line.to_s.strip) || 0
+        [line_no, start_column, line_no, text.length]
       end
 
       def line_indent(line)
