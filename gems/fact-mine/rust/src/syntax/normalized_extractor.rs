@@ -1053,6 +1053,7 @@ impl<'a> Extractor<'a> {
                 .or_default()
                 .push(declaration.field.clone());
             self.facts.state_declarations.push(declaration);
+            return; // Don't recurse into type annotation children
         }
 
         if matches!(
@@ -2214,19 +2215,37 @@ fn span_contains(outer: Span, inner: Span) -> bool {
         && (outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]))
 }
 
-/// From a FIELD_DECLARATION-like node, extract the type after the field name.
-/// Handles patterns like: `count int`, `count: int`, `count: int = 0`, `items: list[str]`
+/// From a FIELD_DECLARATION-like node, extract the type from the node's children.
+/// Children are typically [name, type?, value?] — the type is the child after the name.
 fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String> {
+    let child_nodes = child_nodes(node);
+    // Find the field name child, then take the next child as the type
+    for (i, child) in child_nodes.iter().enumerate() {
+        // Match the field name child: could be Symbol, LVAR, or identifier node
+        let is_name = child.text.trim() == field_name
+            || child.r#type == "LVAR"
+            || child.r#type == "CVAR"
+            || child.r#type == "identifier";
+        if is_name && i + 1 < child_nodes.len() {
+            let type_child = child_nodes[i + 1];
+            let type_text = type_child.text.trim().to_string();
+            if !type_text.is_empty()
+                && type_text != ":"
+                && !type_text.starts_with('=')
+                && !type_text.starts_with('(')
+                && !type_text.starts_with('{')
+            {
+                return Some(type_text);
+            }
+        }
+    }
+    // Fallback: text-based extraction for languages where children aren't structured
     let text = node.text.trim();
-    // Find field name in text and take everything after it
     let after_name = text
         .find(field_name)
         .map(|idx| text[idx + field_name.len()..].trim_start())?;
-    // Strip leading colon if present
     let after_name = after_name.strip_prefix(':').unwrap_or(after_name).trim_start();
-    // Strip trailing assignment if present (e.g., " = 0", " = []")
     let type_text = after_name.split('=').next()?.trim();
-    // Filter out common non-type lookalikes
     if type_text.is_empty()
         || type_text == ";"
         || type_text.starts_with('(')
@@ -2235,7 +2254,6 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
     {
         return None;
     }
-    // Handle nullable shorthand: `string?` -> `string | null` or keep as-is
     Some(type_text.to_string())
 }
 
