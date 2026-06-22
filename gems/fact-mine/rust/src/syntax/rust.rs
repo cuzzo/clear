@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 
 const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
@@ -206,12 +207,50 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("none")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // Rust struct field: `name: Type` or `pub name: Type`
+        let text = text.strip_prefix("pub ").unwrap_or(text);
+        if let Some((name, rest)) = text.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty() && !name.contains(' ') && !name.contains('.')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            {
+                let type_text = rest.trim().to_string();
+                if !type_text.is_empty() {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: RustNormalizedBehavior = RustNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 pub(crate) fn simple_identifier(name: &str) -> bool {

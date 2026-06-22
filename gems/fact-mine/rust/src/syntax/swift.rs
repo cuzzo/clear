@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect, NormalizedStateWrite,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 
 const SWIFT_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("Date", &["now"]), ("UUID", &["init"])];
@@ -212,12 +213,50 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("nil")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // Swift: `var name: Type` or `let name: Type`
+        let text = text.strip_prefix("var ").or_else(|| text.strip_prefix("let ")).unwrap_or(text);
+        if let Some((name, rest)) = text.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty() && !name.contains(' ') && !name.contains('.')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            {
+                let type_text = rest.split('=').next().unwrap_or(rest).trim().to_string();
+                if !type_text.is_empty() {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: SwiftNormalizedBehavior = SwiftNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn simple_identifier(name: &str) -> bool {

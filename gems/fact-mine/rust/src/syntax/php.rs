@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 
 const PHP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -167,12 +168,70 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null") || text.contains("??")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // PHP: `public Type $name`, `private Type $name`, `Type $name`
+        let text = text.strip_prefix("public ").or_else(|| text.strip_prefix("private "))
+            .or_else(|| text.strip_prefix("protected ")).unwrap_or(text);
+        // After visibility modifier, pattern is `Type $name` or `Type $name = value`
+        if let Some((name, _)) = text.split_once('=') {
+            let parts: Vec<&str> = text.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let name = name.trim().split_whitespace().last().unwrap_or("").trim_start_matches('$');
+                if !name.is_empty() && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic()) {
+                    let type_text = parts[..parts.len()-1].join(" ");
+                    if !type_text.is_empty() {
+                        return Some(StateDeclaration {
+                            field: name.to_string(),
+                            owner: String::new(),
+                            r#type: Some(type_text),
+                            file: String::new(),
+                            line: node.first_lineno,
+                            span: span(node),
+                        });
+                    }
+                }
+            }
+        }
+        let parts: Vec<&str> = text.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let name = parts.last().unwrap().trim_start_matches('$').trim_end_matches(';');
+            if !name.is_empty() && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic()) {
+                let type_text = parts[..parts.len()-1].join(" ");
+                if !type_text.is_empty() {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: PhpNormalizedBehavior = PhpNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn member_reads(text: &str, line: usize, column: usize) -> Vec<NormalizedStateRead> {

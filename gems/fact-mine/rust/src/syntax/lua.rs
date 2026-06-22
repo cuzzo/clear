@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Child, Node, Span};
 
 const LUA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -212,6 +213,18 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         let lower = text.to_ascii_lowercase();
         lower.contains("nil") || lower.contains(" and ") || lower.contains(" or ")
+    }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // Lua: table fields, pattern: name = value (no type annotation in Lua)
+        // Lua doesn't have static types, so return None. State is detected via writes.
+        let _ = text;
+        None
     }
 }
 

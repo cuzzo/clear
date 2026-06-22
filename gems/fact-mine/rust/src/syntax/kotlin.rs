@@ -1,11 +1,12 @@
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
+use super::CallSite;
+use super::StateDeclaration;
+use crate::ast::{Node, Span};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
-use super::CallSite;
-use crate::ast::{Node, Span};
 
 const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -194,12 +195,50 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // Kotlin: `val name: Type` or `var name: Type`
+        let text = text.strip_prefix("val ").or_else(|| text.strip_prefix("var ")).unwrap_or(text);
+        if let Some((name, rest)) = text.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty() && !name.contains(' ') && !name.contains('.')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            {
+                let type_text = rest.split('=').next().unwrap_or(rest).trim().to_string();
+                if !type_text.is_empty() {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: KotlinNormalizedBehavior = KotlinNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn simple_identifier(name: &str) -> bool {

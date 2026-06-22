@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
 
@@ -203,12 +204,51 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // C struct field: `Type name;`
+        let parts: Vec<&str> = text.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let name = parts.last().unwrap().trim_end_matches(';');
+            if !name.is_empty() && !name.contains('.') && !name.contains('(')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                && name.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+            {
+                let type_text = parts[..parts.len()-1].join(" ");
+                if !type_text.contains('(') && !type_text.is_empty() {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: CNormalizedBehavior = CNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn typed_self_owner(parameter: &str) -> Option<String> {
