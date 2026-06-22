@@ -21,53 +21,85 @@ module FactMine
     end
 
     class TreeSitterLanguageAdapter
-      CLONE_IDENTIFIER_KINDS = %w[
-        identifier constant type_identifier field_identifier property_identifier
-        shorthand_property_identifier_pattern simple_identifier variable_name
-      ].freeze
-      CLONE_LITERAL_KINDS = %w[
-        string string_content string_literal interpreted_string_literal raw_string_literal
-        integer float int number rational imaginary character char_literal
-        symbol simple_symbol true false nil none null
-      ].freeze
-      CLONE_SKIP_KINDS = %w[
-        comment identifier constant type_identifier field_identifier property_identifier
-        parameters formal_parameters parameter_list argument_list arguments
-        block_parameters call_suffix function_value_parameters method_parameters value_argument
-        scope_resolution
-      ].freeze
-      CLONE_CANDIDATE_KINDS = %w[
-        array assignment assignment_statement block case case_clause class
-        class_definition class_declaration compound_statement conjunction_expression control_structure_body
-        do_block enum_declaration for for_statement function_body hash if if_statement match_expression
-        match_statement method method_definition module operator_assignment singleton_method statements
-        struct_declaration switch_case switch_expression switch_statement
-        unless until while while_statement
-      ].freeze
-      CLONE_BODY_KINDS = %w[
-        body block body_statement declaration_list statement_block compound_statement
-        function_body statements suite do_block
-      ].freeze
-      CLONE_CALL_KINDS = %w[
-        call call_expression function_call method_call method_invocation invocation_expression
-      ].freeze
-
       def clone_candidates(document)
+        CloneSimilarityAnalyzer.new(document).scan
+      end
+    end
+
+    class CloneSimilarityAnalyzer
+      CANDIDATE_TYPES = %w[
+        DEFN DEFS BLOCK IF UNLESS CASE CASE2 WHEN AND OR FOR WHILE UNTIL ITER
+        CALL QCALL FCALL VCALL OPCALL OP_ASGN1 OP_ASGN2 ATTRASGN HASH LIST
+      ].freeze
+      SKIP_TYPES = %w[ROOT SCOPE ARGS ZLIST].freeze
+      IDENTIFIER_TYPES = %w[LVAR DVAR IVAR GVAR CONST SELF].freeze
+      LITERAL_TYPES = %w[STR DSTR XSTR RAW_ARGUMENT FIELD_EXPRESSION INTEGER LIT].freeze
+      PUBLIC_NODE_TYPES = {
+        "CLASS" => "class",
+        "MODULE" => "module",
+        "SCOPE" => "body",
+        "BLOCK" => "body_statement",
+        "DEFN" => "method",
+        "DEFS" => "method",
+        "ARGS" => "parameters",
+        "LASGN" => "assignment",
+        "DASGN" => "assignment",
+        "IASGN" => "assignment",
+        "GASGN" => "assignment",
+        "MASGN" => "assignment",
+        "ATTRASGN" => "assignment",
+        "OP_ASGN1" => "assignment",
+        "OP_ASGN2" => "assignment",
+        "IF" => "if",
+        "UNLESS" => "unless",
+        "CASE" => "case",
+        "CASE2" => "case",
+        "WHEN" => "when",
+        "CALL" => "call",
+        "QCALL" => "call",
+        "FCALL" => "call",
+        "VCALL" => "call",
+        "OPCALL" => "call",
+        "LIST" => "argument_list",
+        "HASH" => "hash",
+        "ITER" => "block",
+        "AND" => "and",
+        "OR" => "or",
+        "FOR" => "for",
+        "WHILE" => "while",
+        "UNTIL" => "until"
+      }.freeze
+
+      def self.scan_normalized_row(row)
+        new(OpenStruct.new(
+          file: row.fetch("file"),
+          language: row.fetch("language", "unknown"),
+          normalized_root: row.fetch("normalized_root")
+        )).scan.map(&:to_h)
+      end
+
+      def initialize(document)
+        @document = document
+        language = document.respond_to?(:language) ? document.language : :unknown
+        @behavior = Syntax::NormalizedExtractionBehavior.for(language)
+        @parents = {}
+      end
+
+      def scan
         out = []
         seen = Set.new
+        walk(normalized_root).each do |node|
+          next unless candidate_node?(node)
 
-        document.function_defs.each do |fn|
-          candidate = clone_candidate_for(document, fn.body, node_name: "defn", function_name: fn.name)
-          clone_add_candidate(out, seen, candidate) if candidate
+          candidate = clone_candidate_for(node, function_name: enclosing_function_name(node))
+          next unless candidate
+
+          key = [candidate.file, candidate.line, candidate.span, candidate.node_name, candidate.fingerprint]
+          next if seen.include?(key)
+
+          seen << key
+          out << candidate
         end
-
-        clone_walk(document.root) do |node|
-          next unless clone_candidate_node?(node)
-
-          function = clone_method_span_for(document, line(node))
-          clone_add_candidate(out, seen, clone_candidate_for(document, node, function_name: function&.name))
-        end
-
         out
       rescue StandardError
         []
@@ -75,198 +107,240 @@ module FactMine
 
       private
 
-      def clone_add_candidate(out, seen, candidate)
-        return unless candidate
-        return if clone_typed_struct_schema_text?(candidate.raw)
+      attr_reader :document
 
-        key = [candidate.file, candidate.line, candidate.span, candidate.node_name, candidate.fingerprint]
-        return if seen.include?(key)
+      def clone_candidate_for(node, function_name:)
+        fingerprint, mass = fingerprint_for(node)
+        return nil if fingerprint.empty? || mass.zero?
 
-        seen << key
-        out << candidate
-      end
-
-      def clone_candidate_for(document, node, node_name: nil, function_name: nil)
-        fp, mass = clone_fingerprint(node)
-        return nil if fp.to_s.empty?
-
-        line_no = line(node)
-        method = clone_method_span_for(document, line_no)
-        children = clone_fuzzy_children_for(node)
-        child_data = children.map { |child| clone_fingerprint(child) }
-                             .reject { |child_fp, child_mass| child_fp.to_s.empty? || child_mass.zero? }
-
+        child_data = candidate_children(node).map { |child| fingerprint_for(child) }
+                                           .reject { |child_fp, child_mass| child_fp.empty? || child_mass.zero? }
         CloneCandidate.new(
           file: document.file,
-          line: line_no,
-          span: span(node),
-          method_name: function_name || method&.name || "(top-level)",
-          node_name: node_name || clone_node_name(node),
+          line: node_line(node),
+          span: node_span(node),
+          method_name: function_name || "(top-level)",
+          node_name: node_name(node),
           mass: mass,
-          fingerprint: fp,
-          raw: normalize_text(node.text),
+          fingerprint: fingerprint,
+          raw: compact_text(node),
           child_fingerprints: child_data.map(&:first),
           child_masses: child_data.map(&:last)
         )
       end
 
-      def clone_candidate_node?(node)
-        return false unless ts_node?(node)
-        return false unless node.named?
-        return false if CLONE_SKIP_KINDS.include?(node.kind)
-        return false unless CLONE_CANDIDATE_KINDS.include?(node.kind)
-        return false if clone_typed_struct_schema_text?(node.text)
+      def candidate_node?(node)
+        return false unless normalized_node?(node)
+        return false if SKIP_TYPES.include?(node_type(node))
+        return false unless CANDIDATE_TYPES.include?(node_type(node))
+        return false if @behavior.suppress_clone_candidate?(node, ancestors: ancestors_for(node))
 
-        node.named_child_count.positive?
+        node_children(node).any?
       end
 
-      def clone_fuzzy_children_for(node)
-        body = clone_body_node(node)
-        source = body || node
-        children = source.named_children
-        children = node.named_children if children.empty?
-        children.reject { |child| CLONE_SKIP_KINDS.include?(child.kind) || clone_typed_struct_schema_text?(child.text) }
+      def candidate_children(node)
+        body = body_node(node)
+        children = node_children(body || node)
+        children.reject { |child| SKIP_TYPES.include?(node_type(child)) }
       end
 
-      def clone_body_node(node)
-        named_field(node, "body") ||
-          node.named_children.find { |child| CLONE_BODY_KINDS.include?(child.kind) }
+      def body_node(node)
+        node_children(node).find { |child| node_type(child) == "BLOCK" }
       end
 
-      def clone_fingerprint(node, active = nil)
-        return ["", 0] unless ts_node?(node)
+      def fingerprint_for(node, active = nil)
+        return ["", 0] unless normalized_node?(node)
 
         active ||= Set.new
-        key = node_key(node)
+        key = object_key(node)
         return ["", 0] if active.include?(key)
 
         active << key
         begin
-          return ["", 0] if node.kind == "comment"
-          return clone_fingerprint_call(node, active) if CLONE_CALL_KINDS.include?(node.kind) && clone_call_message(node)
+          token = terminal_token(node)
+          return [token, 1] unless token.empty?
 
-          if node.child_count.zero?
-            token = clone_terminal_token(node)
-            return ["", 0] if token.empty?
-
-            return [token, 1]
-          end
-
-          child_parts = []
+          parts = scalar_tokens(node)
           mass = 1
-          node.children.each do |child|
-            child_fp, child_mass = clone_fingerprint(child, active)
+          node_children(node).each do |child|
+            child_fp, child_mass = fingerprint_for(child, active)
             next if child_fp.empty?
 
-            child_parts << child_fp
+            parts << child_fp
             mass += child_mass
           end
+          return ["", 0] if parts.empty?
 
-          return [clone_terminal_token(node), 1] if child_parts.empty?
-
-          ["#{node.kind}(#{child_parts.join(' ')})", mass]
+          ["#{fingerprint_label(node)}(#{parts.join(' ')})", mass]
         ensure
           active.delete(key)
         end
       end
 
-      def clone_fingerprint_call(node, active)
-        message = clone_call_message(node)
-        child_parts = []
-        mass = 1
-        node.children.each do |child|
-          child_fp, child_mass = clone_fingerprint(child, active)
-          next if child_fp.empty?
-
-          child_parts << child_fp
-          mass += child_mass
-        end
-        ["#{node.kind}<#{message}>(#{child_parts.join(' ')})", mass]
-      end
-
-      def clone_call_message(node)
-        return nil unless node.children.any? { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
-
-        callee = named_field(node, "function") || named_field(node, "callee")
-        return clone_callee_message(callee) if callee
-
-        argument_node = node.children.find { |child| %w[argument_list arguments call_suffix].include?(child.kind) }
-        named_before_args = node.named_children.select do |child|
-          argument_node.nil? || child.start_byte < argument_node.start_byte
-        end
-        clone_callee_message(named_before_args.last)
-      end
-
-      def clone_callee_message(node)
-        return nil unless ts_node?(node)
-        return node.text if CLONE_IDENTIFIER_KINDS.include?(node.kind)
-        return clone_navigation_suffix_message(node) if %w[navigation_expression directly_assignable_expression].include?(node.kind)
-
-        leaf = node.named_children.reverse.find { |child| CLONE_IDENTIFIER_KINDS.include?(child.kind) }
-        leaf&.text
-      end
-
-      def clone_navigation_suffix_message(node)
-        suffix = node.named_children.reverse.find { |child| child.kind == "navigation_suffix" }
-        leaf = suffix&.named_children&.reverse&.find { |child| CLONE_IDENTIFIER_KINDS.include?(child.kind) }
-        leaf&.text
-      end
-
-      def clone_terminal_token(node)
-        kind = node.kind.to_s
-        return "id" if CLONE_IDENTIFIER_KINDS.include?(kind)
-        return clone_literal_token(kind) if CLONE_LITERAL_KINDS.include?(kind)
-
-        text = normalize_text(node.text)
-        return "" if text.empty?
-        return "id" if text.match?(/\A[A-Za-z_]\w*[!?=]?\z/)
-        return "lit" if text.match?(/\A(?::[A-Za-z_]\w*|[-+]?\d+(?:\.\d+)?|".*"|'.*')\z/)
-
-        "#{kind}:#{text}"
-      end
-
-      def clone_literal_token(kind)
-        case kind
-        when "true", "false" then "bool"
-        when "nil", "none", "null" then "nil"
-        else "lit"
+      def scalar_tokens(node)
+        Array(value_for(node, "children")).reject { |child| normalized_node?(child) }.filter_map do |child|
+          scalar_token(child)
         end
       end
 
-      def clone_node_name(node)
-        return "defn" if %w[method function_definition function_declaration method_definition function_item].include?(node.kind)
-        return "defs" if node.kind == "singleton_method"
+      def scalar_token(value)
+        text = value.to_s
+        return nil if text.empty?
 
-        node.kind
+        text.match?(/\A[A-Za-z_@:$]\w*[!?=]?\z/) ? "id" : "lit"
       end
 
-      def clone_typed_struct_schema_text?(text)
-        text.to_s.match?(/<\s*T::Struct\b/) ||
-          text.to_s.lines.all? { |line| line.strip.empty? || line.match?(/\A\s*(?:const|prop)\s+:[A-Za-z_]\w*\b/) }
+      def fingerprint_label(node)
+        label = public_node_type(node)
+        message = call_message(node)
+        message ? "#{label}<#{message}>" : label
       end
 
-      def clone_method_span_for(document, line_no)
-        document.function_defs.find { |fn| fn.span[0] <= line_no && line_no <= fn.span[2] }
-      rescue StandardError
+      def call_message(node)
+        return nil unless %w[CALL QCALL FCALL VCALL ATTRASGN].include?(node_type(node))
+
+        message =
+          case node_type(node)
+          when "CALL", "QCALL", "ATTRASGN" then scalar_child(node, 1)
+          when "FCALL", "VCALL" then scalar_child(node, 0)
+          end
+        args = child_node(node, %w[CALL QCALL ATTRASGN].include?(node_type(node)) ? 2 : 1)
+        return nil unless args && !node_children(args).empty?
+
+        message.to_s
+      end
+
+      def terminal_token(node)
+        type = node_type(node)
+        return "id" if IDENTIFIER_TYPES.include?(type)
+        return "bool" if %w[TRUE FALSE].include?(type)
+        return "nil" if type == "NIL"
+        return "lit" if LITERAL_TYPES.include?(type)
+
+        children = Array(value_for(node, "children"))
+        scalars = children.reject { |child| normalized_node?(child) }.map(&:to_s).reject(&:empty?)
+        return scalars.map { |scalar| scalar.match?(/\A[A-Za-z_]\w*[!?=]?\z/) ? "id" : scalar }.join(":") if node_children(node).empty?
+
+        ""
+      end
+
+      def node_name(node)
+        case node_type(node)
+        when "DEFN" then "defn"
+        when "DEFS" then "defs"
+        else public_node_type(node)
+        end
+      end
+
+      def public_node_type(node)
+        PUBLIC_NODE_TYPES.fetch(node_type(node), node_type(node).downcase)
+      end
+
+      def enclosing_function_name(node)
+        current = node
+        while current
+          return function_name(current) if %w[DEFN DEFS].include?(node_type(current))
+
+          current = parent_of(current)
+        end
         nil
       end
 
-      def clone_walk(node, &block)
-        return unless ts_node?(node)
-
-        pending = [node]
-        seen = Set.new
-        until pending.empty?
-          current = pending.pop
-          next unless ts_node?(current)
-
-          key = node_key(current)
-          next if seen.include?(key)
-
-          seen << key
-          yield current
-          current.children.reverse_each { |child| pending << child }
+      def function_name(node)
+        case node_type(node)
+        when "DEFS"
+          scalar_child(node, 1).to_s
+        else
+          scalar_child(node, 0).to_s
         end
+      end
+
+      def normalized_root
+        document.normalized_root
+      end
+
+      def walk(root)
+        out = []
+        pending = [[root, nil]]
+        until pending.empty?
+          node, parent = pending.pop
+          next unless normalized_node?(node)
+
+          set_parent(node, parent)
+          out << node
+          node_children(node).reverse_each { |child| pending << [child, node] }
+        end
+        out
+      end
+
+      def normalized_node?(node)
+        node.is_a?(Hash) || node.respond_to?(:type)
+      end
+
+      def node_type(node)
+        value_for(node, "type").to_s
+      end
+
+      def node_children(node)
+        Array(value_for(node, "children")).select { |child| normalized_node?(child) }
+      end
+
+      def scalar_child(node, index)
+        child = Array(value_for(node, "children"))[index]
+        normalized_node?(child) ? nil : child
+      end
+
+      def child_node(node, index)
+        child = Array(value_for(node, "children"))[index]
+        normalized_node?(child) ? child : nil
+      end
+
+      def node_line(node)
+        value_for(node, "first_lineno").to_i
+      end
+
+      def node_span(node)
+        [
+          value_for(node, "first_lineno").to_i,
+          value_for(node, "first_column").to_i,
+          value_for(node, "last_lineno").to_i,
+          value_for(node, "last_column").to_i
+        ]
+      end
+
+      def compact_text(node)
+        value_for(node, "text").to_s.tr("\u00A0", " ").strip.gsub(/\s+/, " ")
+      end
+
+      def value_for(node, key)
+        return node[key] if node.is_a?(Hash)
+        return node.public_send(key) if node.respond_to?(key)
+
+        nil
+      end
+
+      def object_key(node)
+        return node.object_id unless node.is_a?(Hash)
+
+        node.object_id
+      end
+
+      def parent_of(node)
+        @parents[node.object_id]
+      end
+
+      def set_parent(node, parent)
+        @parents[node.object_id] = parent
+      end
+
+      def ancestors_for(node)
+        out = []
+        current = parent_of(node)
+        while current
+          out << current
+          current = parent_of(current)
+        end
+        out
       end
     end
   end

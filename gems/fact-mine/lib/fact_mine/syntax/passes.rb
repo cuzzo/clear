@@ -191,5 +191,207 @@ module FactMine
         out
       end
     end
+
+    class NormalizedStatefulSyntaxPass
+      def self.enrich(row, language:, file:, source:, lines:)
+        new(row, language: language, file: file, source: source, lines: lines).enrich
+      end
+
+      def initialize(row, language:, file:, source:, lines:)
+        @row = row
+        @language = language.to_sym
+        @file = file
+        @source = source
+        @lines = lines
+        @profile = Syntax.language_profile(@language)
+        @behavior = Syntax::NormalizedExtractionBehavior.for(@language)
+      end
+
+      def enrich
+        apply_visibility_events!
+        append_effects_from_calls!
+        dedupe_semantic_effects!
+        append_dispatch_facts!
+        append_protocol_facts!
+        append_normalized_local_facts!
+        append_normalized_extension_facts!
+        append_profile_metadata!
+        @row
+      end
+
+      private
+
+      def apply_visibility_events!
+        events_by_owner = Array(@behavior.visibility_events_from_calls(calls)).group_by do |event|
+          event.fetch(:owner).to_s
+        end
+
+        functions.group_by { |function| function.fetch("owner").to_s }.each do |owner, owner_functions|
+          current_visibility = "public"
+          events = visibility_timeline(owner_functions, events_by_owner.fetch(owner, []))
+
+          events.each do |event|
+            if event.key?(:function)
+              function = event.fetch(:function)
+              if function.fetch("visibility") == "public"
+                function["visibility"] = function.fetch("name").to_s.include?(".") ? "public" : current_visibility
+              end
+            elsif event.fetch(:target_names).empty?
+              current_visibility = event.fetch(:visibility).to_s
+            else
+              apply_targeted_visibility!(owner_functions, event)
+            end
+          end
+        end
+      end
+
+      def visibility_timeline(owner_functions, visibility_events)
+        function_events = owner_functions.map { |function| { function: function, line: function.fetch("line"), order: 1 } }
+        visibility_events.map { |event| event.merge(line: event.fetch(:line), order: 0) }
+                         .concat(function_events)
+                         .sort_by { |event| [event.fetch(:line).to_i, event.fetch(:order).to_i] }
+      end
+
+      def apply_targeted_visibility!(owner_functions, event)
+        event.fetch(:target_names).each do |name|
+          owner_functions.reverse_each do |function|
+            next unless function.fetch("name").to_s == name.to_s
+
+            function["visibility"] = event.fetch(:visibility).to_s
+            break
+          end
+        end
+      end
+
+      def append_effects_from_calls!
+        document = OpenStruct.new(
+          language: @language,
+          function_defs: object_rows("functions"),
+          call_sites: calls.map { |call| OpenStruct.new(call.transform_keys(&:to_sym)) }
+        )
+        @profile.semantic_effect_sites(document).each do |effect|
+          semantic_effects << effect.to_h.transform_keys(&:to_s)
+        end
+      end
+
+      def dedupe_semantic_effects!
+        seen = {}
+        @row["semantic_effects"] = semantic_effects.select do |effect|
+          key = effect.values_at("kind", "detail", "function", "line", "span")
+          next false if seen[key]
+
+          seen[key] = true
+        end.sort_by { |effect| effect.values_at("kind", "detail", "function", "line", "span").map(&:to_s) }
+      end
+
+      def append_profile_metadata!
+        document = OpenStruct.new(file: @file, language: @language, source: @source, lines: @lines)
+        @row["immutable_struct_readers"] = @profile.immutable_struct_readers(document)
+        @row["immutable_struct_reader_types"] = @profile.immutable_struct_reader_types(document)
+        @row["type_aliases"] = @profile.type_aliases(document)
+        @row["method_param_types"] = @profile.__send__(:method_param_types, document)
+      end
+
+      def append_protocol_facts!
+        document = fact_document_view
+        @row["protocol_method_effects"] = @profile.protocol_method_effects(document).map do |effect|
+          effect.to_h.transform_keys(&:to_s)
+        end
+        @row["protocol_call_paths"] = @profile.protocol_call_paths(document).map do |path|
+          row = path.to_h.transform_keys(&:to_s)
+          row["calls"] = row.fetch("calls").map { |call| call.to_h.transform_keys(&:to_s) }
+          row
+        end
+      end
+
+      def append_dispatch_facts!
+        derived = @profile.dispatch_sites(fact_document_view).map do |site|
+          site.to_h.transform_keys(&:to_s).tap do |row|
+            row["arm_members"] = row.fetch("arm_members").transform_keys(&:to_s)
+          end
+        end
+        @row["dispatch_sites"] = merge_dispatch_sites(@row.fetch("dispatch_sites") + derived)
+      end
+
+      def merge_dispatch_sites(sites)
+        sites.each_with_object({}) do |site, out|
+          normalized = normalized_dispatch_site(site)
+          out[dispatch_site_key(normalized)] ||= normalized
+        end.values
+      end
+
+      def normalized_dispatch_site(site)
+        site = site.transform_keys(&:to_s)
+        site.merge(
+          "variant_set" => Array(site.fetch("variant_set")).map(&:to_s).sort,
+          "arm_members" => site.fetch("arm_members").transform_keys(&:to_s).to_h do |member, values|
+            [member, Array(values).map(&:to_s).sort]
+          end,
+          "outside" => Array(site.fetch("outside")).map(&:to_s).sort
+        )
+      end
+
+      def dispatch_site_key(site)
+        [
+          site.fetch("file"),
+          site.fetch("function"),
+          site.fetch("line"),
+          site.fetch("span"),
+          site.fetch("variant_set")
+        ]
+      end
+
+      def append_normalized_extension_facts!
+        if Syntax.const_defined?(:CloneSimilarityAnalyzer, false)
+          @row["clone_candidates"] = Syntax::CloneSimilarityAnalyzer.scan_normalized_row(@row)
+        end
+        if Syntax.const_defined?(:NilGuardAnalyzer, false)
+          @row["redundant_nil_guards"] = Syntax::NilGuardAnalyzer.scan_normalized_row(@row)
+        end
+      end
+
+      def append_normalized_local_facts!
+        return unless Syntax.const_defined?(:NormalizedLocalFactsAnalyzer, false)
+
+        facts = Syntax::NormalizedLocalFactsAnalyzer.analyze(@row, language: @language, file: @file, lines: @lines)
+        @row["local_methods"] = facts.fetch("local_methods")
+        @row["path_conditions"] = facts.fetch("path_conditions")
+        @row["local_complexity_scores"] = facts.fetch("local_complexity_scores")
+        @row["local_contract_assignments"] = facts.fetch("local_contract_assignments")
+      end
+
+      def fact_document_view
+        OpenStruct.new(
+          language: @language,
+          function_defs: object_rows("functions"),
+          state_reads: object_rows("state_reads"),
+          state_writes: object_rows("state_writes"),
+          call_sites: object_rows("calls"),
+          branch_arms: branch_arm_rows
+        )
+      end
+
+      def object_rows(key)
+        @row.fetch(key).map { |row| OpenStruct.new(row.transform_keys(&:to_sym)) }
+      end
+
+      def branch_arm_rows
+        object_rows("branch_arms").each do |row|
+          row.kind = row.kind.to_sym if row.kind
+        end
+      end
+
+      def functions
+        @row.fetch("functions")
+      end
+
+      def calls
+        @row.fetch("calls")
+      end
+
+      def semantic_effects
+        @row.fetch("semantic_effects")
+      end
+    end
   end
 end

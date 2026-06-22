@@ -1207,6 +1207,18 @@
           ]
         },
         {
+          "detail": "callback",
+          "function": "process",
+          "kind": "callback_inversion",
+          "line": 30,
+          "span": [
+            30,
+            4,
+            30,
+            22
+          ]
+        },
+        {
           "detail": "callback.call",
           "function": "process",
           "kind": "dynamic_dispatch",
@@ -1240,6 +1252,30 @@
             4,
             59,
             23
+          ]
+        },
+        {
+          "detail": "user",
+          "function": "process",
+          "kind": "eliminable_guard",
+          "line": 27,
+          "span": [
+            27,
+            11,
+            27,
+            24
+          ]
+        },
+        {
+          "detail": "user&.profile",
+          "function": "process",
+          "kind": "eliminable_guard",
+          "line": 27,
+          "span": [
+            27,
+            11,
+            27,
+            30
           ]
         },
         {

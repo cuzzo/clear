@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     RUST_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bNone\b/].freeze,
+      guard_mids: %w[is_none is_some].freeze,
       type_guard_patterns: [
         /\b(?:is_some|is_none)\s*\(/,
         /\b(?:Some|None)\b/,
@@ -18,6 +19,23 @@ module FactMine
         /\Areturn\s+(?:None|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    RUST_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[downcast downcast_ref downcast_mut call call_mut call_once].freeze,
+      meta_mids: %w[transmute from_raw_parts from_raw_parts_mut].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[std tokio fs env process net io].freeze,
+      io_bare: %w[panic todo unimplemented unreachable print].freeze,
+      dir_context: %w[current_dir home_dir].freeze,
+      context_pairs: {
+        "SystemTime" => %w[now],
+        "Instant" => %w[now]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook read write spawn await].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:rust, RUST_EFFECT_LEXICON)
 
     class RustSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_item].freeze
@@ -74,5 +92,90 @@ module FactMine
         modifier_visibility(node) || :private
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class RustNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def source_message_text(message, node)
+        return "#{message}()" if node && node.text.to_s.include?("#{message}()")
+
+        message
+      end
+
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def owner_kind(node, default_kind:)
+        return "impl" if node.text.to_s.strip.start_with?("impl ")
+
+        default_kind
+      end
+
+      def owner_name_from_text(node)
+        node.text.to_s[/\b(?:impl|struct)\s+([A-Za-z_]\w*)/, 1]
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "STRUCT_ITEM"
+
+        name = node.text.to_s[/\bstruct\s+([A-Za-z_]\w*)/, 1]
+        name ? { name: name, kind: "struct" } : nil
+      end
+
+      def owner_name_span(_name, node, default_span:)
+        return default_span if node.type.to_s == "STRUCT_ITEM"
+
+        keyword_block_span(node, "struct") || default_span
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+
+        match = node.text.to_s.match(/\A(?:pub(?:\([^)]*\))?\s+)?([A-Za-z_]\w*)\s*:\s*([^,}]+)/)
+        return nil unless match
+
+        type = match[2].to_s.strip
+        return nil if type.empty?
+
+        { "field" => match[1], "type" => type }
+      end
+
+      def function_visibility(_name, node, lines:)
+        return "public" if node.text.to_s.strip.start_with?("pub ")
+
+        "private"
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip
+        return text if text.match?(/\A&(?:mut\s+)?self\z/)
+        if text.include?(":")
+          name = text.split(":", 2).first.to_s.strip.sub(/\Amut\s+/, "")
+          return name if name.match?(/\A[A-Za-z_]\w*\z/)
+        end
+
+        super
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\A(?:pub\s+)?fn\s+([A-Za-z_]\w*)\b/, 1] || super
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "is_some"
+          { local: subject, non_nil_when_true: true }
+        when "is_none"
+          { local: subject, non_nil_when_true: false }
+        end
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:rust, RustNormalizedExtractionBehavior)
   end
 end

@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     JAVASCRIPT_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\b(?:null|undefined)\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\btypeof\b/,
         /\binstanceof\b/,
@@ -18,6 +19,24 @@ module FactMine
         /\Areturn\s+(?:null|undefined|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    JAVASCRIPT_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[eval Function call apply bind].freeze,
+      meta_mids: %w[eval Function defineProperty defineProperties setPrototypeOf].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[console Console fs process Deno Bun].freeze,
+      io_bare: %w[setTimeout setInterval fetch require import print].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "Date" => %w[now],
+        "Math" => %w[random],
+        "performance" => %w[now]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:javascript, JAVASCRIPT_EFFECT_LEXICON)
 
     class JavaScriptSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration method_definition].freeze
@@ -78,5 +97,37 @@ module FactMine
         function_name(node).to_s.start_with?("#") ? :private : :public
       end
     end
+
+    class JavaScriptNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "this.#{message}"
+      end
+
+      def function_visibility(name, _node, lines:)
+        name.to_s.start_with?("#") ? "private" : "public"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def explicit_self_state_ref(_node, message)
+        "this.#{message}"
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:javascript, JavaScriptNormalizedExtractionBehavior)
   end
 end

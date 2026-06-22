@@ -12,19 +12,14 @@ module Decomplex
     Call = Struct.new(:mid, :file, :owner, :defn, :line, :span, :reads, :writes, keyword_init: true)
     MethodSequence = Struct.new(:file, :owner, :defn, :line, :calls, keyword_init: true)
 
-    DECLARATIVE_MIDS = Syntax::RUBY_PROTOCOL_DECLARATIVE_MIDS
-    TEST_DSL_MIDS = Syntax::RUBY_PROTOCOL_TEST_DSL_MIDS
-    IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
-    OPTIONAL_DIAGNOSTIC_MIDS = Syntax::RUBY_PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS
-    MUTATING_MIDS = Syntax::RUBY_PROTOCOL_MUTATING_MIDS
-    NON_MUTATING_OPERATOR_MIDS = Syntax::RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS
-    MUTATING_SUFFIXES = Syntax::RUBY_PROTOCOL_MUTATING_SUFFIXES
-
     def self.scan(files)
       documents = files.map { |file| Syntax.parse(file, parser: "tree_sitter") }
       effect_index = EffectIndex.new(documents.flat_map(&:protocol_method_effects))
       sequences = documents.flat_map { |document| sequences_for_document(document, effect_index) }
-      Report.new(sequences)
+      diagnostics = documents.flat_map do |document|
+        Syntax.protocol_lexicon_for(document.language).optional_diagnostic_mids
+      end.uniq
+      Report.new(sequences, optional_diagnostic_mids: diagnostics)
     end
 
     def self.sequences_for_document(document, effect_index)
@@ -84,8 +79,9 @@ module Decomplex
     end
 
     class Report
-      def initialize(sequences)
+      def initialize(sequences, optional_diagnostic_mids:)
         @sequences = sequences
+        @optional_diagnostic_mids = optional_diagnostic_mids
         @site_call_sets = sequences.each_with_object(Hash.new { |h, k| h[k] = {} }) do |seq, out|
           state_calls(seq).each { |call| out[site_key(seq)][call.mid] = true }
         end
@@ -218,8 +214,8 @@ module Decomplex
 
       def diagnostic_protocol?(protocol)
         protocol.any? do |mid|
-          OPTIONAL_DIAGNOSTIC_MIDS.include?(mid) ||
-            OPTIONAL_DIAGNOSTIC_MIDS.include?("#{mid}!")
+          @optional_diagnostic_mids.include?(mid) ||
+            @optional_diagnostic_mids.include?("#{mid}!")
         end
       end
 

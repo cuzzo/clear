@@ -1,9 +1,21 @@
 use super::super::{
     named_children, node_text, question_colon_ternary_parts, raw_named_children, TernaryParts,
-    TYPESCRIPT_TERNARY_KINDS,
 };
-use super::base::{AstNormalizationAdapter, TYPESCRIPT_ASSIGNMENT_OPERATORS};
+use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
+
+const TYPESCRIPT_ASSIGNMENT_OPERATORS: &[&str] = &[
+    "=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=",
+    "??=",
+];
+const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "conditional",
+    "ternary_expression",
+];
 
 pub(crate) struct TypeScriptAstAdapter;
 
@@ -66,6 +78,37 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
 
     fn interpolation_node(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(node.kind(), "interpolation" | "template_substitution")
+    }
+
+    fn case_arm_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_case" {
+            return None;
+        }
+        let body = named_children(node)
+            .into_iter()
+            .skip(1)
+            .filter(|child| child.kind() != "break_statement")
+            .collect::<Vec<_>>();
+        (!body.is_empty()).then_some(body)
+    }
+
+    fn case_arm_pattern_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_case" {
+            return None;
+        }
+        let patterns = named_children(node)
+            .into_iter()
+            .take_while(|child| child.kind() != "expression_statement")
+            .collect::<Vec<_>>();
+        (!patterns.is_empty()).then_some(patterns)
     }
 
     fn rescue_body_target<'tree>(
@@ -243,5 +286,13 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
 
     fn assignment_operators(&self) -> &'static [&'static str] {
         TYPESCRIPT_ASSIGNMENT_OPERATORS
+    }
+
+    fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
+        match kind {
+            "for_in_statement" | "for_statement" => Some("FOR"),
+            "while_statement" => Some("WHILE"),
+            _ => None,
+        }
     }
 }

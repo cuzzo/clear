@@ -41,6 +41,12 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
     "concrete language branch" =>
       /\b(?:case|when|if|elsif)\b.*(?::ruby|:python|:javascript|:typescript|:go|:rust|:zig|:lua|:c|:cpp|:csharp|:java|:swift|:kotlin|:php)\b|\blanguage\s*==\s*(?::ruby|:python|:javascript|:typescript|:go|:rust|:zig|:lua|:c|:cpp|:csharp|:java|:swift|:kotlin|:php)\b/
   }.freeze
+  LANGUAGE_SOURCE_MINING_PATTERNS = {
+    "Ruby rescue-nil source mining" => /rescue\\s\+nil|rescue\s+nil/,
+    "Ruby protocol constants" => /\bRUBY_PROTOCOL_/,
+    "guard method vocabulary" => /\b(?:is_a\?|kind_of\?|instance_of\?|nil\?|respond_to\?|is_none|is_some|is_null|isNull)\b/,
+    "source-text control keyword mining" => /\\A\(\?:if\|unless\|while\|until\)|if\|unless\|while\|until/
+  }.freeze
 
   def test_detectors_do_not_talk_to_tree_sitter_nodes_directly
     offenders = scan_files(DETECTOR_FILES, RAW_TREE_SITTER_PATTERNS)
@@ -65,6 +71,15 @@ class DecomplexArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Code after Syntax must not contain language-specific branches",
+      offenders
+    )
+  end
+
+  def test_post_syntax_consumers_do_not_mine_language_specific_source_text
+    offenders = scan_files(POST_SYNTAX_CONSUMER_FILES, LANGUAGE_SOURCE_MINING_PATTERNS)
+
+    assert_empty offenders, format_offenders(
+      "Code after Syntax must use facts instead of language-specific source text or constants",
       offenders
     )
   end

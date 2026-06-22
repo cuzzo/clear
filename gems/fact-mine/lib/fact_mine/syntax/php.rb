@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     PHP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/i].freeze,
+      guard_mids: %w[isNull isSome is_null is_a].freeze,
       type_guard_patterns: [
         /\bnull\b/i,
         /\b(?:is_null|isset|empty|is_a|instanceof)\s*(?:\(|\b)/
@@ -17,6 +18,24 @@ module FactMine
         /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/i
       ].freeze
     ).freeze
+
+    PHP_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[call_user_func call_user_func_array __call __callStatic].freeze,
+      meta_mids: %w[eval ReflectionClass ReflectionMethod ReflectionFunction class_alias].freeze,
+      method_obj_mids: %w[Closure fromCallable].freeze,
+      io_consts: %w[FilesystemIterator DirectoryIterator PDO mysqli].freeze,
+      io_bare: %w[print printf fopen file_get_contents file_put_contents exec shell_exec system passthru die exit trigger_error].freeze,
+      dir_context: %w[getcwd getenv].freeze,
+      context_pairs: {
+        "DateTime" => %w[createFromFormat],
+        "DateTimeImmutable" => %w[createFromFormat],
+        "random_int" => %w[call]
+      }.freeze,
+      context_bare: %w[time microtime random_int rand mt_rand].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:php, PHP_EFFECT_LEXICON)
 
     class PhpSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_definition method_declaration].freeze
@@ -521,5 +540,66 @@ module FactMine
         ts_node?(node) && node.kind == "null"
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class PhpNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def call_access_span(_node, computed_span:, full_span:)
+        full_span
+      end
+
+      def self_member_receiver(message)
+        "this.#{message}"
+      end
+
+      def normalize_source_text(text)
+        text.to_s
+            .gsub(/\$this->/, "this.")
+            .gsub(/\$([A-Za-z_]\w*)->/, '\1.')
+            .gsub(/->|::/, ".")
+            .gsub(/\$([A-Za-z_]\w*)/, '\1')
+      end
+
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        return current_owner unless current_owner == file_owner
+
+        text = node.text.to_s
+        text[/\Afunction\s+([A-Za-z_]\w*)[:]/, 1] || current_owner
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+
+        "public"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfunction\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def case_pattern_display(pattern)
+        normalize_source_text(pattern.to_s)
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull", "is_null"
+          { local: subject, non_nil_when_true: false }
+        end
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:php, PhpNormalizedExtractionBehavior)
   end
 end

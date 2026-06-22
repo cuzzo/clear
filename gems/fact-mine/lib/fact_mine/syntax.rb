@@ -4,6 +4,7 @@ require "set"
 require "rbconfig"
 require "json"
 require "ostruct"
+require_relative "ast"
 
 module FactMine
   module Syntax
@@ -34,7 +35,7 @@ module FactMine
     PathConditionSite = Struct.new(:guards, :action, :file, :function, :line, :span, keyword_init: true)
     LanguageLexicon = Struct.new(
       :type_guard_patterns, :diagnostic_patterns, :trivial_patterns,
-      :nil_literal_patterns,
+      :nil_literal_patterns, :guard_mids,
       keyword_init: true
     ) do
       def type_guard?(text, allow_literal_nil: true)
@@ -55,6 +56,10 @@ module FactMine
         source.empty? || matches?(trivial_patterns, source)
       end
 
+      def guard_mid?(message)
+        Array(guard_mids).include?(message.to_s)
+      end
+
       private
 
       def matches?(patterns, source)
@@ -66,6 +71,12 @@ module FactMine
           source.match?(/(?:\A|[^\w!?])#{Regexp.escape(name)}[!?]?(?:\s*\(|\b)/)
         end
       end
+    end
+
+    def self.guard_mid?(language, message)
+      language_profile(language).lexicon.guard_mid?(message)
+    rescue StandardError
+      false
     end
 
     class TreeSitterLanguageAdapter
@@ -2715,6 +2726,9 @@ module FactMine
     require_relative "syntax/adapters"
     require_relative "syntax/dynamic_language"
     require_relative "syntax/passes"
+    require_relative "syntax/normalized_extraction_behavior"
+    require_relative "syntax/effects"
+    require_relative "syntax/protocols"
     require_relative "syntax/ruby"
     require_relative "syntax/python"
     require_relative "syntax/javascript"
@@ -2925,6 +2939,14 @@ module FactMine
       projection = JSON.parse(Native::Command.run("syntax-facts", "--language", language.to_s, file.to_s))
       row = Array(projection.fetch("documents")).first || {}
       FactDocument.new(row, file: file, language: language, source: source, lines: source.lines)
+    end
+
+    def normalized_fact_document(file, language:)
+      NormalizedExtractor.fact_document(file, language: language)
+    end
+
+    def syntax_pipeline
+      ENV.fetch("FACT_MINE_SYNTAX_PIPELINE", "normalized").tr("-", "_")
     end
 
     class Document
@@ -3257,7 +3279,19 @@ module FactMine
 
       def parse(file, language: nil)
         lang = (language || Syntax.language_for(file)).to_sym
-        return Syntax.native_fact_document(file, language: lang) if lang == :ruby
+
+        case Syntax.syntax_pipeline
+        when "", "normalized"
+          return Syntax.normalized_fact_document(file, language: lang)
+        when "legacy"
+          return Syntax.native_fact_document(file, language: lang) if lang == :ruby
+        when "native"
+          return Syntax.native_fact_document(file, language: lang)
+        when "raw"
+          # Fall through to the raw Tree-sitter adapter path below.
+        else
+          raise ArgumentError, "unknown FactMine syntax pipeline #{Syntax.syntax_pipeline.inspect}"
+        end
 
         parse_raw(file, language: lang)
       end
@@ -3480,11 +3514,11 @@ module FactMine
   end
 end
 
-require_relative "syntax/effects"
-require_relative "syntax/protocols"
 require_relative "syntax/contracts"
 require_relative "syntax/dispatch"
 require_relative "syntax/clone_similarity"
 require_relative "syntax/complexity"
 require_relative "syntax/nil_guards"
+require_relative "syntax/normalized_local_facts"
 require_relative "syntax/fact_document"
+require_relative "syntax/normalized_extractor"

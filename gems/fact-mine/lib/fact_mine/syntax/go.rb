@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     GO_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnil\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnil\b/,
         /\.\(type\)/,
@@ -18,6 +19,23 @@ module FactMine
         /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    GO_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[Call CallSlice Method MethodByName ValueOf TypeOf].freeze,
+      meta_mids: %w[Call CallSlice MethodByName New MakeFunc].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[os io ioutil fs net http exec syscall].freeze,
+      io_bare: %w[panic print println recover].freeze,
+      dir_context: %w[Getwd UserHomeDir].freeze,
+      context_pairs: {
+        "time" => %w[Now Since Until],
+        "rand" => %w[Int Intn Float64 Read]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook Lock Unlock RLock RUnlock Do Go Add Done Wait].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:go, GO_EFFECT_LEXICON)
 
     class GoSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration method_declaration].freeze
@@ -220,5 +238,155 @@ module FactMine
         node.named_children.flat_map { |child| go_var_spec_nodes(child) }
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class GoNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "TYPE_DECLARATION"
+
+        name = node.text.to_s[/\Atype\s+([A-Za-z_]\w*)\b/, 1]
+        name ? { name: name, kind: "owner" } : nil
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+
+        name_node = node.children.find { |child| child.respond_to?(:type) && child.type.to_s == "LVAR" }
+        return nil unless name_node
+
+        name = name_node.children.first.to_s
+        type = node.text.to_s.sub(/\A#{Regexp.escape(name)}\s*/, "").strip
+        return nil if name.empty? || type.empty?
+
+        { "field" => name, "type" => type }
+      end
+
+      def state_param_origin_names(node, current_params:)
+        return [] unless node&.respond_to?(:type)
+        return [] unless node.text.to_s.match?(/\bappend\s*\(/)
+
+        lvar_names(node).select { |name| current_params.include?(name) }.uniq
+      end
+
+      def embedded_member_reads(node)
+        return [] unless node.first_lineno == node.last_lineno
+
+        reads = []
+        text = node.text.to_s
+        text.to_enum(:scan, /\b([a-z]\w*)\.([A-Z]\w*)\b/).each do
+          receiver = Regexp.last_match(1)
+          field = Regexp.last_match(2)
+          index = Regexp.last_match.begin(0)
+          reads << {
+            field: field,
+            receiver: receiver,
+            line: node.first_lineno,
+            span: [
+              node.first_lineno,
+              node.first_column + index,
+              node.first_lineno,
+              node.first_column + index + Regexp.last_match(0).length
+            ]
+          }
+        end
+        reads
+      end
+
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        return current_owner unless current_owner == file_owner
+
+        node.text.to_s[/\Afunc\s*\(\s*[A-Za-z_]\w*\s+\*?([A-Za-z_]\w*)\s*\)/, 1] || current_owner
+      end
+
+      def receiver_aliases_for_function(node)
+        aliases = {}
+        receiver = node.text.to_s[/\Afunc\s*\(\s*([A-Za-z_]\w*)\s+\*?[A-Za-z_]\w*\s*\)/, 1]
+        aliases[receiver] = "self" if receiver
+        aliases
+      end
+
+      def function_visibility(name, node, lines:)
+        return "private" if name.match?(/\A[a-z_]/)
+
+        super
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\Afunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def parameter_list_source(source)
+        open_index = source.index("(")
+        return "" unless open_index
+
+        if source.start_with?("func (")
+          receiver_close = matching_paren_index(source, open_index)
+          open_index = source.index("(", receiver_close.to_i + 1)
+          return "" unless open_index
+        end
+
+        close_index = matching_paren_index(source, open_index)
+        return "" unless close_index
+
+        source[(open_index + 1)...close_index].to_s
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip
+        return nil if text.empty?
+
+        tokens = text.scan(/[A-Za-z_]\w*[!?]?/)
+        tokens.first&.delete_suffix("?")
+      end
+
+      def split_case_source(source)
+        [source]
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def explicit_self_state_ref(node, message)
+        receiver = node.text.to_s.strip[/\A([A-Za-z_]\w*)\./, 1]
+        return "#{receiver}.#{message}" if receiver
+
+        super
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+
+      private
+
+      def lvar_names(node)
+        return [] unless node.respond_to?(:type)
+
+        names = []
+        names << node.children.first.to_s if node.type.to_s == "LVAR"
+        node.children.each do |child|
+          names.concat(lvar_names(child)) if child.respond_to?(:type)
+        end
+        names
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:go, GoNormalizedExtractionBehavior)
   end
 end

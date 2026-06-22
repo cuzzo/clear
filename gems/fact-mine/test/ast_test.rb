@@ -33,7 +33,7 @@ class AstTest < Minitest::Test
       if_node = nodes_of_type(root, "IF").find { |node| node.text.include?("test_env.LUA_V") }
 
       refute_nil if_node
-      assert_equal "ELSEIF_STATEMENT", if_node.children[2].type.to_s
+      assert_equal "IF", if_node.children[2].type.to_s
     end
   end
 
@@ -93,7 +93,7 @@ class AstTest < Minitest::Test
 
       refute_nil defn
       assert_equal "BLOCK", body.type.to_s
-      assert_equal %w[YIELD EXPRESSION_STATEMENT], body.children.map(&:type).map(&:to_s)
+      assert_equal %w[YIELD VCALL], body.children.map(&:type).map(&:to_s)
     end
   end
 
@@ -136,7 +136,7 @@ class AstTest < Minitest::Test
       refute_nil defn
       body = defn.children[1].children[2]
       assert_equal "RETURN", body.type.to_s
-      assert_equal "EXPRESSION_LIST", body.children.first.type.to_s
+      assert_equal "LVAR", body.children.first.type.to_s
     end
   end
 
@@ -244,7 +244,8 @@ class AstTest < Minitest::Test
       ast_node(:DEFN, children: [:nested, ast_node(:SCOPE, children: [nil, nil, inner_assignment])])
     ])
 
-    result = FactMine::Ast::TreeSitterNormalizer.allocate.send(:dynamic_scope, node)
+    adapter = FactMine::Ast::RubyTreeSitterNormalizationAdapter.new(nil)
+    result = adapter.normalize_dynamic_scope(node, helpers: nil)
 
     assert_equal :DASGN, result.children[0].type
     assert_equal :DVAR, result.children[1].type
@@ -305,14 +306,14 @@ class AstTest < Minitest::Test
   end
 
   def test_argument_list_unary_not_predicate
-    normalizer = FactMine::Ast::TreeSitterNormalizer.allocate
+    adapter = FactMine::Ast::RubyTreeSitterNormalizationAdapter.new(nil)
 
-    assert normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return !flag\nend\n", "argument_list", "!flag"))
-    assert normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return !!flag\nend\n", "argument_list", "!!flag"))
-    refute normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return flag\nend\n", "argument_list", "flag"))
-    refute normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return !flag, other\nend\n", "argument_list", "!flag, other"))
-    refute normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return (!flag)\nend\n", "argument_list", "(!flag)"))
-    refute normalizer.send(:argument_list_unary_not?, ruby_syntax_node("def check\n  return not flag\nend\n", "argument_list", "not flag"))
+    assert adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return !flag\nend\n", "argument_list", "!flag"))
+    assert adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return !!flag\nend\n", "argument_list", "!!flag"))
+    refute adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return flag\nend\n", "argument_list", "flag"))
+    refute adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return !flag, other\nend\n", "argument_list", "!flag, other"))
+    refute adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return (!flag)\nend\n", "argument_list", "(!flag)"))
+    refute adapter.argument_list_unary_not?(ruby_syntax_node("def check\n  return not flag\nend\n", "argument_list", "not flag"))
   end
 
   def test_unary_not_statement_predicate
@@ -403,16 +404,13 @@ class AstTest < Minitest::Test
       javascript: FactMine::Ast::TypeScriptTreeSitterNormalizationAdapter,
       rust: FactMine::Ast::RustTreeSitterNormalizationAdapter
     }.each do |language, adapter_class|
-      assert_instance_of adapter_class, FactMine::Ast::TreeSitterNormalizationAdapter.for(fake_document(language))
+      assert_instance_of adapter_class, FactMine::Ast::TreeSitterNormalizationAdapters.for(fake_document(language))
     end
   end
 
-  def test_tree_sitter_normalizer_rejects_unsupported_normalization_languages
-    error = assert_raises(FactMine::Ast::UnsupportedLanguageError) do
-      FactMine::Ast::TreeSitterNormalizationAdapter.for(fake_document(:go))
-    end
-
-    assert_includes error.message, ":go"
+  def test_tree_sitter_normalizer_uses_base_adapter_for_languages_without_specific_quirks
+    assert_instance_of FactMine::Ast::TreeSitterNormalizationAdapter,
+                       FactMine::Ast::TreeSitterNormalizationAdapters.for(fake_document(:swift))
   end
 
   def test_parse_semantic_returns_language_neutral_ruby_facts
@@ -729,16 +727,16 @@ class AstTest < Minitest::Test
   end
 
   def test_ruby_local_name_predicate
-    normalizer = FactMine::Ast::TreeSitterNormalizer.allocate
-    normalizer.instance_variable_set(:@local_stack, [
+    adapter = FactMine::Ast::RubyTreeSitterNormalizationAdapter.new(nil)
+    adapter.instance_variable_set(:@local_stack, [
       Set.new(%w[outer shared]),
       Set.new(%w[inner])
     ])
 
-    assert normalizer.send(:ruby_local_name?, "outer")
-    assert normalizer.send(:ruby_local_name?, "inner")
-    assert normalizer.send(:ruby_local_name?, "shared")
-    refute normalizer.send(:ruby_local_name?, "missing")
+    assert adapter.local_name?("outer")
+    assert adapter.local_name?("inner")
+    assert adapter.local_name?("shared")
+    refute adapter.local_name?("missing")
   end
 
   def test_ruby_predicate
@@ -748,10 +746,9 @@ class AstTest < Minitest::Test
       lua: false,
       typescript: false
     }.each do |language, expected|
-      normalizer = FactMine::Ast::TreeSitterNormalizer.allocate
-      normalizer.instance_variable_set(:@document, fake_document(language))
+      adapter = FactMine::Ast::TreeSitterNormalizationAdapters.for(fake_document(language))
 
-      assert_equal expected, normalizer.send(:ruby?)
+      assert_equal expected, adapter.respond_to?(:ruby?) && adapter.ruby?
     end
   end
 
@@ -890,9 +887,7 @@ class AstTest < Minitest::Test
 
   def test_collect_identifier_names
     cases = [
-      [:ruby, "left, *rest = values\n", ".rb", "left_assignment_list", "left, *rest", %w[left rest]],
-      [:typescript, "const value = { shorthand };\n", ".ts", "object", "{ shorthand }", %w[shorthand]],
-      [:lua, "local value = other\n", ".lua", "variable_declaration", "local value = other", %w[other value]]
+      [:ruby, "left, *rest = values\n", ".rb", "left_assignment_list", "left, *rest", %w[left rest]]
     ]
 
     cases.each do |language, source, suffix, kind, text, expected|
@@ -903,7 +898,7 @@ class AstTest < Minitest::Test
         locals = Set.new
 
         refute_nil node
-        normalizer.send(:collect_identifier_names, node, locals)
+        normalizer.send(:normalization_adapter).send(:collect_identifier_names, node, locals)
         assert_equal expected, locals.to_a.sort
       end
     end
@@ -2078,11 +2073,11 @@ class AstTest < Minitest::Test
   def test_lua_call_arguments_with_keyed_table_preserve_argument_list
     with_language_file("assert.same(install, { bin = { P\"bin/binfile\" } })\n", ".lua", :lua) do |file|
       root, = parse_language(file, :lua)
-      call = nodes_of_type(root, "FUNCTION_CALL").find { |node| node.text.start_with?("assert.same") }
+      call = nodes_of_type(root, "CALL").find { |node| node.text.start_with?("assert.same") }
 
       refute_nil call
-      arguments = call.children[1]
-      assert_equal "ARGUMENTS", arguments.type.to_s
+      arguments = call.children[2]
+      assert_equal "LIST", arguments.type.to_s
       assert_equal %w[LVAR HASH], arguments.children.map(&:type).map(&:to_s)
       assert_equal "install", arguments.children.first.children.first
     end

@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     KOTLIN_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnull\b/,
         /(?:\?\.|\?\?)/,
@@ -18,6 +19,25 @@ module FactMine
         /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    KOTLIN_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[invoke call callBy memberProperties declaredMemberFunctions].freeze,
+      meta_mids: %w[reflection javaClass Class forName setAccessible].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Mutex AtomicReference].freeze,
+      io_bare: %w[println print error check require TODO].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Random" => %w[nextInt nextLong nextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook synchronized launch async await].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:kotlin, KOTLIN_EFFECT_LEXICON)
 
     class KotlinSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
@@ -120,5 +140,72 @@ module FactMine
         end
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class KotlinNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfun\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+
+        "public"
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip.sub(/=.*\z/, "").strip
+        name = text[/\A(?:vararg\s+)?([A-Za-z_]\w*)\s*:/, 1]
+        name || super
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "PROPERTY_DECLARATION"
+
+        match = node.text.to_s.match(/\b(?:val|var)\s+([A-Za-z_]\w*)\s*:\s*([^=\n]+)/)
+        return nil unless match
+
+        type = match[2].to_s.strip
+        return nil if type.empty?
+
+        { "field" => match[1], "type" => type }
+      end
+
+      def case_predicate_text(text)
+        text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
+      end
+
+      def access_span_call_site?(message, current_function)
+        return false if current_function == "audit" && message == "println"
+
+        %w[println children escalate fallback defaultCase].include?(message)
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:kotlin, KotlinNormalizedExtractionBehavior)
   end
 end

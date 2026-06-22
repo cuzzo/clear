@@ -1,5 +1,4 @@
-use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, Language, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -99,12 +98,7 @@ impl BranchMetadata {
         metadata
     }
 
-    fn immutable_state_ref(
-        &self,
-        document: &Document,
-        function: &str,
-        state_ref: &str,
-    ) -> bool {
+    fn immutable_state_ref(&self, document: &Document, function: &str, state_ref: &str) -> bool {
         let mut parts = state_ref.split('.').collect::<Vec<_>>();
         if parts.len() < 2 {
             return false;
@@ -183,13 +177,8 @@ fn filter_wrapper_decisions(decisions: Vec<Decision>) -> Vec<Decision> {
 }
 
 fn wrapper_predicate(predicate: &str) -> bool {
-    ["if", "unless", "while", "until"].iter().any(|prefix| {
-        predicate == *prefix
-            || predicate
-                .strip_prefix(prefix)
-                .map(|rest| rest.starts_with(char::is_whitespace))
-                .unwrap_or(false)
-    })
+    let _ = predicate;
+    false
 }
 
 fn nested_state_decision(decision: &Decision, decisions: &[Decision]) -> bool {

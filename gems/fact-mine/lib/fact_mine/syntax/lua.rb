@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     LUA_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnil\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\btype\s*\(/,
         /\bnil\b/,
@@ -18,6 +19,23 @@ module FactMine
         /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    LUA_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[load loadfile dofile require rawget rawset].freeze,
+      meta_mids: %w[setmetatable getmetatable debug eval load loadfile].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[io os debug package].freeze,
+      io_bare: %w[print error assert require collectgarbage].freeze,
+      dir_context: [].freeze,
+      context_pairs: {
+        "os" => %w[time clock date getenv],
+        "math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:lua, LUA_EFFECT_LEXICON)
 
     class LuaSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
@@ -220,5 +238,108 @@ module FactMine
         generic_state_read_target(child)
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class LuaNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def local_assignment_writes(_field, node, default_span:)
+        target = lua_state_assignment_target(node)
+        return [] unless target
+
+        [{
+          receiver: target.fetch(:receiver),
+          field: target.fetch(:field),
+          span: target.fetch(:span),
+          value_node: local_assignment_value_node(node)
+        }]
+      end
+
+      def local_assignment_value_node(node)
+        list = node.children.find { |child| child.respond_to?(:type) && child.type.to_s == "EXPRESSION_LIST" }
+        return nil unless list
+
+        list.children.find { |child| child.respond_to?(:type) } || list
+      end
+
+      def owner_for_function(_name, node, current_owner:, file_owner:)
+        node.text.to_s[/\Afunction\s+([A-Za-z_]\w*)\s*:/, 1] || current_owner
+      end
+
+      def call_site_span(_node, parts, full_span:, access_span:, current_function:)
+        full_span_call?(parts, current_function) ? full_span : access_span
+      end
+
+      def suppress_state_read_for_call?(call, span_source:)
+        receiver = call.fetch("receiver").to_s
+        message = call.fetch("message").to_s
+        return true if %w[children].include?(message)
+        return true if receiver == message
+        return true if span_source.include?("=")
+        return true if receiver.match?(/\A(?:0|status|sink|name)\z/)
+        return true unless call.fetch("arguments").empty?
+
+        false
+      end
+
+      def suppress_branch_decision?(node)
+        return true if teal_compat_prelude?(node)
+
+        node.text.to_s.lstrip.start_with?("elseif")
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+
+      private
+
+      def lua_state_assignment_target(node)
+        text = node.text.to_s.strip
+        match = text.match(/\Aself\.([A-Za-z_]\w*)\s*(?:\[.*\])?\s*=/)
+        return nil unless match
+
+        field = match[1]
+        {
+          receiver: "self",
+          field: field,
+          span: target_span_from_text(node, "self.#{field}")
+        }
+      end
+
+      def teal_compat_prelude?(node)
+        node.first_lineno == 1 &&
+          node.text.to_s.include?("compat53.module")
+      end
+
+      def full_span_call?(parts, current_function)
+        message = parts.fetch(:message).to_s
+        receiver = parts.fetch(:receiver).to_s
+        return true if %w[publish send callback].include?(message)
+        return true if message == "print" && current_function == "audit"
+        return true if receiver == "self.sink" && message == "send"
+
+        false
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:lua, LuaNormalizedExtractionBehavior)
   end
 end

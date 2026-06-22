@@ -134,13 +134,10 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options) -> Result
     let profile = rust_profile_enabled();
     let total_started = Instant::now();
     let parse_started = Instant::now();
-    let mut documents = parallel::map_ordered(files, |file| {
+    let documents = parallel::map_ordered(files, |file| {
         syntax::parse_file_for_report(file.path.clone(), file.language)
     })?;
     profile_phase(profile, "parse", parse_started.elapsed());
-    let protocol_started = Instant::now();
-    syntax::materialize_protocol_facts(&mut documents)?;
-    profile_phase(profile, "protocol_facts", protocol_started.elapsed());
     let shared_started = Instant::now();
     let shared = SharedFacts::new(&documents);
     profile_phase(profile, "shared_facts", shared_started.elapsed());

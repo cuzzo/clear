@@ -1,5 +1,4 @@
-use crate::decomplex::ast::{self, Span};
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, Language, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -82,7 +81,7 @@ pub fn scan_documents(documents: &[Document]) -> SemanticAliasReport {
 }
 
 fn canon(text: &str) -> String {
-    let (mut t, _) = ast::canon_polarity(text);
+    let (mut t, _) = canon_polarity(text);
     t = t.strip_prefix("self.").unwrap_or(&t).to_string();
     t = t.strip_prefix('@').unwrap_or(&t).to_string();
 
@@ -95,6 +94,21 @@ fn canon(text: &str) -> String {
     t = re.replace(&t, "$rest").to_string();
 
     t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn canon_polarity(text: &str) -> (String, bool) {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix('!') {
+        (
+            rest.trim_start_matches('(')
+                .trim_end_matches(')')
+                .trim()
+                .to_string(),
+            true,
+        )
+    } else {
+        (trimmed.to_string(), false)
+    }
 }
 
 fn semantic_predicate_definition(name: &str, body: &str) -> bool {

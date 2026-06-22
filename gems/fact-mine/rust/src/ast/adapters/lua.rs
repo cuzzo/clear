@@ -1,14 +1,28 @@
 use super::super::{
-    bracketed, direct_binary_operator, lua_keyed_table_target, lua_positional_table_target,
-    named_children, node_text, raw_named_children, LUA_LEADING_FUNCTION_WRAPPER_KINDS,
-    LUA_LEADING_IF_WRAPPER_KINDS,
+    bare_identifier_text, bracketed, direct_binary_operator, named_children, node_text,
+    raw_named_children,
 };
-use super::base::{AstNormalizationAdapter, NamedChildrenAction, LUA_ASSIGNMENT_OPERATORS};
+use super::base::{AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction};
 use tree_sitter::Node as TreeSitterNode;
+
+const LUA_ASSIGNMENT_OPERATORS: &[&str] = &["="];
+const LUA_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
+const LUA_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
+const LUA_IDENTIFIER_TEXT_KEYWORDS: &[&str] = &["false", "nil", "true"];
 
 pub(crate) struct LuaAstAdapter;
 
 impl AstNormalizationAdapter for LuaAstAdapter {
+    fn local_identifier_text(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() != "expression_list" {
+            return None;
+        }
+
+        let text = node_text(node, source);
+        (bare_identifier_text(text) && !LUA_IDENTIFIER_TEXT_KEYWORDS.contains(&text))
+            .then(|| text.to_string())
+    }
+
     fn explicit_alternative<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -114,7 +128,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
             && children.len() == 1
             && matches!(
                 children[0].kind(),
-                "function_call" | "return_statement" | "variable_declaration"
+                "return_statement" | "variable_declaration"
             )
             && node_text(node, source) == node_text(children[0], source)
         {
@@ -236,6 +250,52 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         None
     }
 
+    fn else_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "else_statement" {
+            return None;
+        }
+
+        let block = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "block")?;
+        Some(named_children(block))
+    }
+
+    fn elsif_statement(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.kind() == "elseif_statement"
+    }
+
+    fn elsif_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<ConditionalBranchParts<'tree>> {
+        if node.kind() != "elseif_statement" {
+            return None;
+        }
+
+        let named = named_children(node);
+        let sibling_alternative = node.next_named_sibling().filter(|sibling| {
+            matches!(
+                sibling.kind(),
+                "elseif_statement" | "else" | "else_statement"
+            )
+        });
+        Some(ConditionalBranchParts {
+            condition: *named.first()?,
+            positive: named.iter().copied().find(|child| child.kind() == "block"),
+            negative: named
+                .iter()
+                .copied()
+                .find(|child| matches!(child.kind(), "elseif_statement" | "else_statement"))
+                .or(sibling_alternative),
+        })
+    }
+
     fn array_literal_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -275,7 +335,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         source: &str,
     ) -> Vec<TreeSitterNode<'tree>> {
         let target = self.array_literal_target(node, source).unwrap_or(node);
-        if target.kind() == "arguments" {
+        if matches!(target.kind(), "arguments" | "expression_list") {
             if let Some(table) = named_children(target)
                 .into_iter()
                 .find(|child| child.kind() == "table_constructor")
@@ -316,7 +376,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         source: &str,
     ) -> Vec<TreeSitterNode<'tree>> {
         let target = self.hash_literal_target(node, source).unwrap_or(node);
-        if target.kind() == "arguments" {
+        if matches!(target.kind(), "arguments" | "expression_list") {
             if let Some(table) = named_children(target)
                 .into_iter()
                 .find(|child| child.kind() == "table_constructor")
@@ -440,6 +500,11 @@ impl AstNormalizationAdapter for LuaAstAdapter {
 
     fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {
         node.kind() == "field"
+            || (node.kind() == "dot_index_expression"
+                && node
+                    .parent()
+                    .map(|parent| parent.kind() == "binary_expression")
+                    .unwrap_or(false))
     }
 
     fn no_paren_string_argument_content<'tree>(
@@ -457,6 +522,39 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         raw_named_children(node)
             .into_iter()
             .find(|child| child.kind() == "string_content")
+    }
+
+    fn concatenated_string_children<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        let named = named_children(node);
+        let call = if node.kind() == "function_call" {
+            node
+        } else if node.kind() == "block" && named.len() == 1 && named[0].kind() == "function_call" {
+            named[0]
+        } else {
+            return None;
+        };
+
+        if lua_no_paren_string_call(call, source) {
+            Some(named_children(call))
+        } else {
+            None
+        }
+    }
+
+    fn call_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        if node.kind() == "expression_list" {
+            let children = named_children(node);
+            return children
+                .first()
+                .is_some_and(|child| child.kind() == "identifier")
+                && children.iter().any(|child| child.kind() == "arguments");
+        }
+
+        node.kind() == "function_call" && !lua_no_paren_string_call(node, source)
     }
 
     fn assignment_operators(&self) -> &'static [&'static str] {
@@ -477,4 +575,141 @@ fn lua_single_assignment_block_child(node: TreeSitterNode<'_>, source: &str) -> 
     grandparent.kind() == "block"
         && node_text(grandparent, source) == node_text(parent, source)
         && raw_named_children(grandparent).len() == 1
+}
+
+fn lua_positional_table_target<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<TreeSitterNode<'tree>> {
+    if node.kind() == "block" {
+        let named = named_children(node);
+        if named.len() == 1 && named[0].kind() == "function_call" {
+            return lua_positional_table_target(named[0], source);
+        }
+    }
+
+    if node.kind() == "function_call" {
+        let named = named_children(node);
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_positional_table_target(named[1], source);
+        }
+    }
+
+    if matches!(node.kind(), "arguments" | "expression_list") {
+        let table = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "table_constructor")?;
+        if node_text(node, source).trim() == node_text(table, source).trim() {
+            return lua_positional_table_target(table, source).map(|_| node);
+        }
+        return None;
+    }
+
+    if node.kind() == "table_constructor" {
+        let fields = named_children(node);
+        if fields.is_empty() {
+            return None;
+        }
+        if fields.iter().all(|field| {
+            field.kind() == "field" && {
+                let named = named_children(*field);
+                named.len() <= 1
+            }
+        }) {
+            return Some(node);
+        }
+    }
+
+    None
+}
+
+fn lua_keyed_table_target<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<TreeSitterNode<'tree>> {
+    if node.kind() == "block" {
+        let named = named_children(node);
+        if named.len() == 1 && node_text(named[0], source).trim() == node_text(node, source).trim()
+        {
+            return lua_keyed_table_target(named[0], source);
+        }
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_keyed_table_target(named[1], source);
+        }
+    }
+
+    if node.kind() == "function_call" {
+        let named = named_children(node);
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_keyed_table_target(named[1], source);
+        }
+    }
+
+    if matches!(node.kind(), "arguments" | "expression_list") {
+        if bracketed(node, source, "{", "}") {
+            let fields = named_children(node);
+            if fields.is_empty() {
+                return Some(node);
+            }
+            if fields
+                .iter()
+                .any(|field| field.kind() != "field" || named_children(*field).len() > 1)
+            {
+                return Some(node);
+            }
+            return None;
+        }
+
+        let table = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "table_constructor")?;
+        if node_text(node, source).trim() == node_text(table, source).trim() {
+            return lua_keyed_table_target(table, source).map(|_| node);
+        }
+        return None;
+    }
+
+    if node.kind() == "table_constructor" {
+        let fields = named_children(node);
+        if fields.is_empty() {
+            return Some(node);
+        }
+        if fields
+            .iter()
+            .any(|field| field.kind() != "field" || named_children(*field).len() > 1)
+        {
+            return Some(node);
+        }
+    }
+
+    None
+}
+
+fn lua_no_paren_string_call(node: TreeSitterNode<'_>, source: &str) -> bool {
+    if node.kind() != "function_call" {
+        return false;
+    }
+
+    named_children(node)
+        .iter()
+        .find(|child| child.kind() == "arguments")
+        .and_then(|args| {
+            named_children(*args)
+                .first()
+                .copied()
+                .map(|string| (*args, string))
+        })
+        .map(|(args, string)| {
+            string.kind() == "string" && node_text(args, source) == node_text(string, source)
+        })
+        .unwrap_or(false)
 }

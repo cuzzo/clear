@@ -5,6 +5,11 @@ require_relative "base"
 module FactMine
   module Ast
     class TypeScriptTreeSitterNormalizationAdapter < TreeSitterNormalizationAdapter
+      ASSIGNMENT_OPERATORS = (
+        COMMON_ASSIGNMENT_OPERATORS + %w[**= <<= >>= >>>= &= |= ^= &&= ||= ??=]
+      ).freeze
+      TERNARY_KINDS = (QUESTION_COLON_TERNARY_KINDS + %w[ternary_expression]).freeze
+
       def explicit_alternative(node)
         node.named_children.find { |child| %w[else else_clause].include?(child.kind) }
       rescue StandardError
@@ -20,7 +25,7 @@ module FactMine
       end
 
       def ternary_parts(node)
-        question_colon_ternary_parts(node, TYPESCRIPT_TERNARY_KINDS)
+        question_colon_ternary_parts(node, TERNARY_KINDS)
       end
 
       def interpolated_string?(node)
@@ -139,7 +144,7 @@ module FactMine
       private
 
       def assignment_operators
-        TYPESCRIPT_ASSIGNMENT_OPERATORS
+        ASSIGNMENT_OPERATORS
       end
     end
 

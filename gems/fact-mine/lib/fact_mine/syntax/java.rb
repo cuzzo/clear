@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     JAVA_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnull\b/,
         /\binstanceof\b/,
@@ -19,6 +20,25 @@ module FactMine
         /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    JAVA_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[invoke getMethod getDeclaredMethod getField getDeclaredField forName].freeze,
+      meta_mids: %w[invoke setAccessible newInstance Proxy].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[System File Files Paths ProcessBuilder Socket HttpClient Thread Lock AtomicReference].freeze,
+      io_bare: %w[throw print].freeze,
+      dir_context: %w[getProperty getenv].freeze,
+      context_pairs: {
+        "System" => %w[currentTimeMillis nanoTime getenv getProperty],
+        "Instant" => %w[now],
+        "UUID" => %w[randomUUID],
+        "Math" => %w[random]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook wait notify notifyAll submit execute].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:java, JAVA_EFFECT_LEXICON)
 
     class JavaSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[method_declaration].freeze
@@ -91,5 +111,108 @@ module FactMine
         super
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class JavaNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      JAVA_FIELD_MODIFIERS = %w[
+        public private protected static final transient volatile
+      ].freeze
+
+      def project_call(node, call)
+        projected = call.dup
+        text = node.text.to_s.strip
+        if text.match?(/\Athis\.[A-Za-z_]\w+\(/) && !projected.fetch("arguments").empty?
+          projected["message"] = "this"
+          projected["receiver"] = "self"
+        elsif (field = text[/\Athis\.([A-Za-z_]\w*)\.name\(\)/, 1])
+          projected["message"] = field
+          projected["receiver"] = "self"
+        elsif (stream = text[/\ASystem\.(err|out)\.println\(/, 1])
+          projected["message"] = stream
+          projected["receiver"] = "System"
+        elsif (profile_receiver = text[/\A(.+)\.profile\(\)\.name\(\)/, 1])
+          projected["message"] = "profile()"
+          projected["receiver"] = profile_receiver
+        elsif projected.fetch("message") == "name" &&
+              (nested = projected.fetch("receiver").to_s[/\A(.+)\.([A-Za-z_]\w+\(\))\z/, 1])
+          projected["message"] = projected.fetch("receiver").split(".").last
+          projected["receiver"] = nested
+        end
+        projected
+      end
+
+      def suppress_state_read_for_call?(call, span_source:)
+        return true if call.fetch("receiver") != "self"
+        return true if span_source.include?(".name()")
+
+        false
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+        return nil if node.text.to_s.include?("(")
+
+        member = typed_member_declaration(node.text, JAVA_FIELD_MODIFIERS)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+        return "public" if text.match?(/\Apublic\b/)
+
+        "public"
+      end
+
+      def explicit_self_state_ref(_node, message)
+        "this.#{message}"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def case_pattern_display(pattern)
+        pattern.to_s.start_with?("\"", "'") ? "case #{pattern}" : pattern
+      end
+
+      def method_state_ref?(node, parts)
+        parts.fetch(:receiver) != "self" && node.text.to_s.include?("(")
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+
+      private
+
+      def typed_member_declaration(source, modifiers)
+        text = source.to_s.strip.sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| modifiers.include?(token) }.join(" ")
+        return nil if type.empty?
+
+        { name: name, type: type }
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:java, JavaNormalizedExtractionBehavior)
   end
 end

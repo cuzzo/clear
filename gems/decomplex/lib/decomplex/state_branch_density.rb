@@ -79,8 +79,8 @@ module Decomplex
       end
     end
 
-    def wrapper_predicate?(predicate)
-      predicate.to_s.match?(/\A(?:if|unless|while|until)\b/)
+    def wrapper_predicate?(_predicate)
+      false
     end
 
     def nested_state_decision?(decision, decisions)

@@ -36,9 +36,7 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "user",
@@ -49,9 +47,7 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "account.profile",
@@ -62,9 +58,7 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "account",
@@ -75,9 +69,7 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "value",
@@ -88,9 +80,7 @@
         "control": "always",
         "safe_navigation": true,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "self",
@@ -101,9 +91,7 @@
         "control": "always",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "self",
@@ -114,9 +102,7 @@
         "control": "conditional",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       },
       {
         "receiver": "item",
@@ -127,221 +113,132 @@
         "control": "conditional",
         "safe_navigation": false,
         "block": false,
-        "arguments": [
-
-        ]
+        "arguments": []
       }
     ],
     "clone_candidates": [
       {
-        "method_name": "open",
-        "node_name": "defn",
-        "line": 4,
-        "mass": 6,
-        "fingerprint": "method(id body(assignment(id bool)))",
+        "method_name": "clone_left",
+        "node_name": "call",
+        "line": 25,
+        "mass": 3,
+        "fingerprint": "call<audit>(id argument_list(id))",
         "child_fingerprints": [
-          "assignment(id bool)"
+          "argument_list(id)"
         ],
         "child_masses": [
-          3
+          2
         ]
       },
       {
-        "method_name": "close",
-        "node_name": "defn",
-        "line": 8,
-        "mass": 6,
-        "fingerprint": "method(id body(assignment(id bool)))",
+        "method_name": "clone_right",
+        "node_name": "call",
+        "line": 31,
+        "mass": 3,
+        "fingerprint": "call<audit>(id argument_list(id))",
         "child_fingerprints": [
-          "assignment(id bool)"
+          "argument_list(id)"
         ],
         "child_masses": [
-          3
+          2
         ]
       },
       {
         "method_name": "clone_left",
         "node_name": "body_statement",
         "line": 24,
-        "mass": 16,
-        "fingerprint": "body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))",
+        "mass": 9,
+        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
         "child_fingerprints": [
-          "assignment(id call(call(identifier(id) id) id))",
-          "call<audit>(id argument_list(identifier(id)))"
+          "assignment(id call(id call(id id)))",
+          "call<audit>(id argument_list(id))",
+          "id"
         ],
         "child_masses": [
-          8,
-          5
+          4,
+          3,
+          1
         ]
       },
       {
         "method_name": "clone_right",
         "node_name": "body_statement",
         "line": 30,
-        "mass": 16,
-        "fingerprint": "body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))",
+        "mass": 9,
+        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
         "child_fingerprints": [
-          "assignment(id call(call(identifier(id) id) id))",
-          "call<audit>(id argument_list(identifier(id)))"
+          "assignment(id call(id call(id id)))",
+          "call<audit>(id argument_list(id))",
+          "id"
         ],
         "child_masses": [
-          8,
-          5
-        ]
-      },
-      {
-        "method_name": "clone_left",
-        "node_name": "defn",
-        "line": 23,
-        "mass": 22,
-        "fingerprint": "method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))))",
-        "child_fingerprints": [
-          "body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))"
-        ],
-        "child_masses": [
-          16
-        ]
-      },
-      {
-        "method_name": "clone_right",
-        "node_name": "defn",
-        "line": 29,
-        "mass": 22,
-        "fingerprint": "method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))))",
-        "child_fingerprints": [
-          "body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))"
-        ],
-        "child_masses": [
-          16
-        ]
-      },
-      {
-        "method_name": "run",
-        "node_name": "defn",
-        "line": 12,
-        "mass": 16,
-        "fingerprint": "method(id body(parameters(assignment(id)) body_statement(call(id) if(call(identifier(id) id) call(id)))))",
-        "child_fingerprints": [
-          "body_statement(call(id) if(call(identifier(id) id) call(id)))"
-        ],
-        "child_masses": [
-          10
-        ]
-      },
-      {
-        "method_name": "(top-level)",
-        "node_name": "class",
-        "line": 3,
-        "mass": 92,
-        "fingerprint": "class(identifier(id) body(body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(assignment(id)) body_statement(call(id) if(call(identifier(id) id) call(id))))) method(id body(parameters(assignment(id)) body_statement(unless(identifier(id) id) call(identifier(id) id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))))))",
-        "child_fingerprints": [
-          "body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(assignment(id)) body_statement(call(id) if(call(identifier(id) id) call(id))))) method(id body(parameters(assignment(id)) body_statement(unless(identifier(id) id) call(identifier(id) id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))))"
-        ],
-        "child_masses": [
-          88
-        ]
-      },
-      {
-        "method_name": "guard",
-        "node_name": "defn",
-        "line": 17,
-        "mass": 15,
-        "fingerprint": "method(id body(parameters(assignment(id)) body_statement(unless(identifier(id) id) call(identifier(id) id))))",
-        "child_fingerprints": [
-          "body_statement(unless(identifier(id) id) call(identifier(id) id))"
-        ],
-        "child_masses": [
-          9
-        ]
-      },
-      {
-        "method_name": "open",
-        "node_name": "assignment",
-        "line": 5,
-        "mass": 3,
-        "fingerprint": "assignment(id bool)",
-        "child_fingerprints": [
-          "bool"
-        ],
-        "child_masses": [
+          4,
+          3,
           1
-        ]
-      },
-      {
-        "method_name": "close",
-        "node_name": "assignment",
-        "line": 9,
-        "mass": 3,
-        "fingerprint": "assignment(id bool)",
-        "child_fingerprints": [
-          "bool"
-        ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
-        "method_name": "clone_left",
-        "node_name": "assignment",
-        "line": 24,
-        "mass": 8,
-        "fingerprint": "assignment(id call(call(identifier(id) id) id))",
-        "child_fingerprints": [
-          "call(call(identifier(id) id) id)"
-        ],
-        "child_masses": [
-          6
-        ]
-      },
-      {
-        "method_name": "clone_right",
-        "node_name": "assignment",
-        "line": 30,
-        "mass": 8,
-        "fingerprint": "assignment(id call(call(identifier(id) id) id))",
-        "child_fingerprints": [
-          "call(call(identifier(id) id) id)"
-        ],
-        "child_masses": [
-          6
-        ]
-      },
-      {
-        "method_name": "run",
-        "node_name": "body_statement",
-        "line": 13,
-        "mass": 10,
-        "fingerprint": "body_statement(call(id) if(call(identifier(id) id) call(id)))",
-        "child_fingerprints": [
-          "call(id)",
-          "if(call(identifier(id) id) call(id))"
-        ],
-        "child_masses": [
-          2,
-          7
         ]
       },
       {
         "method_name": "run",
         "node_name": "if",
         "line": 14,
-        "mass": 7,
-        "fingerprint": "if(call(identifier(id) id) call(id))",
+        "mass": 4,
+        "fingerprint": "if(call(id id) id)",
         "child_fingerprints": [
-          "call(identifier(id) id)",
-          "call(id)"
+          "call(id id)",
+          "id"
         ],
         "child_masses": [
-          4,
+          2,
+          1
+        ]
+      },
+      {
+        "method_name": "clone_left",
+        "node_name": "call",
+        "line": 24,
+        "mass": 3,
+        "fingerprint": "call(id call(id id))",
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
           2
         ]
       },
       {
-        "method_name": "guard",
-        "node_name": "unless",
-        "line": 18,
-        "mass": 4,
-        "fingerprint": "unless(identifier(id) id)",
+        "method_name": "clone_right",
+        "node_name": "call",
+        "line": 30,
+        "mass": 3,
+        "fingerprint": "call(id call(id id))",
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ]
+      },
+      {
+        "method_name": "run",
+        "node_name": "body_statement",
+        "line": 13,
+        "mass": 6,
+        "fingerprint": "body_statement(id if(call(id id) id))",
+        "child_fingerprints": [
+          "id",
+          "if(call(id id) id)"
+        ],
+        "child_masses": [
+          1,
+          4
+        ]
+      },
+      {
+        "method_name": "clone_left",
+        "node_name": "argument_list",
+        "line": 25,
+        "mass": 2,
+        "fingerprint": "argument_list(id)",
         "child_fingerprints": [
           "id"
         ],
@@ -350,94 +247,174 @@
         ]
       },
       {
-        "method_name": "open",
+        "method_name": "clone_right",
+        "node_name": "argument_list",
+        "line": 31,
+        "mass": 2,
+        "fingerprint": "argument_list(id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "run",
+        "node_name": "call",
+        "line": 14,
+        "mass": 2,
+        "fingerprint": "call(id id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "guard",
+        "node_name": "call",
+        "line": 20,
+        "mass": 2,
+        "fingerprint": "call(id id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "clone_left",
+        "node_name": "call",
+        "line": 24,
+        "mass": 2,
+        "fingerprint": "call(id id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "clone_right",
+        "node_name": "call",
+        "line": 30,
+        "mass": 2,
+        "fingerprint": "call(id id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "guard",
+        "node_name": "unless",
+        "line": 18,
+        "mass": 2,
+        "fingerprint": "unless(id)",
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ]
+      },
+      {
+        "method_name": "(top-level)",
         "node_name": "body_statement",
         "line": 4,
-        "mass": 88,
-        "fingerprint": "body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(assignment(id)) body_statement(call(id) if(call(identifier(id) id) call(id))))) method(id body(parameters(assignment(id)) body_statement(unless(identifier(id) id) call(identifier(id) id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))) method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id)))))",
+        "mass": 54,
+        "fingerprint": "body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(id) body_statement(id if(call(id id) id)))) method(id body(parameters(id) body_statement(unless(id) call(id id)))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))))",
         "child_fingerprints": [
           "method(id body(assignment(id bool)))",
           "method(id body(assignment(id bool)))",
-          "method(id body(parameters(assignment(id)) body_statement(call(id) if(call(identifier(id) id) call(id)))))",
-          "method(id body(parameters(assignment(id)) body_statement(unless(identifier(id) id) call(identifier(id) id))))",
-          "method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))))",
-          "method(id body(parameters(assignment(id)) body_statement(assignment(id call(call(identifier(id) id) id)) call<audit>(id argument_list(identifier(id))) identifier(id))))"
+          "method(id body(parameters(id) body_statement(id if(call(id id) id))))",
+          "method(id body(parameters(id) body_statement(unless(id) call(id id))))",
+          "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
+          "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))"
         ],
         "child_masses": [
-          6,
-          6,
-          16,
-          15,
-          22,
-          22
+          4,
+          4,
+          10,
+          9,
+          13,
+          13
         ]
       },
       {
         "method_name": "guard",
         "node_name": "body_statement",
         "line": 18,
-        "mass": 9,
-        "fingerprint": "body_statement(unless(identifier(id) id) call(identifier(id) id))",
+        "mass": 5,
+        "fingerprint": "body_statement(unless(id) call(id id))",
         "child_fingerprints": [
-          "unless(identifier(id) id)",
-          "call(identifier(id) id)"
+          "unless(id)",
+          "call(id id)"
         ],
         "child_masses": [
-          4,
-          4
+          2,
+          2
         ]
       },
       {
-        "method_name": "run",
-        "node_name": "assignment",
-        "line": 12,
-        "mass": 2,
-        "fingerprint": "assignment(id)",
-        "child_fingerprints": [
-
-        ],
-        "child_masses": [
-
-        ]
+        "method_name": "open",
+        "node_name": "defn",
+        "line": 4,
+        "mass": 4,
+        "fingerprint": "method(id body(assignment(id bool)))",
+        "child_fingerprints": [],
+        "child_masses": []
       },
       {
-        "method_name": "guard",
-        "node_name": "assignment",
-        "line": 17,
-        "mass": 2,
-        "fingerprint": "assignment(id)",
-        "child_fingerprints": [
-
-        ],
-        "child_masses": [
-
-        ]
+        "method_name": "close",
+        "node_name": "defn",
+        "line": 8,
+        "mass": 4,
+        "fingerprint": "method(id body(assignment(id bool)))",
+        "child_fingerprints": [],
+        "child_masses": []
       },
       {
         "method_name": "clone_left",
-        "node_name": "assignment",
+        "node_name": "defn",
         "line": 23,
-        "mass": 2,
-        "fingerprint": "assignment(id)",
-        "child_fingerprints": [
-
-        ],
-        "child_masses": [
-
-        ]
+        "mass": 13,
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
+        "child_fingerprints": [],
+        "child_masses": []
       },
       {
         "method_name": "clone_right",
-        "node_name": "assignment",
+        "node_name": "defn",
         "line": 29,
-        "mass": 2,
-        "fingerprint": "assignment(id)",
-        "child_fingerprints": [
-
-        ],
-        "child_masses": [
-
-        ]
+        "mass": 13,
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
+        "child_fingerprints": [],
+        "child_masses": []
+      },
+      {
+        "method_name": "run",
+        "node_name": "defn",
+        "line": 12,
+        "mass": 10,
+        "fingerprint": "method(id body(parameters(id) body_statement(id if(call(id id) id))))",
+        "child_fingerprints": [],
+        "child_masses": []
+      },
+      {
+        "method_name": "guard",
+        "node_name": "defn",
+        "line": 17,
+        "mass": 9,
+        "fingerprint": "method(id body(parameters(id) body_statement(unless(id) call(id id))))",
+        "child_fingerprints": [],
+        "child_masses": []
       }
     ],
     "functions": [
@@ -482,18 +459,14 @@
         "owner": "SourceFactProtocolsNilClone",
         "line": 4,
         "visibility": "public",
-        "params": [
-
-        ]
+        "params": []
       },
       {
         "name": "close",
         "owner": "SourceFactProtocolsNilClone",
         "line": 8,
         "visibility": "public",
-        "params": [
-
-        ]
+        "params": []
       }
     ],
     "protocol_call_paths": [
@@ -501,33 +474,25 @@
         "owner": "SourceFactProtocolsNilClone",
         "name": "guard",
         "line": 17,
-        "calls": [
-
-        ]
+        "calls": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
         "name": "guard",
         "line": 17,
-        "calls": [
-
-        ]
+        "calls": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
         "name": "open",
         "line": 4,
-        "calls": [
-
-        ]
+        "calls": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
         "name": "close",
         "line": 8,
-        "calls": [
-
-        ]
+        "calls": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
@@ -618,9 +583,7 @@
           "item.ready",
           "open"
         ],
-        "writes": [
-
-        ]
+        "writes": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
@@ -629,9 +592,7 @@
         "reads": [
           "value.name"
         ],
-        "writes": [
-
-        ]
+        "writes": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
@@ -642,9 +603,7 @@
           "user.profile",
           "user.profile.name"
         ],
-        "writes": [
-
-        ]
+        "writes": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
@@ -655,17 +614,13 @@
           "account.profile.name",
           "audit"
         ],
-        "writes": [
-
-        ]
+        "writes": []
       },
       {
         "owner": "SourceFactProtocolsNilClone",
         "name": "open",
         "line": 4,
-        "reads": [
-
-        ],
+        "reads": [],
         "writes": [
           "opened"
         ]
@@ -674,9 +629,7 @@
         "owner": "SourceFactProtocolsNilClone",
         "name": "close",
         "line": 8,
-        "reads": [
-
-        ],
+        "reads": [],
         "writes": [
           "opened"
         ]
@@ -692,7 +645,12 @@
       }
     ],
     "semantic_effects": [
-
+      {
+        "detail": "value",
+        "function": "guard",
+        "kind": "eliminable_guard",
+        "line": 20
+      }
     ],
     "state_reads": [
       {

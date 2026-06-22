@@ -7,40 +7,37 @@ module FactMine
     ProtocolCall = Struct.new(:mid, :file, :owner, :defn, :line, :span, keyword_init: true)
     ProtocolMethodPath = Struct.new(:file, :owner, :name, :line, :calls, keyword_init: true)
     ProtocolPath = Struct.new(:calls, :terminal, keyword_init: true)
-    PROTOCOL_PATH_LIMIT = 64
-    PROTOCOL_DECLARATIVE_MIDS = %w[
-      abstract! alias_method any attr_accessor attr_reader attr_writer bind
-      cast checked enum extend final include interface! let must must_because
-      nilable override overridable params prepend private private_class_method
-      protected public require require_relative requires_ancestor sealed! sig
-      type_member type_template untyped unsafe void
-    ].freeze
-    PROTOCOL_TEST_DSL_MIDS = %w[
-      a_kind_of after around before be be_a be_an be_empty be_falsey be_nil
-      be_truthy change contain_exactly context describe eq eql equal expect
-      have_attributes have_key have_received it match not_to raise_error
-      receive subject to
-    ].freeze
-    PROTOCOL_IGNORED_MIDS = (PROTOCOL_DECLARATIVE_MIDS + PROTOCOL_TEST_DSL_MIDS).freeze
-    PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS = %w[
-      error! fixable! read_interpolated_string warn!
-    ].freeze
-    PROTOCOL_MUTATING_MIDS = %w[
-      << []= add append clear collect! compact! concat declare delete delete_if
-      each_key= fill filter! keep_if mark merge! move push reject! replace
-      resolve shift stamp store unshift update write
-    ].freeze
-    PROTOCOL_NON_MUTATING_OPERATOR_MIDS = %w[! != !~].freeze
-    PROTOCOL_MUTATING_SUFFIXES = %w[!].freeze
+    ProtocolLexicon = Struct.new(
+      :path_limit, :declarative_mids, :test_dsl_mids, :ignored_mids,
+      :optional_diagnostic_mids, :mutating_mids, :non_mutating_operator_mids,
+      :mutating_suffixes,
+      keyword_init: true
+    )
 
-    RUBY_PROTOCOL_PATH_LIMIT = PROTOCOL_PATH_LIMIT
-    RUBY_PROTOCOL_DECLARATIVE_MIDS = PROTOCOL_DECLARATIVE_MIDS
-    RUBY_PROTOCOL_TEST_DSL_MIDS = PROTOCOL_TEST_DSL_MIDS
-    RUBY_PROTOCOL_IGNORED_MIDS = PROTOCOL_IGNORED_MIDS
-    RUBY_PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS = PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS
-    RUBY_PROTOCOL_MUTATING_MIDS = PROTOCOL_MUTATING_MIDS
-    RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS = PROTOCOL_NON_MUTATING_OPERATOR_MIDS
-    RUBY_PROTOCOL_MUTATING_SUFFIXES = PROTOCOL_MUTATING_SUFFIXES
+    EMPTY_PROTOCOL_LEXICON = ProtocolLexicon.new(
+      path_limit: 64,
+      declarative_mids: [].freeze,
+      test_dsl_mids: [].freeze,
+      ignored_mids: [].freeze,
+      optional_diagnostic_mids: [].freeze,
+      mutating_mids: [].freeze,
+      non_mutating_operator_mids: [].freeze,
+      mutating_suffixes: [].freeze
+    ).freeze
+
+    @protocol_lexicons = {}
+
+    def self.register_protocol_lexicon(language, lexicon)
+      @protocol_lexicons[language.to_sym] = lexicon
+    end
+
+    def self.protocol_lexicon_for(language)
+      @protocol_lexicons.fetch(language.to_sym, EMPTY_PROTOCOL_LEXICON)
+    end
+
+    def self.protocol_ignored_mids(language)
+      protocol_lexicon_for(language).ignored_mids
+    end
 
     class Document
       def protocol_method_effects
@@ -54,13 +51,26 @@ module FactMine
 
     class TreeSitterLanguageAdapter
       def protocol_method_effects(document)
+        behavior = Syntax::NormalizedExtractionBehavior.for(document.language)
+
         document.function_defs.map do |function_def|
           reads = document.state_reads.select do |read|
             read.owner == function_def.owner && read.function == function_def.name
-          end.map(&:field).uniq.sort
+          end.filter_map { |read| behavior.protocol_read_label_from_state(read) }
+
+          reads.concat(document.call_sites.select do |call|
+            call.owner == function_def.owner && call.function == function_def.name
+          end.filter_map do |call|
+            label = behavior.protocol_read_label_from_call(call)
+            next nil if label.to_s.empty?
+
+            label
+          end)
+          reads = reads.uniq.sort
+
           writes = document.state_writes.select do |write|
             write.owner == function_def.owner && write.function == function_def.name
-          end.map(&:field).uniq.sort
+          end.filter_map { |write| behavior.protocol_write_label(write) }.uniq.sort
 
           ProtocolMethodEffect.new(
             file: function_def.file,
@@ -75,29 +85,56 @@ module FactMine
 
       def protocol_call_paths(document)
         document.function_defs.map do |function_def|
-          calls = document.call_sites.select do |call|
+          calls = protocol_self_calls(document, function_def)
+
+          protocol_call_variants(calls, function_def).map do |path_calls|
+            ProtocolMethodPath.new(
+              file: function_def.file,
+              owner: function_def.owner,
+              name: function_def.name.to_s.split(/[.:]/).last,
+              line: function_def.line,
+              calls: path_calls
+            )
+          end
+        end.flatten
+      end
+
+      def protocol_self_calls(document, function_def)
+        document.call_sites.select do |call|
             call.owner == function_def.owner &&
               call.function == function_def.name &&
               call.receiver.to_s == "self"
-          end.map do |call|
-            ProtocolCall.new(
-              mid: call.message.to_s.split(/[.:]/).last,
-              file: call.file,
-              owner: call.owner,
-              defn: call.function,
-              line: call.line,
-              span: call.span
-            )
+        end.map do |call|
+          ProtocolCall.new(
+            mid: call.message.to_s.split(/[.:]/).last,
+            file: call.file,
+            owner: call.owner,
+            defn: call.function,
+            line: call.line,
+            span: call.span
+          ).tap do |protocol_call|
+            protocol_call.define_singleton_method(:conditional?) { call.conditional }
           end
-
-          ProtocolMethodPath.new(
-            file: function_def.file,
-            owner: function_def.owner,
-            name: function_def.name.to_s.split(/[.:]/).last,
-            line: function_def.line,
-            calls: calls
-          )
         end
+      end
+
+      def protocol_call_variants(calls, function_def)
+        return [[], []] if calls.empty? && protocol_conditional_body?(function_def.body)
+
+        conditional_calls, always_calls = calls.partition do |call|
+          call.respond_to?(:conditional?) && call.conditional?
+        end
+        return [calls] if conditional_calls.empty?
+
+        conditional_calls.map { |call| (always_calls + [call]).sort_by(&:line) } +
+          [always_calls.sort_by(&:line)]
+      end
+
+      def protocol_conditional_body?(node)
+        return false unless node.is_a?(Hash)
+        return true if %w[if unless case].include?(node["kind"].to_s)
+
+        Array(node["children"]).any? { |child| protocol_conditional_body?(child) }
       end
     end
 

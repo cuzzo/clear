@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     CPP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\b(?:nullptr|NULL)\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\b(?:nullptr|NULL)\b/,
         /\b(?:dynamic_cast|typeid)\s*[<(]/,
@@ -19,6 +20,23 @@ module FactMine
         /\Areturn\s+(?:nullptr|NULL|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    CPP_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[dynamic_cast typeid any_cast get_if visit invoke].freeze,
+      meta_mids: %w[reinterpret_cast const_cast dlsym dlopen].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[std filesystem fstream iostream thread mutex atomic].freeze,
+      io_bare: %w[throw abort exit assert system print].freeze,
+      dir_context: %w[current_path].freeze,
+      context_pairs: {
+        "chrono" => %w[now],
+        "random_device" => %w[operator()]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook try_lock wait notify_one notify_all].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:cpp, CPP_EFFECT_LEXICON)
 
     class CppSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_definition].freeze
@@ -129,5 +147,143 @@ module FactMine
         nil
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class CppNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      CPP_FIELD_MODIFIERS = %w[
+        public private protected mutable static const constexpr volatile unsigned signed short long
+      ].freeze
+
+      def implicit_owner_fields?
+        true
+      end
+
+      def field_name_from_declaration(node)
+        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
+        return nil if node.text.to_s.include?("(")
+
+        text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && name.match?(/\A[A-Za-z_]\w*\z/)
+        return nil if %w[private protected public mutable static const constexpr volatile unsigned signed short long int char float double bool string].include?(name)
+
+        name
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+        return nil if node.text.to_s.include?("(")
+
+        member = cpp_member_declaration(node.text)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
+      end
+
+      def source_message_text(message, node)
+        return "#{message}()" if node && node.text.to_s.include?("#{message}()")
+
+        message
+      end
+
+      def initializer_field_reads(node, owner:, owner_fields:, function_name:)
+        return [] unless owner_fields
+
+        reads = []
+        text = node.text.to_s
+        text.to_enum(:scan, /(?:[:,]\s*)([A-Za-z_]\w*)\s*\(\s*0\s*\)/).each do
+          field = Regexp.last_match(1)
+          next unless owner_fields.include?(field)
+
+          start_line = node.first_lineno
+          line_offset = text[0...Regexp.last_match.begin(1)].count("\n")
+          line_text = text.lines[line_offset].to_s
+          column = line_text.index(field).to_i
+          reads << {
+            field: field,
+            receiver: "self",
+            function: function_name,
+            line: start_line + line_offset,
+            span: [start_line + line_offset, column, start_line + line_offset, column + field.length]
+          }
+        end
+        reads
+      end
+
+      def owner_name_span(_name, node, default_span:)
+        keyword_block_span(node, "struct") || default_span
+      end
+
+      def declarative_owner(node, current_owner:)
+        return nil unless node.type.to_s == "TYPE_DEFINITION"
+
+        text = node.text.to_s
+        name = text[/}\s*([A-Za-z_]\w*)\s*;/m, 1]
+        name && text.include?("struct") ? { name: name, kind: "struct" } : nil
+      end
+
+      def function_visibility(name, node, lines:)
+        current = "private"
+        lines.first(node.first_lineno - 1).each do |line|
+          match = line.match(/^\s*(public|private|protected)\s*:/)
+          next unless match
+
+          current = match[1] == "public" ? "public" : "private"
+        end
+        lines[node.first_lineno - 1].to_s[0...node.first_column.to_i].to_s.scan(/\b(public|private|protected)\s*:/) do
+          current = Regexp.last_match(1) == "public" ? "public" : "private"
+        end
+        current
+      end
+
+      def case_predicate_text(text)
+        text.start_with?("(") && text.end_with?(")") ? text[1...-1] : text
+      end
+
+      def wrap_branch_predicate?(_branch)
+        true
+      end
+
+      def case_pattern_display(pattern)
+        pattern.to_s.sub(/\AAST::/, "AST.")
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def stream_insertion_operator?(node)
+        node.text.to_s.include?("std::")
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+
+      private
+
+      def cpp_member_declaration(source)
+        text = source.to_s.strip.sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| CPP_FIELD_MODIFIERS.include?(token) }.join(" ")
+        type = type.gsub(/\s+\*/, " *").gsub(/\s+&/, " &").strip
+        return nil if type.empty?
+
+        { name: name, type: type }
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:cpp, CppNormalizedExtractionBehavior)
   end
 end

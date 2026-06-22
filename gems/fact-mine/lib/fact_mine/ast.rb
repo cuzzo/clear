@@ -15,10 +15,10 @@ module FactMine
   module Ast
     module_function
 
-    def parse(file)
+    def parse(file, language: nil)
       require_relative "syntax"
-      document = Syntax.parse_raw(file, parser: "tree_sitter")
-      key = [:tree_sitter, document.object_id]
+      document = Syntax.parse_raw(file, language: language, parser: "tree_sitter")
+      key = [:tree_sitter, language&.to_sym, document.object_id]
       normalized_cache.fetch(key) do
         normalized_cache[key] = [TreeSitterNormalizer.new(document).normalize, document.lines]
       end
@@ -33,7 +33,7 @@ module FactMine
       end
     end
 
-    require_relative "ast/legacy_normalizer"
+    require_relative "ast/normalizer"
 
     # Flatten a && chain (binary-nested OR n-ary, version dependent).
     def flatten_and(node)

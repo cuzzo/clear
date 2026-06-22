@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     CSHARP_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnull\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnull\b/,
         /(?:\?\.|\?\?)/,
@@ -18,6 +19,24 @@ module FactMine
         /\Areturn\s+(?:null|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    CSHARP_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[Invoke GetMethod GetProperty GetField Activator CreateInstance].freeze,
+      meta_mids: %w[Invoke GetType Reflection Emit DynamicMethod].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[Console File Directory Path Process Socket HttpClient Environment].freeze,
+      io_bare: %w[throw print].freeze,
+      dir_context: %w[CurrentDirectory GetEnvironmentVariable].freeze,
+      context_pairs: {
+        "DateTime" => %w[Now UtcNow Today],
+        "Guid" => %w[NewGuid],
+        "Random" => %w[Next NextDouble]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook Lock Monitor Enter Exit Wait Pulse].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:csharp, CSHARP_EFFECT_LEXICON)
 
     class CSharpSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[method_declaration].freeze
@@ -116,5 +135,86 @@ module FactMine
         super
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class CsharpNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      CSHARP_FIELD_MODIFIERS = %w[
+        public private protected internal readonly static const volatile required
+      ].freeze
+
+      def implicit_owner_fields?
+        true
+      end
+
+      def field_name_from_declaration(node)
+        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
+        return nil if node.text.to_s.include?("(")
+
+        text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && name.match?(/\A[A-Za-z_]\w*\z/)
+        return nil if %w[private protected public internal readonly static const volatile string int long short byte bool decimal double float var].include?(name)
+
+        name
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION].include?(node.type.to_s)
+        return nil if node.text.to_s.include?("(")
+
+        member = csharp_member_declaration(node.text)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self" && !call.fetch("arguments").empty?
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|protected)\b/)
+        return "public" if text.match?(/\Apublic\b/)
+
+        "public"
+      end
+
+      def explicit_self_state_ref(_node, message)
+        "this.#{message}"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+
+      private
+
+      def csharp_member_declaration(source)
+        text = source.to_s.strip.sub(/\{.*\}\s*\z/m, "").sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| CSHARP_FIELD_MODIFIERS.include?(token) }.join(" ")
+        return nil if type.empty?
+
+        { name: name, type: type }
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:csharp, CsharpNormalizedExtractionBehavior)
   end
 end

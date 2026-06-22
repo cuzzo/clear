@@ -26,7 +26,10 @@ fn run() -> Result<()> {
 }
 
 enum Command {
-    SyntaxFacts { language: String, files: Vec<PathBuf> },
+    SyntaxFacts {
+        language: String,
+        files: Vec<PathBuf>,
+    },
 }
 
 fn parse_args(args: Vec<String>) -> Result<Command> {
@@ -41,9 +44,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--language" => {
-                language = iter
-                    .next()
-                    .with_context(|| "--language requires a value")?;
+                language = iter.next().with_context(|| "--language requires a value")?;
             }
             other if other.starts_with("--") => bail!("unsupported option: {other}"),
             path => files.push(PathBuf::from(path)),

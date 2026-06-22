@@ -62,6 +62,9 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     kotlin.rb
     lua.rb
     nil_guards.rb
+    normalized_extraction_behavior.rb
+    normalized_extractor.rb
+    normalized_local_facts.rb
     passes.rb
     php.rb
     protocols.rb
@@ -82,6 +85,31 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     "stateful syntax enrichment belongs in syntax/passes.rb" =>
       /^\s*def\s+after_structural_facts\b/
   }.freeze
+  CONCRETE_LANGUAGE_TOKENS = /\b(?:ruby|python|lua|typescript|javascript|rust|zig|swift|kotlin|php|go|java|csharp|cpp)\b/i
+  AST_GENERIC_FILES = %w[
+    ast/normalizer.rb
+    ast/adapters/base.rb
+  ].freeze
+  AST_ALLOWED_FILES = %w[
+    cache.rb
+    node.rb
+    source_map.rb
+    semantic_node.rb
+    semantic_normalizer.rb
+    legacy_normalizer.rb
+    normalizer.rb
+    adapters.rb
+    adapters/base.rb
+    adapters/c.rb
+    adapters/go.rb
+    adapters/kotlin.rb
+    adapters/lua.rb
+    adapters/python.rb
+    adapters/ruby.rb
+    adapters/rust.rb
+    adapters/typescript.rb
+    adapters/zig.rb
+  ].freeze
 
   def test_detector_specific_syntax_extensions_do_not_live_in_syntax_rb
     syntax_rb = File.join(LIB, "syntax.rb")
@@ -199,6 +227,101 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
 
     assert_empty offenders, format_offenders(
       "Syntax subfiles must not hide behavior behind their own requires",
+      offenders
+    )
+  end
+
+  def test_generic_ast_normalizer_files_do_not_reference_concrete_languages
+    files = AST_GENERIC_FILES.map { |file_name| File.join(LIB, file_name) }
+    offenders = scan_files(
+      files,
+      "generic AST normalizer code must not branch on concrete languages" => CONCRETE_LANGUAGE_TOKENS
+    )
+
+    assert_empty offenders, format_offenders(
+      "Concrete AST normalization behavior belongs in lib/fact_mine/ast/adapters/<language>.rb",
+      offenders
+    )
+  end
+
+  def test_ast_directory_does_not_gain_unreviewed_helper_files
+    ast_root = File.join(LIB, "ast")
+    files = Dir.glob(File.join(ast_root, "**", "*.rb")).map do |path|
+      path.delete_prefix("#{ast_root}/")
+    end.sort
+    unexpected = files - AST_ALLOWED_FILES.sort
+    missing = AST_ALLOWED_FILES.sort - files
+    offenders = unexpected.map { |file_name| "#{file_name}: unexpected AST helper file" } +
+                missing.map { |file_name| "#{file_name}: missing AST file" }
+
+    assert_empty offenders, format_offenders(
+      "AST helper files are an architecture boundary; update this invariant deliberately",
+      offenders
+    )
+  end
+
+  def test_generic_normalized_extractor_does_not_reference_concrete_languages
+    generic_extraction_files = %w[
+      normalized_extraction_behavior.rb
+      normalized_extractor.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
+    offenders = scan_files(
+      generic_extraction_files,
+      "generic normalized fact extraction must not branch on concrete languages" => CONCRETE_LANGUAGE_TOKENS
+    )
+
+    assert_empty offenders, format_offenders(
+      "Concrete normalized extraction quirks belong in the language syntax adapter files",
+      offenders
+    )
+  end
+
+  def test_generic_normalized_fact_engines_do_not_walk_raw_parser_nodes
+    files = %w[
+      clone_similarity.rb
+      nil_guards.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
+    offenders = scan_files(
+      files,
+      "generic normalized fact engines must consume normalized IR, not parser nodes" =>
+        /\b(?:ts_node\?|named_children|named_child_count|named_field|first_token_kind|direct_operator)\b/
+    )
+
+    assert_empty offenders, format_offenders(
+      "Raw parser traversal belongs in concrete language syntax adapters",
+      offenders
+    )
+  end
+
+  def test_generic_effect_and_protocol_engines_do_not_own_language_vocabularies
+    files = %w[
+      effects.rb
+      protocols.rb
+    ].map { |file_name| File.join(LIB, "syntax", file_name) }
+    offenders = scan_files(
+      files,
+      "language vocabularies belong in syntax/<language>.rb" =>
+        /\b(?:RUBY_|PYTHON_|JAVASCRIPT_|TYPESCRIPT_|RUST_|ZIG_|LUA_|GO_|CSHARP_|JAVA_|SWIFT_|KOTLIN_|PHP_|COMMON_CALLBACK_SET|T::Struct)\b/
+    )
+
+    assert_empty offenders, format_offenders(
+      "Generic effect/protocol engines must expose registries, not language lexicons",
+      offenders
+    )
+  end
+
+  def test_normalized_extractor_does_not_own_stateful_enrichment_or_visibility
+    file = File.join(LIB, "syntax", "normalized_extractor.rb")
+    offenders = scan_files(
+      [file],
+      "stateful enrichment belongs in syntax/passes.rb or language behavior" =>
+        /\b(?:apply_visibility|append_effects_from_calls|dedupe_semantic_effects|visibility_events_from_calls|public protected private)\b/,
+      "declaration modifier/type vocabularies belong in language behavior" =>
+        /%w\[[^\]]*\b(?:readonly|static|volatile|unsigned|signed|short|long|int|char|float|double|bool|string|var)\b[^\]]*\]/
+    )
+
+    assert_empty offenders, format_offenders(
+      "NormalizedExtractor must remain a stateless normalized fact scanner",
       offenders
     )
   end

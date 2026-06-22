@@ -145,7 +145,8 @@
         "score": 2.2,
         "signals": {
           "boolean_ops": 0,
-          "branches": 2
+          "branches": 2,
+          "loops": 1
         }
       }
     ],

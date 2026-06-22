@@ -24,33 +24,54 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn every_supported_language_has_a_syntax_adapter_file() {
-    let adapters = crate_src().join("syntax/adapters");
-    let expected = [
-        "c.rs",
-        "cpp.rs",
-        "csharp.rs",
-        "go.rs",
-        "java.rs",
-        "javascript.rs",
-        "kotlin.rs",
-        "lua.rs",
-        "php.rs",
-        "python.rs",
-        "ruby.rs",
-        "rust.rs",
-        "swift.rs",
-        "typescript.rs",
-        "zig.rs",
+fn public_api_does_not_export_ast_or_parser_internals() {
+    let lib_source = fs::read_to_string(crate_src().join("lib.rs")).expect("read lib.rs");
+    let syntax_source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
+    let forbidden = [
+        (&lib_source, "pub mod ast", "AST internals"),
+        (
+            &syntax_source,
+            "pub mod tree_sitter_adapter",
+            "tree-sitter adapter internals",
+        ),
     ];
 
-    for file in expected {
+    for (source, pattern, label) in forbidden {
         assert!(
-            adapters.join(file).is_file(),
-            "missing syntax adapter file {}",
-            adapters.join(file).display()
+            !source.contains(pattern),
+            "{} must not be public FactMine API",
+            label
         );
     }
+}
+
+#[test]
+fn document_public_api_does_not_expose_raw_syntax_internals() {
+    let source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
+    let forbidden = [
+        ("pub source: String", "raw source text"),
+        ("pub lines: Vec<String>", "raw source lines"),
+        ("pub root: RawNode", "raw syntax root"),
+        ("pub normalized_root: NormalizedNode", "normalized IR root"),
+        ("pub body: RawNode", "raw function body"),
+    ];
+
+    for (pattern, label) in forbidden {
+        assert!(
+            !source.contains(pattern),
+            "{} must stay internal to FactMine passes",
+            label
+        );
+    }
+}
+
+#[test]
+fn syntax_adapters_directory_does_not_exist() {
+    let adapters = crate_src().join("syntax/adapters");
+    assert!(
+        !adapters.exists(),
+        "syntax/adapters was the old raw fact-profile boundary; use ast/adapters for normalization and syntax/<lang>.rs for language behavior"
+    );
 }
 
 #[test]
@@ -109,7 +130,7 @@ fn tree_sitter_adapter_does_not_define_concrete_language_profiles() {
     for pattern in forbidden {
         assert!(
             !source.contains(pattern),
-            "{} should live in syntax/adapters, not tree_sitter_adapter.rs",
+            "{} should not live in tree_sitter_adapter.rs; parser setup is grammar-only and language behavior belongs in syntax/<lang>.rs",
             pattern
         );
     }
@@ -117,18 +138,23 @@ fn tree_sitter_adapter_does_not_define_concrete_language_profiles() {
 
 #[test]
 fn ast_normalizer_does_not_define_a_language_adapter_enum() {
-    let path = crate_src().join("ast.rs");
-    let source = fs::read_to_string(&path).expect("read ast.rs");
+    let checked = [
+        crate_src().join("ast.rs"),
+        crate_src().join("ast/normalizer.rs"),
+    ];
     for pattern in [
         "enum TreeSitterNormalizationAdapter",
         "impl TreeSitterNormalizationAdapter",
         "TreeSitterNormalizationAdapter::",
     ] {
-        assert!(
-            !source.contains(pattern),
-            "{} should live as polymorphic ast/adapters implementations",
-            pattern
-        );
+        for path in &checked {
+            let source = fs::read_to_string(path).expect("read shared AST file");
+            assert!(
+                !source.contains(pattern),
+                "{} should live as polymorphic ast/adapters implementations",
+                pattern
+            );
+        }
     }
 }
 
@@ -157,33 +183,109 @@ fn ast_adapters_do_not_delegate_through_a_language_kind_selector() {
 }
 
 #[test]
+fn ast_adapter_base_does_not_own_concrete_language_selectors_or_lexicons() {
+    let path = crate_src().join("ast/adapters/base.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read ast adapter base"));
+    let forbidden = [
+        "fn ruby",
+        "ruby_",
+        "RUBY_",
+        "python_",
+        "PYTHON_",
+        "lua_",
+        "LUA_",
+        "typescript_",
+        "TYPESCRIPT_",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Shared AST adapter base must not own concrete-language selectors or lexicons:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn shared_ast_normalizer_does_not_own_concrete_parser_tokens() {
+    let checked = [
+        crate_src().join("ast.rs"),
+        crate_src().join("ast/normalizer.rs"),
+        crate_src().join("ast/adapters/base.rs"),
+    ];
+    let forbidden = [
+        "\"unless\"",
+        "\"unless_modifier\"",
+        "\"elsif\"",
+        "\"rescue_modifier\"",
+        "\"rescue\"",
+        "\"ensure\"",
+        "\"begin\"",
+        "\"instance_variable\"",
+        "\"global_variable\"",
+        "\"def\"",
+        "\"singleton_method\"",
+        "\"impl_item\"",
+        "\"singleton_class\"",
+        "\"block_argument\"",
+        "\"until_modifier\"",
+        "\"heredoc_beginning\"",
+        "\"heredoc_body\"",
+        "\"heredoc_content\"",
+        "\"chained_string\"",
+        "\"concatenated_string\"",
+    ];
+    let mut offenders = Vec::new();
+
+    for path in checked {
+        let source = production_source(&fs::read_to_string(&path).expect("read shared AST file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Concrete parser tokens belong in ast/adapters/<language>.rs, not shared AST normalization:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
 fn syntax_directory_does_not_gain_unreviewed_helper_files() {
     let syntax_dir = crate_src().join("syntax");
     let expected = [
-        "adapters/base.rs",
-        "adapters/c.rs",
-        "adapters/cpp.rs",
-        "adapters/csharp.rs",
-        "adapters/false_simplicity_lexicon.rs",
-        "adapters/go.rs",
-        "adapters/java.rs",
-        "adapters/javascript.rs",
-        "adapters/kotlin.rs",
-        "adapters/lua.rs",
-        "adapters/mod.rs",
-        "adapters/php.rs",
-        "adapters/python.rs",
-        "adapters/ruby.rs",
-        "adapters/rust.rs",
-        "adapters/swift.rs",
-        "adapters/typescript.rs",
-        "adapters/zig.rs",
+        "clone_similarity.rs",
         "complexity.rs",
+        "effects.rs",
         "local_flow.rs",
+        "normalized_behavior.rs",
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
         "normalized_extractor.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
+        "parser_grammar.rs",
+        "passes.rs",
         "path_condition.rs",
         "protocols.rs",
-        "raw_tree.rs",
         "redundant_nil_guard.rs",
         "tree_sitter_adapter.rs",
         "visibility.rs",
@@ -212,6 +314,75 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
     assert!(
         offenders.is_empty(),
         "Syntax helper files are an architecture boundary; update this invariant deliberately:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn syntax_language_files_use_plain_language_names() {
+    let syntax_dir = crate_src().join("syntax");
+    let offenders = rust_files_recursive(&syntax_dir)
+        .into_iter()
+        .filter_map(|path| {
+            let file_name = path.file_name()?.to_str()?;
+            (file_name.starts_with("normalized_")
+                && file_name != "normalized_behavior.rs"
+                && file_name != "normalized_extractor.rs")
+                .then(|| path.display().to_string())
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Concrete language syntax files must be syntax/<lang>.rs; normalized_* is reserved for generic normalized passes:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn language_specific_ast_files_live_only_in_ast_adapters() {
+    let ast_dir = crate_src().join("ast");
+    let forbidden_names = [
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
+        "ruby_normalization.rs",
+        "python_normalization.rs",
+        "lua_normalization.rs",
+        "typescript_normalization.rs",
+    ];
+    let offenders = rust_files_recursive(&ast_dir)
+        .into_iter()
+        .filter_map(|path| {
+            let relative = path
+                .strip_prefix(&ast_dir)
+                .expect("ast file under ast dir")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative.starts_with("adapters/") {
+                return None;
+            }
+            let file_name = path.file_name()?.to_str()?;
+            (forbidden_names.contains(&file_name) || file_name.ends_with("_normalization.rs"))
+                .then(|| relative)
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Language-specific AST normalization belongs in ast/adapters/<lang>.rs, not extra ast helper files:\n{}",
         offenders.join("\n")
     );
 }
@@ -246,227 +417,114 @@ fn syntax_subfiles_do_not_declare_nested_modules() {
 }
 
 #[test]
-fn syntax_adapter_module_loader_only_declares_known_modules() {
-    let path = crate_src().join("syntax/adapters/mod.rs");
-    let source = production_source(&fs::read_to_string(&path).expect("read syntax adapters mod"));
-    let expected = [
-        "pub(crate) mod base;",
-        "mod c;",
-        "mod cpp;",
-        "mod csharp;",
-        "pub(crate) mod false_simplicity_lexicon;",
-        "mod go;",
-        "mod java;",
-        "mod javascript;",
-        "mod kotlin;",
-        "mod lua;",
-        "mod php;",
-        "mod python;",
-        "mod ruby;",
-        "mod rust;",
-        "mod swift;",
-        "mod typescript;",
-        "mod zig;",
+fn removed_raw_syntax_profile_architecture_stays_removed() {
+    let syntax_dir = crate_src().join("syntax");
+    let forbidden = [
+        "LanguageProfile",
+        "false_simplicity_lexicon",
+        "syntax/adapters",
+        "materialize_protocol_facts",
+        "raw_tree",
     ];
-    let modules = source
-        .lines()
-        .map(str::trim)
-        .filter(|line| {
-            line.starts_with("mod ")
-                || line.starts_with("pub mod ")
-                || line.starts_with("pub(crate) mod ")
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let expected = expected.into_iter().map(str::to_string).collect::<Vec<_>>();
-    let unexpected = modules
-        .iter()
-        .filter(|module| !expected.contains(module))
-        .map(|module| format!("{module}: unexpected adapter module declaration"));
-    let missing = expected
-        .iter()
-        .filter(|module| !modules.contains(module))
-        .map(|module| format!("{module}: missing adapter module declaration"));
-    let offenders = unexpected.chain(missing).collect::<Vec<_>>();
+    let mut offenders = Vec::new();
+    for path in rust_files_recursive(&syntax_dir) {
+        let source = production_source(&fs::read_to_string(&path).expect("read syntax file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
 
     assert!(
         offenders.is_empty(),
-        "syntax/adapters/mod.rs must only load the approved adapter modules:\n{}",
+        "Removed raw syntax profile/fallback architecture must not come back:\n{}",
         offenders.join("\n")
     );
 }
 
 #[test]
-fn concrete_syntax_profiles_only_live_in_their_own_files() {
+fn generic_syntax_files_do_not_own_language_guard_or_metadata_lexicons() {
     let syntax_dir = crate_src().join("syntax");
-    let adapters_dir = syntax_dir.join("adapters");
-    let owners = [
-        ("CProfile", "c.rs"),
-        ("CppProfile", "cpp.rs"),
-        ("CSharpProfile", "csharp.rs"),
-        ("GoProfile", "go.rs"),
-        ("JavaProfile", "java.rs"),
-        ("JavaScriptProfile", "javascript.rs"),
-        ("KotlinProfile", "kotlin.rs"),
-        ("LuaProfile", "lua.rs"),
-        ("PhpProfile", "php.rs"),
-        ("PythonProfile", "python.rs"),
-        ("RubyProfile", "ruby.rs"),
-        ("RustProfile", "rust.rs"),
-        ("SwiftProfile", "swift.rs"),
-        ("TypeScriptProfile", "typescript.rs"),
-        ("ZigProfile", "zig.rs"),
+    let language_files = [
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
+    ];
+    let forbidden = [
+        "\"nil?\"",
+        "\"respond_to?\"",
+        "\"is_a?\"",
+        "\"kind_of?\"",
+        "\"instance_of?\"",
+        "\"isNull\"",
+        "\"is_null\"",
+        "\"is_none\"",
+        "\"is_some\"",
+        "T::Struct",
+        "const :",
+        "ruby_metadata",
     ];
     let mut offenders = Vec::new();
 
     for path in rust_files_recursive(&syntax_dir) {
+        let relative = path
+            .strip_prefix(&syntax_dir)
+            .expect("syntax file under syntax dir")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if language_files.contains(&relative.as_str()) {
+            continue;
+        }
         let source = production_source(&fs::read_to_string(&path).expect("read syntax file"));
-        for (index, line) in source.lines().enumerate() {
-            let trimmed = line.trim_start();
-            for (profile, owner_file) in owners {
-                if !(trimmed.starts_with(&format!("pub(crate) struct {profile}"))
-                    || trimmed.starts_with(&format!("struct {profile}"))
-                    || trimmed.starts_with(&format!("impl {profile}"))
-                    || trimmed.contains(&format!(" for {profile}")))
-                {
-                    continue;
-                }
-                let owner = adapters_dir.join(owner_file);
-                if path != owner {
-                    offenders.push(format!(
-                        "{}:{}: {} belongs in {}: {}",
-                        path.display(),
-                        index + 1,
-                        profile,
-                        owner.display(),
-                        trimmed
-                    ));
-                }
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
             }
         }
     }
 
     assert!(
         offenders.is_empty(),
-        "Concrete syntax profiles must not be split across helper files:\n{}",
+        "Concrete guard/metadata spellings belong in syntax/<language>.rs, not generic syntax files:\n{}",
         offenders.join("\n")
     );
 }
 
 #[test]
-fn syntax_language_profile_trait_does_not_expose_detector_fact_engines() {
-    let path = crate_src().join("syntax/adapters/base.rs");
-    let source = production_source(&fs::read_to_string(&path).expect("read syntax adapter base"));
-    let trait_source = source
-        .split_once("pub(crate) trait LanguageProfile")
-        .map(|(_, rest)| rest)
-        .unwrap_or(&source);
+fn clone_similarity_does_not_depend_on_parser_or_concrete_languages() {
+    let path = crate_src().join("syntax/clone_similarity.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read clone similarity"));
     let forbidden = [
-        (
-            "semantic-effect fact generation",
-            "structural_semantic_effect_sites(",
-        ),
-        (
-            "ordered-protocol effect generation",
-            "protocol_method_effects(",
-        ),
-        ("ordered-protocol path generation", "protocol_call_paths("),
-        ("clone candidate generation", "clone_candidates("),
-        ("post-collection fact mutation", "after_collect_facts("),
-    ];
-    let offenders = forbidden
-        .into_iter()
-        .filter_map(|(reason, pattern)| {
-            trait_source
-                .contains(pattern)
-                .then(|| format!("{}: {}", reason, pattern))
-        })
-        .collect::<Vec<_>>();
-
-    assert!(
-        offenders.is_empty(),
-        "LanguageProfile must be grammar facts and small hooks only; detector fact engines belong in shared syntax modules:\n{}",
-        offenders.join("\n")
-    );
-}
-
-#[test]
-fn concrete_syntax_adapters_do_not_define_detector_fact_engines() {
-    let adapters = crate_src().join("syntax/adapters");
-    let skipped = ["base.rs", "mod.rs", "false_simplicity_lexicon.rs"];
-    let forbidden_lines = [
-        "fn structural_semantic_effect_sites",
-        "fn ruby_structural_semantic_effect_sites",
-        "fn protocol_method_effects",
-        "fn protocol_call_paths",
-        "fn clone_candidates",
-        "fn after_collect_facts",
-        "RawProtocolAdapter",
-        "RawProtocolShape",
-        "RawCallShape",
-        "semantic_effects::",
-        "protocols::method_effects",
-        "protocols::call_paths",
-    ];
-    let mut offenders = Vec::new();
-
-    for entry in fs::read_dir(&adapters).expect("read syntax adapters dir") {
-        let path = entry.expect("syntax adapter entry").path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-            continue;
-        }
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| skipped.contains(&name))
-            .unwrap_or(false)
-        {
-            continue;
-        }
-
-        let source = production_source(&fs::read_to_string(&path).expect("read syntax adapter"));
-        for (index, line) in source.lines().enumerate() {
-            let trimmed = line.trim_start();
-            for pattern in forbidden_lines {
-                if trimmed.contains(pattern) {
-                    offenders.push(format!("{}:{}: {}", path.display(), index + 1, trimmed));
-                }
-            }
-        }
-    }
-
-    assert!(
-        offenders.is_empty(),
-        "Concrete syntax adapters may classify grammar shapes, but must not own detector fact engines:\n{}",
-        offenders.join("\n")
-    );
-}
-
-#[test]
-fn ruby_syntax_profile_is_parser_only() {
-    let path = crate_src().join("syntax/adapters/ruby.rs");
-    let source = production_source(&fs::read_to_string(&path).expect("read ruby syntax adapter"));
-    let forbidden = [
-        "tree_sitter::Node",
+        "tree_sitter",
         "RawNode",
-        "CallSite",
-        "CallTarget",
-        "Target",
-        "FunctionDef",
-        "StateRead",
-        "StateWrite",
-        "SemanticEffectSite",
-        "ProtocolMethod",
-        "fn call_target",
-        "fn state_target",
-        "fn state_read_target",
-        "fn assignment_target",
-        "fn function_name",
-        "fn function_visibility",
-        "fn owner_name_from_declaration",
-        "fn clone_candidate_node",
-        "fn clone_fingerprint_children",
-        "ruby_",
+        "document.root",
+        "LanguageProfile",
+        "Language::",
+        "Ruby",
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "Swift",
+        "Kotlin",
+        "Lua",
+        "Php",
+        "CSharp",
+        "default_clone_candidate_node",
+        "raw_clone",
+        "T::Struct",
     ];
     let offenders = forbidden
         .into_iter()
@@ -476,32 +534,50 @@ fn ruby_syntax_profile_is_parser_only() {
 
     assert!(
         offenders.is_empty(),
-        "Ruby syntax facts must come from normalized extraction; syntax/adapters/ruby.rs is parser-only:\n{}",
+        "Clone similarity must consume only normalized syntax facts, not parser, profile-hook, or concrete-language APIs:\n{}",
         offenders.join("\n")
     );
 }
 
 #[test]
-fn syntax_adapter_loader_does_not_forward_detector_fact_engines() {
-    let path = crate_src().join("syntax/adapters/mod.rs");
-    let source = production_source(&fs::read_to_string(&path).expect("read syntax adapters mod"));
+fn parse_file_routes_all_languages_through_normalized_passes() {
+    let path = crate_src().join("syntax/tree_sitter_adapter.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read tree_sitter_adapter"));
+    let parse_file_source = source
+        .split_once("fn parse_file_with_options")
+        .and_then(|(_, rest)| {
+            rest.split_once("fn parse_normalized_file")
+                .map(|(body, _)| body)
+        })
+        .unwrap_or("");
     let forbidden = [
-        "protocols",
-        "ProtocolMethod",
-        "SemanticEffect",
-        "structural_semantic",
-        "method_effects",
-        "call_paths",
+        "collect_facts(",
+        "collect_dispatch_sites(",
+        "collect_implicit_state_accesses(",
+        "apply_visibility(",
+        "RawNode::from_tree_sitter",
     ];
-    let offenders = forbidden
+    let missing = [
+        "parse_normalized_file(",
+        "normalize_tree(",
+        "StatelessSyntaxPass::normalized",
+        "StatefulSyntaxPass::new",
+    ];
+    let mut offenders = forbidden
         .into_iter()
-        .filter(|pattern| source.contains(pattern))
-        .map(|pattern| pattern.to_string())
+        .filter(|pattern| parse_file_source.contains(pattern))
+        .map(|pattern| format!("forbidden raw collection path: {pattern}"))
         .collect::<Vec<_>>();
+    offenders.extend(
+        missing
+            .into_iter()
+            .filter(|pattern| !source.contains(pattern))
+            .map(|pattern| format!("missing normalized pipeline call: {pattern}")),
+    );
 
     assert!(
         offenders.is_empty(),
-        "syntax/adapters/mod.rs must only select profiles and apply syntax-level helpers; detector fact derivation belongs outside adapters:\n{}",
+        "parse_file must normalize every language, then run stateless/stateful normalized passes:\n{}",
         offenders.join("\n")
     );
 }
@@ -548,6 +624,85 @@ fn normalized_extractor_does_not_depend_on_concrete_languages_or_tree_sitter() {
     );
 }
 
+#[test]
+fn normalized_extractor_does_not_own_stateful_enrichment() {
+    let path = crate_src().join("syntax/normalized_extractor.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read normalized extractor"));
+    let forbidden = [
+        "apply_visibility",
+        "VisibilityEvent",
+        "false_simplicity_lexicon",
+        "semantic_effect_sites_from_calls",
+        "ruby_immutable",
+        "ruby_type_alias",
+        "ruby_sig_param",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Normalized extraction must remain stateless; stateful enrichment belongs in syntax/passes.rs and role modules:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn tree_sitter_adapter_does_not_own_stateful_enrichment_engines() {
+    let path = crate_src().join("syntax/tree_sitter_adapter.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read tree_sitter_adapter"));
+    let forbidden = [
+        "fn semantic_effect_sites_from_calls",
+        "fn dedup_semantic_effect_sites",
+        "fn ruby_immutable",
+        "fn reader_sets_to_vecs",
+        "fn ruby_type_alias",
+        "fn ruby_method_param_types",
+        "fn ruby_sig_param_types",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "tree_sitter_adapter.rs should parse and orchestrate passes, not own stateful fact engines:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn rust_syntax_passes_do_not_touch_parser_internals() {
+    let checked = [
+        crate_src().join("syntax/normalized_behavior.rs"),
+        crate_src().join("syntax/ruby.rs"),
+        crate_src().join("syntax/passes.rs"),
+        crate_src().join("syntax/effects.rs"),
+    ];
+    let forbidden = ["tree_sitter", "RawNode", "document.root"];
+    let mut offenders = Vec::new();
+
+    for path in checked {
+        let source = production_source(&fs::read_to_string(&path).expect("read pass file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Stateful pass modules must consume facts/source metadata, not parser internals:\n{}",
+        offenders.join("\n")
+    );
+}
+
 fn production_source(source: &str) -> String {
     source
         .lines()
@@ -558,12 +713,8 @@ fn production_source(source: &str) -> String {
 
 #[test]
 fn ast_normalizer_does_not_branch_on_language_after_parser_setup() {
-    let path = crate_src().join("ast.rs");
-    let source = fs::read_to_string(&path).expect("read ast.rs");
-    let normalizer_source = source
-        .split_once("struct TreeSitterNormalizer")
-        .map(|(_, rest)| rest)
-        .unwrap_or(&source);
+    let path = crate_src().join("ast/normalizer.rs");
+    let normalizer_source = fs::read_to_string(&path).expect("read ast/normalizer.rs");
     let language_branch_count = [
         "Language::Ruby",
         "Language::Python",
@@ -594,6 +745,6 @@ fn ast_normalizer_does_not_branch_on_language_after_parser_setup() {
 
     assert_eq!(
         language_branch_count, 0,
-        "ast.rs normalizer branches on language; put behavior in ast/adapters instead"
+        "ast/normalizer.rs branches on language; put behavior in ast/adapters instead"
     );
 }

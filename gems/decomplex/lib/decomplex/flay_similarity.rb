@@ -184,7 +184,7 @@ module Decomplex
     end
 
     def effective_mass_floor
-      @effective_mass_floor ||= [@mass, (@mass * 23.0 / 8.0).ceil].max
+      @effective_mass_floor ||= @mass
     end
   end
 end

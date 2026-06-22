@@ -1,12 +1,30 @@
 use super::super::{
     bare_identifier_text, named_children, node_text, raw_named_children, TernaryParts,
-    PYTHON_CONCATENATED_STRING_WRAPPER_KINDS, PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS,
-    PYTHON_LEADING_FUNCTION_WRAPPER_KINDS, PYTHON_LEADING_IF_WRAPPER_KINDS,
-    PYTHON_LEADING_OWNER_WRAPPER_KINDS,
 };
-use super::base::{AstNormalizationAdapter, NamedChildrenAction, PYTHON_ASSIGNMENT_OPERATORS};
+use super::base::{AstNormalizationAdapter, NamedChildrenAction};
 use tree_sitter::Node as TreeSitterNode;
 
+const PYTHON_ASSIGNMENT_OPERATORS: &[&str] = &[
+    "=", "+=", "-=", "*=", "/=", "%=", "//=", "**=", "@=", "&=", "|=", "^=", "<<=", ">>=", ":=",
+];
+const PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "expression_statement",
+];
+const PYTHON_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_LEADING_OWNER_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_CONCATENATED_STRING_WRAPPER_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "block",
+    "expression_statement",
+];
 const PYTHON_BODY_FIELD_KINDS: &[&str] = &[
     "elif_clause",
     "else_clause",
@@ -121,13 +139,22 @@ impl AstNormalizationAdapter for PythonAstAdapter {
                 if statement_children.len() == 1 && statement_children[0].kind() == "ellipsis" {
                     return NamedChildrenAction::Drop;
                 }
+                if statement_children.len() == 1 && statement_children[0].kind() == "call" {
+                    let call_children = raw_named_children(statement_children[0]);
+                    if call_children
+                        .first()
+                        .map(|child| child.kind() == "identifier")
+                        .unwrap_or(false)
+                    {
+                        return NamedChildrenAction::Recurse(statement_children[0]);
+                    }
+                }
                 if statement_children.len() == 1
                     && matches!(
                         statement_children[0].kind(),
                         "assignment"
                             | "augmented_assignment"
                             | "binary_operator"
-                            | "call"
                             | "string"
                             | "subscript"
                     )
@@ -144,14 +171,19 @@ impl AstNormalizationAdapter for PythonAstAdapter {
             }
             if matches!(
                 child.kind(),
-                "yield"
-                    | "binary_operator"
-                    | "comparison_operator"
-                    | "call"
-                    | "attribute"
-                    | "string"
+                "yield" | "binary_operator" | "comparison_operator" | "attribute" | "string"
             ) {
                 return NamedChildrenAction::Recurse(child);
+            }
+            if child.kind() == "call" {
+                let call_children = raw_named_children(child);
+                if call_children
+                    .first()
+                    .map(|child| child.kind() == "identifier")
+                    .unwrap_or(false)
+                {
+                    return NamedChildrenAction::Recurse(child);
+                }
             }
         }
 
@@ -179,6 +211,18 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         }
 
         NamedChildrenAction::Default
+    }
+
+    fn non_local_assignment_lhs(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.parent()
+            .map(|parent| parent.kind() == "keyword_argument")
+            .unwrap_or(false)
+    }
+
+    fn local_binding_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        (node.kind() == "as_pattern_target")
+            .then(|| node_text(node, source).to_string())
+            .filter(|name| bare_identifier_text(name))
     }
 
     fn nested_class_body_child<'tree>(
@@ -246,6 +290,78 @@ impl AstNormalizationAdapter for PythonAstAdapter {
 
     fn leading_function_body_kind(&self) -> &'static str {
         "block"
+    }
+
+    fn statement_wrapped_call_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "expression_statement" {
+            return None;
+        }
+        let raw_named = raw_named_children(node);
+        if raw_named.len() == 1
+            && raw_named[0].kind() == "call"
+            && node_text(raw_named[0], source) == node_text(node, source)
+        {
+            Some(raw_named[0])
+        } else {
+            None
+        }
+    }
+
+    fn normalized_for_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(
+        TreeSitterNode<'tree>,
+        TreeSitterNode<'tree>,
+        Option<TreeSitterNode<'tree>>,
+    )> {
+        let statement = self
+            .exact_single_named_child(node, &["for_statement"], source)
+            .unwrap_or(node);
+        if statement.kind() != "for_statement" {
+            return None;
+        }
+
+        let named = named_children(statement);
+        let body = named
+            .iter()
+            .rev()
+            .copied()
+            .find(|child| child.kind() == "block");
+        let mut header = named.into_iter().filter(|child| Some(*child) != body);
+        let target = header.next()?;
+        let iterable = header.next()?;
+        Some((target, iterable, body))
+    }
+
+    fn normalized_with_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+        let statement = self
+            .exact_single_named_child(node, &["with_statement"], source)
+            .unwrap_or(node);
+        if statement.kind() != "with_statement" {
+            return None;
+        }
+
+        let named = named_children(statement);
+        let clause = named
+            .iter()
+            .copied()
+            .find(|child| child.kind() == "with_clause");
+        let body = named
+            .iter()
+            .rev()
+            .copied()
+            .find(|child| child.kind() == "block");
+        Some((clause, body))
     }
 
     fn leading_owner_target<'tree>(
@@ -515,6 +631,10 @@ impl AstNormalizationAdapter for PythonAstAdapter {
 
     fn concatenated_string_wrapper_kinds(&self) -> &'static [&'static str] {
         PYTHON_CONCATENATED_STRING_WRAPPER_KINDS
+    }
+
+    fn concatenated_string_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "concatenated_string"
     }
 
     fn dotted_expression_wrapper_kinds(&self) -> &'static [&'static str] {

@@ -315,6 +315,7 @@ module FactMine
         when "kind"
           %w[
             case_dispatch conjunction if case protocol_pressure
+            class module owner struct impl
             hidden_mutation hidden_io dynamic_dispatch context_dependency
             callback_inversion metaprogramming
             comment blank

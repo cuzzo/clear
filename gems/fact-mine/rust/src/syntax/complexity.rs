@@ -1,40 +1,31 @@
-use super::{FunctionDef, LocalComplexityScore};
-use crate::ast::RawNode;
+use super::{local_flow::MethodSummary, LocalComplexityScore};
+use crate::ast::{self, Node};
 use std::collections::BTreeMap;
-use std::path::Path;
 
-pub(crate) fn local_complexity_scores(
-    file: &str,
-    functions: &[FunctionDef],
+pub(crate) fn local_complexity_scores_from_methods(
+    methods: &[MethodSummary],
 ) -> BTreeMap<String, LocalComplexityScore> {
-    functions
+    methods
         .iter()
-        .map(|function| {
-            let owner = local_method_owner(file, &function.owner);
-            let id = format!("{}#{}", owner, function.name);
-            (id, LocalComplexityScorer::new().score(&function.body))
-        })
+        .map(|method| (method.id.clone(), LocalComplexityScorer.score(&method.node)))
         .collect()
 }
 
 struct LocalComplexityScorer;
 
 impl LocalComplexityScorer {
-    fn new() -> Self {
-        Self
-    }
-
-    fn score(&self, method_node: &RawNode) -> LocalComplexityScore {
+    fn score(&self, method_node: &Node) -> LocalComplexityScore {
         let mut signals = BTreeMap::new();
+        let score = self.score_node(method_node, 0, &mut signals);
         LocalComplexityScore {
-            score: self.round(self.score_node(method_node, 0, &mut signals)),
+            score: (score * 10.0).round() / 10.0,
             signals,
         }
     }
 
     fn score_node(
         &self,
-        node: &RawNode,
+        node: &Node,
         nesting: usize,
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
@@ -43,45 +34,38 @@ impl LocalComplexityScorer {
         }
 
         if branch(node) {
-            *signals.entry("branches".to_string()).or_insert(0) += 1;
+            increment(signals, "branches");
             if nesting > 0 {
-                *signals.entry("nested".to_string()).or_insert(0) += 1;
+                increment(signals, "nested");
             }
-            return self.branch_cost(nesting)
-                + self.predicate_cost(condition_node(node), signals)
+            return branch_cost(nesting)
+                + self.predicate_cost(node, signals)
                 + self.score_children(node, nesting + 1, signals);
         }
 
         if loop_node(node) {
-            *signals.entry("loops".to_string()).or_insert(0) += 1;
-            if nesting > 0 {
-                *signals.entry("nested".to_string()).or_insert(0) += 1;
+            increment(signals, "loops");
+            if normalized_iterator(node) {
+                return self.score_children(node, nesting, signals);
             }
-            return self.branch_cost(nesting) + self.score_children(node, nesting + 1, signals);
+            if nesting > 0 {
+                increment(signals, "nested");
+            }
+            return branch_cost(nesting) + self.score_children(node, nesting + 1, signals);
         }
 
         if case_node(node) {
-            *signals.entry("cases".to_string()).or_insert(0) += 1;
+            increment(signals, "cases");
             return 0.5 + self.score_children(node, nesting + 1, signals);
         }
 
         if rescue_node(node) {
-            *signals.entry("rescues".to_string()).or_insert(0) += 1;
-            return self.branch_cost(nesting) + self.score_children(node, nesting + 1, signals);
-        }
-
-        if early_exit(node) {
-            *signals.entry("early_exits".to_string()).or_insert(0) += 1;
-            let exit_cost = if nesting > 0 {
-                0.5 + (nesting as f64 * 0.25)
-            } else {
-                0.0
-            };
-            return exit_cost + self.score_children(node, nesting, signals);
+            increment(signals, "rescues");
+            return branch_cost(nesting) + self.score_children(node, nesting + 1, signals);
         }
 
         if boolean_node(node) {
-            *signals.entry("boolean_ops".to_string()).or_insert(0) += 1;
+            increment(signals, "boolean_ops");
             return 0.25 + self.score_children(node, nesting, signals);
         }
 
@@ -90,260 +74,74 @@ impl LocalComplexityScorer {
 
     fn score_children(
         &self,
-        node: &RawNode,
+        node: &Node,
         nesting: usize,
         signals: &mut BTreeMap<String, usize>,
     ) -> f64 {
-        compensated_sum(node.children.iter().map(|child| {
-            if return_fallback_boolean_wrapper(node, child) {
-                0.0
-            } else if duplicate_ruby_early_exit_token(node, child) {
-                0.0
-            } else if transparent_single_line_suite_statement(node, child) {
-                self.score_children(child, nesting, signals)
-            } else {
-                self.score_node(child, nesting, signals)
-            }
-        }))
-    }
-
-    fn predicate_cost(&self, node: Option<&RawNode>, signals: &mut BTreeMap<String, usize>) -> f64 {
-        let Some(node) = node else { return 0.0 };
-        let bools = boolean_count(node);
-        *signals.entry("boolean_ops".to_string()).or_insert(0) += bools;
-        (bools as f64) * 0.5
-    }
-
-    fn branch_cost(&self, nesting: usize) -> f64 {
-        1.1 + (nesting as f64)
-    }
-
-    fn round(&self, value: f64) -> f64 {
-        (value * 10.0).round() / 10.0
-    }
-}
-
-fn local_method_owner(file: &str, owner: &str) -> String {
-    let file_owner = file_owner(file);
-    if owner == file_owner {
-        return "(top-level)".to_string();
-    }
-    owner
-        .strip_prefix(&format!("{file_owner}::"))
-        .unwrap_or(owner)
-        .to_string()
-}
-
-fn file_owner(file: &str) -> String {
-    Path::new(file)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("Object")
-        .to_string()
-}
-
-fn skip_nested(node: &RawNode) -> bool {
-    matches!(node.kind.as_str(), "class" | "module" | "lambda")
-}
-
-fn branch(node: &RawNode) -> bool {
-    (matches!(
-        node.kind.as_str(),
-        "if" | "unless" | "if_statement" | "if_expression" | "if_modifier" | "unless_modifier"
-    ) && !node.named_children().is_empty())
-        || hidden_if(node)
-        || modifier_if(node)
-}
-
-fn hidden_if(node: &RawNode) -> bool {
-    if node.kind == "expression_statement" && node.text.trim_start().starts_with("if ") {
-        if node.named_children().iter().any(|child| {
-            matches!(
-                child.kind.as_str(),
-                "if" | "unless" | "if_statement" | "if_expression"
-            )
-        }) {
-            return false;
-        }
-        return true;
-    }
-    matches!(
-        node.kind.as_str(),
-        "body_statement" | "block" | "statements" | "statement_list"
-    ) && node
-        .children
-        .first()
-        .map(|child| !child.named && matches!(child.kind.as_str(), "if" | "unless"))
-        .unwrap_or(false)
-}
-
-fn modifier_if(node: &RawNode) -> bool {
-    if matches!(node.kind.as_str(), "if_modifier" | "unless_modifier") {
-        return true;
-    }
-    if node.kind != "body_statement" {
-        return false;
-    }
-    let mut seen_named = false;
-    node.children.iter().any(|child| {
-        seen_named |= child.named;
-        seen_named && !child.named && matches!(child.kind.as_str(), "if" | "unless")
-    })
-}
-
-fn loop_node(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "while"
-            | "WHILE"
-            | "until"
-            | "UNTIL"
-            | "while_statement"
-            | "for"
-            | "FOR"
-            | "for_statement"
-            | "for_in_statement"
-            | "do_block"
-            | "ITER"
-    ) || hidden_loop(node)
-        || (node.kind == "expression_statement"
-            && starts_with_any(node.text.trim_start(), &["for", "while", "loop"]))
-        || (node.kind == "labeled_statement"
-            && node.text.trim_start().starts_with("for ")
-            && !has_named_control_child(
-                node,
-                &["for_statement", "for_expression", "while_statement"],
-            ))
-}
-
-fn hidden_loop(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "body_statement" | "block" | "statements" | "statement_list"
-    ) && node
-        .children
-        .first()
-        .map(|child| !child.named && matches!(child.kind.as_str(), "for" | "while" | "loop"))
-        .unwrap_or(false)
-}
-
-fn starts_with_any(text: &str, words: &[&str]) -> bool {
-    words
-        .iter()
-        .any(|word| text == *word || text.starts_with(&format!("{word} ")))
-}
-
-fn case_node(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "case" | "switch_statement" | "switch_expression" | "match_statement" | "match_expression"
-    ) || (node.kind == "expression_statement"
-        && node.text.trim_start().starts_with("match ")
-        && !has_named_control_child(
-            node,
-            &[
-                "case",
-                "switch_statement",
-                "switch_expression",
-                "match_statement",
-                "match_expression",
-            ],
-        ))
-}
-
-fn has_named_control_child(node: &RawNode, kinds: &[&str]) -> bool {
-    node.named_children()
-        .iter()
-        .any(|child| kinds.contains(&child.kind.as_str()))
-}
-
-fn rescue_node(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "rescue" | "RESCUE" | "RESBODY" | "rescue_modifier" | "rescue_clause" | "rescue_body"
-    )
-}
-
-fn early_exit(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "return"
-            | "break"
-            | "next"
-            | "redo"
-            | "retry"
-            | "return_statement"
-            | "break_statement"
-            | "continue_statement"
-    )
-}
-
-fn duplicate_ruby_early_exit_token(parent: &RawNode, child: &RawNode) -> bool {
-    matches!(
-        parent.kind.as_str(),
-        "return" | "break" | "next" | "redo" | "retry"
-    ) && !child.named
-        && child.text == parent.kind
-        && parent.text.trim() == parent.kind
-}
-
-fn transparent_single_line_suite_statement(parent: &RawNode, child: &RawNode) -> bool {
-    parent.kind == "block"
-        && parent.children.len() == 1
-        && parent.text == child.text
-        && matches!(
-            child.kind.as_str(),
-            "return_statement" | "break_statement" | "continue_statement"
+        compensated_sum(
+            node.children
+                .iter()
+                .filter_map(ast::node)
+                .map(|child| self.score_node(child, nesting, signals)),
         )
+    }
+
+    fn predicate_cost(&self, node: &Node, signals: &mut BTreeMap<String, usize>) -> f64 {
+        let condition = node.children.first().and_then(ast::node);
+        let Some(condition) = condition else {
+            return 0.0;
+        };
+        let booleans = boolean_count(condition);
+        *signals.entry("boolean_ops".to_string()).or_default() += booleans;
+        0.5 * booleans as f64
+    }
 }
 
-fn return_fallback_boolean_wrapper(parent: &RawNode, child: &RawNode) -> bool {
-    (parent.kind == "return_statement"
-        && child.kind == "expression_list"
-        && child
-            .named_children()
+fn increment(signals: &mut BTreeMap<String, usize>, key: &str) {
+    *signals.entry(key.to_string()).or_default() += 1;
+}
+
+fn branch_cost(nesting: usize) -> f64 {
+    1.1 + nesting as f64
+}
+
+fn skip_nested(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "CLASS" | "MODULE" | "LAMBDA")
+}
+
+fn branch(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "IF" | "UNLESS")
+}
+
+fn loop_node(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "ITER" | "FOR" | "WHILE" | "UNTIL")
+}
+
+fn normalized_iterator(node: &Node) -> bool {
+    node.r#type == "ITER"
+}
+
+fn case_node(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "CASE" | "CASE2" | "WHEN")
+}
+
+fn rescue_node(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "RESCUE" | "RESBODY" | "ENSURE")
+}
+
+fn boolean_node(node: &Node) -> bool {
+    matches!(node.r#type.as_str(), "AND" | "OR")
+}
+
+fn boolean_count(node: &Node) -> usize {
+    let self_count = usize::from(boolean_node(node));
+    self_count
+        + node
+            .children
             .iter()
-            .any(|grandchild| boolean_node(grandchild)))
-        || (parent.kind == "return" && boolean_node(child))
-}
-
-fn boolean_node(node: &RawNode) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "binary"
-            | "binary_expression"
-            | "boolean_operator"
-            | "conjunction_expression"
-            | "disjunction_expression"
-    ) && (node
-        .children
-        .iter()
-        .any(|child| !child.named && matches!(child.text.as_str(), "&&" | "||" | "and" | "or"))
-        || text_has_boolean_operator(&node.text))
-}
-
-fn text_has_boolean_operator(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("&&")
-        || lower.contains("||")
-        || lower
-            .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .any(|word| matches!(word, "and" | "or"))
-}
-
-fn condition_node(node: &RawNode) -> Option<&RawNode> {
-    if modifier_if(node) {
-        return node.named_children().last().copied();
-    }
-    if node.kind == "body_statement" {
-        return node.named_children().first().copied();
-    }
-    node.named_children().first().copied()
-}
-
-fn boolean_count(node: &RawNode) -> usize {
-    let own = usize::from(boolean_node(node));
-    own + node.children.iter().map(boolean_count).sum::<usize>()
+            .filter_map(ast::node)
+            .map(boolean_count)
+            .sum::<usize>()
 }
 
 fn compensated_sum(values: impl IntoIterator<Item = f64>) -> f64 {

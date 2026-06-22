@@ -1,6 +1,5 @@
-use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow;
-use crate::decomplex::syntax::{self, Document, Language, LocalComplexityScore};
+use crate::decomplex::syntax::{self, Document, Language, LocalComplexityScore, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};

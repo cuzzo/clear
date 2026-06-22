@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     SWIFT_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnil\b/].freeze,
+      guard_mids: %w[isNull isSome].freeze,
       type_guard_patterns: [
         /\bnil\b/,
         /(?:\?\.|\?\?)/,
@@ -19,6 +20,23 @@ module FactMine
         /\Areturn\s+(?:nil|true|false|0|1)\s*;?\z/
       ].freeze
     ).freeze
+
+    SWIFT_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[perform value setValue selector NSClassFromString].freeze,
+      meta_mids: %w[Mirror unsafeBitCast withUnsafePointer withUnsafeBytes].freeze,
+      method_obj_mids: %w[method].freeze,
+      io_consts: %w[FileManager Process URLSession DispatchQueue Thread Lock NSLock].freeze,
+      io_bare: %w[print fatalError preconditionFailure assertionFailure].freeze,
+      dir_context: %w[currentDirectoryPath homeDirectoryForCurrentUser].freeze,
+      context_pairs: {
+        "Date" => %w[now],
+        "UUID" => %w[init]
+      }.freeze,
+      context_bare: [].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock mutex atomic subscribe callback hook async sync].freeze,
+      core_consts: [].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:swift, SWIFT_EFFECT_LEXICON)
 
     class SwiftSyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[function_declaration].freeze
@@ -94,5 +112,69 @@ module FactMine
         end
       end
     end
+  end
+end
+
+module FactMine
+  module Syntax
+    class SwiftNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def function_name_from_text(text)
+        text.to_s.strip[/\bfunc\s+([A-Za-z_]\w*)\s*\(/, 1] || super
+      end
+
+      def parameter_name_from_signature(param)
+        text = param.to_s.strip.sub(/=.*\z/, "").strip
+        before_colon = text.split(":", 2).first.to_s.strip
+        name = before_colon.split(/\s+/).reject { |part| part == "_" }.last
+        return name if name&.match?(/\A[A-Za-z_]\w*\z/)
+
+        super
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "PROPERTY_DECLARATION"
+
+        match = node.text.to_s.match(/\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*([^=\n{]+)/)
+        return nil unless match
+
+        type = match[2].to_s.strip
+        return nil if type.empty?
+
+        { "field" => match[1], "type" => type }
+      end
+
+      def function_visibility(_name, node, lines:)
+        text = node.text.to_s.strip
+        return "private" if text.match?(/\A(?:private|fileprivate)\b/)
+
+        "public"
+      end
+
+      def access_span_call_site?(message, _current_function)
+        message == "fallback"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless subject
+
+        case message.to_s
+        when "isSome"
+          { local: subject, non_nil_when_true: true }
+        when "isNull"
+          { local: subject, non_nil_when_true: false }
+        end
+
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:swift, SwiftNormalizedExtractionBehavior)
   end
 end

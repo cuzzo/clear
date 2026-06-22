@@ -4,6 +4,7 @@ module FactMine
   module Syntax
     RUBY_LEXICON = LanguageLexicon.new(
       nil_literal_patterns: [/\bnil\b/].freeze,
+      guard_mids: %w[is_a? kind_of? instance_of? nil? respond_to?].freeze,
       type_guard_patterns: [
         /(?:\A|[^\w!?])(?:nil\?|is_a\?|kind_of\?|instance_of\?|respond_to\?)(?:\s*\(|\b)/,
         /&\./
@@ -17,9 +18,83 @@ module FactMine
       ].freeze
     ).freeze
 
-    class RubySyntaxAdapter < TreeSitterLanguageAdapter
-      include DynamicLanguageSyntax
+    RUBY_EFFECT_LEXICON = EffectLexicon.new(
+      dispatch_mids: %w[send __send__ public_send const_get constantize
+                        instance_variable_get].freeze,
+      meta_mids: %w[define_method define_singleton_method alias_method
+                    class_eval module_eval instance_eval class_exec
+                    module_exec instance_exec eval const_set
+                    instance_variable_set remove_method undef_method
+                    prepend singleton_class binding].freeze,
+      method_obj_mids: %w[method public_method instance_method].freeze,
+      io_consts: %w[File IO Dir FileUtils Open3 Socket TCPSocket UDPSocket
+                    TCPServer UNIXSocket Tempfile Pathname Marshal].freeze,
+      io_pairs: {
+        "Net" => %w[get post post_form start],
+        "URI" => %w[open]
+      }.freeze,
+      io_bare: %w[puts print warn gets readline readlines system
+                  exec spawn fork sleep open abort exit exit!].freeze,
+      dir_context: %w[pwd getwd home].freeze,
+      context_pairs: {
+        "Time" => %w[now current], "Date" => %w[today current],
+        "DateTime" => %w[now current], "Process" => %w[pid ppid uid gid euid],
+        "Thread" => %w[current list main], "Fiber" => %w[current],
+        "Random" => %w[rand bytes], "GC" => %w[stat count],
+        "ObjectSpace" => %w[each_object count_objects]
+      }.freeze,
+      context_bare: %w[rand srand].freeze,
+      callback_set: %w[transaction synchronize lock with_lock unlock
+                       mutex atomic reentrant subscribe callback hook].freeze,
+      callback_requires_block: false,
+      core_consts: %w[String Symbol Integer Float Numeric Rational Complex
+                      Array Hash Set Range Struct Object BasicObject Kernel
+                      Module Class Comparable Enumerable Enumerator Proc Method
+                      UnboundMethod NilClass TrueClass FalseClass Exception
+                      StandardError RuntimeError ArgumentError TypeError
+                      NameError NoMethodError IO File Dir Time Date DateTime
+                      Regexp MatchData Thread Mutex Fiber Process Math GC
+                      ObjectSpace Marshal Random Encoding].freeze
+    ).freeze
+    Syntax.register_effect_lexicon(:ruby, RUBY_EFFECT_LEXICON)
 
+    RUBY_PROTOCOL_DECLARATIVE_MIDS = %w[
+      abstract! alias_method any attr_accessor attr_reader attr_writer bind
+      cast checked enum extend final include interface! let must must_because
+      nilable override overridable params prepend private private_class_method
+      protected public require require_relative requires_ancestor sealed! sig
+      type_member type_template untyped unsafe void
+    ].freeze
+    RUBY_PROTOCOL_TEST_DSL_MIDS = %w[
+      a_kind_of after around before be be_a be_an be_empty be_falsey be_nil
+      be_truthy change contain_exactly context describe eq eql equal expect
+      have_attributes have_key have_received it match not_to raise_error
+      receive subject to
+    ].freeze
+    RUBY_PROTOCOL_IGNORED_MIDS = (RUBY_PROTOCOL_DECLARATIVE_MIDS + RUBY_PROTOCOL_TEST_DSL_MIDS).freeze
+    RUBY_PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS = %w[
+      error! fixable! read_interpolated_string warn!
+    ].freeze
+    RUBY_PROTOCOL_MUTATING_MIDS = %w[
+      << []= add append clear collect! compact! concat declare delete delete_if
+      each_key= fill filter! keep_if mark merge! move push reject! replace
+      resolve shift stamp store unshift update write
+    ].freeze
+    RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS = %w[! != !~].freeze
+    RUBY_PROTOCOL_MUTATING_SUFFIXES = %w[!].freeze
+    RUBY_PROTOCOL_LEXICON = ProtocolLexicon.new(
+      path_limit: 64,
+      declarative_mids: RUBY_PROTOCOL_DECLARATIVE_MIDS,
+      test_dsl_mids: RUBY_PROTOCOL_TEST_DSL_MIDS,
+      ignored_mids: RUBY_PROTOCOL_IGNORED_MIDS,
+      optional_diagnostic_mids: RUBY_PROTOCOL_OPTIONAL_DIAGNOSTIC_MIDS,
+      mutating_mids: RUBY_PROTOCOL_MUTATING_MIDS,
+      non_mutating_operator_mids: RUBY_PROTOCOL_NON_MUTATING_OPERATOR_MIDS,
+      mutating_suffixes: RUBY_PROTOCOL_MUTATING_SUFFIXES
+    ).freeze
+    Syntax.register_protocol_lexicon(:ruby, RUBY_PROTOCOL_LEXICON)
+
+    class RubySyntaxAdapter < TreeSitterLanguageAdapter
       FUNCTION_NODE_KINDS = %w[method].freeze
       CALL_NODE_KINDS = %w[call].freeze
       CLASS_OWNER_NODE_KINDS = %w[class].freeze
@@ -200,15 +275,15 @@ module FactMine
       end
 
       def predicate_def(_document, function_def)
-        dynamic_predicate_def(function_def)
+        nil
       end
 
       def local_methods(document)
-        dynamic_local_methods(document)
+        []
       end
 
       def path_condition_sites(document)
-        dynamic_path_condition_sites(document)
+        []
       end
 
       def immutable_struct_readers(document)
@@ -885,5 +960,185 @@ module FactMine
       end
     end
 
+  end
+end
+
+module FactMine
+  module Syntax
+    class RubyNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      def self_member_receiver(message)
+        "self.#{message}"
+      end
+
+      def emit_index_call_site?(_node, _call)
+        true
+      end
+
+      def emit_index_assignment_mutation?(_node, _field)
+        true
+      end
+
+      def emit_attribute_assignment_mutation?(_node, field)
+        field.to_s != "[]"
+      end
+
+      def preserve_constant_receiver_call?(call)
+        receiver = call.fetch("receiver").to_s
+        message = call.fetch("message").to_s
+        base = receiver.sub(/\A::/, "").split("::").first
+        return true if base == "Dir" && RUBY_EFFECT_LEXICON.dir_context.include?(message)
+        return true if RUBY_EFFECT_LEXICON.context_pairs[base]&.include?(message)
+        return true if RUBY_EFFECT_LEXICON.io_pairs.to_h[base]&.include?(message)
+
+        false
+      end
+
+      def function_visibility(name, _node, lines:)
+        return "private" if name.start_with?("#")
+
+        "public"
+      end
+
+      def structural_semantic_effects(_node, function_name:)
+        return [] unless %w[method_missing respond_to_missing?].include?(function_name)
+
+        [{ kind: "metaprogramming", detail: "def #{function_name}" }]
+      end
+
+      def visibility_events_from_calls(calls)
+        calls.filter_map do |call|
+          visibility = call.fetch("message").to_s
+          next unless call.fetch("receiver").to_s == "self"
+          next unless %w[public protected private].include?(visibility)
+
+          {
+            owner: call.fetch("owner"),
+            visibility: visibility,
+            line: call.fetch("line"),
+            target_names: call.fetch("arguments").to_a.map { |arg| visibility_argument_name(arg) }.reject(&:empty?)
+          }
+        end
+      end
+
+      def nil_guard_fact(message, subject)
+        return nil unless message.to_s == "nil?" && subject
+
+        { local: subject, non_nil_when_true: false }
+      end
+
+      def terminating_call_message?(message)
+        %w[raise fail abort exit exit!].include?(message.to_s)
+      end
+
+      def mutating_receiver_message?(message)
+        %w[
+          << []= add append clear collect! compact! concat delete delete_if fill filter!
+          keep_if merge! move push reject! replace shift store unshift update write
+        ].include?(message) || (message.to_s.end_with?("!") && !%w[!= !~].include?(message))
+      end
+
+      def branch_state_ref(_node, parts, default_ref:)
+        default_ref
+      end
+
+      def protocol_read_label_from_state(read)
+        receiver = read.receiver.to_s
+        field = read.field.to_s.delete_prefix("@").delete_prefix("$").delete_suffix("?")
+        return field if receiver.empty? || receiver == "self"
+
+        "#{receiver}.#{field}"
+      end
+
+      def protocol_read_label_from_call(call)
+        return nil unless call.receiver.to_s == "self"
+
+        call.message.to_s
+      end
+
+      def protocol_write_label(write)
+        field = write.field.to_s.delete_prefix("@").delete_prefix("$")
+        receiver = write.receiver.to_s
+        return field if receiver.empty? || receiver == "self"
+
+        "#{receiver}.#{field}"
+      end
+
+      def normalize_comparison_source(source)
+        text = source.to_s.strip
+        if text.start_with?("!")
+          text = text.delete_prefix("!")
+                     .sub(/\A\(+/, "")
+                     .sub(/\)+\z/, "")
+                     .strip
+        end
+        text = text.delete_prefix("self.")
+        text = text.delete_prefix("@")
+        if (dot_index = text.index("."))
+          receiver = text[0...dot_index]
+          rest = text[(dot_index + 1)..]
+          text = rest if simple_identifier?(receiver) && (rest.include?(" == ") || rest.include?(" != ") || rest.include?("."))
+        end
+        normalize_source_text(text.to_s.strip.gsub(/\s+/, " "))
+      end
+
+      def property_read_call?(_node, _parts)
+        false
+      end
+
+      def state_read_span_key(call)
+        call.fetch("receiver").to_s.include?("(") ? "span" : "access_span"
+      end
+
+      def boolean_enclosing_span(_node, node_span:, decision_span:)
+        node_span
+      end
+
+      def suppress_self_call_state_read?(call)
+        call.fetch("receiver") == "self"
+      end
+
+      def wrap_branch_predicate?(_branch)
+        false
+      end
+
+      def suppress_clone_candidate?(node, ancestors:)
+        return false if %w[DEFN DEFS].include?(normalized_node_type(node))
+        return false if ancestors.any? { |ancestor| %w[DEFN DEFS].include?(normalized_node_type(ancestor)) }
+
+        ancestors.any? do |ancestor|
+          normalized_node_type(ancestor) == "CLASS" &&
+            normalized_node_text(ancestor).match?(/<\s*T::Struct\b/)
+        end
+      end
+
+      private
+
+      def normalized_node_type(node)
+        return node["type"].to_s if node.is_a?(Hash)
+        return node.type.to_s if node.respond_to?(:type)
+
+        ""
+      end
+
+      def normalized_node_text(node)
+        return node["text"].to_s if node.is_a?(Hash)
+        return node.text.to_s if node.respond_to?(:text)
+
+        ""
+      end
+
+      def visibility_argument_name(argument)
+        argument.to_s.strip
+                .delete_prefix(":")
+                .delete_prefix("\"")
+                .delete_suffix("\"")
+                .delete_prefix("'")
+                .delete_suffix("'")
+                .split(/\s+/)
+                .first.to_s
+      end
+    end
+
+    NormalizedExtractionBehavior.register(:ruby, RubyNormalizedExtractionBehavior)
   end
 end

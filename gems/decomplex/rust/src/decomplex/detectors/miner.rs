@@ -1,5 +1,4 @@
-use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, DecisionSite, Document, Language};
+use crate::decomplex::syntax::{self, DecisionSite, Document, Language, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};

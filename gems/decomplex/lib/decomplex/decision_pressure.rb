@@ -7,10 +7,6 @@ module Decomplex
   # canonical root contract their subject comes from, then rank contracts
   # by how many re-derived decisions they drive.
   class DecisionPressure
-    GUARD_MIDS = %w[
-      is_a? kind_of? instance_of? nil? respond_to?
-      is_none is_some is_null isNull
-    ].freeze
     TRANSIENT_NOARG_MIDS = %w[pop shift].freeze
     Hit = Struct.new(:contract, :file, :defn, :line, :span,
                      keyword_init: true)
@@ -28,7 +24,7 @@ module Decomplex
           next if call.receiver.to_s.empty?
 
           asgmap = assignment_maps.fetch(call.function, {})
-          if eliminable_guard?(call)
+          if eliminable_guard?(document, call)
             contract = contract_of(call.receiver, asgmap)
             guard << hit(contract, call) if contract
           elsif essential_dispatch?(call)
@@ -36,15 +32,20 @@ module Decomplex
             dispatch << hit(contract, call) if contract
           end
         end
+        document.semantic_effect_sites.each do |effect|
+          next unless effect.kind.to_s == "eliminable_guard"
 
-        guard.concat(rescue_nil_hits(document, assignment_maps))
+          asgmap = assignment_maps.fetch(effect.function, {})
+          contract = contract_of(effect.detail, asgmap)
+          guard << hit(contract, effect) if contract
+        end
       end
       guard.uniq! { |hit| [hit.contract, hit.file, hit.defn, hit.line] }
       Report.new(guard, dispatch)
     end
 
-    def self.eliminable_guard?(call)
-      GUARD_MIDS.include?(call.message.to_s) || call.safe_navigation
+    def self.eliminable_guard?(document, call)
+      Syntax.guard_mid?(document.language, call.message) || call.safe_navigation
     end
 
     def self.essential_dispatch?(call)
@@ -59,31 +60,6 @@ module Decomplex
         line: call.line,
         span: call.span
       )
-    end
-
-    def self.rescue_nil_hits(document, assignment_maps)
-      document.local_methods.flat_map do |method|
-        asgmap = assignment_maps.fetch(method.name, {})
-        method.statements.filter_map do |statement|
-          next unless statement.source.match?(/\brescue\s+nil\b/)
-
-          call = document.call_sites.find do |candidate|
-            candidate.function == method.name && inside_span?(candidate.span, statement.span)
-          end
-          next unless call
-
-          contract = contract_of(call_expression(call), asgmap)
-          next unless contract
-
-          Hit.new(
-            contract: contract,
-            file: method.file,
-            defn: method.name,
-            line: statement.line,
-            span: statement.span
-          )
-        end
-      end
     end
 
     def self.build_assignment_map(document, method)
@@ -120,14 +96,6 @@ module Decomplex
 
     def self.call_expression(call)
       [call.receiver, call.message].map(&:to_s).reject(&:empty?).join(".")
-    end
-
-    def self.inside_span?(inner, outer)
-      return false unless inner && outer
-
-      starts_after_or_at = (inner[0] > outer[0]) || (inner[0] == outer[0] && inner[1] >= outer[1])
-      ends_before_or_at = (inner[2] < outer[2]) || (inner[2] == outer[2] && inner[3] <= outer[3])
-      starts_after_or_at && ends_before_or_at
     end
 
     class Report

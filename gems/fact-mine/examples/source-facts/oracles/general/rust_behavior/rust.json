@@ -1,0 +1,340 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        },
+        {
+          "after_index": 3,
+          "before_index": 2,
+          "kind": "blank"
+        },
+        {
+          "after_index": 4,
+          "before_index": 3,
+          "kind": "blank"
+        }
+      ],
+      "method": "update",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "result"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "local",
+              "input"
+            ]
+          ],
+          "reads": [
+            "input"
+          ],
+          "writes": [
+            "local"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "input",
+              "local"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "input",
+            "local"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "enabled",
+              "local"
+            ],
+            [
+              "enabled",
+              "result"
+            ],
+            [
+              "local",
+              "result"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "enabled",
+            "local",
+            "result"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "result"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "result"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "none_ready",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "syntax": {
+    "calls": [
+      {
+        "arguments": [
+          "\"config\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "update",
+        "line": 18,
+        "message": "read_to_string",
+        "receiver": "std::fs",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"done\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "update",
+        "line": 22,
+        "message": "push_str",
+        "receiver": "result",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "result"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "update",
+        "line": 23,
+        "message": "Some",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "none_ready",
+        "line": 27,
+        "message": "is_none",
+        "receiver": "self.value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "update",
+        "line": 11,
+        "message": "is_none",
+        "receiver": "local",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "update",
+        "line": 15,
+        "message": "is_some",
+        "receiver": "local",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "update",
+        "line": 17,
+        "message": "callback",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "update",
+        "line": 18,
+        "message": "ok",
+        "receiver": "std::fs::read_to_string.call(\"config\")",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 26,
+        "name": "none_ready",
+        "owner": "RustSourceFactBehavior",
+        "params": [
+          "&self"
+        ],
+        "visibility": "private"
+      },
+      {
+        "line": 7,
+        "name": "update",
+        "owner": "RustSourceFactBehavior",
+        "params": [
+          "&mut self",
+          "input",
+          "enabled"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "owners": [
+      {
+        "kind": "impl",
+        "line": 6,
+        "name": "RustSourceFactBehavior"
+      },
+      {
+        "kind": "struct",
+        "line": 1,
+        "name": "RustSourceFactBehavior"
+      }
+    ],
+    "predicate_bodies": [
+      {
+        "body": "self.value.is_none()",
+        "line": 26,
+        "name": "none_ready",
+        "owner": "RustSourceFactBehavior"
+      }
+    ],
+    "redundant_nil_guards": []
+    ,
+    "semantic_effects": [
+      {
+        "detail": "local",
+        "function": "update",
+        "kind": "eliminable_guard",
+        "line": 11
+      },
+      {
+        "detail": "local",
+        "function": "update",
+        "kind": "eliminable_guard",
+        "line": 15
+      },
+      {
+        "detail": "self.value",
+        "function": "none_ready",
+        "kind": "eliminable_guard",
+        "line": 27
+      },
+      {
+        "detail": "std::fs.read_to_string",
+        "function": "update",
+        "kind": "hidden_io",
+        "line": 18
+      },
+      {
+        "detail": "std::fs::read_to_string.call(\"config\").ok",
+        "function": "update",
+        "kind": "hidden_io",
+        "line": 18
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "is_none",
+        "function": "none_ready",
+        "line": 27,
+        "receiver": "self.value"
+      },
+      {
+        "field": "is_none",
+        "function": "update",
+        "line": 11,
+        "receiver": "local"
+      },
+      {
+        "field": "is_some",
+        "function": "update",
+        "line": 15,
+        "receiver": "local"
+      },
+      {
+        "field": "ok",
+        "function": "update",
+        "line": 18,
+        "receiver": "std::fs::read_to_string.call(\"config\")"
+      },
+      {
+        "field": "push_str",
+        "function": "update",
+        "line": 22,
+        "receiver": "result"
+      },
+      {
+        "field": "read_to_string",
+        "function": "update",
+        "line": 18,
+        "receiver": "std::fs"
+      },
+      {
+        "field": "value",
+        "function": "none_ready",
+        "line": 27,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": [
+      {
+        "field": "value",
+        "function": "update",
+        "line": 16,
+        "receiver": "self"
+      }
+    ]
+  }
+}

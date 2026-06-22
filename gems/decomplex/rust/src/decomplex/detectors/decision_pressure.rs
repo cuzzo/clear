@@ -1,6 +1,5 @@
-use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow::{self, MethodSummary};
-use crate::decomplex::syntax::{self, CallSite, Document, Language};
+use crate::decomplex::syntax::{self, CallSite, Document, Language, Span};
 use anyhow::Result;
 use regex::Regex;
 use serde::Serialize;
@@ -8,17 +7,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-const GUARD_MIDS: &[&str] = &[
-    "is_a?",
-    "kind_of?",
-    "instance_of?",
-    "nil?",
-    "respond_to?",
-    "is_none",
-    "is_some",
-    "is_null",
-    "isNull",
-];
 const TRANSIENT_NOARG_MIDS: &[&str] = &["pop", "shift"];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -57,9 +45,9 @@ pub fn scan_documents_with_summaries(
     let mut guard = Vec::new();
     let mut dispatch = Vec::new();
     let assignment_maps = build_assignment_maps(&methods);
-    let methods_by_file = methods_by_file(&methods);
 
     for document in documents {
+        let eliminable_guard_calls = eliminable_guard_call_keys(document);
         for call in &document.call_sites {
             if call.receiver.is_empty() {
                 continue;
@@ -68,19 +56,30 @@ pub fn scan_documents_with_summaries(
             let assignment_map = assignment_maps
                 .get(&(call.file.clone(), call.function.clone()))
                 .unwrap_or(&empty);
-            if eliminable_guard(call) {
-                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
-                    guard.push(hit(contract, call));
-                }
-            } else if essential_dispatch(call) {
+            if essential_dispatch(call) && !eliminable_guard_calls.contains(&call_key(call)) {
                 if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
                     dispatch.push(hit(contract, call));
                 }
             }
         }
 
-        if let Some(methods) = methods_by_file.get(&document.file) {
-            guard.extend(rescue_nil_hits(document, methods, &assignment_maps));
+        for effect in &document.semantic_effect_sites {
+            if effect.kind != "eliminable_guard" {
+                continue;
+            }
+            let empty = BTreeMap::new();
+            let assignment_map = assignment_maps
+                .get(&(effect.file.clone(), effect.function.clone()))
+                .unwrap_or(&empty);
+            if let Some(contract) = contract_of(&effect.detail, assignment_map, 0) {
+                guard.push(Hit {
+                    contract,
+                    file: effect.file.clone(),
+                    defn: effect.function.clone(),
+                    line: effect.line,
+                    span: effect.span,
+                });
+            }
         }
     }
 
@@ -97,8 +96,29 @@ pub fn scan_documents_with_summaries(
     Report::new(guard, dispatch).ranked()
 }
 
-fn eliminable_guard(call: &CallSite) -> bool {
-    GUARD_MIDS.contains(&call.message.as_str()) || call.safe_navigation
+fn eliminable_guard_call_keys(document: &Document) -> BTreeSet<(String, String, usize, Span)> {
+    document
+        .semantic_effect_sites
+        .iter()
+        .filter(|effect| effect.kind == "eliminable_guard")
+        .map(|effect| {
+            (
+                effect.file.clone(),
+                effect.function.clone(),
+                effect.line,
+                effect.span,
+            )
+        })
+        .collect()
+}
+
+fn call_key(call: &CallSite) -> (String, String, usize, Span) {
+    (
+        call.file.clone(),
+        call.function.clone(),
+        call.line,
+        call.span,
+    )
 }
 
 fn essential_dispatch(call: &CallSite) -> bool {
@@ -129,54 +149,11 @@ fn build_assignment_maps(
         .collect()
 }
 
-fn methods_by_file<'a>(methods: &'a [MethodSummary]) -> BTreeMap<String, Vec<&'a MethodSummary>> {
-    let mut out: BTreeMap<String, Vec<&MethodSummary>> = BTreeMap::new();
-    for method in methods {
-        out.entry(method.file.clone()).or_default().push(method);
-    }
-    out
-}
-
 fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
     local_flow::local_contract_assignments(method)
         .into_iter()
         .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0).map(|c| (name, c)))
         .collect()
-}
-
-fn rescue_nil_hits(
-    document: &Document,
-    methods: &[&MethodSummary],
-    assignment_maps: &BTreeMap<(String, String), BTreeMap<String, String>>,
-) -> Vec<Hit> {
-    let mut out = Vec::new();
-    for method in methods {
-        let empty = BTreeMap::new();
-        let assignment_map = assignment_maps
-            .get(&(method.file.clone(), method.name.clone()))
-            .unwrap_or(&empty);
-        for statement in &method.statements {
-            if !statement.source.contains("rescue nil") {
-                continue;
-            }
-            let Some(call) = document.call_sites.iter().find(|candidate| {
-                candidate.function == method.name && inside_span(candidate.span, statement.span)
-            }) else {
-                continue;
-            };
-            let Some(contract) = contract_of(&call_expression(call), assignment_map, 0) else {
-                continue;
-            };
-            out.push(Hit {
-                contract,
-                file: method.file.clone(),
-                defn: method.name.clone(),
-                line: statement.line,
-                span: statement.span,
-            });
-        }
-    }
-    out
 }
 
 fn contract_of(
@@ -223,21 +200,6 @@ fn contract_of(
     }
 
     None
-}
-
-fn call_expression(call: &CallSite) -> String {
-    [call.receiver.as_str(), call.message.as_str()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn inside_span(inner: Span, outer: Span) -> bool {
-    let starts_after_or_at =
-        (inner[0] > outer[0]) || (inner[0] == outer[0] && inner[1] >= outer[1]);
-    let ends_before_or_at = (inner[2] < outer[2]) || (inner[2] == outer[2] && inner[3] <= outer[3]);
-    starts_after_or_at && ends_before_or_at
 }
 
 struct Report {

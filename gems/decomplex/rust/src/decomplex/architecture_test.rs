@@ -38,6 +38,34 @@ fn rust_files(dir: PathBuf) -> Vec<PathBuf> {
 }
 
 #[test]
+fn decomplex_crate_does_not_depend_on_tree_sitter() {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("read Cargo.toml");
+    assert!(
+        !manifest.contains("tree-sitter"),
+        "Decomplex must not depend on parser crates; parser access belongs behind FactMine"
+    );
+}
+
+#[test]
+fn decomplex_does_not_reexport_fact_mine_internals() {
+    let path = crate_src().join("mod.rs");
+    let source = fs::read_to_string(&path).expect("read decomplex/mod.rs");
+    for pattern in [
+        "fact_mine_rust::{ast",
+        "fact_mine_rust::ast",
+        "tree_sitter_adapter",
+        "syntax::tree_sitter_adapter",
+    ] {
+        assert!(
+            !source.contains(pattern),
+            "{} would let Decomplex bypass computed FactMine facts",
+            pattern
+        );
+    }
+}
+
+#[test]
 fn detectors_do_not_import_tree_sitter_directly() {
     for path in detector_files() {
         let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
@@ -47,6 +75,31 @@ fn detectors_do_not_import_tree_sitter_directly() {
             path.display()
         );
     }
+}
+
+#[test]
+fn detectors_do_not_read_raw_document_text() {
+    let forbidden = [
+        ("raw document lines", "document.lines"),
+        ("raw document source", "document.source"),
+        ("local source slicing helper", "source_text("),
+    ];
+    let mut offenders = Vec::new();
+
+    for path in detector_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
+        for (reason, pattern) in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Detectors must consume computed facts, not raw document text:\n{}",
+        offenders.join("\n")
+    );
 }
 
 #[test]
@@ -189,7 +242,7 @@ fn false_simplicity_detector_does_not_own_language_lexicons() {
     ] {
         assert!(
             !source.contains(pattern),
-            "{} belongs in syntax/adapters, not the false_simplicity detector",
+            "{} belongs in FactMine normalized language behavior, not the false_simplicity detector",
             pattern
         );
     }
@@ -218,6 +271,54 @@ fn state_branch_density_detector_does_not_own_ruby_source_mining() {
 }
 
 #[test]
+fn decision_pressure_detector_uses_semantic_effect_facts_for_eliminable_guards() {
+    let path = crate_src().join("detectors/decision_pressure.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read decision_pressure.rs"));
+    for pattern in [
+        "rescue nil",
+        "statement.source",
+        "fn rescue_nil_hits",
+        "fn inside_span",
+        "GUARD_MIDS",
+        "\"nil?\"",
+        "\"respond_to?\"",
+        "\"is_a?\"",
+        "\"kind_of?\"",
+        "\"instance_of?\"",
+        "\"isNull\"",
+        "\"is_null\"",
+        "\"is_none\"",
+        "\"is_some\"",
+        "call.safe_navigation",
+    ] {
+        assert!(
+            !source.contains(pattern),
+            "{} belongs in normalized semantic effects, not decision_pressure",
+            pattern
+        );
+    }
+}
+
+#[test]
+fn state_branch_density_detector_does_not_classify_raw_branch_keywords() {
+    let path = crate_src().join("detectors/state_branch_density.rs");
+    let source =
+        production_source(&fs::read_to_string(&path).expect("read state_branch_density.rs"));
+    for pattern in [
+        "\"unless\"",
+        "\"until\"",
+        "strip_prefix(prefix)",
+        "starts_with(char::is_whitespace)",
+    ] {
+        assert!(
+            !source.contains(pattern),
+            "{} belongs in normalized branch facts, not state_branch_density",
+            pattern
+        );
+    }
+}
+
+#[test]
 fn flay_similarity_detector_does_not_own_clone_fingerprint_grammar() {
     let path = crate_src().join("detectors/flay_similarity.rs");
     let source = production_source(&fs::read_to_string(&path).expect("read flay_similarity.rs"));
@@ -232,7 +333,7 @@ fn flay_similarity_detector_does_not_own_clone_fingerprint_grammar() {
     ] {
         assert!(
             !source.contains(pattern),
-            "{} belongs in syntax/adapters, not flay_similarity",
+            "{} belongs in FactMine normalized clone facts, not flay_similarity",
             pattern
         );
     }

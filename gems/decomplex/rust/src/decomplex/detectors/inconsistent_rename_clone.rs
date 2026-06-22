@@ -1,6 +1,5 @@
-use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::local_flow;
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, Language, Span};
 use anyhow::Result;
 use regex::Regex;
 use serde::Serialize;
