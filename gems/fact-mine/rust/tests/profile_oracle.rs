@@ -81,6 +81,53 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    tmp.write_all(
+        b"class Worker\n  def run\n    @total = 0\n    @total += 1\n  end\nend\n",
+    )?;
+    let path = tmp.path().to_path_buf();
+
+    let document = syntax::parse_file(path, Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    assert!(!output.fields.is_empty(), "state_writes should produce fields");
+    let total = output
+        .fields
+        .iter()
+        .find(|f| f.name == "@total")
+        .with_context(|| "missing @total field")?;
+    assert_eq!(total.owner, "Worker");
+    assert_eq!(total.static_origin, "state_write");
+
+    Ok(())
+}
+
+#[test]
+fn call_sites_on_fields_emit_state_protocols() -> Result<()> {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    tmp.write_all(
+        b"class Service\n  def call\n    @client.fetch\n    @client.store(1)\n  end\nend\n",
+    )?;
+    let path = tmp.path().to_path_buf();
+
+    let document = syntax::parse_file(path, Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let key = "Service\u{0}@client";
+    let protocols = output
+        .state_protocols
+        .get(key)
+        .with_context(|| format!("missing state_protocols key {}", key))?;
+    assert!(protocols.contains(&"fetch".to_string()));
+    assert!(protocols.contains(&"store".to_string()));
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Oracle-based cross-language tests
 // ---------------------------------------------------------------------------
