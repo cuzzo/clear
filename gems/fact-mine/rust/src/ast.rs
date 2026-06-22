@@ -7,9 +7,6 @@ use std::path::Path;
 use tree_sitter::{Node as TreeSitterNode, Parser};
 
 mod adapters;
-use adapters::{
-    dynamic_constant_pattern_text, dynamic_exception_constant_text, dynamic_instance_variable_text,
-};
 use adapters::{normalization_adapter, AstNormalizationAdapter, NamedChildrenAction};
 
 pub type Span = [usize; 4];
@@ -378,13 +375,7 @@ const CASE_NODE_KINDS: &[&str] = &[
     "when_expression",
 ];
 const LEADING_LOOP_WRAPPER_KINDS: &[&str] = &["body_statement", "block", "block_body", "statement"];
-const LOOP_NODE_KINDS: &[&str] = &[
-    "while",
-    "while_statement",
-    "while_modifier",
-    "until",
-    "until_modifier",
-];
+const LOOP_NODE_KINDS: &[&str] = &["while", "while_statement", "while_modifier"];
 const RESCUE_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block_body", "statement"];
 const ENSURE_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block_body", "statement"];
 const ARRAY_LITERAL_WRAPPER_KINDS: &[&str] = &[
@@ -442,7 +433,6 @@ const INTERPOLATED_STATEMENT_WRAPPER_KINDS: &[&str] =
     &["body_statement", "block_body", "statement", "argument_list"];
 const CONCATENATED_STRING_WRAPPER_KINDS: &[&str] =
     &["body_statement", "block_body", "statement", "argument_list"];
-const CONCATENATED_STRING_NODE_KINDS: &[&str] = &["chained_string", "concatenated_string"];
 
 pub(crate) struct TernaryParts<'tree> {
     pub(crate) condition: TreeSitterNode<'tree>,
@@ -557,29 +547,6 @@ fn descendant<'tree>(node: TreeSitterNode<'tree>, kinds: &[&str]) -> Option<Tree
             return Some(child);
         }
         stack.extend(named_children(child));
-    }
-    None
-}
-
-fn concatenated_string_node<'tree>(node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
-    if !CONCATENATED_STRING_NODE_KINDS.contains(&node.kind()) {
-        return None;
-    }
-    let children = named_children(node);
-    if children.len() > 1 && children.iter().all(|child| child.kind() == "string") {
-        Some(node)
-    } else {
-        None
-    }
-}
-
-fn concatenated_string_target<'tree>(node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
-    if let Some(target) = concatenated_string_node(node) {
-        return Some(target);
-    }
-    let children = named_children(node);
-    if children.len() == 1 {
-        return concatenated_string_target(children[0]);
     }
     None
 }
@@ -821,6 +788,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.module_node(node) {
             return self.normalize_module(node);
         }
+        if self.class_like_owner_kind(node.kind()) {
+            return self.normalize_class_like_owner(node);
+        }
         if self.lambda_expression(node) {
             return self.normalize_lambda(node);
         }
@@ -857,14 +827,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             | "method_definition"
             | "method_declaration"
             | "function_item" => self.normalize_function(node),
-            "impl_item" => self.normalize_impl(node),
             _ if self.block_kind(node.kind()) => {
                 let children = self.normalize_children(node);
                 Some(self.wrap("BLOCK", children, node))
             }
             "subshell" => Some(self.normalize_subshell(node)),
-            "block_argument" => self.normalize_block_argument(node),
-            "singleton_class" => self.normalize_singleton_class(node),
+            _ if self.block_pass_argument(node) => self.normalize_block_argument(node),
+            _ if self.singleton_class_node(node) => self.normalize_singleton_class(node),
             "yield" => Some(self.normalize_yield(node)),
             "operator_assignment" => self.normalize_operator_assignment(node),
             "assignment" | "assignment_expression" | "assignment_statement" => {
@@ -901,8 +870,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             "self" | "this" => Some(self.wrap("SELF", Vec::new(), node)),
             "array" => Some(self.normalize_array_literal(node)),
             _ if self.interpolation_node(node) => self.normalize_interpolation(node),
-            "heredoc_beginning" => Some(self.normalize_heredoc_beginning(node)),
-            "chained_string" | "concatenated_string" => Some(self.normalize_chained_string(node)),
+            _ if self.heredoc_start_node(node) => Some(self.normalize_heredoc_beginning(node)),
+            _ if self.concatenated_string_node(node) => Some(self.normalize_chained_string(node)),
             "string"
             | "string_content"
             | "string_literal"
@@ -1037,20 +1006,14 @@ impl<'source> TreeSitterNormalizer<'source> {
         ))
     }
 
-    fn normalize_impl(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        let type_node = self.named_field(node, "type").or_else(|| {
-            self.named_children(node).into_iter().find(|child| {
-                matches!(
-                    child.kind(),
-                    "type_identifier" | "scoped_type_identifier" | "identifier"
-                )
-            })
-        });
+    fn normalize_class_like_owner(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let type_node = self
+            .normalization_adapter
+            .class_like_owner_name(node, self.source);
         let name = self.const_for(type_node, node);
         let body = self
-            .named_field(node, "body")
-            .or_else(|| self.block_child(node))
-            .or(Some(node))
+            .normalization_adapter
+            .class_like_owner_body(node, self.source)
             .and_then(|body| self.normalize_body(body));
         Some(self.wrap(
             "CLASS",
@@ -1377,7 +1340,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_loop(&mut self, node: TreeSitterNode<'_>, node_type: &str) -> Option<Node> {
-        if matches!(node.kind(), "while_modifier" | "until_modifier") {
+        if self.modifier_loop_kind(node.kind()) {
             let named = self.named_children(node);
             let action = *named.first()?;
             let condition = *named.get(1)?;
@@ -1549,7 +1512,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             } else if self.dynamic_syntax_enabled()
                 && pattern_wrapper
                 && pattern_children.is_empty()
-                && dynamic_constant_pattern_text(&pattern_text)
+                && self
+                    .normalization_adapter
+                    .dynamic_constant_pattern_text(&pattern_text)
             {
                 normalized.push(self.wrap("CONST", vec![Child::Symbol(pattern_text)], pattern));
             } else if self.dynamic_syntax_enabled()
@@ -2939,7 +2904,9 @@ impl<'source> TreeSitterNormalizer<'source> {
             .iter()
             .filter_map(|child| {
                 if child.kind() == "exceptions"
-                    && dynamic_exception_constant_text(node_text(*child, self.source))
+                    && self
+                        .normalization_adapter
+                        .dynamic_exception_constant_text(node_text(*child, self.source))
                 {
                     Some(self.normalize_const(*child))
                 } else {
@@ -3359,6 +3326,11 @@ impl<'source> TreeSitterNormalizer<'source> {
             .heredoc_call_for_body(node, self.source)
     }
 
+    fn heredoc_start_node(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .heredoc_start_node(node, self.source)
+    }
+
     fn terminal_statement(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(
             node.kind(),
@@ -3369,7 +3341,10 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_terminal_statement(&self, node: TreeSitterNode<'_>) -> Node {
         let text = node_text(node, self.source).trim();
-        if dynamic_instance_variable_text(text) {
+        if self
+            .normalization_adapter
+            .dynamic_instance_variable_text(text)
+        {
             return self.wrap("IVAR", vec![Child::String(text.to_string())], node);
         }
         if text.starts_with('$') {
@@ -3527,7 +3502,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_concatenated_string_statement(&mut self, node: TreeSitterNode<'_>) -> Node {
-        let target = concatenated_string_target(node).unwrap_or(node);
+        let target = self
+            .normalization_adapter
+            .concatenated_string_target(node, self.source)
+            .unwrap_or(node);
         let mut normalized_children = Vec::new();
         let children = self
             .normalization_adapter
@@ -3608,14 +3586,12 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn normalize_heredoc_body_statement(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
-        let mut heredoc_bodies = self
-            .named_children(node)
-            .into_iter()
-            .filter(|child| child.kind() == "heredoc_body");
+        let heredoc_bodies = self.normalization_adapter.heredoc_body_nodes(node);
+        let mut heredoc_bodies = heredoc_bodies.into_iter();
         let mut children = Vec::new();
 
         for child in self.named_children(node) {
-            if child.kind() == "heredoc_body" {
+            if self.normalization_adapter.heredoc_body_node(child) {
                 continue;
             }
 
@@ -3653,11 +3629,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         let mut heredoc_body = None;
         let mut ancestor = node.parent();
         while let Some(candidate) = ancestor {
-            let bodies = self
-                .named_children(candidate)
-                .into_iter()
-                .filter(|child| child.kind() == "heredoc_body")
-                .collect::<Vec<_>>();
+            let bodies = self.normalization_adapter.heredoc_body_nodes(candidate);
             if !bodies.is_empty() {
                 heredoc_body = if let Some(current) = self.current_heredoc_body_span {
                     bodies
@@ -3694,8 +3666,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.named_children(node)
             .into_iter()
             .filter_map(|child| match child.kind() {
-                "interpolation" => self.normalize_interpolation(child),
-                "heredoc_content" => {
+                _ if self.interpolation_node(child) => self.normalize_interpolation(child),
+                _ if self.normalization_adapter.heredoc_content_node(child) => {
                     let text = node_text(child, self.source).to_string();
                     if text.is_empty() {
                         None
@@ -3883,7 +3855,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn normalize_children(&mut self, node: TreeSitterNode<'_>) -> Vec<Child> {
         let mut children = Vec::new();
         for child in self.named_children(node) {
-            if child.kind() == "heredoc_body" {
+            if self.normalization_adapter.heredoc_body_node(child) {
                 continue;
             }
             if self.assignment_rhs(child) {
@@ -4966,7 +4938,11 @@ impl<'source> TreeSitterNormalizer<'source> {
     fn concatenated_string_statement(&self, node: TreeSitterNode<'_>) -> bool {
         let children = self.named_children(node);
         self.normalization_adapter
-            .concatenated_string_statement(node, &children)
+            .concatenated_string_statement(node, self.source, &children)
+    }
+
+    fn concatenated_string_node(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter.concatenated_string_node(node)
     }
 
     fn interpolated_string(&self, node: TreeSitterNode<'_>) -> bool {
@@ -5335,9 +5311,10 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .into_iter()
                 .collect();
         }
-        if children.len() == 1
-            && children[0].kind() == "heredoc_beginning"
-            && heredoc_marker_text(node_text(args, self.source).trim_start())
+        if self
+            .normalization_adapter
+            .heredoc_literal_argument(args, self.source, &children)
+            && !children.is_empty()
         {
             return self.literal_arguments_from_text(args);
         }
@@ -5360,7 +5337,10 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn literal_arguments_from_text(&mut self, args: TreeSitterNode<'_>) -> Vec<Node> {
         let text = node_text(args, self.source);
-        if text.trim_start().starts_with("<<") && heredoc_marker_text(text.trim_start()) {
+        if self
+            .normalization_adapter
+            .heredoc_literal_argument(args, self.source, &[])
+        {
             return vec![self.normalize_heredoc_beginning(args)];
         }
 
@@ -6123,12 +6103,30 @@ impl<'source> TreeSitterNormalizer<'source> {
         self.normalization_adapter.singleton_function_kind(kind)
     }
 
+    fn singleton_class_node(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .singleton_class_node(node, self.source)
+    }
+
+    fn block_pass_argument(&self, node: TreeSitterNode<'_>) -> bool {
+        self.normalization_adapter
+            .block_pass_argument(node, self.source)
+    }
+
+    fn class_like_owner_kind(&self, kind: &str) -> bool {
+        self.normalization_adapter.class_like_owner_kind(kind)
+    }
+
     fn if_node_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.if_node_kind(kind)
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         self.normalization_adapter.loop_node_type(kind)
+    }
+
+    fn modifier_loop_kind(&self, kind: &str) -> bool {
+        self.normalization_adapter.modifier_loop_kind(kind)
     }
 
     fn member_access_operator(&self, text: &str) -> bool {
@@ -6556,24 +6554,6 @@ fn exact_bare_identifier_text(text: &str) -> bool {
 fn exact_integer_text(text: &str) -> bool {
     let digits = text.strip_prefix('-').unwrap_or(text);
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
-}
-
-fn heredoc_marker_text(text: &str) -> bool {
-    text.split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ','))
-        .any(|token| {
-            let Some(marker) = token.strip_prefix("<<") else {
-                return false;
-            };
-            let marker = marker
-                .strip_prefix('-')
-                .or_else(|| marker.strip_prefix('~'))
-                .unwrap_or(marker);
-            let mut chars = marker.chars();
-            let Some(first) = chars.next() else {
-                return false;
-            };
-            first == '_' || first.is_ascii_alphabetic()
-        })
 }
 
 fn comparison_operator_from_text(text: &str) -> Option<String> {

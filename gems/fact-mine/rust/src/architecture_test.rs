@@ -164,7 +164,7 @@ fn ast_adapter_base_does_not_own_concrete_language_selectors_or_lexicons() {
 }
 
 #[test]
-fn shared_ast_normalizer_does_not_own_ruby_parser_tokens() {
+fn shared_ast_normalizer_does_not_own_concrete_parser_tokens() {
     let checked = [
         crate_src().join("ast.rs"),
         crate_src().join("ast/adapters/base.rs"),
@@ -181,6 +181,15 @@ fn shared_ast_normalizer_does_not_own_ruby_parser_tokens() {
         "\"global_variable\"",
         "\"def\"",
         "\"singleton_method\"",
+        "\"impl_item\"",
+        "\"singleton_class\"",
+        "\"block_argument\"",
+        "\"until_modifier\"",
+        "\"heredoc_beginning\"",
+        "\"heredoc_body\"",
+        "\"heredoc_content\"",
+        "\"chained_string\"",
+        "\"concatenated_string\"",
     ];
     let mut offenders = Vec::new();
 
@@ -195,7 +204,7 @@ fn shared_ast_normalizer_does_not_own_ruby_parser_tokens() {
 
     assert!(
         offenders.is_empty(),
-        "Ruby parser tokens belong in ast/adapters/ruby.rs, not shared AST normalization:\n{}",
+        "Concrete parser tokens belong in ast/adapters/<language>.rs, not shared AST normalization:\n{}",
         offenders.join("\n")
     );
 }

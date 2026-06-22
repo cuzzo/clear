@@ -14805,7 +14805,7 @@ fn normalize_class_matches_ruby_private_method() {
 }
 
 #[test]
-fn normalize_impl_matches_ruby_private_method() {
+fn normalize_class_like_owner_matches_ruby_private_impl_method() {
     for (source, kind, text) in [(
         "impl Thing {\n    fn call(&self) {\n        work();\n    }\n}\n",
         "impl_item",
@@ -14815,7 +14815,7 @@ fn normalize_impl_matches_ruby_private_method() {
         let node = first_raw_node(tree.root_node(), source, kind, text);
         let mut normalizer = super::TreeSitterNormalizer::new(source, Language::Rust);
         let rust = normalizer
-            .normalize_impl(node)
+            .normalize_class_like_owner(node)
             .map(|node| node_value(&node))
             .unwrap_or(Value::Null);
 

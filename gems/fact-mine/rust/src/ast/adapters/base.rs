@@ -1,16 +1,15 @@
 use super::super::{
-    bracketed, case_arm_descendant, concatenated_string_node, concatenated_string_target,
-    descendant, direct_binary_operator, element_reference_shape, identifier_kind_name,
-    named_children, node_text, question_colon_ternary_parts, raw_named_children,
-    statement_block_wrapper, TernaryParts, ARRAY_LITERAL_NODE_KINDS, ARRAY_LITERAL_WRAPPER_KINDS,
-    BOOLEAN_EXPRESSION_KINDS, CASE_ARGUMENT_WHEN_KINDS, CASE_ELSE_KINDS, CASE_NODE_KINDS,
-    COMPARISON_EXPRESSION_KINDS, CONCATENATED_STRING_WRAPPER_KINDS,
-    DOTTED_EXPRESSION_WRAPPER_KINDS, ELEMENT_REFERENCE_NODE_KINDS, ELEMENT_REFERENCE_WRAPPER_KINDS,
-    EMPTY_BODY_WRAPPER_KINDS, HASH_LITERAL_NODE_KINDS, HASH_LITERAL_WRAPPER_KINDS,
-    HEREDOC_BODY_WRAPPER_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS, LEADING_CASE_WRAPPER_KINDS,
-    LEADING_FUNCTION_WRAPPER_KINDS, LEADING_IF_WRAPPER_KINDS, LEADING_LOOP_WRAPPER_KINDS,
-    LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS, OWNER_STATEMENT_NESTED_KINDS,
-    QUESTION_COLON_TERNARY_KINDS,
+    bracketed, case_arm_descendant, descendant, direct_binary_operator, element_reference_shape,
+    identifier_kind_name, named_children, node_text, question_colon_ternary_parts,
+    raw_named_children, statement_block_wrapper, TernaryParts, ARRAY_LITERAL_NODE_KINDS,
+    ARRAY_LITERAL_WRAPPER_KINDS, BOOLEAN_EXPRESSION_KINDS, CASE_ARGUMENT_WHEN_KINDS,
+    CASE_ELSE_KINDS, CASE_NODE_KINDS, COMPARISON_EXPRESSION_KINDS,
+    CONCATENATED_STRING_WRAPPER_KINDS, DOTTED_EXPRESSION_WRAPPER_KINDS,
+    ELEMENT_REFERENCE_NODE_KINDS, ELEMENT_REFERENCE_WRAPPER_KINDS, EMPTY_BODY_WRAPPER_KINDS,
+    HASH_LITERAL_NODE_KINDS, HASH_LITERAL_WRAPPER_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS,
+    LEADING_CASE_WRAPPER_KINDS, LEADING_FUNCTION_WRAPPER_KINDS, LEADING_IF_WRAPPER_KINDS,
+    LEADING_LOOP_WRAPPER_KINDS, LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS,
+    OWNER_STATEMENT_NESTED_KINDS, QUESTION_COLON_TERNARY_KINDS,
 };
 use tree_sitter::Node as TreeSitterNode;
 
@@ -661,10 +660,35 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn heredoc_body_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        HEREDOC_BODY_WRAPPER_KINDS.contains(&node.kind())
-            && named_children(node)
-                .iter()
-                .any(|child| child.kind() == "heredoc_body")
+        self.heredoc_body_nodes(node).first().is_some()
+    }
+
+    fn heredoc_start_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn heredoc_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
+    fn heredoc_body_node(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
+    }
+
+    fn heredoc_content_node(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
+    }
+
+    fn heredoc_literal_argument(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _source: &str,
+        _children: &[TreeSitterNode<'_>],
+    ) -> bool {
+        false
     }
 
     fn heredoc_call_for_body(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -683,9 +707,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     fn concatenated_string_statement(
         &self,
         node: TreeSitterNode<'_>,
+        source: &str,
         children: &[TreeSitterNode<'_>],
     ) -> bool {
-        if concatenated_string_node(node).is_some() {
+        if self.concatenated_string_target(node, source).is_some() {
             return true;
         }
         if !self
@@ -697,7 +722,29 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         if children.len() > 1 && children.iter().all(|child| child.kind() == "string") {
             return true;
         }
-        children.len() == 1 && concatenated_string_target(children[0]).is_some()
+        children.len() == 1
+            && self
+                .concatenated_string_target(children[0], source)
+                .is_some()
+    }
+
+    fn concatenated_string_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if self.concatenated_string_node(node) {
+            return Some(node);
+        }
+        let children = named_children(node);
+        if children.len() == 1 {
+            return self.concatenated_string_target(children[0], source);
+        }
+        None
+    }
+
+    fn concatenated_string_node(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
     }
 
     fn concatenated_string_children<'tree>(
@@ -799,12 +846,44 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    fn block_pass_argument(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn singleton_class_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn class_like_owner_kind(&self, _kind: &str) -> bool {
+        false
+    }
+
+    fn class_like_owner_name<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    fn class_like_owner_body<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         match kind {
             "while" | "while_statement" | "while_modifier" => Some("WHILE"),
             "for" | "for_statement" | "for_in_clause" => Some("FOR"),
             _ => None,
         }
+    }
+
+    fn modifier_loop_kind(&self, _kind: &str) -> bool {
+        false
     }
 
     fn member_access_operator(&self, text: &str) -> bool {
@@ -828,6 +907,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn global_variable(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn dynamic_constant_pattern_text(&self, _text: &str) -> bool {
+        false
+    }
+
+    fn dynamic_exception_constant_text(&self, _text: &str) -> bool {
+        false
+    }
+
+    fn dynamic_instance_variable_text(&self, _text: &str) -> bool {
         false
     }
 

@@ -1,8 +1,8 @@
 use super::super::{
-    exact_bare_identifier_text, heredoc_marker_text, identifier_kind_name, named_children,
-    node_text, raw_named_children, TreeSitterNormalizer, CASE_ARGUMENT_WHEN_KINDS,
-    ENSURE_BODY_WRAPPER_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS,
-    LEADING_FUNCTION_WRAPPER_KINDS, RESCUE_BODY_WRAPPER_KINDS,
+    exact_bare_identifier_text, identifier_kind_name, named_children, node_text,
+    raw_named_children, TreeSitterNormalizer, CASE_ARGUMENT_WHEN_KINDS, ENSURE_BODY_WRAPPER_KINDS,
+    HEREDOC_BODY_WRAPPER_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS,
+    LEADING_FUNCTION_WRAPPER_KINDS, LEADING_LOOP_WRAPPER_KINDS, RESCUE_BODY_WRAPPER_KINDS,
 };
 use super::base::{AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction};
 use std::collections::BTreeSet;
@@ -75,6 +75,14 @@ impl AstNormalizationAdapter for RubyAstAdapter {
         kind == "singleton_method"
     }
 
+    fn singleton_class_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.kind() == "singleton_class"
+    }
+
+    fn block_pass_argument(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.kind() == "block_argument"
+    }
+
     fn leading_function_keyword(&self, kind: &str) -> bool {
         kind == "def"
     }
@@ -133,6 +141,18 @@ impl AstNormalizationAdapter for RubyAstAdapter {
                 .strip_prefix('$')
                 .map(ruby_variable_name_text)
                 .unwrap_or(false)
+    }
+
+    fn dynamic_constant_pattern_text(&self, text: &str) -> bool {
+        ruby_constant_text(text)
+    }
+
+    fn dynamic_exception_constant_text(&self, text: &str) -> bool {
+        ruby_exception_constant_text(text)
+    }
+
+    fn dynamic_instance_variable_text(&self, text: &str) -> bool {
+        ruby_instance_variable_text(text)
     }
 
     fn case_argument_list(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -225,6 +245,10 @@ impl AstNormalizationAdapter for RubyAstAdapter {
             "for" | "for_statement" | "for_in_clause" => Some("FOR"),
             _ => None,
         }
+    }
+
+    fn modifier_loop_kind(&self, kind: &str) -> bool {
+        matches!(kind, "while_modifier" | "until_modifier")
     }
 
     fn conditional_branch_skip_kind(&self, kind: &str) -> bool {
@@ -337,6 +361,27 @@ impl AstNormalizationAdapter for RubyAstAdapter {
         )
     }
 
+    fn leading_loop_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if !LEADING_LOOP_WRAPPER_KINDS.contains(&node.kind()) {
+            return None;
+        }
+        let raw_named = named_children(node);
+        if raw_named.len() == 1
+            && matches!(
+                raw_named[0].kind(),
+                "while" | "until" | "while_modifier" | "until_modifier"
+            )
+            && node_text(raw_named[0], source) == node_text(node, source)
+        {
+            return Some(raw_named[0]);
+        }
+        Some(node)
+    }
+
     fn zero_child_identifier_call(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         if node.kind() != "call" || !ruby_variable_name_text(node_text(node, source)) {
             return false;
@@ -368,6 +413,47 @@ impl AstNormalizationAdapter for RubyAstAdapter {
 
             self.heredoc_call_for_body(child, source)
         })
+    }
+
+    fn heredoc_start_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.kind() == "heredoc_beginning"
+    }
+
+    fn heredoc_body_nodes<'tree>(&self, node: TreeSitterNode<'tree>) -> Vec<TreeSitterNode<'tree>> {
+        if !HEREDOC_BODY_WRAPPER_KINDS.contains(&node.kind()) {
+            return Vec::new();
+        }
+        named_children(node)
+            .into_iter()
+            .filter(|child| self.heredoc_body_node(*child))
+            .collect()
+    }
+
+    fn heredoc_body_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "heredoc_body"
+    }
+
+    fn heredoc_content_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "heredoc_content"
+    }
+
+    fn heredoc_literal_argument(
+        &self,
+        node: TreeSitterNode<'_>,
+        source: &str,
+        children: &[TreeSitterNode<'_>],
+    ) -> bool {
+        if children.len() == 1 && self.heredoc_start_node(children[0], source) {
+            return heredoc_marker_text(node_text(node, source).trim_start());
+        }
+
+        children.is_empty()
+            && node_text(node, source).trim_start().starts_with("<<")
+            && heredoc_marker_text(node_text(node, source).trim_start())
+    }
+
+    fn concatenated_string_node(&self, node: TreeSitterNode<'_>) -> bool {
+        matches!(node.kind(), "chained_string" | "concatenated_string")
     }
 
     fn named_children_action<'tree>(
@@ -567,16 +653,22 @@ fn ruby_inline_def_receiver_text(text: &str) -> bool {
     false
 }
 
-pub(in crate::ast) fn dynamic_exception_constant_text(text: &str) -> bool {
-    ruby_exception_constant_text(text)
-}
-
-pub(in crate::ast) fn dynamic_constant_pattern_text(text: &str) -> bool {
-    ruby_constant_text(text)
-}
-
-pub(in crate::ast) fn dynamic_instance_variable_text(text: &str) -> bool {
-    ruby_instance_variable_text(text)
+fn heredoc_marker_text(text: &str) -> bool {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ','))
+        .any(|token| {
+            let Some(marker) = token.strip_prefix("<<") else {
+                return false;
+            };
+            let marker = marker
+                .strip_prefix('-')
+                .or_else(|| marker.strip_prefix('~'))
+                .unwrap_or(marker);
+            let mut chars = marker.chars();
+            let Some(first) = chars.next() else {
+                return false;
+            };
+            first == '_' || first.is_ascii_alphabetic()
+        })
 }
 
 impl<'source> TreeSitterNormalizer<'source> {

@@ -633,6 +633,10 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         PYTHON_CONCATENATED_STRING_WRAPPER_KINDS
     }
 
+    fn concatenated_string_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "concatenated_string"
+    }
+
     fn dotted_expression_wrapper_kinds(&self) -> &'static [&'static str] {
         PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS
     }
