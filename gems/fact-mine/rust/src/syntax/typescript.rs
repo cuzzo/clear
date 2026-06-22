@@ -8,6 +8,7 @@ use super::normalized_behavior::{
 use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::{Node, Span};
+use crate::ast::Child;
 
 const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const TYPESCRIPT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
@@ -125,16 +126,32 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         node: &Node,
         _owner: &str,
     ) -> Option<StateDeclaration> {
+        // Try structured children first: [name, type?, value?]
+        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
+            Child::Node(n) => Some(n.as_ref()),
+            _ => None,
+        }).collect();
+        if child_nodes.len() >= 2 {
+            let name = child_nodes[0].text.trim();
+            if is_simple_name(name) {
+                let type_text = child_nodes[1].text.trim().to_string();
+                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        // Fallback: text-based (`name: Type`)
         let text = node.text.trim();
         if let Some((name, rest)) = text.split_once(':') {
             let name = name.trim();
-            if !name.is_empty()
-                && !name.contains(' ')
-                && !name.contains('.')
-                && !name.contains('(')
-                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-                && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
-            {
+            if is_simple_name(name) {
                 let type_text = rest.split('=').next().unwrap_or(rest).trim()
                     .trim_end_matches(',').trim_end_matches(';').to_string();
                 if !type_text.is_empty() && type_text != ":" {
@@ -172,4 +189,15 @@ fn simple_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_simple_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(' ')
+        && !name.contains('.')
+        && !name.contains('[')
+        && !name.contains('<')
+        && !name.contains('(')
+        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

@@ -7,6 +7,7 @@ use super::normalized_behavior::{
 use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::{Node, Span};
+use crate::ast::Child;
 
 const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -314,4 +315,15 @@ fn java_receiver_method_message(receiver: &str) -> Option<(String, String)> {
     }
     let (base, method) = receiver.split_once('.')?;
     Some((base.to_string(), method.to_string()))
+}
+
+fn is_simple_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(' ')
+        && !name.contains('.')
+        && !name.contains('[')
+        && !name.contains('<')
+        && !name.contains('(')
+        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

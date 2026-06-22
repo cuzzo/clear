@@ -2,6 +2,7 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::{Node, Span};
+use crate::ast::Child;
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
@@ -256,4 +257,15 @@ fn strip_wrapping_parens(text: &str) -> &str {
         .strip_prefix('(')
         .and_then(|stripped| stripped.strip_suffix(')'))
         .unwrap_or(source)
+}
+
+fn is_simple_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(' ')
+        && !name.contains('.')
+        && !name.contains('[')
+        && !name.contains('<')
+        && !name.contains('(')
+        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

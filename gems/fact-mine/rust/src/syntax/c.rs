@@ -7,6 +7,7 @@ use super::normalized_behavior::{
 use super::CallSite;
 use super::StateDeclaration;
 use crate::ast::{Node, Span};
+use crate::ast::Child;
 use std::collections::BTreeMap;
 
 const C_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
@@ -299,4 +300,15 @@ fn simple_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_simple_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(' ')
+        && !name.contains('.')
+        && !name.contains('[')
+        && !name.contains('<')
+        && !name.contains('(')
+        && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+        && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
