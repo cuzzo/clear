@@ -214,6 +214,27 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         node: &Node,
         _owner: &str,
     ) -> Option<StateDeclaration> {
+        // Try structured children first: [name, type?, value?]
+        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
+            Child::Node(n) => Some(n.as_ref()),
+            _ => None,
+        }).collect();
+        if child_nodes.len() >= 2 {
+            let name = child_nodes[0].text.trim();
+            if is_simple_name(name) {
+                let type_text = child_nodes[1].text.trim().to_string();
+                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
         let text = node.text.trim();
         // Rust struct field: `name: Type` or `pub name: Type`
         let text = text.strip_prefix("pub ").unwrap_or(text);
