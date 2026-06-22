@@ -104,6 +104,19 @@ module FactMine
         message
       end
 
+      def project_call(_node, call)
+        return call unless call.fetch("message").to_s == "call"
+
+        receiver = call.fetch("receiver").to_s
+        return call unless receiver.include?("::")
+
+        parts = receiver.split("::")
+        message = parts.pop
+        return call unless message&.match?(/\A[A-Za-z_]\w*[!?=]?\z/) && parts.any?
+
+        call.merge("receiver" => parts.join("::"), "message" => message)
+      end
+
       def self_member_receiver(message)
         "self.#{message}"
       end
@@ -129,6 +142,18 @@ module FactMine
         return default_span if node.type.to_s == "STRUCT_ITEM"
 
         keyword_block_span(node, "struct") || default_span
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+
+        match = node.text.to_s.match(/\A(?:pub(?:\([^)]*\))?\s+)?([A-Za-z_]\w*)\s*:\s*([^,}]+)/)
+        return nil unless match
+
+        type = match[2].to_s.strip
+        return nil if type.empty?
+
+        { "field" => match[1], "type" => type }
       end
 
       def function_visibility(_name, node, lines:)
@@ -161,6 +186,10 @@ module FactMine
         when "is_none"
           { local: subject, non_nil_when_true: false }
         end
+      end
+
+      def predicate_like_body?(text)
+        text.to_s.match?(/\.(?:is_some|is_none)\s*\(\)\z/)
       end
     end
 

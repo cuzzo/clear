@@ -24,12 +24,6 @@ module NilKill
         def notes
           ["static Tree-sitter evidence is supported; runtime tracing is not implemented for Zig"]
         end
-
-        private
-
-        def self_receiver_names
-          %w[self]
-        end
       end
     end
   end

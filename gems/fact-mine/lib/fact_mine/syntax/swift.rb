@@ -87,6 +87,30 @@ module FactMine
       NAVIGATION_SUFFIX_NODE_KINDS = %w[navigation_suffix].freeze
       FIELD_LIKE_NODE_KINDS = %w[navigation_expression directly_assignable_expression].freeze
       BLOCK_ARGUMENT_NODE_KINDS = [].freeze
+
+      private
+
+      def record_state_param_origin(document, node, stack, out)
+        return super unless node.kind == "assignment"
+
+        lhs, rhs = node.named_children
+        target = lhs && state_target(lhs)
+        return unless target && rhs
+        target = normalize_target_receiver(target, stack)
+
+        (current_params(stack) & [rhs.text.to_s]).each do |param|
+          out << StateParamOrigin.new(
+            field: target[:field],
+            receiver: target[:receiver],
+            owner: current_owner(document, stack),
+            param: param,
+            file: document.file,
+            function: current_function(stack),
+            line: line(node),
+            span: span(node)
+          )
+        end
+      end
     end
   end
 end
@@ -109,6 +133,18 @@ module FactMine
         return name if name&.match?(/\A[A-Za-z_]\w*\z/)
 
         super
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "PROPERTY_DECLARATION"
+
+        match = node.text.to_s.match(/\b(?:let|var)\s+([A-Za-z_]\w*)\s*:\s*([^=\n{]+)/)
+        return nil unless match
+
+        type = match[2].to_s.strip
+        return nil if type.empty?
+
+        { "field" => match[1], "type" => type }
       end
 
       def function_visibility(_name, node, lines:)

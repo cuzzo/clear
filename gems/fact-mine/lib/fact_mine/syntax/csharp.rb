@@ -52,7 +52,7 @@ module FactMine
       VARIABLE_DECLARATION_NODE_KINDS = %w[variable_declaration].freeze
       LOCAL_VARIABLE_DECLARATOR_NODE_KINDS = %w[variable_declarator].freeze
       DECLARATOR_NODE_KINDS = %w[variable_declaration variable_declarator].freeze
-      FIELD_DECLARATION_NODE_KINDS = %w[field_declaration].freeze
+      FIELD_DECLARATION_NODE_KINDS = %w[field_declaration property_declaration].freeze
       DECLARATION_SITE_PARENT_NODE_KINDS = %w[parameter variable_declarator method_declaration class_declaration].freeze
       ASSIGNMENT_NODE_KINDS = %w[assignment_expression].freeze
       ASSIGNMENT_STATE_DECLARATION_NODE_KINDS = %w[assignment_expression].freeze
@@ -92,6 +92,11 @@ module FactMine
       end
 
       def field_declaration_name_node(node)
+        if node.kind == "property_declaration"
+          name = node.named_children.find { |child| child.kind == "identifier" }
+          return name if name
+        end
+
         declaration = node.named_children.find { |child| child.kind == "variable_declaration" }
         declarator = declaration&.named_children&.find { |child| child.kind == "variable_declarator" }
         return named_field(declarator, "name") || declarator if declarator
@@ -114,6 +119,14 @@ module FactMine
         super
       end
 
+      def declared_type_text(node, name_node)
+        if node.kind == "property_declaration"
+          return declared_type_before_name(node.text.to_s, node, name_node)
+        end
+
+        super
+      end
+
       private
 
       def control_context(node)
@@ -128,20 +141,32 @@ end
 module FactMine
   module Syntax
     class CsharpNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      CSHARP_FIELD_MODIFIERS = %w[
+        public private protected internal readonly static const volatile required
+      ].freeze
+
       def implicit_owner_fields?
         true
       end
 
       def field_name_from_declaration(node)
         return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
-        return nil if node.text.to_s.include?("(")
 
         text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
+        return nil if text.include?("(")
+
         name = text.scan(/[A-Za-z_]\w*/).last
         return nil unless name && name.match?(/\A[A-Za-z_]\w*\z/)
         return nil if %w[private protected public internal readonly static const volatile string int long short byte bool decimal double float var].include?(name)
 
         name
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION].include?(node.type.to_s)
+
+        member = csharp_member_declaration(node.text)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
       end
 
       def suppress_self_call_state_read?(call)
@@ -174,6 +199,19 @@ module FactMine
           { local: subject, non_nil_when_true: false }
         end
 
+      end
+
+      private
+
+      def csharp_member_declaration(source)
+        text = source.to_s.strip.sub(/\{.*\}\s*\z/m, "").sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| CSHARP_FIELD_MODIFIERS.include?(token) }.join(" ")
+        return nil if type.empty?
+
+        { name: name, type: type }
       end
     end
 

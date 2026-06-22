@@ -66,6 +66,9 @@ module FactMine
         if call.safe_navigation && !call.receiver.to_s.empty?
           return semantic_effect_site_from_call(call, :eliminable_guard, call.receiver.to_s)
         end
+        if nil_guard_call?(message, call.receiver) && !call.receiver.to_s.empty?
+          return semantic_effect_site_from_call(call, :eliminable_guard, call.receiver.to_s)
+        end
 
         if effect_callback_call?(call, message)
           return semantic_effect_site_from_call(call, :callback_inversion, message)
@@ -133,6 +136,12 @@ module FactMine
           if message.length > 1 && message.end_with?("!") && !%w[!= !~].include?(message)
 
         nil
+      end
+
+      def nil_guard_call?(message, receiver)
+        !!NormalizedExtractionBehavior.for(language).nil_guard_fact(message, receiver.to_s)
+      rescue ArgumentError, KeyError
+        false
       end
 
       def effect_callback_call?(call, message)

@@ -28,59 +28,7 @@ module NilKill
     end
 
     def index_sources
-      SourceIndex.reset_global_shape_indexes
-      files = NilKill.target_files
-      warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
-      files.each { |path| SourceIndex.new(path, warm_only: warm_only) }
-      files.each { |path| SourceIndex.new(path, warm_only: true) } if warm_only
-      reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
-      cached = nil
-      5.times do
-        before = SourceIndex.noreturn_methods.size
-        pass = reuse ? {} : nil
-        files.each { |path| idx = SourceIndex.new(path); pass[path] = idx if reuse }
-        if SourceIndex.noreturn_methods.size == before
-          cached = pass
-          break
-        end
-      end
-      files.each do |path|
-        idx = (cached && cached[path]) || SourceIndex.new(path)
-        @store.facts["files"][NilKill.rel(path)] = idx.summary
-        @store.facts["unsigned_methods"].concat(idx.methods.reject { |m| m["has_sig"] })
-        @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] })
-        @store.facts["tlet_sites"].concat(idx.tlet_sites)
-        @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks)
-        @store.facts["deterministic_guards"].concat(idx.deterministic_guards)
-        @store.facts["struct_declarations"].concat(idx.struct_declarations)
-        @store.facts["struct_field_static"].concat(idx.struct_field_static)
-        @store.facts["tuple_arrays"].concat(idx.tuple_arrays)
-        @store.facts["hash_shapes"].concat(idx.hash_shapes)
-        @store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-        @store.facts["hash_record_blockers"].concat(idx.hash_record_blockers)
-        @store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls)
-        @store.facts["type_normalizers"].concat(idx.type_normalizers)
-        @store.facts["dispatcher_inferences"].concat(idx.dispatcher_inferences)
-        @store.facts["return_origins"].concat(idx.return_origins)
-        @store.facts["param_origins"].concat(idx.param_origins)
-        @store.facts["ivar_protocols"] ||= {}
-        idx.ivar_protocols.each do |(klass, ivar), methods|
-          key = "#{klass}\0#{ivar}"
-          @store.facts["ivar_protocols"][key] ||= []
-          @store.facts["ivar_protocols"][key] = (@store.facts["ivar_protocols"][key] + methods.to_a).uniq
-        end
-        @store.facts["ivar_param_origins"] ||= {}
-        idx.ivar_param_origins.each do |(klass, ivar), sources|
-          key = "#{klass}\0#{ivar}"
-          @store.facts["ivar_param_origins"][key] ||= []
-          @store.facts["ivar_param_origins"][key] = (@store.facts["ivar_param_origins"][key] + sources.to_a).uniq
-        end
-        idx.methods.each do |method|
-          rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
-          rec["source"] = method
-          rec["has_sig"] = method["has_sig"]
-        end
-      end
+      StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
     end
 
     def load_sorbet
@@ -150,7 +98,7 @@ module NilKill
       candidates = Report.new.struct_field_candidates(
         Array(@store.facts["struct_field_runtime"]), Array(@store.facts["struct_field_static"])
       )
-      already = SourceIndex.rbi_field_types
+      already = rbi_field_type_index
       candidates.each do |c|
         type = c["type"].to_s
         next if type.empty? || type == "T.untyped"
@@ -1115,6 +1063,26 @@ module NilKill
       @return_origin_by_location[[src["path"], src["line"]]]
     end
 
+    def rbi_field_type_index
+      raw = @store.facts["rbi_field_types"]
+      return raw if raw.is_a?(Hash)
+
+      Array(raw).each_with_object({}) do |record, index|
+        klass = record["class"].to_s
+        field = record["field"].to_s
+        type = record["type"].to_s
+        next if klass.empty? || field.empty? || type.empty?
+
+        index[[klass, field]] = type
+      end
+    end
+
+    def noreturn_method_names
+      Array(@store.facts["noreturn_methods"]).filter_map do |entry|
+        entry.is_a?(Hash) ? entry["name"].to_s : entry.to_s
+      end.reject(&:empty?).to_set
+    end
+
     # Receiver-type inference: for a `recv.method` call_untyped return
     # where `recv` is a param, resolve the caller-passed classes via
     # param_origins and the callee return via RbiReturnIndex; rewrite
@@ -1176,15 +1144,13 @@ module NilKill
             callee = source["callee"].to_s
             next if callee.empty?
             # Noreturn helpers (error!, fixable!, raise-wrappers) are the
-            # single most common residual blocker. Their noreturn-ness
-            # lives in SourceIndex.noreturn_methods (populated by the
-            # cross-file noreturn fixpoint), NOT as a strong return type
-            # in the index, because their body raises. Resolve them to
-            # T.noreturn directly; static_sorbet_type treats it as
-            # bottom so a `return x if c; error!(...)` origin unifies to
-            # x's type instead of staying blocked.
+            # single most common residual blocker. Static evidence carries
+            # their names separately from ordinary return types because
+            # their body raises. Resolve them to T.noreturn directly;
+            # static_sorbet_type treats it as bottom so a
+            # `return x if c; error!(...)` origin unifies to x's type.
             resolved =
-              if SourceIndex.noreturn_methods.include?(callee)
+              if noreturn_method_names.include?(callee)
                 "T.noreturn"
               else
                 index[[enclosing_class, callee]] || name_unique[callee]
@@ -1250,7 +1216,7 @@ module NilKill
       # sorbet/rbi/ast-struct-fields.rbi (and any other RBIs) carry typed
       # returns for accessors that lack inline `sig {}` and therefore never
       # made it into existing_sigs. Merge them keyed by [class, field].
-      SourceIndex.rbi_field_types.each do |(klass, name), ret|
+      rbi_field_type_index.each do |(klass, name), ret|
         next if klass.to_s.empty? || name.to_s.empty?
         next if ret.to_s.empty? || ret == "T.untyped"
         index[[klass, name]] ||= ret

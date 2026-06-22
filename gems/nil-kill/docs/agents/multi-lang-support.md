@@ -504,7 +504,7 @@ module AutoType
     class Ruby
       def language = raise NotImplementedError
       def supports?(action) = raise NotImplementedError
-      def plan(action, source_index) = raise NotImplementedError
+      def plan(action, static_analysis) = raise NotImplementedError
       def apply(plan, workspace) = raise NotImplementedError
       def verify(plan, command_runner) = raise NotImplementedError
     end

@@ -207,6 +207,9 @@ module FactMine
         return nil unless pattern.named_children.empty?
 
         pattern_text = pattern.text.to_s
+        if pattern_text.match?(/\A:[A-Za-z_]\w*[!?=]?\z/)
+          return [helpers.__send__(:wrap, :LIT, children: [pattern_text.delete_prefix(":").to_sym], source: pattern)]
+        end
         if pattern_text.match?(/\A[A-Z]\w*\z/)
           return [helpers.__send__(:wrap, :CONST, children: [pattern_text.to_sym], source: pattern)]
         end

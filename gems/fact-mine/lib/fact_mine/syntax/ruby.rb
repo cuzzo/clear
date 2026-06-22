@@ -298,6 +298,32 @@ module FactMine
         ruby_type_aliases(document.lines)
       end
 
+      def typed_state_declarations(document)
+        declarations = ruby_tlet_state_declarations(document)
+        declarations.concat(ruby_t_struct_fields(document).map do |field|
+          StateDeclaration.new(
+            field: field.fetch(:name),
+            owner: field.fetch(:owner),
+            type: field.fetch(:type),
+            type_references: [],
+            file: document.file,
+            line: field.fetch(:line),
+            span: field.fetch(:span)
+          )
+        end)
+        declarations
+      end
+
+      def type_definitions(document)
+        definitions = []
+        definitions.concat(ruby_method_type_definitions(document))
+        definitions.concat(ruby_state_field_type_definitions(document))
+        definitions.concat(ruby_struct_new_type_definitions(document))
+        definitions.concat(ruby_include_type_definitions(document))
+        definitions.concat(ruby_type_alias_definitions(document))
+        definitions.uniq { |row| [row["language"], row["file"], row["owner"], row["kind"], row["name"], row["line"], row["type_system"]] }
+      end
+
       private
 
       def comparison_target(node)
@@ -320,6 +346,276 @@ module FactMine
         return nil unless COMPARISON_OPERATORS.include?(operator)
 
         { source: normalize_text(node.text), operator: operator }
+      end
+
+      def ruby_method_type_definitions(document)
+        Array(document.function_defs).filter_map do |function|
+          signature = ruby_function_signature(document, function)
+          next if signature.empty?
+
+          TypeMetadataFacts.method_signature(
+            language: "ruby",
+            type_system: "sorbet",
+            file: function.file,
+            owner: ruby_method_owner(document, function),
+            name: function.name,
+            line: function.line,
+            signature: signature,
+            return_type: RUBY_TYPE_PROFILE.extract_return_type(signature),
+            params: RUBY_TYPE_PROFILE.extract_param_entries(signature).map { |name, type| { "name" => name, "type" => type } }
+          )
+        end
+      end
+
+      def ruby_state_field_type_definitions(document)
+        Array(document.state_declarations).filter_map do |state|
+          type = state.type.to_s
+          next if type.empty?
+
+          TypeMetadataFacts.state_field(
+            language: "ruby",
+            type_system: "sorbet",
+            file: state.file,
+            owner: state.owner,
+            name: state.field,
+            line: state.line,
+            declared_type: type,
+            type_references: state.respond_to?(:type_references) ? state.type_references : []
+          )
+        end
+      end
+
+      def ruby_struct_new_type_definitions(document)
+        ruby_struct_definitions(document).flat_map do |struct|
+          struct.fetch(:fields).map do |name|
+            TypeMetadataFacts.state_field(
+              language: "ruby",
+              type_system: "ruby-struct",
+              file: document.file,
+              owner: struct.fetch(:owner),
+              name: name,
+              line: struct.fetch(:line),
+              declared_type: nil
+            )
+          end
+        end
+      end
+
+      def ruby_include_type_definitions(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "self" && call.message.to_s == "include"
+
+          included = Array(call.arguments).first.to_s.strip
+          next if included.empty?
+
+          owner = TypeMetadataFacts.owner_for_line(document, call.line)
+          next if owner.empty?
+
+          TypeMetadataFacts.included_module(
+            language: "ruby",
+            type_system: "ruby-include",
+            file: call.file,
+            owner: owner,
+            name: ruby_resolved_include_name(document, owner, included),
+            line: call.line
+          )
+        end
+      end
+
+      def ruby_type_alias_definitions(document)
+        owner_stack = []
+        pending = nil
+        definitions = []
+        document.lines.each_with_index do |line, index|
+          line_no = index + 1
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("#")
+
+          if pending
+            if stripped == "end" && TypeMetadataFacts.line_indent(line) <= pending.fetch(:indent)
+              target = pending.fetch(:body).join(" ").gsub(/\s+/, " ").strip.sub(/,\z/, "")
+              definitions << ruby_type_alias_definition(document, pending.fetch(:owner), pending.fetch(:name), target, pending.fetch(:line)) unless target.empty?
+              pending = nil
+            else
+              pending.fetch(:body) << stripped
+            end
+            next
+          end
+
+          if (match = stripped.match(/\A(?:class|module)\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+            owner_stack << TypeMetadataFacts.qualified_owner(owner_stack.last, match[1])
+            next
+          end
+
+          if stripped == "end"
+            owner_stack.pop
+            next
+          end
+
+          if (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*(.+)\s*\}\s*(?:#.*)?\z/))
+            definitions << ruby_type_alias_definition(document, owner_stack.last.to_s, match[1], match[2].strip, line_no)
+          elsif (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s+do\b/))
+            pending = { owner: owner_stack.last.to_s, name: match[1], line: line_no, indent: TypeMetadataFacts.line_indent(line), body: [] }
+          end
+        end
+        definitions
+      end
+
+      def ruby_type_alias_definition(document, owner, name, target, line)
+        TypeMetadataFacts.type_alias(
+          language: "ruby",
+          type_system: "sorbet",
+          file: document.file,
+          owner: owner,
+          name: name,
+          line: line,
+          target: target
+        )
+      end
+
+      def ruby_function_signature(document, function)
+        signature = function.respond_to?(:signature) ? function.signature.to_s : ""
+        signature = ruby_signature_before_line_number(document, function.line) if signature.empty?
+        signature = signature.strip
+        signature.start_with?("sig ") ? signature : ""
+      end
+
+      def ruby_signature_before_line_number(document, line)
+        index = line.to_i - 2
+        lines = document.lines
+        index -= 1 while index >= 0 && lines[index].to_s.strip.empty?
+        return "" if index.negative?
+
+        stripped = lines[index].to_s.strip
+        if stripped == "end"
+          start = index
+          while start >= 0
+            text = lines[start].to_s.strip
+            return TypeMetadataFacts.normalize_text(lines[start..index].join("\n")) if text == "sig do"
+            return "" if start != index && text.match?(/\A(?:def|class|module)\b/)
+
+            start -= 1
+          end
+          return ""
+        end
+
+        return TypeMetadataFacts.normalize_text(stripped) if stripped.start_with?("sig ")
+        return "" unless stripped == "}" || stripped.end_with?("}")
+
+        start = index
+        while start >= 0
+          text = lines[start].to_s.strip
+          return TypeMetadataFacts.normalize_text(lines[start..index].join("\n")) if text.start_with?("sig ")
+          return "" if text.match?(/\A(?:def|class|module)\b/)
+
+          start -= 1
+        end
+        ""
+      end
+
+      def ruby_struct_definitions(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "Struct" && call.message.to_s == "new"
+
+          line = document.lines[call.line.to_i - 1].to_s
+          match = line.match(/([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
+          next unless match
+
+          fields = Array(call.arguments).filter_map { |arg| arg.to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1] }
+          next if fields.empty?
+
+          parent = TypeMetadataFacts.owner_for_line(document, call.line)
+          {
+            owner: TypeMetadataFacts.qualified_owner(parent, match[1]),
+            line: call.line,
+            span: call.span,
+            fields: fields
+          }
+        end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line), entry.fetch(:fields)] }
+      end
+
+      def ruby_t_struct_fields(document)
+        containers = ruby_t_struct_containers(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "self" && %w[const prop].include?(call.message.to_s)
+
+          name = Array(call.arguments)[0].to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1]
+          type = Array(call.arguments)[1].to_s.strip
+          next if name.to_s.empty? || type.empty?
+
+          owner = ruby_deepest_owner_for_line(containers, call.line)
+          next if owner.to_s.empty?
+
+          {
+            owner: owner,
+            name: name,
+            type: TypeMetadataFacts.normalize_text(type),
+            line: call.line,
+            span: call.span
+          }
+        end.uniq { |field| [field.fetch(:owner), field.fetch(:name), field.fetch(:line)] }
+      end
+
+      def ruby_tlet_state_declarations(document)
+        document.lines.each_with_index.filter_map do |line, index|
+          line_no = index + 1
+          match = line.strip.match(/\A(?:(@[A-Za-z_]\w*)|self\.([A-Za-z_]\w*))\s*=\s*T\.let\((.*)\)\z/m)
+          next unless match
+
+          args = TypeMetadataFacts.split_top_level(match[3])
+          type = args[1].to_s.strip
+          next if type.empty?
+
+          owner = TypeMetadataFacts.owner_for_line(document, line_no)
+          next if owner.empty?
+
+          StateDeclaration.new(
+            field: match[1] || match[2],
+            owner: owner,
+            type: TypeMetadataFacts.normalize_text(type),
+            type_references: [],
+            file: document.file,
+            line: line_no,
+            span: TypeMetadataFacts.source_line_span(line, line_no)
+          )
+        end
+      end
+
+      def ruby_t_struct_containers(document)
+        Array(document.owner_defs).filter_map do |owner|
+          line = document.lines[owner.line.to_i - 1].to_s
+          next unless line.match?(/<\s*T::Struct\b/)
+
+          { owner: owner.name.to_s, line: owner.line, span: owner.span }
+        end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
+      end
+
+      def ruby_method_owner(document, function)
+        ruby_deepest_owner_for_line(ruby_struct_definitions(document), function.line) || function.owner.to_s
+      end
+
+      def ruby_resolved_include_name(document, owner, name)
+        return name.to_s if name.to_s.include?("::")
+
+        namespace = owner.to_s.split("::")[0...-1].join("::")
+        qualified = TypeMetadataFacts.qualified_owner(namespace, name)
+        TypeMetadataFacts.owner_names(document).include?(qualified) ? qualified : name.to_s
+      end
+
+      def ruby_deepest_owner_for_line(records, line)
+        Array(records).select { |record| ruby_span_contains_line?(record.fetch(:span), line) }
+                      .max_by { |record| ruby_span_sort_key(record.fetch(:span)) }
+                      &.fetch(:owner, nil)
+      end
+
+      def ruby_span_contains_line?(span, line)
+        range = Array(span)
+        range[0].to_i <= line.to_i && range[2].to_i >= line.to_i
+      end
+
+      def ruby_span_sort_key(span)
+        range = Array(span)
+        [range[0].to_i, -((range[2].to_i - range[0].to_i).abs)]
       end
 
       def inline_def_argument_list?(node)
@@ -1138,6 +1434,211 @@ module FactMine
                 .first.to_s
       end
     end
+
+    class RubySorbetTypeProfile < TypeProfile
+      MAX_UNION_TYPES = 3
+      CORE_RUNTIME_GUARD_CLASSES = %w[
+        Array Hash Set String Symbol Integer Float NilClass TrueClass FalseClass Numeric Range Regexp Time
+      ].freeze
+      NUMERIC_GUARD_SUBCLASSES = %w[Integer Float].freeze
+      BOOLEAN_GUARD_SUBCLASSES = %w[TrueClass FalseClass].freeze
+
+      def useful_type?(type)
+        super && normalize_type(type) != "T.untyped"
+      end
+
+      def static_type(types, union_policy: ENV.fetch("NIL_KILL_UNION_POLICY", "untyped"))
+        values = Array(types).compact.map(&:to_s).reject(&:empty?)
+        return "T.untyped" if values.empty?
+
+        has_nil = false
+        others = []
+        values.each do |type|
+          if type == "NilClass"
+            has_nil = true
+          elsif type.start_with?("T.nilable(") && type.end_with?(")")
+            has_nil = true
+            others << type[10..-2]
+          else
+            others << normalize_static_type(type)
+          end
+        end
+
+        others = others.uniq.sort
+        if others.include?("T.noreturn")
+          return has_nil ? "NilClass" : "T.noreturn" if others == ["T.noreturn"]
+
+          others.delete("T.noreturn")
+        end
+        return "NilClass" if others.empty? && has_nil
+        return "T.untyped" if others.empty?
+
+        base =
+          if others.all? { |type| %w[TrueClass FalseClass T::Boolean].include?(type) }
+            "T::Boolean"
+          elsif others.size == 1
+            others.first
+          elsif union_policy == "any" && others.size <= MAX_UNION_TYPES
+            "T.any(#{others.join(", ")})"
+          else
+            "T.untyped"
+          end
+        return "T.untyped" if base == "T.untyped"
+
+        has_nil ? "T.nilable(#{base})" : base
+      end
+
+      def normalize_static_type(type)
+        case type.to_s
+        when "Array" then "T::Array[T.untyped]"
+        when "Hash" then "T::Hash[T.untyped, T.untyped]"
+        when "Set" then "T::Set[T.untyped]"
+        else type.to_s
+        end
+      end
+
+      def extract_param_entries(signature)
+        params = extract_call_args(signature, "params")
+        return [] unless params
+
+        split_top_level(params).filter_map do |entry|
+          name, type = entry.split(/:\s*/, 2)
+          next unless name && type
+
+          [name.strip, type.strip]
+        end
+      end
+
+      def extract_return_type(signature)
+        extract_call_args(signature, "returns")
+      end
+
+      def strip_nilable_type(type)
+        text = type.to_s.strip
+        return text unless text.start_with?("T.nilable(")
+
+        extract_call_args(text, "T.nilable") || text
+      end
+
+      def nullable_or_untyped?(type)
+        raw = type.to_s.strip
+        raw.empty? || raw == "T.untyped" || raw == "NilClass" || raw.include?("T.nilable")
+      end
+
+      def nil_check_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)\.nil\?\z/, 1]
+      end
+
+      def safe_nav_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)&\./, 1]
+      end
+
+      def always_noreturn_body_text?(text)
+        source = text.to_s
+        return false if source.match?(/\breturn\b/)
+
+        source.match?(/\braise\b/) ||
+          source.match?(/\bfail\b/) ||
+          source.match?(/\babort\b/) ||
+          source.match?(/\bT\.absurd\s*\(/)
+      end
+
+      def return_expression_type(code, param_types)
+        source = code.to_s.strip
+        return ["NilClass", "nil", nil, false] if source == "nil"
+        return ["String", "static", nil, false] if source.match?(/\A["']/)
+        return ["Symbol", "static", nil, false] if source.start_with?(":")
+        return ["Integer", "static", nil, false] if source.match?(/\A[-+]?\d+\z/)
+        return ["T::Boolean", "static", nil, false] if %w[true false].include?(source)
+        return [param_types[source], "static", nil, false] if param_types[source]
+
+        if (match = source.match(/\A([a-z_]\w*)\.join\b/))
+          receiver_type = param_types[match[1]].to_s
+          return ["String", "typed_call", "join", true] if receiver_type.match?(/\A(?:Array|T::Array)\[String\]/)
+        end
+
+        return [nil, "call_untyped", source, false] if source.match?(/\A[a-z_]\w*[!?]?\z/)
+
+        [nil, "unknown", nil, false]
+      end
+
+      def literal_text_type(text, constant_types = {})
+        value = text.to_s.strip
+        return "String" if value.match?(/\A["']/)
+        return "Symbol" if value.match?(/\A:/)
+        return "T::Array[Symbol]" if value.match?(/\A%i[\[\(\{]/)
+        return "T::Array[String]" if value.match?(/\A%w[\[\(\{]/)
+        return "Integer" if value.match?(/\A[-+]?\d+\z/)
+        return "Float" if value.match?(/\A[-+]?\d+\.\d+\z/)
+        return "T::Boolean" if %w[true false True False].include?(value)
+        return "NilClass" if %w[nil null None].include?(value)
+        return constant_types[value] if constant_types.key?(value)
+
+        "T.untyped"
+      end
+
+      def class_guard_truth(receiver_type, class_name, exact:)
+        raw = receiver_type.to_s
+        return nil if raw.empty? || raw == "T.untyped" || raw.include?("T.any(") || raw.start_with?("T.nilable(")
+
+        bare = bare_class_name(raw)
+        wanted = bare_class_name(class_name)
+        return false if exact && known_disjoint_guard_classes?(bare, wanted)
+        return nil if exact
+        return true if bare == wanted || known_guard_subclass?(bare, wanted)
+        return false if known_disjoint_guard_classes?(bare, wanted)
+
+        nil
+      end
+
+      private
+
+      def bare_class_name(type)
+        raw = type.to_s.delete_prefix("::")
+        case raw
+        when /\AT::Array\b/, /\AArray\b/ then "Array"
+        when /\AT::Hash\b/, /\AHash\b/ then "Hash"
+        when /\AT::Set\b/, /\ASet\b/ then "Set"
+        when "T::Boolean" then "T::Boolean"
+        else raw.split("::").last
+        end
+      end
+
+      def known_guard_subclass?(bare, wanted)
+        return true if wanted == "Numeric" && NUMERIC_GUARD_SUBCLASSES.include?(bare)
+        return true if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+
+        false
+      end
+
+      def known_disjoint_guard_classes?(bare, wanted)
+        return false if bare == wanted
+        return false if known_guard_subclass?(bare, wanted) || known_guard_subclass?(wanted, bare)
+        return false if bare == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(wanted)
+        return false if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+        return true if bare == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+        return true if wanted == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(bare)
+
+        CORE_RUNTIME_GUARD_CLASSES.include?(bare) && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+      end
+    end
+
+    RUBY_TYPE_PROFILE = RubySorbetTypeProfile.new(
+      language: :ruby,
+      type_system: "sorbet",
+      broad_types: %w[T.untyped T.anything Object BasicObject],
+      intrinsic_types: %w[
+        Array BasicObject Class Complex Encoding Enumerator Exception FalseClass Fiber Float Hash Integer Module NilClass
+        Numeric Object Proc Range Rational Regexp String Struct Symbol Thread Time TrueClass
+      ],
+      nil_types: %w[NilClass],
+      boolean_types: %w[TrueClass FalseClass T::Boolean],
+      collection_types: %w[Array Hash Set T::Array T::Hash T::Set],
+      generic_wrappers: %w[T.nilable T.any],
+      alias_wrappers: [{ name: "T.nilable", open: "(", close: ")" }],
+      union_wrappers: [{ name: "T.any", open: "(", close: ")" }]
+    ).freeze
+    Syntax.register_type_profile(:ruby, RUBY_TYPE_PROFILE)
 
     NormalizedExtractionBehavior.register(:ruby, RubyNormalizedExtractionBehavior)
   end

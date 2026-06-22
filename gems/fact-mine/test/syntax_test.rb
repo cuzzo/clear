@@ -62,6 +62,49 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_ruby_case_decision_span_excludes_later_method_statements
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Ruby Tree-sitter adapter span test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RB) do |path|
+      def dispatch(n, z)
+        case n
+        when 1 then 10
+        when 2 then 20
+        end
+        return 99 if z
+        n
+      end
+    RB
+      decisions = FactMine::Syntax.parse(path, language: :ruby).decision_sites.select { |site| site.kind == :case_dispatch }
+
+      assert_equal 1, decisions.size
+      assert_equal [2, 2, 5, 5], decisions.first.span
+    end
+  end
+
+  def test_ruby_symbol_case_patterns_emit_decisions_and_branch_arms
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Ruby Tree-sitter adapter symbol case test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RB) do |path|
+      def dispatch(k)
+        case k
+        when :x then 11
+        when :y then 21
+        else 31
+        end
+      end
+    RB
+      doc = FactMine::Syntax.parse(path, language: :ruby)
+      decision = doc.decision_sites.find { |site| site.kind == :case_dispatch }
+
+      refute_nil decision
+      assert_equal %w[:x :y], decision.members
+      assert_equal %w[:x :y], doc.branch_arms.map(&:member)
+    end
+  end
+
   def test_unknown_parser_fails_loudly
     with_file("def a; end\n") do |path|
       error = assert_raises(ArgumentError) do
@@ -231,6 +274,51 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_lua_adapter_extracts_indexed_self_writes
+    grammar = ENV["DECOMPLEX_TS_LUA_PATH"]
+    skip "set DECOMPLEX_TS_LUA_PATH to run Lua structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~LUA, ".lua") do |path|
+      function Worker:push(value)
+        self.items[#self.items + 1] = value
+      end
+    LUA
+      doc = FactMine::Syntax.parse(path, parser: "tree_sitter", language: :lua)
+
+      assert_includes doc.state_writes.map { |write| [write.owner, write.function, write.receiver, write.field] },
+        ["Worker", "push", "self", "items"]
+      assert_includes doc.state_param_origins.map { |origin| [origin.owner, origin.function, origin.receiver, origin.field, origin.param] },
+        ["Worker", "push", "self", "items", "value"]
+    end
+  end
+
+  def test_tree_sitter_lua_adapter_exports_table_shapes_as_raw_hash_nodes
+    grammar = ENV["DECOMPLEX_TS_LUA_PATH"]
+    skip "set DECOMPLEX_TS_LUA_PATH to run Lua structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~LUA, ".lua") do |path|
+      function Worker.new(items)
+        local self = { items = items, count = 0 }
+        return self
+      end
+    LUA
+      doc = FactMine::Syntax.parse(path, parser: "tree_sitter", language: :lua)
+      nodes = []
+      pending = [doc.root]
+      until pending.empty?
+        node = pending.pop
+        nodes << node
+        pending.concat(node.children)
+      end
+
+      hash = nodes.find { |node| node.kind == "hash" && node.text == "{ items = items, count = 0 }" }
+      refute_nil hash
+      assert_equal %w[pair pair], hash.named_children.map(&:kind)
+      assert_equal %w[items count], hash.named_children.map { |pair| pair.named_children.first.text }
+      assert_equal "number", hash.named_children.last.named_children.last.kind
+    end
+  end
+
   def test_tree_sitter_go_adapter_extracts_name_type_struct_fields
     grammar = ENV["DECOMPLEX_TS_GO_PATH"]
     skip "set DECOMPLEX_TS_GO_PATH to run Go structural facts test" unless grammar && File.file?(grammar)
@@ -242,6 +330,10 @@ class SyntaxTest < Minitest::Test
         I16 []int16
         Count int
       }
+
+      func (s *Slab) Push(value int16) {
+        s.I16 = append(s.I16, value)
+      }
     GO
       doc = FactMine::Syntax.parse(path, parser: "tree_sitter", language: :go)
 
@@ -250,6 +342,8 @@ class SyntaxTest < Minitest::Test
         ["Slab", "I16", "[]int16"]
       assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
         ["Slab", "Count", "int"]
+      assert_includes doc.state_param_origins.map { |origin| [origin.owner, origin.function, origin.receiver, origin.field, origin.param] },
+        ["Slab", "Push", "self", "I16", "value"]
     end
   end
 
@@ -686,10 +780,28 @@ class SyntaxTest < Minitest::Test
       doc = FactMine::Syntax.parse(path, parser: "tree_sitter", language: :c)
 
       assert_includes doc.function_defs.map(&:name), "classify"
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Node", "storage", "int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["self", "storage", "classify"]
       assert_includes doc.decision_sites.map(&:kind), :conjunction
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
+    end
+  end
+
+  def test_tree_sitter_rust_adapter_extracts_struct_field_types
+    grammar = ENV["DECOMPLEX_TS_RUST_PATH"]
+    skip "set DECOMPLEX_TS_RUST_PATH to run Rust structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RS, ".rs") do |path|
+      pub struct Worker { items: Vec<String>, count: usize }
+    RS
+      doc = FactMine::Syntax.parse(path, parser: "tree_sitter", language: :rust)
+
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Worker", "items", "Vec<String>"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Worker", "count", "usize"]
     end
   end
 
@@ -700,6 +812,7 @@ class SyntaxTest < Minitest::Test
     with_file(<<~CPP, ".cpp") do |path|
       class Parser {
        public:
+        int storage;
         int parse(Node* node) {
           node->storage = 1;
           if (node == nullptr || node->ready) return 1;
@@ -711,6 +824,8 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Parser", "storage", "int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["node", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
@@ -735,6 +850,8 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "Parse"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Parser", "_storage", "int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["self", "_storage", "Parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
@@ -759,6 +876,8 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Parser", "storage", "int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["self", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
@@ -787,6 +906,8 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Parser", "storage", "Int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["self", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch
@@ -815,6 +936,8 @@ class SyntaxTest < Minitest::Test
 
       assert_includes doc.owner_defs.map { |owner| [owner.name, owner.kind] }, ["Parser", :class]
       assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Parser", "parse"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] },
+        ["Parser", "storage", "Int"]
       assert_includes doc.state_writes.map { |write| [write.receiver, write.field, write.function] },
         ["self", "storage", "parse"]
       assert_includes doc.decision_sites.map(&:kind), :case_dispatch

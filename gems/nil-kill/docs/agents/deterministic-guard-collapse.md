@@ -18,9 +18,9 @@ local facts, signatures, or runtime producer evidence.
 
 Nil-kill already has most of the substrate:
 
-- `SourceIndex#dead_nil_checks` records provably dead safe-navigation and
+- StaticAnalysis facts include `dead_nil_checks` for provably dead safe-navigation and
   `.nil?` checks.
-- `SourceIndex#type_normalizers` records `is_a?(Type)` / `kind_of?(Type)`
+- StaticAnalysis facts include `deterministic_guards` for `is_a?(Type)` / `kind_of?(Type)`
   guards and resolves the guarded receiver back to a canonical origin
   (`param`, `attr`, `ivar`, `hashkey`, `call`, or local fallback).
 - `Report#guard_collapse_rows` joins those guards with runtime producer
@@ -71,7 +71,7 @@ arithmetic. Those belong in future z3-backed extensions.
 ## Implementation Plan
 
 1. Add `deterministic_guards` to `NilKill::Store#facts`.
-2. Extend `SourceIndex`:
+2. Extend Tree-sitter fact mining:
    - collect deterministic guard facts from `if` / `unless` predicates,
    - trust only locals/params, ivars, and literal subjects for branch
      proof, not arbitrary call-return names,
@@ -89,7 +89,7 @@ arithmetic. Those belong in future z3-backed extensions.
 5. Extend `Apply` only after the report proves high value. The first pass
    should not rewrite arbitrary `if` bodies; it should surface and rank.
 6. Tests:
-   - `SourceIndex` records static deterministic class/nil/literal guards,
+   - StaticAnalysis records static deterministic class/nil/literal guards,
    - `Infer` converts static facts into review actions,
    - `Report` renders static and contract-proven collapse rows,
    - existing nil-kill specs continue to pass.

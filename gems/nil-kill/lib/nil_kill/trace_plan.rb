@@ -14,12 +14,14 @@ module NilKill
     end
 
     def write(path)
-      NilKill.target_files.each do |file|
-        idx = SourceIndex.new(file)
-        idx.methods.each { |method| add_method(method) }
-        idx.tlet_sites.each { |site| add_tlet(site) }
-        idx.struct_declarations.each { |decl| add_struct_decl(decl) }
-        idx.struct_field_static.each { |field| add_struct_static(field) }
+      files = NilKill.target_files
+      unless files.empty?
+        static = StaticEvidence.build(files, root: ROOT, language: :ruby, include_annotations: false)
+        static.fetch("methods", []).each { |method| add_static_method(method) }
+        facts = Hash(static["facts"])
+        Array(facts["tlet_sites"]).each { |site| add_tlet(site) }
+        Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
+        Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
       end
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, JSON.pretty_generate({
@@ -55,6 +57,32 @@ module NilKill
       }
     end
 
+    def add_static_method(method)
+      signature = method["signature"].to_s
+      param_types = NilKill.extract_param_entries(signature).to_h
+      untraceable = Array(method["untraceable_params"]).map(&:to_s).to_set
+      params = Array(method["params"]).reject { |name| untraceable.include?(name.to_s) }.to_h do |name|
+        type = param_types[name.to_s]
+        [name.to_s, !NilKill.strong_trace_type?(type)]
+      end
+      return_type = NilKill.extract_return_type(signature)
+      sample_return = !signature.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      name = method_name(method)
+      key = [
+        method["owner"].to_s,
+        name,
+        method_kind(method),
+        File.expand_path(method["path"], ROOT),
+        method["line"],
+      ].join("\0")
+      @methods[key] = {
+        "frame" => true,
+        "params" => params,
+        "return" => sample_return,
+        "sample" => params.values.any? || sample_return,
+      }
+    end
+
     def add_tlet(site)
       return unless site["tlet"]
       type = site["type"]
@@ -74,6 +102,28 @@ module NilKill
       type = field["type"] || field["candidate_type"]
       key = [klass, name].join("\0")
       @struct_fields[key] = !NilKill.strong_trace_type?(type)
+    end
+
+    def add_static_state_type(field)
+      klass = field["owner"].to_s
+      name = field["field"].to_s.sub(/\A@/, "")
+      type = field["declared_type"].to_s
+      return if klass.empty? || name.empty? || type.empty?
+
+      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
+    def method_name(method)
+      method["name"].to_s.sub(/\Aself\./, "")
+    end
+
+    def method_kind(method)
+      raw = method["kind"].to_s
+      name = method["name"].to_s
+      return "class" if name.start_with?("self.") || raw == "class" || raw == "class_method"
+      return "function" if raw == "function" || method["owner"].to_s.empty?
+
+      "instance"
     end
   end
 end

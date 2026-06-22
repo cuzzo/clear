@@ -14,7 +14,7 @@ module FactMine
     CallSite = Struct.new(:receiver, :message, :file, :function, :owner, :line, :span,
                           :conditional, :arguments, :control, :safe_navigation, :block,
                           keyword_init: true)
-    StateDeclaration = Struct.new(:field, :owner, :type, :file, :line, :span, keyword_init: true)
+    StateDeclaration = Struct.new(:field, :owner, :type, :type_references, :file, :line, :span, keyword_init: true)
     StateParamOrigin = Struct.new(:field, :receiver, :owner, :param, :file, :function,
                                   :line, :span, keyword_init: true)
     DecisionSite = Struct.new(:kind, :members, :file, :function, :line, :span, :predicate,
@@ -438,6 +438,14 @@ module FactMine
 
       def type_aliases(_document)
         {}
+      end
+
+      def type_definitions(_document)
+        []
+      end
+
+      def typed_state_declarations(_document)
+        []
       end
 
       def predicate_def(_document, function_def)
@@ -1360,6 +1368,7 @@ module FactMine
           field: declaration[:field],
           owner: owner_for_node(document, node, stack: stack),
           type: declaration[:type],
+          type_references: declaration[:type_references],
           file: document.file,
           line: line(node),
           span: span(node)
@@ -2723,6 +2732,8 @@ module FactMine
       end
     end
 
+    require_relative "syntax/type_profile"
+    require_relative "syntax/type_metadata_facts"
     require_relative "syntax/adapters"
     require_relative "syntax/dynamic_language"
     require_relative "syntax/passes"
@@ -3033,6 +3044,10 @@ module FactMine
 
       def type_aliases
         adapter.type_aliases(self)
+      end
+
+      def type_definitions
+        adapter.type_definitions(self)
       end
     end
 
@@ -3387,6 +3402,10 @@ module FactMine
 
       def type_aliases(document)
         stateful_syntax_pass(document).type_aliases
+      end
+
+      def type_definitions(document)
+        syntax_profile(document.language).type_definitions(document)
       end
 
       private

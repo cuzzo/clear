@@ -63,104 +63,33 @@ RSpec.describe NilKill do
     end
   end
 
-  describe NilKill::SourceIndex do
-    it "infers helper parameter types from dispatcher case arms" do
-      Dir.mktmpdir("nil-kill-dispatcher") do |dir|
-        path = File.join(dir, "visitor.rb")
-        File.write(path, <<~RUBY)
-          class Visitor
-            def visit(node)
-              case node
-              when AST::Name
-                visit_name(node)
-              when AST::Call
-                visit_call(node)
-              end
-            end
-
-            def visit_name(node)
-              node
-            end
-
-            def visit_call(node)
-              node
-            end
-          end
-        RUBY
-
-        idx = described_class.new(path)
-
-        expect(idx.dispatcher_inferences).to include(
-          a_hash_including("class" => "Visitor", "dispatcher" => "visit", "helper" => "visit_name", "type" => "AST::Name")
-        )
-        expect(idx.dispatcher_inferences).to include(
-          a_hash_including("class" => "Visitor", "dispatcher" => "visit", "helper" => "visit_call", "type" => "AST::Call")
-        )
-      end
-    end
-
-    it "records return syntax and control shape for hygiene reporting" do
-      Dir.mktmpdir("nil-kill-return-hygiene-index") do |dir|
-        path = File.join(dir, "hygiene.rb")
-        File.write(path, <<~RUBY)
-          class HygieneIndex
-            extend T::Sig
-
-            sig { returns(T.untyped) }
-            def branchless_implicit
-              "ok"
-            end
-
-            sig { returns(T.untyped) }
-            def mixed_branching(flag)
-              return "early" if flag
-              "late"
-            end
-          end
-        RUBY
-
-        idx = described_class.new(path)
-        origins = idx.return_origins.each_with_object({}) { |origin, lookup| lookup[origin["method"]] = origin }
-
-        expect(origins["branchless_implicit"]).to include(
-          "return_syntax" => "implicit",
-          "control_shape" => "branchless"
-        )
-        expect(origins["mixed_branching"]).to include(
-          "return_syntax" => "mixed",
-          "control_shape" => "branching"
-        )
-      end
-    end
-  end
-
   describe NilKill::FlowGraph do
     it "indexes hash field reads by producer identity and field path" do
-      Dir.mktmpdir("nil-kill-flow-graph") do |dir|
-        path = File.join(dir, "records.rb")
-        File.write(path, <<~RUBY)
-          class Records
-            def pick
-              record = {c: "ok", p: 1}
-              record[:c]
-            end
-          end
-        RUBY
+      lookup = {
+        "path" => "records.rb",
+        "line" => 4,
+        "code" => "record[:c]",
+        "receiver" => "record",
+        "index" => ":c",
+        "lookup_type" => "T.nilable(String)",
+        "origin" => {
+          "kind" => "hash literal",
+          "path" => "records.rb",
+          "line" => 3,
+          "name" => "record",
+        },
+      }
+      graph = described_class.from_evidence("facts" => {
+        "existing_sigs" => [],
+        "unsigned_methods" => [],
+        "collection_index_lookups" => [lookup],
+      }, "methods" => [])
 
-        idx = NilKill::SourceIndex.new(path)
-        lookup = idx.collection_index_lookups.find { |entry| entry["code"] == "record[:c]" }
-        graph = described_class.from_evidence("facts" => {
-          "existing_sigs" => [],
-          "unsigned_methods" => idx.methods,
-          "collection_index_lookups" => idx.collection_index_lookups,
-        }, "methods" => [])
+      field_id = graph.hash_record_identity_for_lookup(lookup)
 
-        field_id = graph.hash_record_identity_for_lookup(lookup)
-
-        expect(field_id).to include("hash_literal")
-        expect(field_id).to end_with("[:c]")
-        expect(graph.sorbet_type_for(field_id)).to eq("T.nilable(String)")
-      end
+      expect(field_id).to include("hash_literal")
+      expect(field_id).to end_with("[:c]")
+      expect(graph.sorbet_type_for(field_id)).to eq("T.nilable(String)")
     end
 
     it "represents call arguments, returns, forwarding, and struct fields as graph edges" do
@@ -2404,12 +2333,15 @@ RSpec.describe NilKill do
     end
 
     describe "build_project_method_return_index" do
-      def stub_rbi_field_types(types)
-        original = NilKill::SourceIndex.method(:rbi_field_types)
-        NilKill::SourceIndex.define_singleton_method(:rbi_field_types) { types }
+      def with_rbi_field_types(infer, types)
+        store = infer.instance_variable_get(:@store)
+        original = store.facts["rbi_field_types"]
+        store.facts["rbi_field_types"] = types.map do |(klass, field), type|
+          { "class" => klass, "field" => field, "type" => type }
+        end
         yield
       ensure
-        NilKill::SourceIndex.define_singleton_method(:rbi_field_types, original)
+        store.facts["rbi_field_types"] = original if store
       end
 
       it "includes existing_sigs entries with strong returns" do
@@ -2419,7 +2351,7 @@ RSpec.describe NilKill do
           { "class" => "Wrapper", "method" => "wrap",
             "sig" => "sig { params(node: T.untyped).returns(String) }" },
         ]
-        stub_rbi_field_types({}) do
+        with_rbi_field_types(infer, {}) do
           index = infer.send(:build_project_method_return_index)
           expect(index[["Wrapper", "wrap"]]).to eq("String")
         end
@@ -2432,7 +2364,7 @@ RSpec.describe NilKill do
           { "class" => "Wrapper", "method" => "untyped_wrap",
             "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
         ]
-        stub_rbi_field_types({}) do
+        with_rbi_field_types(infer, {}) do
           index = infer.send(:build_project_method_return_index)
           expect(index).not_to have_key(["Wrapper", "untyped_wrap"])
         end
@@ -2440,7 +2372,7 @@ RSpec.describe NilKill do
 
       it "merges RBI struct-field accessor types" do
         infer = infer_with_store
-        stub_rbi_field_types({ ["AST::Foo", "token"] => "Token", ["AST::Foo", "ignored"] => "T.untyped" }) do
+        with_rbi_field_types(infer, { ["AST::Foo", "token"] => "Token", ["AST::Foo", "ignored"] => "T.untyped" }) do
           index = infer.send(:build_project_method_return_index)
           expect(index[["AST::Foo", "token"]]).to eq("Token")
           expect(index).not_to have_key(["AST::Foo", "ignored"])
@@ -2458,7 +2390,7 @@ RSpec.describe NilKill do
           { "class" => "Helper", "method" => "blocked_one", "confidence" => "blocked",
             "candidate_type" => "T.untyped" },
         ]
-        stub_rbi_field_types({}) do
+        with_rbi_field_types(infer, {}) do
           index = infer.send(:build_project_method_return_index)
           expect(index[["Helper", "summarize"]]).to eq("String")
           expect(index).not_to have_key(["Helper", "weak"])
@@ -2599,7 +2531,7 @@ RSpec.describe NilKill do
           { "class" => "Cls", "method" => "m", "confidence" => "strong",
             "candidate_type" => "Integer" },
         ]
-        stub_rbi_field_types({}) do
+        with_rbi_field_types(infer, {}) do
           index = infer.send(:build_project_method_return_index)
           expect(index[["Cls", "m"]]).to eq("String")
         end

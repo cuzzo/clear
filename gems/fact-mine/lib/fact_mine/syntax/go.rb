@@ -268,6 +268,13 @@ module FactMine
         { "field" => name, "type" => type }
       end
 
+      def state_param_origin_names(node, current_params:)
+        return [] unless node&.respond_to?(:type)
+        return [] unless node.text.to_s.match?(/\bappend\s*\(/)
+
+        lvar_names(node).select { |name| current_params.include?(name) }.uniq
+      end
+
       def embedded_member_reads(node)
         return [] unless node.first_lineno == node.last_lineno
 
@@ -364,6 +371,19 @@ module FactMine
           { local: subject, non_nil_when_true: false }
         end
 
+      end
+
+      private
+
+      def lvar_names(node)
+        return [] unless node.respond_to?(:type)
+
+        names = []
+        names << node.children.first.to_s if node.type.to_s == "LVAR"
+        node.children.each do |child|
+          names.concat(lvar_names(child)) if child.respond_to?(:type)
+        end
+        names
       end
     end
 

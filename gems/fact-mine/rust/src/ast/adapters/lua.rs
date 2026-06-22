@@ -1,5 +1,6 @@
 use super::super::{
-    bracketed, direct_binary_operator, named_children, node_text, raw_named_children,
+    bare_identifier_text, bracketed, direct_binary_operator, named_children, node_text,
+    raw_named_children,
 };
 use super::base::{AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction};
 use tree_sitter::Node as TreeSitterNode;
@@ -7,10 +8,21 @@ use tree_sitter::Node as TreeSitterNode;
 const LUA_ASSIGNMENT_OPERATORS: &[&str] = &["="];
 const LUA_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
 const LUA_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
+const LUA_IDENTIFIER_TEXT_KEYWORDS: &[&str] = &["false", "nil", "true"];
 
 pub(crate) struct LuaAstAdapter;
 
 impl AstNormalizationAdapter for LuaAstAdapter {
+    fn local_identifier_text(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() != "expression_list" {
+            return None;
+        }
+
+        let text = node_text(node, source);
+        (bare_identifier_text(text) && !LUA_IDENTIFIER_TEXT_KEYWORDS.contains(&text))
+            .then(|| text.to_string())
+    }
+
     fn explicit_alternative<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -323,7 +335,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         source: &str,
     ) -> Vec<TreeSitterNode<'tree>> {
         let target = self.array_literal_target(node, source).unwrap_or(node);
-        if target.kind() == "arguments" {
+        if matches!(target.kind(), "arguments" | "expression_list") {
             if let Some(table) = named_children(target)
                 .into_iter()
                 .find(|child| child.kind() == "table_constructor")
@@ -364,7 +376,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
         source: &str,
     ) -> Vec<TreeSitterNode<'tree>> {
         let target = self.hash_literal_target(node, source).unwrap_or(node);
-        if target.kind() == "arguments" {
+        if matches!(target.kind(), "arguments" | "expression_list") {
             if let Some(table) = named_children(target)
                 .into_iter()
                 .find(|child| child.kind() == "table_constructor")
@@ -586,7 +598,7 @@ fn lua_positional_table_target<'tree>(
         }
     }
 
-    if node.kind() == "arguments" {
+    if matches!(node.kind(), "arguments" | "expression_list") {
         let table = named_children(node)
             .into_iter()
             .find(|child| child.kind() == "table_constructor")?;
@@ -642,7 +654,7 @@ fn lua_keyed_table_target<'tree>(
         }
     }
 
-    if node.kind() == "arguments" {
+    if matches!(node.kind(), "arguments" | "expression_list") {
         if bracketed(node, source, "{", "}") {
             let fields = named_children(node);
             if fields.is_empty() {

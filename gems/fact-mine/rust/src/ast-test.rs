@@ -20187,19 +20187,18 @@ fn lua_table_string_entry_matches_ruby_field_shape() {
         Language::Lua,
         ".lua",
     );
-    let expression_list = first_node(
+    let list = first_node(
         &root,
-        "EXPRESSION_LIST",
+        "LIST",
         "{\n   \"/luasocket-${LUASOCKET}.src.rock\",\n}",
     );
-    let field = child_node(expression_list, 0);
-    let string = child_node(field, 0);
+    let string = child_node(list, 0);
 
     assert_eq!(
-            child_types(expression_list),
-            vec!["FIELD"],
-            "Ruby exposes a Lua table constructor assignment RHS as its field children: {expression_list:#?}"
-        );
+        child_types(list),
+        vec!["STR"],
+        "Ruby exposes a Lua positional table constructor assignment RHS as a LIST: {list:#?}"
+    );
     assert_eq!(string.r#type, "STR");
     assert_eq!(
         string.children,
@@ -20278,10 +20277,10 @@ fn lua_single_bare_assignment_function_body_matches_ruby_lasgn_shape() {
 
     assert_eq!(body.r#type, "LASGN");
     assert_eq!(body.children.first(), Some(&Child::String("x".to_string())));
-    assert_eq!(right.r#type, "EXPRESSION_LIST");
+    assert_eq!(right.r#type, "LVAR");
     assert!(
-        right.children.is_empty(),
-        "Ruby exposes a bare identifier Lua single-assignment RHS with no children: {right:#?}"
+        right.children == vec![Child::String("y".to_string())],
+        "Ruby exposes a bare identifier Lua single-assignment RHS as an LVAR: {right:#?}"
     );
 }
 
@@ -20363,16 +20362,16 @@ fn lua_single_return_function_body_matches_ruby_opcall_shape() {
 }
 
 #[test]
-fn lua_top_level_return_identifier_matches_ruby_empty_expression_list() {
+fn lua_top_level_return_identifier_matches_ruby_lvar() {
     let root = parse_language_source("return sum\n", Language::Lua, ".lua");
     let return_node = first_node(&root, "RETURN", "return sum");
-    let expression_list = child_node(return_node, 0);
+    let value = child_node(return_node, 0);
 
-    assert_eq!(expression_list.r#type, "EXPRESSION_LIST");
+    assert_eq!(value.r#type, "LVAR");
     assert!(
-            expression_list.children.is_empty(),
-            "Ruby exposes a Lua return of a bare identifier as an empty expression_list: {expression_list:#?}"
-        );
+        value.children == vec![Child::String("sum".to_string())],
+        "Ruby exposes a Lua return of a bare identifier as an LVAR: {value:#?}"
+    );
 }
 
 #[test]

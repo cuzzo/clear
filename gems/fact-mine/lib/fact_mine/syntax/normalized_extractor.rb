@@ -80,6 +80,7 @@ module FactMine
           "state_param_origins" => @facts.fetch(:state_param_origins),
           "state_reads" => @facts.fetch(:state_reads),
           "state_writes" => @facts.fetch(:state_writes),
+          "type_definitions" => [],
           "decisions" => dedupe_decision_sites(@facts.fetch(:decision_sites)),
           "branch_decisions" => @facts.fetch(:branch_decisions),
           "branch_arms" => @facts.fetch(:branch_arms),
@@ -275,6 +276,12 @@ module FactMine
       end
 
       def scan_case(node)
+        if node.type.to_s == "CASE" && child_node(node, 0)&.type.to_s == "CASE"
+          record_branch_decision(node, child_node(node, 0))
+          scan(child_node(node, 0))
+          return
+        end
+
         value_index = node.type.to_s == "CASE" ? 0 : nil
         chain_index = node.type.to_s == "CASE" ? 1 : 0
         value = value_index && child_node(node, value_index)
@@ -469,7 +476,8 @@ module FactMine
       def suppress_call_site?(node, call)
         message = call.fetch("message").to_s
         receiver = call.fetch("receiver").to_s
-        return true if receiver == "self" && message.match?(/\A[A-Z]/) && call.fetch("arguments").empty?
+        return true if receiver == "self" && message.match?(/\A[A-Z]/) &&
+                       call.fetch("arguments").empty? && !node.text.to_s.include?("(")
         return true if constant_receiver?(receiver) && !receiver.include?("(") &&
                        call.fetch("arguments").empty? && !call.fetch("block") &&
                        !@extraction_behavior.preserve_constant_receiver_call?(call)
@@ -490,11 +498,17 @@ module FactMine
         field = first_string_or_symbol(node)
         writes = @extraction_behavior.local_assignment_writes(field, node, default_span: span(node))
         unless writes.empty?
+          value_node = local_assignment_value_node(node)
           writes.each do |write|
             record_state_write_target(write.fetch(:receiver), write.fetch(:field), node, write.fetch(:span))
-            record_state_param_origin(write.fetch(:receiver), write.fetch(:field), child_node(node, 1), node)
+            record_state_param_origin(
+              write.fetch(:receiver),
+              write.fetch(:field),
+              write.fetch(:value_node, nil) || value_node,
+              node
+            )
           end
-          scan(child_node(node, 1)) if child_node(node, 1)
+          scan(value_node) if value_node
           return
         end
 
@@ -527,24 +541,23 @@ module FactMine
       end
 
       def record_state_param_origin(receiver, field, value_node, assignment_node)
-        param = param_origin_name(value_node)
-        return unless param && current_function_params.include?(param)
+        param_origin_names(value_node).each do |param|
+          origin = {
+            "field" => field,
+            "receiver" => receiver,
+            "file" => @file,
+            "function" => current_function,
+            "owner" => current_owner,
+            "param" => param,
+            "line" => assignment_node.first_lineno,
+            "span" => span(assignment_node)
+          }
+          key = origin.values_at("field", "receiver", "owner", "function", "param", "line", "span")
+          next if @seen_param_origins[key]
 
-        origin = {
-          "field" => field,
-          "receiver" => receiver,
-          "file" => @file,
-          "function" => current_function,
-          "owner" => current_owner,
-          "param" => param,
-          "line" => assignment_node.first_lineno,
-          "span" => span(assignment_node)
-        }
-        key = origin.values_at("field", "receiver", "owner", "function", "param", "line", "span")
-        return if @seen_param_origins[key]
-
-        @seen_param_origins[key] = true
-        @facts.fetch(:state_param_origins) << origin
+          @seen_param_origins[key] = true
+          @facts.fetch(:state_param_origins) << origin
+        end
       end
 
       def assignment_value_node(node)
@@ -552,6 +565,23 @@ module FactMine
         return nil unless args
 
         child_nodes(args).last
+      end
+
+      def local_assignment_value_node(node)
+        @extraction_behavior.local_assignment_value_node(node) || child_node(node, 1)
+      end
+
+      def param_origin_names(node)
+        direct = param_origin_name(node)
+        names = []
+        names << direct if direct
+        names.concat(
+          @extraction_behavior.state_param_origin_names(
+            node,
+            current_params: current_function_params
+          )
+        )
+        names.map(&:to_s).select { |name| current_function_params.include?(name) }.uniq
       end
 
       def param_origin_name(node)
@@ -1324,6 +1354,8 @@ module FactMine
 
       def predicate_like_body?(text)
         lower = text.downcase
+        return true if @extraction_behavior.predicate_like_body?(text)
+
         %w[true false].include?(lower) ||
           lower.match?(/true|false|null|nil/) ||
           text.match?(/==|!=|&&|\|\|/) ||
@@ -1562,6 +1594,8 @@ module FactMine
       end
 
       def raw_kind(node)
+        return "pair" if normalized_hash_pair?(node)
+
         {
           "ROOT" => "program",
           "SCOPE" => "body",
@@ -1600,9 +1634,19 @@ module FactMine
           "TRUE" => "true",
           "FALSE" => "false",
           "NIL" => "nil",
+          "HASH" => "hash",
+          "NUMBER" => "number",
+          "INTEGER" => "integer",
           "STR" => "string",
           "DSTR" => "string"
         }.fetch(node.type.to_s, node.type.to_s)
+      end
+
+      def normalized_hash_pair?(node)
+        return false unless node.type.to_s == "HASH"
+
+        key = child_nodes(node).first
+        key && %w[LIT STR].include?(key.type.to_s)
       end
 
       def normalized_row(node)

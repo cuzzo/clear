@@ -91,6 +91,15 @@ module FactMine
 
         params.named_children.filter_map { |param| parameter_name(param) }.uniq
       end
+
+      def field_declaration_name_node(node)
+        if node.kind == "field_declaration"
+          declarator = node.named_children.find { |child| child.kind == "variable_declarator" }
+          return declarator if declarator&.text.to_s.match?(/\A[A-Za-z_]\w*\z/)
+        end
+
+        super
+      end
     end
 
     class JavaSyntaxAdapter
@@ -108,6 +117,10 @@ end
 module FactMine
   module Syntax
     class JavaNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      JAVA_FIELD_MODIFIERS = %w[
+        public private protected static final transient volatile
+      ].freeze
+
       def project_call(node, call)
         projected = call.dup
         text = node.text.to_s.strip
@@ -136,6 +149,14 @@ module FactMine
         return true if span_source.include?(".name()")
 
         false
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+        return nil if node.text.to_s.include?("(")
+
+        member = typed_member_declaration(node.text, JAVA_FIELD_MODIFIERS)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
       end
 
       def suppress_self_call_state_read?(call)
@@ -176,6 +197,19 @@ module FactMine
           { local: subject, non_nil_when_true: false }
         end
 
+      end
+
+      private
+
+      def typed_member_declaration(source, modifiers)
+        text = source.to_s.strip.sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| modifiers.include?(token) }.join(" ")
+        return nil if type.empty?
+
+        { name: name, type: type }
       end
     end
 

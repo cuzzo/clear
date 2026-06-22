@@ -25,7 +25,6 @@ module NilKill
     end
 
     def findings
-      SourceIndex.reset_global_shape_indexes
       added_lines_by_provider.flat_map do |provider, provider_added_lines|
         provider.static_diff_findings(
           root: root,
@@ -88,7 +87,7 @@ module NilKill
     end
 
     def findings_for_path(path)
-      lines = SourceIndex.source_lines(File.join(root, path))
+      lines = StaticAnalysis.source_lines(File.join(root, path))
       facts = lightweight_facts_for_path(path)
       audit_methods(path, facts.fetch(:methods), lines) +
         audit_hash_records(path, facts.fetch(:hash_shapes)) +
@@ -132,7 +131,7 @@ module NilKill
     end
 
     def lightweight_facts_for_path(path)
-      lines = SourceIndex.source_lines(File.join(root, path))
+      lines = StaticAnalysis.source_lines(File.join(root, path))
       line_numbers = added_lines.fetch(path)
       {
         methods: line_numbers.filter_map { |line_number| lightweight_method(path, line_number, lines[line_number - 1]) },
@@ -241,7 +240,7 @@ module NilKill
     end
 
     def typed_ivar_initialized_before?(path, line_number, ivar)
-      lines = SourceIndex.source_lines(File.join(root, path))
+      lines = StaticAnalysis.source_lines(File.join(root, path))
       return true if lines.first(line_number - 1).any? { |prior| typed_ivar_line?(prior, ivar) }
       return true if in_initialize_copy?(lines, line_number) && lines.any? { |line| typed_ivar_line?(line, ivar) }
 
@@ -267,7 +266,7 @@ module NilKill
         files_by_ivar = Hash.new { |hash, key| hash[key] = Set.new }
         context_paths.each do |rel|
           candidate = File.join(root, rel)
-          SourceIndex.source_lines(candidate).each do |line|
+          StaticAnalysis.source_lines(candidate).each do |line|
             found_ivar = typed_ivar_from_line(line)
             files_by_ivar[found_ivar] << rel if found_ivar
           end

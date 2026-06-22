@@ -99,6 +99,10 @@ module FactMine
         target
       end
 
+      def state_target(lhs)
+        lua_indexed_state_target(lhs) || super
+      end
+
       def generated_prelude?(document, node)
         return false unless line(node) == 1
 
@@ -198,9 +202,20 @@ module FactMine
         parent = parent_node(node)
         return nil unless parent && field_like_node?(parent)
 
+        if parent.kind == "method_index_expression"
+          return lua_method_target(parent, args)
+        end
+
         target_from_callee(parent).merge(arguments: args.named_children.map { |child| normalize_text(child.text) })
       rescue StandardError
         nil
+      end
+
+      def lua_indexed_state_target(lhs)
+        return nil unless lhs.kind == "variable_list"
+
+        target = lhs.named_children.find { |child| child.kind == "dot_index_expression" }
+        target && generic_state_target(target)
       end
 
       def lua_single_return_member_target(node)
@@ -231,6 +246,25 @@ module FactMine
     class LuaNormalizedExtractionBehavior < NormalizedExtractionBehavior
       def self_member_receiver(message)
         "self.#{message}"
+      end
+
+      def local_assignment_writes(_field, node, default_span:)
+        target = lua_state_assignment_target(node)
+        return [] unless target
+
+        [{
+          receiver: target.fetch(:receiver),
+          field: target.fetch(:field),
+          span: target.fetch(:span),
+          value_node: local_assignment_value_node(node)
+        }]
+      end
+
+      def local_assignment_value_node(node)
+        list = node.children.find { |child| child.respond_to?(:type) && child.type.to_s == "EXPRESSION_LIST" }
+        return nil unless list
+
+        list.children.find { |child| child.respond_to?(:type) } || list
       end
 
       def owner_for_function(_name, node, current_owner:, file_owner:)
@@ -276,6 +310,19 @@ module FactMine
       end
 
       private
+
+      def lua_state_assignment_target(node)
+        text = node.text.to_s.strip
+        match = text.match(/\Aself\.([A-Za-z_]\w*)\s*(?:\[.*\])?\s*=/)
+        return nil unless match
+
+        field = match[1]
+        {
+          receiver: "self",
+          field: field,
+          span: target_span_from_text(node, "self.#{field}")
+        }
+      end
 
       def teal_compat_prelude?(node)
         node.first_lineno == 1 &&

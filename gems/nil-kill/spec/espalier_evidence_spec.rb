@@ -75,8 +75,7 @@ RSpec.describe NilKill::EspalierEvidence do
   end
 
   it "emits Tree-sitter static evidence for Zig targets" do
-    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
-    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter evidence test" unless grammar && File.file?(grammar)
+    FactMine::Syntax::TreeSitterAdapter.new.send(:parser_for, :zig)
 
     Dir.mktmpdir("nil-kill-espalier-zig", NilKill::ROOT) do |dir|
       source = File.join(dir, "box.zig")

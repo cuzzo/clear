@@ -136,7 +136,7 @@ class AstTest < Minitest::Test
       refute_nil defn
       body = defn.children[1].children[2]
       assert_equal "RETURN", body.type.to_s
-      assert_equal "EXPRESSION_LIST", body.children.first.type.to_s
+      assert_equal "LVAR", body.children.first.type.to_s
     end
   end
 

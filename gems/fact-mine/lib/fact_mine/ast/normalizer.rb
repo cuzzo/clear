@@ -217,6 +217,8 @@ module FactMine
             wrap(:SELF, children: [], source: node)
           elsif variable_name?(node)
             variable_name_node(node)
+          elsif normalization_adapter.identifier_text_node?(node)
+            local_or_call_for_name(node.text.to_s, node)
           elsif instance_variable?(node)
             wrap(:IVAR, children: [node.text.to_s], source: node)
           elsif global_variable?(node)

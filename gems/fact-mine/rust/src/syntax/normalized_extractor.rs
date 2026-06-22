@@ -108,7 +108,7 @@ impl<'a> Extractor<'a> {
         match node.r#type.as_str() {
             "CLASS" | "MODULE" => self.scan_owner(node),
             "DEFN" | "DEFS" => self.scan_function(node),
-            "HASH" if block_like_hash(node) => {}
+            "HASH" => self.scan_children(node),
             "IF" | "UNLESS" => self.scan_if(node),
             "FOR" | "WHILE" | "UNTIL" => self.scan_loop(node),
             "RESCUE" => self.scan_rescue(node),
@@ -1903,11 +1903,6 @@ fn hidden_assignment_mutation(
     }
 }
 
-fn block_like_hash(node: &Node) -> bool {
-    let text = node.text.trim();
-    text.starts_with('{') && !text.contains("=>") && !text.contains(':')
-}
-
 fn normalized_ternary_if(node: &Node) -> bool {
     node.r#type == "IF" && node.text.contains(" ? ") && node.text.contains(" : ")
 }
@@ -1939,6 +1934,10 @@ fn raw_child(child: &Child) -> Option<RawNode> {
 }
 
 fn raw_kind(node: &Node) -> &str {
+    if normalized_hash_pair(node) {
+        return "pair";
+    }
+
     match node.r#type.as_str() {
         "ROOT" => "program",
         "SCOPE" => "body",
@@ -1962,9 +1961,19 @@ fn raw_kind(node: &Node) -> &str {
         "TRUE" => "true",
         "FALSE" => "false",
         "NIL" => "nil",
+        "HASH" => "hash",
+        "NUMBER" => "number",
+        "INTEGER" => "integer",
         "STR" | "DSTR" => "string",
         _ => node.r#type.as_str(),
     }
+}
+
+fn normalized_hash_pair(node: &Node) -> bool {
+    node.r#type == "HASH"
+        && child_nodes(node)
+            .first()
+            .is_some_and(|child| matches!(child.r#type.as_str(), "LIT" | "STR"))
 }
 
 fn dispatch_members_inside(

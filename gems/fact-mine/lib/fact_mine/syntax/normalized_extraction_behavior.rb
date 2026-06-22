@@ -78,6 +78,14 @@ module FactMine
         []
       end
 
+      def local_assignment_value_node(_node)
+        nil
+      end
+
+      def state_param_origin_names(_node, current_params:)
+        []
+      end
+
       def implicit_owner_fields?
         false
       end
@@ -279,6 +287,10 @@ module FactMine
 
       def structural_semantic_effects(_node, function_name:)
         []
+      end
+
+      def predicate_like_body?(_text)
+        false
       end
 
       def visibility_events_from_calls(_calls)

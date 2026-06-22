@@ -3,6 +3,69 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill infer pipeline" do
+  it "indexes Ruby source facts through static evidence providers" do
+    Dir.mktmpdir("nil-kill-static-provider", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        class StaticProviderExample
+          extend T::Sig
+
+          sig { params(reason: String).returns(String) }
+          def call(reason)
+            reason.nil?
+            reason
+          end
+        end
+      RUBY
+
+      isolated_env("NIL_KILL_TARGETS" => dir) do
+        infer = NilKill::Infer.new(["--no-sorbet"])
+        infer.index_sources
+
+        store = infer.store
+        rel = Pathname.new(source).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+        expect(store.facts["existing_sigs"]).to include(a_hash_including(
+          "path" => rel,
+          "class" => "StaticProviderExample",
+          "method" => "call",
+          "non_nil_params" => include("reason")
+        ))
+        expect(store.facts["dead_nil_checks"]).to include(a_hash_including(
+          "path" => rel,
+          "kind" => "nil_check",
+          "code" => "reason.nil?"
+        ))
+      end
+    end
+  end
+
+  it "indexes Python through the static provider without Ruby-specific enrichment" do
+    Dir.mktmpdir("nil-kill-python-provider", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.py")
+      File.write(source, <<~PYTHON)
+        class StaticProviderExample:
+            def call(self, reason: str) -> str:
+                return reason
+      PYTHON
+
+      isolated_env("NIL_KILL_TARGETS" => dir) do
+        infer = NilKill::Infer.new(["--no-sorbet"])
+        infer.index_sources
+
+        store = infer.store
+        rel = Pathname.new(source).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+        expect(store.facts["existing_sigs"]).to include(a_hash_including(
+          "path" => rel,
+          "language" => "python",
+          "class" => "StaticProviderExample",
+          "method" => "call",
+          "params" => include(a_hash_including("name" => "reason", "type" => "str"))
+        ))
+        expect(store.facts["dead_nil_checks"]).to be_empty
+      end
+    end
+  end
+
   it "loads runtime evidence, indexes sources, builds actions, and writes a report" do
     Dir.mktmpdir("nil-kill-pipeline", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")

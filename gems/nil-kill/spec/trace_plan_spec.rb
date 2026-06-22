@@ -48,7 +48,7 @@ RSpec.describe NilKill::TracePlan do
     e = plan_entry(
       "class" => "C", "method" => "suffix", "kind" => "instance", "line" => 1,
       "path" => "src/c.rb",
-      # SourceIndex omits the block param from `params`, so only the
+      # StaticAnalysis omits the block param from `params`, so only the
       # typed positionals are seen -> sample=false (pruned, no record).
       "sig" => "sig { params(type: Symbol, value: String, block: T.untyped).returns(Prism::Token) }",
       "params" => [{ "name" => "type", "type" => "Symbol" }, { "name" => "value", "type" => "String" }]

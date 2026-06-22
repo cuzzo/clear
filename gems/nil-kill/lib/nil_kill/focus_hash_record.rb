@@ -22,32 +22,7 @@ module NilKill
       abort "no focused paths found for #{@struct_name}; pass --targets path[:path...]" if paths.empty?
 
       store = Store.new
-      SourceIndex.reset_global_shape_indexes
-      paths.each { |path| SourceIndex.new(path) } if @two_pass
-      paths.each do |path|
-        idx = SourceIndex.new(path)
-        store.facts["files"][NilKill.rel(path)] = idx.summary
-        store.facts["unsigned_methods"].concat(idx.methods.reject { |method| method["has_sig"] })
-        store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-        store.facts["tlet_sites"].concat(idx.tlet_sites)
-        store.facts["dead_nil_checks"].concat(idx.dead_nil_checks)
-        store.facts["struct_declarations"].concat(idx.struct_declarations)
-        store.facts["struct_field_static"].concat(idx.struct_field_static)
-        store.facts["tuple_arrays"].concat(idx.tuple_arrays)
-        store.facts["hash_shapes"].concat(idx.hash_shapes)
-        store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-        store.facts["hash_record_blockers"].concat(idx.hash_record_blockers)
-        store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls)
-        store.facts["type_normalizers"].concat(idx.type_normalizers)
-        store.facts["dispatcher_inferences"].concat(idx.dispatcher_inferences)
-        store.facts["return_origins"].concat(idx.return_origins)
-        store.facts["param_origins"].concat(idx.param_origins)
-        idx.methods.each do |method|
-          rec = store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
-          rec["source"] = method
-          rec["has_sig"] = method["has_sig"]
-        end
-      end
+      StaticAnalysis.index_store(store: store, targets: paths, root: ROOT)
 
       infer = Infer.allocate
       infer.instance_variable_set(:@store, store)

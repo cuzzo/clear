@@ -1,17 +1,13 @@
 # frozen_string_literal: true
 
 require "set"
+require_relative "static_helpers"
 
 module Espalier
   # Builds a manifest-derived dependency graph without owning rendering.
   class DependencyGraph
     Node = Struct.new(:id, :kind, :label, :owner, :file, :line, :metadata, keyword_init: true)
     Edge = Struct.new(:source, :target, :kind, :label, :conditional, :weight, :metadata, keyword_init: true)
-
-    CORE_TYPES = %w[
-      Array BasicObject Boolean Class FalseClass Float Hash Integer NilClass
-      Object Proc Set String Symbol T TrueClass
-    ].freeze
 
     attr_reader :nodes_by_id, :edges_by_key
 
@@ -154,7 +150,8 @@ module Espalier
         @owners = Set.new
         @owner_by_simple = {}
         @functions_by_owner = Hash.new { |h, k| h[k] = Set.new }
-        @state_types_by_owner = Hash.new { |h, k| h[k] = {} }
+        @state_targets_by_owner = Hash.new { |h, k| h[k] = {} }
+        @language_by_owner = {}
       end
 
       def build
@@ -175,12 +172,19 @@ module Espalier
 
           @owners << owner
           functions(mod).each { |fn| @functions_by_owner[owner] << value(fn, :name).to_s }
-          @state_types_by_owner[owner] = state_type_index(mod)
+          @language_by_owner[owner] = language_for(mod)
         end
 
         grouped = @owners.group_by { |owner| owner.split("::").last }
         @owner_by_simple = grouped.each_with_object({}) do |(simple, owners), out|
           out[simple] = owners.first if owners.size == 1
+        end
+
+        @manifest.each do |mod|
+          owner = value(mod, :module).to_s
+          next if owner.empty?
+
+          @state_targets_by_owner[owner] = state_owner_target_index(mod)
         end
       end
 
@@ -238,7 +242,7 @@ module Espalier
         @manifest.each do |mod|
           source_owner = value(mod, :module).to_s
           states(mod).each do |state|
-            target_owner = owner_for_type(value(state, :type))
+            target_owner = owner_for_state_type(state, mod)
             next unless target_owner
             next if target_owner == source_owner
 
@@ -387,26 +391,24 @@ module Espalier
         return nil if receiver == "self" || receiver == "this"
         return source_owner if receiver == source_owner
 
-        state_type = state_type_for(source_owner, receiver)
-        return owner_for_type(state_type) if state_type
+        state_target = state_target_for(source_owner, receiver)
+        return state_target if state_target
 
-        return nil unless receiver.match?(/\A[A-Z]/)
-
-        owner_for_type(receiver)
+        owner_for_direct_receiver(receiver, language: @language_by_owner[source_owner])
       end
 
-      def state_type_for(owner, receiver)
-        state_types = @state_types_by_owner[owner]
-        return state_types[receiver] if state_types.key?(receiver)
+      def state_target_for(owner, receiver)
+        state_targets = @state_targets_by_owner[owner]
+        return state_targets[receiver] if state_targets.key?(receiver)
 
         if receiver.start_with?("@")
           state_name = receiver.split(".").first
-          return state_types[state_name]
+          return state_targets[state_name]
         end
 
         if receiver.start_with?("self.", "this.")
           field = receiver.split(".")[1]
-          return state_types[field] || state_types["@#{field}"]
+          return state_targets[field] || state_targets["@#{field}"]
         end
 
         nil
@@ -438,15 +440,46 @@ module Espalier
         @functions_by_owner[owner].include?(function_name.to_s)
       end
 
-      def owner_for_type(type_text)
+      def owner_for_direct_receiver(receiver, language:)
+        text = receiver.to_s
+        return text if @owners.include?(text)
+        return @owner_by_simple[text] if @owner_by_simple.key?(text)
+        return nil unless ruby_language?(language)
+
+        owner_for_ruby_type(text)
+      end
+
+      def owner_for_state_type(state, mod)
+        structured_type_owner(type_references_for(state)) ||
+          (ruby_language?(language_for(mod)) ? owner_for_ruby_type(value(state, :type)) : nil)
+      end
+
+      def structured_type_owner(references)
+        Array(references).each do |reference|
+          names = if reference.is_a?(Hash)
+                    %i[owner qualified_name name type reference].filter_map { |key| value(reference, key).to_s }
+                  else
+                    [reference.to_s]
+                  end
+          names.reject(&:empty?).each do |name|
+            return name if @owners.include?(name)
+            return @owner_by_simple[name] if @owner_by_simple.key?(name)
+
+            simple = name.split("::").last.to_s.split(".").last.to_s
+            return @owner_by_simple[simple] if @owner_by_simple.key?(simple)
+          end
+        end
+        nil
+      end
+
+      def owner_for_ruby_type(type_text)
         return nil if type_text.nil?
 
         text = type_text.to_s
         return text if @owners.include?(text)
         return @owner_by_simple[text] if @owner_by_simple.key?(text)
 
-        owner_type_tokens(text).each do |token|
-          next if CORE_TYPES.include?(token)
+        Espalier.type_profile_for(:ruby, type_system: "sorbet").owner_reference_tokens(text).each do |token|
           return token if @owners.include?(token)
           return @owner_by_simple[token] if @owner_by_simple.key?(token)
 
@@ -456,16 +489,29 @@ module Espalier
         nil
       end
 
-      def owner_type_tokens(text)
-        text.scan(/[A-Z][A-Za-z0-9]*(?:::[A-Z][A-Za-z0-9]*)*/)
-      end
-
-      def state_type_index(mod)
+      def state_owner_target_index(mod)
         states(mod).each_with_object({}) do |state, out|
           state_name = value(state, :name).to_s
-          type = value(state, :type)
-          out[state_name] = type.to_s if type && !type.to_s.empty?
+          target = owner_for_state_type(state, mod)
+          out[state_name] = target if target
         end
+      end
+
+      def type_references_for(state)
+        value(state, :type_references) || value(state, :owner_references) || value(state, :references)
+      end
+
+      def language_for(mod)
+        language = value(mod, :language).to_s
+        return language unless language.empty?
+
+        FactMine::Syntax.language_for(value(mod, :file)).to_s
+      rescue StandardError
+        ""
+      end
+
+      def ruby_language?(language)
+        language.to_s == "ruby"
       end
 
       def functions(mod)

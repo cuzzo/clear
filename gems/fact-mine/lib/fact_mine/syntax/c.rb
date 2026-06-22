@@ -114,6 +114,8 @@ end
 module FactMine
   module Syntax
     class CNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      C_FIELD_MODIFIERS = %w[const volatile struct union enum].freeze
+
       def call_receiver(parts)
         receiver = parts.fetch(:receiver)
         return receiver unless receiver == "self"
@@ -147,6 +149,14 @@ module FactMine
         name && text.include?("struct") ? { name: name, kind: "struct" } : nil
       end
 
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+        return nil if node.text.to_s.include?("(")
+
+        member = c_member_declaration(node.text)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
+      end
+
       def owner_for_function(name, node, current_owner:, file_owner:)
         return current_owner unless current_owner == file_owner
 
@@ -154,6 +164,8 @@ module FactMine
         first = params.split(",", 2).first.to_s.strip
         typed_self = first[/\A(?:const\s+)?(?:struct\s+)?([A-Za-z_]\w*)\s*\*\s*self\z/, 1]
         return typed_self if typed_self
+        typed_receiver = first[/\A(?:const\s+)?(?:struct\s+)?([A-Za-z_]\w*)\s*\*\s*[A-Za-z_]\w*\z/, 1]
+        return typed_receiver if typed_receiver && name.downcase.start_with?("#{typed_receiver.downcase}_")
 
         name[/\A([A-Z]\w*)_/, 1] || current_owner
       end
@@ -190,6 +202,21 @@ module FactMine
           { local: subject, non_nil_when_true: false }
         end
 
+      end
+
+      private
+
+      def c_member_declaration(source)
+        text = source.to_s.strip.sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| C_FIELD_MODIFIERS.include?(token) }.join(" ")
+        type = type.gsub(/\s+\*/, " *").strip
+        type = type.delete_suffix(" *").strip
+        return nil if type.empty?
+
+        { name: name, type: type }
       end
     end
 

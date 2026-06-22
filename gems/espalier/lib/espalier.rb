@@ -1,7 +1,16 @@
 # frozen_string_literal: true
 
+module Espalier
+  ROOT = File.expand_path("../../..", __dir__)
+  VERSION = "0.0.1"
+end
+
+require_relative "espalier/static_helpers"
+require_relative "espalier/languages"
+require_relative "espalier/tree_sitter"
 require_relative "espalier/ast_extractor"
 require_relative "espalier/nil_kill_evidence"
+require_relative "espalier/static_evidence"
 require_relative "espalier/privacy_analyzer"
 require_relative "espalier/architecture_analyzer"
 require_relative "espalier/aggregator"
@@ -11,9 +20,5 @@ require_relative "espalier/formatter"
 require_relative "espalier/reporter"
 
 # Espalier: Architectural representation and semantic abstraction aggregator for LLMs.
-# Parses source skeletons and state modifications, compiles call
-# nodes into DELEGATIONS, and synthesizes annotations from sibling gems: nil-kill,
-# decomplex, boobytrap, and slopcop.
-module Espalier
-  VERSION = "0.0.1"
-end
+# Parses source skeletons and state modifications, compiles call nodes into
+# DELEGATIONS, and synthesizes annotations from sibling gems.

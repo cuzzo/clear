@@ -15,7 +15,9 @@ module NilKill
                  "hash_record_member_calls" => [],
                  "collection_runtime" => [], "ivar_runtime" => [], "collect_coverage" => {},
                  "type_normalizers" => [], "dispatcher_inferences" => [], "return_origins" => [], "param_origins" => [],
-                 "runtime_call_edges" => [], "fallibility_pressure" => [], "hidden_enum_pressure" => [], "flow_graph" => nil }
+                 "rbi_field_types" => [], "noreturn_methods" => [],
+                 "runtime_call_edges" => [], "fallibility_pressure" => [], "hidden_enum_pressure" => [], "flow_graph" => nil,
+                 "static_evidence_summary" => {} }
       @diagnostics = { "sorbet_errors" => [], "nil_origins" => [], "sorbet_feedback" => [] }
       @actions = []
     end

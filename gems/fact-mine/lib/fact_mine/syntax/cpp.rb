@@ -153,6 +153,10 @@ end
 module FactMine
   module Syntax
     class CppNormalizedExtractionBehavior < NormalizedExtractionBehavior
+      CPP_FIELD_MODIFIERS = %w[
+        public private protected mutable static const constexpr volatile unsigned signed short long
+      ].freeze
+
       def implicit_owner_fields?
         true
       end
@@ -167,6 +171,14 @@ module FactMine
         return nil if %w[private protected public mutable static const constexpr volatile unsigned signed short long int char float double bool string].include?(name)
 
         name
+      end
+
+      def state_declaration_from_node(node, owner:)
+        return nil unless node.type.to_s == "FIELD_DECLARATION"
+        return nil if node.text.to_s.include?("(")
+
+        member = cpp_member_declaration(node.text)
+        member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }
       end
 
       def source_message_text(message, node)
@@ -255,6 +267,20 @@ module FactMine
           { local: subject, non_nil_when_true: false }
         end
 
+      end
+
+      private
+
+      def cpp_member_declaration(source)
+        text = source.to_s.strip.sub(/=.*/m, "").delete_suffix(";").strip
+        name = text.scan(/[A-Za-z_]\w*/).last
+        return nil unless name && simple_identifier?(name)
+
+        type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| CPP_FIELD_MODIFIERS.include?(token) }.join(" ")
+        type = type.gsub(/\s+\*/, " *").gsub(/\s+&/, " &").strip
+        return nil if type.empty?
+
+        { name: name, type: type }
       end
     end
 

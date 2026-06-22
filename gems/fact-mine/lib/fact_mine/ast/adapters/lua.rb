@@ -8,6 +8,7 @@ module FactMine
       ASSIGNMENT_OPERATORS = %w[=].freeze
       LEADING_FUNCTION_WRAPPER_KINDS = %w[block].freeze
       LEADING_IF_WRAPPER_KINDS = %w[block].freeze
+      IDENTIFIER_TEXT_KEYWORDS = %w[false nil true].freeze
 
       def explicit_alternative(node)
         node.named_children.find { |child| %w[elseif_statement else else_statement].include?(child.kind) }
@@ -110,7 +111,7 @@ module FactMine
 
       def hash_literal_values(node)
         target = hash_literal_target(node) || node
-        return target.named_children if target.kind == "arguments"
+        return target.named_children if %w[arguments expression_list].include?(target.kind)
 
         super
       rescue StandardError
@@ -118,8 +119,10 @@ module FactMine
       end
 
       def identifier_text_node?(node)
-        %w[variable_list expression_list].include?(node.kind) &&
-          node.text.to_s.match?(/\A[A-Za-z_]\w*\z/)
+        text = node.text.to_s
+        node.kind == "expression_list" &&
+          !IDENTIFIER_TEXT_KEYWORDS.include?(text) &&
+          text.match?(/\A[A-Za-z_]\w*\z/)
       rescue StandardError
         false
       end
@@ -184,7 +187,7 @@ module FactMine
       end
 
       def lua_positional_table_arguments(node)
-        return nil unless node&.kind == "arguments"
+        return nil unless %w[arguments expression_list].include?(node&.kind)
         return nil unless bracketed?(node, "{", "}")
 
         fields = node.named_children
@@ -202,7 +205,7 @@ module FactMine
           end
         end
 
-        return nil unless node&.kind == "arguments"
+        return nil unless %w[arguments expression_list].include?(node&.kind)
         return nil unless bracketed?(node, "{", "}")
 
         fields = node.named_children

@@ -1,6 +1,18 @@
 {
   "local_flow": [
     {
+      "boundaries": [],
+      "method": "none_ready",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
       "boundaries": [
         {
           "after_index": 2,
@@ -44,15 +56,9 @@
           ]
         },
         {
-          "co_uses": [
-            [
-              "input",
-              "local"
-            ]
-          ],
+          "co_uses": [],
           "dependencies": [],
           "reads": [
-            "input",
             "local"
           ],
           "writes": []
@@ -94,18 +100,6 @@
           "reads": [
             "result"
           ],
-          "writes": []
-        }
-      ]
-    },
-    {
-      "boundaries": [],
-      "method": "none_ready",
-      "statements": [
-        {
-          "co_uses": [],
-          "dependencies": [],
-          "reads": [],
           "writes": []
         }
       ]

@@ -150,7 +150,7 @@
         "caller_name": "self.entry",
         "confidence": "high",
         "file": "facts/topology_rich.rb",
-        "kind": "internal_self",
+        "kind": "direct_self",
         "line": 3,
         "span": [
           3,

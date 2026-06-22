@@ -126,7 +126,7 @@
         "caller_name": "entry",
         "confidence": "high",
         "file": "facts/topology.rb",
-        "kind": "internal_self",
+        "kind": "direct_self",
         "line": 3,
         "span": [
           3,
