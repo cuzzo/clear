@@ -1,11 +1,11 @@
 # typed: false
 # frozen_string_literal: true
 
-sibling_syntax = File.expand_path("../../../fact-mine/lib/fact_mine/syntax", __dir__)
-if File.file?("#{sibling_syntax}.rb")
-  require sibling_syntax
-else
-  require "fact_mine/syntax"
+begin
+  require "espalier/tree_sitter"
+rescue LoadError
+  $LOAD_PATH.unshift(File.expand_path("../../../espalier/lib", __dir__))
+  require "espalier/tree_sitter"
 end
 require "set"
 
@@ -55,7 +55,7 @@ module NilKill
       end
 
       def parse
-        parser = FactMine::Syntax::TreeSitterAdapter.new.send(:parser_for, :ruby)
+        parser = Espalier::TreeSitter.parser_for(:ruby)
         tree = parser.parse(@source)
         context = Context.new(@source, tree.root_node, @path)
         ParseResult.new(context.wrap(tree.root_node), [])

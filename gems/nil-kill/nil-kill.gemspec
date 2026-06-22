@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "decomplex", "= 0.0.1"
-  spec.add_dependency "fact-mine", ">= 0.0.1"
+  spec.add_dependency "espalier", ">= 0.0.1"
   spec.add_dependency "parlour"
   spec.add_dependency "rbs-trace"
   spec.add_dependency "sorbet-runtime"

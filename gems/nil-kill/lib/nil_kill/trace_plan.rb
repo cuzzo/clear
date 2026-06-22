@@ -14,8 +14,9 @@ module NilKill
     end
 
     def write(path)
-      NilKill.target_files.each do |file|
-        idx = StaticAnalysis.new(file)
+      files = NilKill.target_files
+      unless files.empty?
+        idx = StaticAnalysis.new(files)
         idx.methods.each { |method| add_method(method) }
         idx.tlet_sites.each { |site| add_tlet(site) }
         idx.struct_declarations.each { |decl| add_struct_decl(decl) }

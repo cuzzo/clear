@@ -13,6 +13,13 @@ PATH
       tree_sitter (~> 0.1)
 
 PATH
+  remote: gems/espalier
+  specs:
+    espalier (0.0.1)
+      decomplex (= 0.0.1)
+      fact-mine (>= 0.0.1)
+
+PATH
   remote: gems/fact-mine
   specs:
     fact-mine (0.0.1)
@@ -23,7 +30,7 @@ PATH
   specs:
     nil-kill (0.1.0)
       decomplex (= 0.0.1)
-      fact-mine (>= 0.0.1)
+      espalier (>= 0.0.1)
       parlour
       rbs-trace
       sorbet-runtime
@@ -301,6 +308,7 @@ DEPENDENCIES
   csv
   debride
   decomplex!
+  espalier!
   fact-mine!
   flog
   minitest (~> 5.25)

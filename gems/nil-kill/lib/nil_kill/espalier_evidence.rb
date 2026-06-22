@@ -3,6 +3,13 @@
 
 require "optparse"
 
+begin
+  require "espalier/tree_sitter"
+rescue LoadError
+  $LOAD_PATH.unshift(File.expand_path("../../../espalier/lib", __dir__))
+  require "espalier/tree_sitter"
+end
+
 module NilKill
   class EspalierEvidence
     DEFAULT_OUTPUT = File.join(TMP_DIR, "espalier-evidence.json")
@@ -105,7 +112,7 @@ module NilKill
 
     def non_ruby_target?(target)
       path = File.expand_path(target, NilKill::ROOT)
-      exts = FactMine::Syntax.supported_exts(parser: "tree_sitter") - [".rb"]
+      exts = Espalier::TreeSitter.supported_exts(parser: "tree_sitter") - [".rb"]
       if File.directory?(path)
         Dir.glob(File.join(path, "**", "*")).any? { |file| File.file?(file) && exts.include?(File.extname(file).downcase) }
       else

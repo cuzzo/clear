@@ -18,4 +18,5 @@ Gem::Specification.new do |s|
   s.executables = ["espalier"]
   s.required_ruby_version = ">= 3.1"
   s.add_dependency "decomplex", "= 0.0.1"
+  s.add_dependency "fact-mine", ">= 0.0.1"
 end
