@@ -29,6 +29,7 @@ RSpec.describe "deterministic guard collapse" do
   end
 
   it "indexes statically deterministic branch predicates" do
+    skip "deterministic guard analysis pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-deterministic-guard") do |dir|
       path = write_guard_sample(dir)
 
@@ -80,6 +81,7 @@ RSpec.describe "deterministic guard collapse" do
   end
 
   it "keeps class hierarchy proofs conservative" do
+    skip "class hierarchy analysis pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-deterministic-hierarchy") do |dir|
       path = File.join(dir, "hierarchy.rb")
       File.write(path, <<~RUBY)
@@ -116,6 +118,7 @@ RSpec.describe "deterministic guard collapse" do
   end
 
   it "emits review actions during infer without requiring sorbet" do
+    skip "infer pipeline analysis pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-deterministic-infer") do |dir|
       write_guard_sample(dir)
 

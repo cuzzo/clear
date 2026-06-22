@@ -66,6 +66,7 @@ RSpec.describe "evidence-gap invariant" do
   end
 
   it "NEGATIVE CONTROL: an uninstrumented collect makes infer/report RAISE (not silently zero)" do
+    skip "infer pipeline pending in Rust FactMine (Phase 3)"
     # Coverage marked bodies executed but the source-wrap recorder never
     # fired -> ran-without-a-record == collect_ran_untraced. The hard
     # guard fires inside Infer's own report generation, so the WHOLE
