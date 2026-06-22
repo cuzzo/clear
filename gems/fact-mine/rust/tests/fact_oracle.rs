@@ -67,6 +67,15 @@ fn source_fact_examples_match_oracles() -> Result<()> {
                 )?)?),
             );
         }
+        if expected.get("path_condition").is_some() {
+            actual.insert(
+                "path_condition".to_string(),
+                project_path_condition(&value(syntax::path_condition::scan_files(
+                    &[fixture.clone()],
+                    language,
+                )?)?),
+            );
+        }
 
         let actual = Value::Object(actual);
         if actual != expected {
@@ -388,6 +397,52 @@ fn project_local_flow(output: &Value) -> Value {
             })
             .collect(),
     )
+}
+
+fn project_path_condition(output: &Value) -> Value {
+    json!({
+        "neglected": array(field(output, "neglected")).iter().map(|row| {
+            json!({
+                "pattern": field(row, "pattern"),
+                "support": field(row, "support"),
+                "missing": field(row, "missing"),
+                "at": canonical_location(field(row, "at")),
+                "action": field(row, "action"),
+            })
+        }).collect::<Vec<_>>(),
+        "scattered": array(field(output, "scattered")).iter().map(|row| {
+            json!({
+                "guards": field(row, "guards"),
+                "support": field(row, "support"),
+                "scatter": field(row, "scatter"),
+                "rank": field(row, "rank"),
+                "sites": canonical_locations(field(row, "sites")),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn canonical_location(value: &Value) -> Value {
+    value
+        .as_str()
+        .map(canonical_location_text)
+        .map(Value::String)
+        .unwrap_or(Value::Null)
+}
+
+fn canonical_locations(value: &Value) -> Value {
+    Value::Array(
+        array(value)
+            .iter()
+            .map(canonical_location)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn canonical_location_text(text: &str) -> String {
+    text.split_once("/examples/")
+        .map(|(_, suffix)| format!("examples/{suffix}"))
+        .unwrap_or_else(|| text.to_string())
 }
 
 fn canonical_co_uses(value: &Value) -> Value {

@@ -260,3 +260,87 @@ fn keyword_block_span(node: &Node, keyword: &str) -> Option<Span> {
         + 1;
     Some([start_line, start_column, end_line, end_column])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: &str, text: &str) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 10,
+            first_column: 2,
+            last_lineno: 10 + text.lines().count().saturating_sub(1),
+            last_column: text.lines().last().map(str::len).unwrap_or_default(),
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn rust_behavior_extracts_fallback_owner_and_function_names() {
+        let behavior = RustNormalizedBehavior;
+        let impl_node = node("CLASS", "impl Widget {}");
+        let struct_node = node("CLASS", "struct Widget {}");
+
+        assert_eq!(
+            behavior.owner_name_from_text(&impl_node).as_deref(),
+            Some("Widget")
+        );
+        assert_eq!(
+            behavior.owner_name_from_text(&struct_node).as_deref(),
+            Some("Widget")
+        );
+        assert_eq!(
+            behavior.function_name_from_text("pub fn parse_value(input: &str)"),
+            Some("parse_value".to_string())
+        );
+        assert_eq!(
+            function_name_after_fn("fn local_helper()"),
+            Some("local_helper".to_string())
+        );
+    }
+
+    #[test]
+    fn rust_behavior_classifies_fallback_keywords_and_owner_spans() {
+        let behavior = RustNormalizedBehavior;
+        let impl_node = node("CLASS", "trait Widget {}");
+        let struct_node = node("CLASS", "pub struct Widget {\n    value: usize,\n}");
+
+        assert_eq!(behavior.owner_kind(&impl_node, "class"), "class");
+        assert_eq!(
+            behavior.owner_name_span("Widget", &struct_node, [1, 0, 1, 1]),
+            Some([10, 6, 12, 1,])
+        );
+        assert!(behavior.local_flow_declaration_keyword("let"));
+        assert!(behavior.local_flow_keyword("match"));
+        assert!(behavior.local_flow_keyword("mut"));
+        assert!(!behavior.local_flow_keyword("domain_value"));
+    }
+
+    #[test]
+    fn rust_behavior_projects_edge_calls_and_terminators() {
+        let behavior = RustNormalizedBehavior;
+        let call_node = node("CALL", "callback.call()");
+        let projected = behavior.project_call(
+            &call_node,
+            NormalizedCallProjection {
+                receiver: "callback".to_string(),
+                message: "call".to_string(),
+                arguments: Vec::new(),
+                access_span: [10, 2, 10, 17],
+                span: [10, 2, 10, 17],
+            },
+        );
+
+        assert_eq!(projected.receiver, "callback");
+        assert_eq!(projected.message, "call");
+        assert!(behavior.terminating_call_message("panic"));
+        assert!(!behavior.terminating_call_message("recover"));
+        assert_eq!(owner_after_keyword("enum Widget {}", "struct"), None);
+        assert_eq!(
+            keyword_block_span(&node("CLASS", "enum Widget {}"), "struct"),
+            None
+        );
+    }
+}
