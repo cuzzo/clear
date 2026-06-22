@@ -135,7 +135,12 @@ jobs:
             tree-sitter-java@0.23.5 \
             tree-sitter-kotlin@0.3.8 \
             tree-sitter-swift@0.7.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build fact-mine-rust binary
+        run: cargo build --release --manifest-path gems/fact-mine/rust/Cargo.toml
       - run: bundle exec rspec gems/nil-kill/spec
+        env:
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
 
   ruby-gems-coverage:
     name: Ruby gems coverage
@@ -171,8 +176,13 @@ jobs:
             tree-sitter-java@0.23.5 \
             tree-sitter-kotlin@0.3.8 \
             tree-sitter-swift@0.7.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build fact-mine-rust binary
+        run: cargo build --release --manifest-path gems/fact-mine/rust/Cargo.toml
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
+        env:
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-gems
