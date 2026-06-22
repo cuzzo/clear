@@ -9,7 +9,7 @@
       "owner": "Calculator",
       "name": "add",
       "kind": "instance",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
       "line": 4,
       "span": [
         4,
@@ -33,7 +33,7 @@
       "owner": "Calculator",
       "name": "result",
       "kind": "instance",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
       "line": 8,
       "span": [
         8,
@@ -49,9 +49,9 @@
   ],
   "fields": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000@total",
+      "id": "ruby\u0000gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000@total",
       "language": "ruby",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
       "owner": "Calculator",
       "name": "@total",
       "line": 5,
