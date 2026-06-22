@@ -18,14 +18,11 @@
         5
       ],
       "language": "ruby",
-      "signature": "def add(value)",
+      "signature": "",
       "params": [
         "value"
       ],
-      "source": {
-        "signature": "def add(value)",
-        "type_system": "sorbet"
-      }
+      "source": {}
     },
     {
       "key": [
@@ -45,12 +42,9 @@
         5
       ],
       "language": "ruby",
-      "signature": "def result()",
+      "signature": "",
       "params": [],
-      "source": {
-        "signature": "def result()",
-        "type_system": "sorbet"
-      }
+      "source": {}
     }
   ],
   "fields": [

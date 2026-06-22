@@ -203,15 +203,22 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let path = document.file.clone();
     let nil_kill = profile == Profile::NilKill;
 
-    let methods = extract_methods(document, &language, &path);
+    // Read source lines once for signature extraction (matches Ruby approach)
+    let lines = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>();
+
+    let methods = extract_methods(&lines, document, &language, &path);
     let fields = extract_fields(document, &language, &path);
     let (state_types, state_type_records) = extract_state_types(document, &language, &path);
     let (state_protocols, state_protocol_records) =
         extract_state_protocols(document, &language, &path);
     let (state_param_origins, state_param_origin_records) =
         extract_state_param_origins(document, &language, &path);
-    let signatures = extract_signatures(document);
-    let type_definitions = extract_type_definitions(document, &language, &path);
+    let signatures = extract_signatures(&lines, document);
+    let type_definitions = extract_type_definitions(&lines, document, &language, &path);
     let hash_shapes = Vec::new(); // TODO Phase 2c
     let array_shapes = Vec::new(); // TODO Phase 2c
     let struct_declarations = extract_struct_declarations(document, &language, &path);
@@ -337,7 +344,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     }
 }
 
-fn extract_methods(document: &Document, language: &str, path: &str) -> Vec<MethodRecord> {
+fn extract_methods(lines: &[String], document: &Document, language: &str, path: &str) -> Vec<MethodRecord> {
     document
         .function_defs
         .iter()
@@ -345,7 +352,7 @@ fn extract_methods(document: &Document, language: &str, path: &str) -> Vec<Metho
             let owner = fn_def.owner.clone();
             let name = fn_def.name.clone();
             let kind = method_kind(fn_def, &owner);
-            let signature = method_signature(document, fn_def, language);
+            let signature = method_signature(lines, fn_def, language);
             let source = method_source(&signature, language);
 
             MethodRecord {
@@ -377,26 +384,85 @@ fn method_kind(fn_def: &syntax::FunctionDef, owner: &str) -> String {
 }
 
 fn method_signature(
-    _document: &Document,
+    lines: &[String],
     fn_def: &syntax::FunctionDef,
     language: &str,
 ) -> String {
-    // Use the source-level signature if available from the extractor,
-    // otherwise synthesize from name + params.
     let sig = fn_def.signature.trim().to_string();
     if !sig.is_empty() {
         return sig;
     }
 
-    let params = fn_def.params.join(", ");
     match language {
-        "ruby" => format!("def {}({})", fn_def.name, params),
-        "python" => format!("def {}({})", fn_def.name, params),
-        "typescript" | "javascript" => {
-            format!("function {}({})", fn_def.name, params)
+        "ruby" => {
+            let sig = ruby_signature_before_line(lines, fn_def.line);
+            if sig.starts_with("sig ") {
+                return sig;
+            }
+            String::new()
         }
-        _ => format!("{} ({})", fn_def.name, params),
+        "python" | "typescript" | "javascript" => {
+            source_signature_for(lines, fn_def)
+        }
+        _ => {
+            let params = fn_def.params.join(", ");
+            if params.is_empty() {
+                fn_def.name.clone()
+            } else {
+                format!("{} ({})", fn_def.name, params)
+            }
+        }
     }
+}
+
+/// Ruby: scan backwards from the def line to find a `sig { ... }` block.
+fn ruby_signature_before_line(lines: &[String], line: usize) -> String {
+    let mut idx = line.saturating_sub(2);
+    if idx >= lines.len() {
+        return String::new();
+    }
+    // Skip blank lines going backward
+    while idx > 0 && lines[idx].trim().is_empty() {
+        idx = idx.saturating_sub(1);
+    }
+    if lines[idx].trim().starts_with("sig ") {
+        return lines[idx].trim().to_string();
+    }
+    let mut start = idx;
+    loop {
+        if start == 0 {
+            break;
+        }
+        let text = lines[start].trim();
+        if text.starts_with("sig ") {
+            // Join lines from start to idx
+            let joined: String = lines[start..=idx]
+                .iter()
+                .map(|l| l.trim())
+                .collect::<Vec<_>>()
+                .join(" ");
+            // Normalize whitespace
+            let normalized: String = joined
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            return normalized;
+        }
+        if text.starts_with("def ") || text.starts_with("class ") || text.starts_with("module ") {
+            return String::new();
+        }
+        start = start.saturating_sub(1);
+    }
+    String::new()
+}
+
+/// Python/TypeScript: the raw def line IS the signature.
+fn source_signature_for(lines: &[String], fn_def: &syntax::FunctionDef) -> String {
+    let idx = fn_def.line.saturating_sub(1);
+    if idx >= lines.len() {
+        return String::new();
+    }
+    lines[idx].trim().to_string()
 }
 
 fn method_source(signature: &str, language: &str) -> serde_json::Value {
@@ -404,14 +470,33 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         return serde_json::Value::Object(Default::default());
     }
     let mut source = serde_json::Map::new();
-    source.insert(
-        "signature".to_string(),
-        serde_json::Value::String(signature.to_string()),
-    );
-    source.insert(
-        "type_system".to_string(),
-        serde_json::Value::String(language_type_system(language).to_string()),
-    );
+    if language == "ruby" && signature.starts_with("sig ") {
+        source.insert(
+            "sig".to_string(),
+            serde_json::Value::String(signature.to_string()),
+        );
+        source.insert(
+            "signature".to_string(),
+            serde_json::Value::String(signature.to_string()),
+        );
+        source.insert(
+            "type_system".to_string(),
+            serde_json::Value::String("sorbet".to_string()),
+        );
+        source.insert(
+            "source".to_string(),
+            serde_json::Value::String("annotation".to_string()),
+        );
+    } else {
+        source.insert(
+            "signature".to_string(),
+            serde_json::Value::String(signature.to_string()),
+        );
+        source.insert(
+            "type_system".to_string(),
+            serde_json::Value::String(language_type_system(language).to_string()),
+        );
+    }
     serde_json::Value::Object(source)
 }
 
@@ -673,10 +758,11 @@ fn extract_state_param_origins(
 // Signatures
 // ---------------------------------------------------------------------------
 
-fn extract_signatures(document: &Document) -> BTreeMap<String, String> {
+fn extract_signatures(lines: &[String], document: &Document) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
+    let language = document.language.as_str();
     for fn_def in &document.function_defs {
-        let sig = fn_def.signature.trim().to_string();
+        let sig = method_signature(lines, fn_def, language);
         if !sig.is_empty() {
             let key = format!("{}\u{0}{}", fn_def.owner, fn_def.name);
             out.insert(key, sig);
@@ -690,15 +776,16 @@ fn extract_signatures(document: &Document) -> BTreeMap<String, String> {
 // ---------------------------------------------------------------------------
 
 fn extract_type_definitions(
+    lines: &[String],
     document: &Document,
     language: &str,
     path: &str,
 ) -> Vec<TypeDefinition> {
     let mut out = Vec::new();
 
-    // Method signatures from function_defs
+    // Method signatures from function_defs with source-level sig extraction
     for fn_def in &document.function_defs {
-        let sig = fn_def.signature.trim().to_string();
+        let sig = method_signature(lines, fn_def, language);
         if sig.is_empty() {
             continue;
         }
@@ -844,10 +931,89 @@ fn parse_typed_signature(
     language: &str,
 ) -> (Option<String>, Vec<BTreeMap<String, String>>) {
     match language {
+        "ruby" => parse_sorbet_signature(sig),
         "python" => parse_python_signature(sig),
         "typescript" | "javascript" => parse_typescript_signature(sig),
         _ => (None, Vec::new()),
     }
+}
+
+/// Sorbet sig: sig { params(name: Type).returns(ReturnType) }
+fn parse_sorbet_signature(
+    sig: &str,
+) -> (Option<String>, Vec<BTreeMap<String, String>>) {
+    let sig = sig.trim();
+    if !sig.starts_with("sig ") {
+        return (None, Vec::new());
+    }
+
+    let return_type = sorbet_extract(sig, ".returns(");
+    let params = sorbet_extract_params(sig);
+    (return_type, params)
+}
+
+fn sorbet_extract(sig: &str, marker: &str) -> Option<String> {
+    let start = sig.find(marker)?;
+    let inner = &sig[start + marker.len()..];
+    let mut depth = 1u32;
+    let mut end = 0usize;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if end > 0 {
+        Some(inner[..end].trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn sorbet_extract_params(sig: &str) -> Vec<BTreeMap<String, String>> {
+    let params_str = match sorbet_extract(sig, ".params(") {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in split_top_level_params(&params_str) {
+        if let Some((name, type_part)) = entry.split_once(':') {
+            let mut map = BTreeMap::new();
+            map.insert("name".to_string(), name.trim().to_string());
+            map.insert("type".to_string(), type_part.trim().to_string());
+            out.push(map);
+        }
+    }
+    out
+}
+
+fn split_top_level_params(params: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, c) in params.char_indices() {
+        match c {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' | '>' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(params[start..i].to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let remainder = params[start..].trim().to_string();
+    if !remainder.is_empty() {
+        out.push(remainder);
+    }
+    out
 }
 
 fn parse_python_signature(
