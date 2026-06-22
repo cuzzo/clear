@@ -283,6 +283,64 @@ jobs:
       - name: Run Rust Decomplex tests
         run: cargo test --manifest-path gems/decomplex/rust/Cargo.toml
 
+  fact-mine-rust-coverage:
+    name: FactMine Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for FactMine
+        run: |
+          mkdir -p tmp/fact-mine-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/fact-mine/rust/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path tmp/fact-mine-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fact-mine-rust-coverage
+          path: tmp/fact-mine-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/fact-mine-rust-coverage/cobertura.xml
+          flags: fact-mine-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  decomplex-rust-coverage:
+    name: Decomplex Rust coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run cargo llvm-cov for Decomplex
+        run: |
+          mkdir -p tmp/decomplex-rust-coverage
+          cargo llvm-cov \
+            --manifest-path gems/decomplex/rust/Cargo.toml \
+            --all-features \
+            --cobertura \
+            --output-path tmp/decomplex-rust-coverage/cobertura.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decomplex-rust-coverage
+          path: tmp/decomplex-rust-coverage/cobertura.xml
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./tmp/decomplex-rust-coverage/cobertura.xml
+          flags: decomplex-rust
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   sorbet:
     name: Sorbet type-check (typed:true files only)
     needs: changes
