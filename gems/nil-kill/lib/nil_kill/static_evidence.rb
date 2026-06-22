@@ -10,8 +10,14 @@ end
 
 module NilKill
   class StaticEvidence
-    def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil)
-      evidence = Espalier::StaticEvidence.build(targets, root: root, language: language, vcs: vcs)
+    def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
+      evidence = Espalier::StaticEvidence.build(
+        targets,
+        root: root,
+        language: language,
+        vcs: vcs,
+        include_annotations: include_annotations
+      )
       overlay_nil_kill_language_capabilities!(evidence)
       evidence
     end

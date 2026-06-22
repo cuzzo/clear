@@ -37,4 +37,34 @@ class StaticEvidenceTest < Minitest::Test
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
     end
   end
+
+  def test_skips_root_rbi_annotations_for_explicit_non_project_targets
+    Dir.mktmpdir("espalier-static-rbi", Dir.pwd) do |dir|
+      target = File.join(dir, "tmp_target")
+      rbi = File.join(dir, "sorbet", "rbi")
+      FileUtils.mkdir_p(target)
+      FileUtils.mkdir_p(rbi)
+      File.write(File.join(target, "worker.rb"), <<~RUBY)
+        class Worker
+          def call(value)
+            value
+          end
+        end
+      RUBY
+      File.write(File.join(rbi, "generated.rbi"), <<~RBI)
+        class Generated
+          sig { returns(String) }
+          def name; end
+        end
+      RBI
+
+      evidence = Espalier::StaticEvidence.build([target], root: dir)
+      rbi_definitions = evidence.dig("facts", "type_definitions").select do |definition|
+        definition["path"].to_s.end_with?(".rbi")
+      end
+
+      assert_empty rbi_definitions
+      assert_equal 0, evidence.dig("summary", "rbi_field_types")
+    end
+  end
 end

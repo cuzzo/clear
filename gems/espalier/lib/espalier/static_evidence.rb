@@ -24,15 +24,16 @@ module Espalier
   # Nil-Kill's Ruby runtime/Sorbet inference path and consumes the shared
   # Tree-sitter facts mined by FactMine.
   class StaticEvidence
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil)
-      new(targets, root: root, language: language, vcs: vcs).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
     end
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil)
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
+      @include_annotations = include_annotations
     end
 
     def build
@@ -281,6 +282,7 @@ module Espalier
     end
 
     def ruby_annotation_type_definitions(files)
+      return [] unless @include_annotations
       return [] unless ruby_annotation_index?(files)
 
       ruby_annotation_files.flat_map do |file|
@@ -295,9 +297,21 @@ module Espalier
 
     def ruby_annotation_index?(files)
       return false unless @language.nil? || @language == :ruby
+      return false unless ruby_annotation_target_scope?
       return true if files.any? { |file| file_language(file).to_s == "ruby" }
 
       @targets.empty?
+    end
+
+    def ruby_annotation_target_scope?
+      return true if @targets.empty?
+
+      target_dirs.any? do |target|
+        expanded = File.expand_path(target, @root)
+        path = rel(expanded)
+        expanded == @root || path == "." || path == "src" || path.start_with?("src#{File::SEPARATOR}") ||
+          path == "sorbet" || path.start_with?("sorbet#{File::SEPARATOR}")
+      end
     end
 
     def ruby_annotation_files
