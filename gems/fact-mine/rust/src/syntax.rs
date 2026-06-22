@@ -180,6 +180,8 @@ pub struct Document {
     pub type_aliases: BTreeMap<String, String>,
     #[serde(default)]
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub state_param_origins: Vec<StateParamOrigin>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -192,6 +194,8 @@ pub struct FunctionDef {
     pub(crate) body: RawNode,
     pub visibility: Option<String>,
     pub params: Vec<String>,
+    #[serde(default)]
+    pub signature: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -249,6 +253,18 @@ pub struct StateRead {
     pub line: usize,
     pub span: Span,
     pub owner: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StateParamOrigin {
+    pub field: String,
+    pub receiver: String,
+    pub owner: String,
+    pub param: String,
+    pub file: String,
+    pub function: String,
+    pub line: usize,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

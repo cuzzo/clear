@@ -215,6 +215,7 @@ impl<'a> Extractor<'a> {
             body,
             visibility: Some(visibility),
             params: params.clone(),
+            signature: String::new(),
         });
         if let Some(alias) = predicate_alias(node, &self.file, &owner, self.behavior) {
             self.facts.predicate_aliases.push(alias);

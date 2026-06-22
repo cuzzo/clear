@@ -93,6 +93,7 @@ fn parse_normalized_file(
         immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
         type_aliases: metadata.syntax.type_aliases,
         method_param_types: metadata.syntax.method_param_types,
+        state_param_origins: Vec::new(),
     };
     profile_parse_phase(
         profile,

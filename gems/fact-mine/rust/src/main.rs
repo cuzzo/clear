@@ -1,6 +1,9 @@
 use anyhow::{bail, Context, Result};
-use fact_mine_rust::syntax::Language;
+use fact_mine_rust::profile::{self, Profile};
+use fact_mine_rust::syntax::{self, Language};
 use fact_mine_rust::syntax_oracle;
+use std::fs;
+
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -17,11 +20,44 @@ fn main() -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    let Command::SyntaxFacts { language, files } = parse_args(std::env::args().skip(1).collect())?;
-    let language = Language::parse(&language)?;
-    let facts = syntax_oracle::project_files(&files, language)
-        .with_context(|| "failed to project syntax facts")?;
-    println!("{}", serde_json::to_string(&facts)?);
+    let command = parse_args(std::env::args().skip(1).collect())?;
+    match command {
+        Command::SyntaxFacts { language, files } => {
+            let language = Language::parse(&language)?;
+            let facts = syntax_oracle::project_files(&files, language)
+                .with_context(|| "failed to project syntax facts")?;
+            println!("{}", serde_json::to_string(&facts)?);
+        }
+        Command::Profile {
+            profile,
+            files,
+            output,
+        } => {
+            let profile = match profile.as_str() {
+                "espalier" => Profile::Espalier,
+                "nil-kill" | "nil_kill" => Profile::NilKill,
+                other => bail!("unsupported profile: {other}; use espalier or nil-kill"),
+            };
+            let mut all_outputs = Vec::new();
+            for file in &files {
+                let lang = file
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .and_then(|ext| Language::for_extension(&ext.to_ascii_lowercase()))
+                    .with_context(|| format!("cannot detect language for {}", file.display()))?;
+                let document = syntax::parse_file(file.clone(), lang)?;
+                all_outputs.push(profile::extract(&document, profile));
+            }
+            // Merge outputs across files (same shape as Ruby's per-file accumulation)
+            let merged = profile::merge(all_outputs, profile);
+            let json = serde_json::to_string_pretty(&merged)?;
+            if let Some(ref output_path) = output {
+                fs::write(output_path, json)?;
+            } else {
+                println!("{}", json);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -30,30 +66,66 @@ enum Command {
         language: String,
         files: Vec<PathBuf>,
     },
+    Profile {
+        profile: String,
+        files: Vec<PathBuf>,
+        output: Option<PathBuf>,
+    },
 }
 
 fn parse_args(args: Vec<String>) -> Result<Command> {
-    let mut language = "ruby".to_string();
-    let mut files = Vec::new();
     let mut iter = args.into_iter();
     let command = iter.next().unwrap_or_default();
-    if command != "syntax-facts" {
-        bail!("usage: fact-mine-rust syntax-facts [--language ruby] FILE...");
-    }
 
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--language" => {
-                language = iter.next().with_context(|| "--language requires a value")?;
+    match command.as_str() {
+        "syntax-facts" => {
+            let mut language = "ruby".to_string();
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--language" => {
+                        language = iter.next().with_context(|| "--language requires a value")?;
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
             }
-            other if other.starts_with("--") => bail!("unsupported option: {other}"),
-            path => files.push(PathBuf::from(path)),
+            if files.is_empty() {
+                bail!("syntax-facts requires at least one file");
+            }
+            Ok(Command::SyntaxFacts { language, files })
         }
+        "profile" => {
+            let profile = iter
+                .next()
+                .with_context(|| "usage: fact-mine-rust profile {espalier|nil-kill} FILE...")?;
+            let mut output = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(
+                            other.strip_prefix("--output=").unwrap(),
+                        ));
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("profile requires at least one file");
+            }
+            Ok(Command::Profile {
+                profile,
+                files,
+                output,
+            })
+        }
+        other => bail!("usage: fact-mine-rust {{syntax-facts|profile}} FILE... (got: {other})"),
     }
-
-    if files.is_empty() {
-        bail!("syntax-facts requires at least one file");
-    }
-
-    Ok(Command::SyntaxFacts { language, files })
 }
