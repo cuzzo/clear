@@ -211,7 +211,158 @@ module FactMine
         end
       end
 
+      def type_definitions(document)
+        definitions = []
+        definitions.concat(python_method_type_definitions(document))
+        definitions.concat(python_state_field_type_definitions(document))
+        definitions.concat(python_stub_type_definitions(document))
+        definitions.concat(python_type_alias_definitions(document))
+        definitions.uniq { |row| [row["language"], row["file"], row["owner"], row["kind"], row["name"], row["line"], row["type_system"]] }
+      end
+
       private
+
+      def python_method_type_definitions(document)
+        Array(document.function_defs).filter_map do |function|
+          signature = python_function_signature(document, function)
+          typed = python_signature_types(signature)
+          next if typed.fetch(:params).empty? && typed.fetch(:return_type).to_s.empty?
+
+          TypeMetadataFacts.method_signature(
+            language: "python",
+            type_system: "python-typing",
+            file: function.file,
+            owner: function.owner,
+            name: function.name,
+            line: function.line,
+            signature: signature,
+            return_type: typed.fetch(:return_type),
+            params: typed.fetch(:params)
+          )
+        end
+      end
+
+      def python_state_field_type_definitions(document)
+        Array(document.state_declarations).filter_map do |state|
+          type = state.type.to_s
+          next if type.empty?
+
+          TypeMetadataFacts.state_field(
+            language: "python",
+            type_system: "python-typing",
+            file: state.file,
+            owner: state.owner,
+            name: TypeMetadataFacts.normalized_state_field("python", state.field),
+            line: state.line,
+            declared_type: type,
+            type_references: state.respond_to?(:type_references) ? state.type_references : []
+          )
+        end
+      end
+
+      def python_stub_type_definitions(document)
+        return [] unless File.extname(document.file).downcase == ".pyi"
+
+        definitions = []
+        owner = nil
+        owner_indent = nil
+        document.lines.each_with_index do |line, index|
+          line_no = index + 1
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("#")
+
+          indent = TypeMetadataFacts.line_indent(line)
+          if owner && indent <= owner_indent.to_i && !stripped.start_with?("def ")
+            owner = nil
+            owner_indent = nil
+          end
+
+          if (match = stripped.match(/\Aclass\s+([A-Za-z_]\w*)\b/))
+            owner = match[1]
+            owner_indent = indent
+            next
+          end
+
+          if (match = stripped.match(/\A(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\((.*)\)\s*(?:->\s*([^:]+))?:/))
+            signature = stripped.sub(/\s*\.\.\.\s*\z/, "")
+            typed = python_signature_types(signature)
+            definitions << TypeMetadataFacts.method_signature(
+              language: "python",
+              type_system: "python-typing",
+              file: document.file,
+              owner: owner.to_s,
+              name: match[1],
+              line: line_no,
+              signature: signature,
+              return_type: typed.fetch(:return_type),
+              params: typed.fetch(:params)
+            )
+          elsif owner && (match = stripped.match(/\A([A-Za-z_]\w*)\s*:\s*([^=#]+)(?:\s*=.*)?\z/))
+            definitions << TypeMetadataFacts.state_field(
+              language: "python",
+              type_system: "python-typing",
+              file: document.file,
+              owner: owner.to_s,
+              name: match[1],
+              line: line_no,
+              declared_type: match[2].strip
+            )
+          end
+        end
+        definitions
+      end
+
+      def python_type_alias_definitions(document)
+        document.lines.each_with_index.filter_map do |line, index|
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("#")
+
+          if (match = stripped.match(/\A([A-Z]\w*)\s*:\s*TypeAlias\s*=\s*(.+?)\s*(?:#.*)?\z/))
+            python_type_alias_definition(document, match[1], match[2].strip, index + 1)
+          elsif (match = stripped.match(/\Atype\s+([A-Z]\w*)\s*=\s*(.+?)\s*(?:#.*)?\z/))
+            python_type_alias_definition(document, match[1], match[2].strip, index + 1)
+          end
+        end
+      end
+
+      def python_type_alias_definition(document, name, target, line)
+        TypeMetadataFacts.type_alias(
+          language: "python",
+          type_system: "python-typing",
+          file: document.file,
+          owner: "",
+          name: name,
+          line: line,
+          target: target
+        )
+      end
+
+      def python_function_signature(document, function)
+        signature = function.respond_to?(:signature) ? function.signature.to_s : ""
+        signature = TypeMetadataFacts.signature_line(document, function).strip if signature.empty?
+        signature
+      end
+
+      def python_signature_types(signature)
+        source = signature.to_s.strip
+        match = source.match(/\A(?:async\s+)?def\s+\w+\s*\((.*)\)\s*(?:->\s*([^:]+))?:/)
+        return { params: [], return_type: nil } unless match
+
+        params = TypeMetadataFacts.split_top_level(match[1]).filter_map do |entry|
+          entry = entry.sub(/\A\*\*?/, "").strip
+          name, rest = entry.split(/:\s*/, 2)
+          next unless name && rest
+
+          name = name.sub(/=.*/, "").strip
+          next if self_receiver_names.include?(name)
+
+          type = rest.sub(/=.*/, "").strip
+          next if type.empty?
+
+          { "name" => name, "type" => type }
+        end
+        { params: params, return_type: match[2]&.strip }
+      end
 
       def hidden_python_function_name(node)
         return nil unless node.kind == "block"

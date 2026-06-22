@@ -26,7 +26,8 @@ module FactMine
         state_declarations: %w[state_declarations],
         state_param_origins: %w[state_param_origins],
         state_reads: %w[state_reads],
-        state_writes: %w[state_writes]
+        state_writes: %w[state_writes],
+        type_definitions: %w[type_definitions]
       }.freeze
 
       FACT_ARRAY_METHODS = (SECTION_KEYS.keys - [:branch_decisions]).freeze

@@ -80,6 +80,7 @@ module FactMine
           "state_param_origins" => @facts.fetch(:state_param_origins),
           "state_reads" => @facts.fetch(:state_reads),
           "state_writes" => @facts.fetch(:state_writes),
+          "type_definitions" => [],
           "decisions" => dedupe_decision_sites(@facts.fetch(:decision_sites)),
           "branch_decisions" => @facts.fetch(:branch_decisions),
           "branch_arms" => @facts.fetch(:branch_arms),

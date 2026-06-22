@@ -316,6 +316,9 @@ module Espalier
       end
 
       def type_definitions(state_declarations)
+        mined = mined_type_definitions
+        return mined unless mined.empty?
+
         definitions = []
         Array(@facts[:function_defs]).each do |fn|
           definition = method_type_definition(fn)
@@ -335,6 +338,33 @@ module Espalier
         definitions
       end
 
+      def mined_type_definitions
+        @mined_type_definitions ||= begin
+          rows = Array(@facts[:type_definitions])
+          rows = @document.type_definitions if rows.empty? && @document.respond_to?(:type_definitions)
+          rows.map { |row| normalize_mined_type_definition(row) }
+              .uniq { |row| [row["language"], row["path"], row["owner"], row["kind"], row["name"], row["line"], row["type_system"]] }
+        end
+      end
+
+      def normalize_mined_type_definition(value)
+        row = value.respond_to?(:to_h) ? value.to_h : value
+        row = row.transform_keys(&:to_s)
+        source_path = row["file"].to_s.empty? ? row["path"].to_s : row["file"].to_s
+        report_path = source_path.empty? ? row["path"].to_s : rel(source_path)
+        normalized = row.merge("path" => report_path)
+        normalized["id"] = [
+          normalized["language"],
+          normalized["path"],
+          normalized["owner"],
+          normalized["kind"],
+          normalized["name"],
+          normalized["line"],
+          normalized["type_system"]
+        ].map(&:to_s).join("\u0000")
+        normalized
+      end
+
       def literal_shapes(kind)
         shapes = []
         walk_tree(@document.root) do |node|
@@ -346,7 +376,7 @@ module Espalier
 
       def normalized_state_declarations
         declarations = Array(@facts[:state_declarations]).dup
-        declarations.concat(extra_typed_state_declarations)
+        declarations.concat(extra_typed_state_declarations) if mined_type_definitions.empty?
         declarations.uniq { |state| [state.file, state.owner, declared_state_field(state.field), state.line, state.type] }
       end
 

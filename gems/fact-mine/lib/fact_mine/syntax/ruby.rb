@@ -298,6 +298,32 @@ module FactMine
         ruby_type_aliases(document.lines)
       end
 
+      def typed_state_declarations(document)
+        declarations = ruby_tlet_state_declarations(document)
+        declarations.concat(ruby_t_struct_fields(document).map do |field|
+          StateDeclaration.new(
+            field: field.fetch(:name),
+            owner: field.fetch(:owner),
+            type: field.fetch(:type),
+            type_references: [],
+            file: document.file,
+            line: field.fetch(:line),
+            span: field.fetch(:span)
+          )
+        end)
+        declarations
+      end
+
+      def type_definitions(document)
+        definitions = []
+        definitions.concat(ruby_method_type_definitions(document))
+        definitions.concat(ruby_state_field_type_definitions(document))
+        definitions.concat(ruby_struct_new_type_definitions(document))
+        definitions.concat(ruby_include_type_definitions(document))
+        definitions.concat(ruby_type_alias_definitions(document))
+        definitions.uniq { |row| [row["language"], row["file"], row["owner"], row["kind"], row["name"], row["line"], row["type_system"]] }
+      end
+
       private
 
       def comparison_target(node)
@@ -320,6 +346,276 @@ module FactMine
         return nil unless COMPARISON_OPERATORS.include?(operator)
 
         { source: normalize_text(node.text), operator: operator }
+      end
+
+      def ruby_method_type_definitions(document)
+        Array(document.function_defs).filter_map do |function|
+          signature = ruby_function_signature(document, function)
+          next if signature.empty?
+
+          TypeMetadataFacts.method_signature(
+            language: "ruby",
+            type_system: "sorbet",
+            file: function.file,
+            owner: ruby_method_owner(document, function),
+            name: function.name,
+            line: function.line,
+            signature: signature,
+            return_type: RUBY_TYPE_PROFILE.extract_return_type(signature),
+            params: RUBY_TYPE_PROFILE.extract_param_entries(signature).map { |name, type| { "name" => name, "type" => type } }
+          )
+        end
+      end
+
+      def ruby_state_field_type_definitions(document)
+        Array(document.state_declarations).filter_map do |state|
+          type = state.type.to_s
+          next if type.empty?
+
+          TypeMetadataFacts.state_field(
+            language: "ruby",
+            type_system: "sorbet",
+            file: state.file,
+            owner: state.owner,
+            name: state.field,
+            line: state.line,
+            declared_type: type,
+            type_references: state.respond_to?(:type_references) ? state.type_references : []
+          )
+        end
+      end
+
+      def ruby_struct_new_type_definitions(document)
+        ruby_struct_definitions(document).flat_map do |struct|
+          struct.fetch(:fields).map do |name|
+            TypeMetadataFacts.state_field(
+              language: "ruby",
+              type_system: "ruby-struct",
+              file: document.file,
+              owner: struct.fetch(:owner),
+              name: name,
+              line: struct.fetch(:line),
+              declared_type: nil
+            )
+          end
+        end
+      end
+
+      def ruby_include_type_definitions(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "self" && call.message.to_s == "include"
+
+          included = Array(call.arguments).first.to_s.strip
+          next if included.empty?
+
+          owner = TypeMetadataFacts.owner_for_line(document, call.line)
+          next if owner.empty?
+
+          TypeMetadataFacts.included_module(
+            language: "ruby",
+            type_system: "ruby-include",
+            file: call.file,
+            owner: owner,
+            name: ruby_resolved_include_name(document, owner, included),
+            line: call.line
+          )
+        end
+      end
+
+      def ruby_type_alias_definitions(document)
+        owner_stack = []
+        pending = nil
+        definitions = []
+        document.lines.each_with_index do |line, index|
+          line_no = index + 1
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("#")
+
+          if pending
+            if stripped == "end" && TypeMetadataFacts.line_indent(line) <= pending.fetch(:indent)
+              target = pending.fetch(:body).join(" ").gsub(/\s+/, " ").strip.sub(/,\z/, "")
+              definitions << ruby_type_alias_definition(document, pending.fetch(:owner), pending.fetch(:name), target, pending.fetch(:line)) unless target.empty?
+              pending = nil
+            else
+              pending.fetch(:body) << stripped
+            end
+            next
+          end
+
+          if (match = stripped.match(/\A(?:class|module)\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+            owner_stack << TypeMetadataFacts.qualified_owner(owner_stack.last, match[1])
+            next
+          end
+
+          if stripped == "end"
+            owner_stack.pop
+            next
+          end
+
+          if (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*(.+)\s*\}\s*(?:#.*)?\z/))
+            definitions << ruby_type_alias_definition(document, owner_stack.last.to_s, match[1], match[2].strip, line_no)
+          elsif (match = stripped.match(/\A([A-Z]\w*)\s*=\s*T\.type_alias\s+do\b/))
+            pending = { owner: owner_stack.last.to_s, name: match[1], line: line_no, indent: TypeMetadataFacts.line_indent(line), body: [] }
+          end
+        end
+        definitions
+      end
+
+      def ruby_type_alias_definition(document, owner, name, target, line)
+        TypeMetadataFacts.type_alias(
+          language: "ruby",
+          type_system: "sorbet",
+          file: document.file,
+          owner: owner,
+          name: name,
+          line: line,
+          target: target
+        )
+      end
+
+      def ruby_function_signature(document, function)
+        signature = function.respond_to?(:signature) ? function.signature.to_s : ""
+        signature = ruby_signature_before_line_number(document, function.line) if signature.empty?
+        signature = signature.strip
+        signature.start_with?("sig ") ? signature : ""
+      end
+
+      def ruby_signature_before_line_number(document, line)
+        index = line.to_i - 2
+        lines = document.lines
+        index -= 1 while index >= 0 && lines[index].to_s.strip.empty?
+        return "" if index.negative?
+
+        stripped = lines[index].to_s.strip
+        if stripped == "end"
+          start = index
+          while start >= 0
+            text = lines[start].to_s.strip
+            return TypeMetadataFacts.normalize_text(lines[start..index].join("\n")) if text == "sig do"
+            return "" if start != index && text.match?(/\A(?:def|class|module)\b/)
+
+            start -= 1
+          end
+          return ""
+        end
+
+        return TypeMetadataFacts.normalize_text(stripped) if stripped.start_with?("sig ")
+        return "" unless stripped == "}" || stripped.end_with?("}")
+
+        start = index
+        while start >= 0
+          text = lines[start].to_s.strip
+          return TypeMetadataFacts.normalize_text(lines[start..index].join("\n")) if text.start_with?("sig ")
+          return "" if text.match?(/\A(?:def|class|module)\b/)
+
+          start -= 1
+        end
+        ""
+      end
+
+      def ruby_struct_definitions(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "Struct" && call.message.to_s == "new"
+
+          line = document.lines[call.line.to_i - 1].to_s
+          match = line.match(/([A-Z]\w*)\s*=\s*Struct\.new\((.*?)\)/m)
+          next unless match
+
+          fields = Array(call.arguments).filter_map { |arg| arg.to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1] }
+          next if fields.empty?
+
+          parent = TypeMetadataFacts.owner_for_line(document, call.line)
+          {
+            owner: TypeMetadataFacts.qualified_owner(parent, match[1]),
+            line: call.line,
+            span: call.span,
+            fields: fields
+          }
+        end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line), entry.fetch(:fields)] }
+      end
+
+      def ruby_t_struct_fields(document)
+        containers = ruby_t_struct_containers(document)
+        Array(document.call_sites).filter_map do |call|
+          next unless call.receiver.to_s == "self" && %w[const prop].include?(call.message.to_s)
+
+          name = Array(call.arguments)[0].to_s.strip[/\A:([A-Za-z_]\w*)\z/, 1]
+          type = Array(call.arguments)[1].to_s.strip
+          next if name.to_s.empty? || type.empty?
+
+          owner = ruby_deepest_owner_for_line(containers, call.line)
+          next if owner.to_s.empty?
+
+          {
+            owner: owner,
+            name: name,
+            type: TypeMetadataFacts.normalize_text(type),
+            line: call.line,
+            span: call.span
+          }
+        end.uniq { |field| [field.fetch(:owner), field.fetch(:name), field.fetch(:line)] }
+      end
+
+      def ruby_tlet_state_declarations(document)
+        document.lines.each_with_index.filter_map do |line, index|
+          line_no = index + 1
+          match = line.strip.match(/\A(?:(@[A-Za-z_]\w*)|self\.([A-Za-z_]\w*))\s*=\s*T\.let\((.*)\)\z/m)
+          next unless match
+
+          args = TypeMetadataFacts.split_top_level(match[3])
+          type = args[1].to_s.strip
+          next if type.empty?
+
+          owner = TypeMetadataFacts.owner_for_line(document, line_no)
+          next if owner.empty?
+
+          StateDeclaration.new(
+            field: match[1] || match[2],
+            owner: owner,
+            type: TypeMetadataFacts.normalize_text(type),
+            type_references: [],
+            file: document.file,
+            line: line_no,
+            span: TypeMetadataFacts.source_line_span(line, line_no)
+          )
+        end
+      end
+
+      def ruby_t_struct_containers(document)
+        Array(document.owner_defs).filter_map do |owner|
+          line = document.lines[owner.line.to_i - 1].to_s
+          next unless line.match?(/<\s*T::Struct\b/)
+
+          { owner: owner.name.to_s, line: owner.line, span: owner.span }
+        end.uniq { |entry| [entry.fetch(:owner), entry.fetch(:line)] }
+      end
+
+      def ruby_method_owner(document, function)
+        ruby_deepest_owner_for_line(ruby_struct_definitions(document), function.line) || function.owner.to_s
+      end
+
+      def ruby_resolved_include_name(document, owner, name)
+        return name.to_s if name.to_s.include?("::")
+
+        namespace = owner.to_s.split("::")[0...-1].join("::")
+        qualified = TypeMetadataFacts.qualified_owner(namespace, name)
+        TypeMetadataFacts.owner_names(document).include?(qualified) ? qualified : name.to_s
+      end
+
+      def ruby_deepest_owner_for_line(records, line)
+        Array(records).select { |record| ruby_span_contains_line?(record.fetch(:span), line) }
+                      .max_by { |record| ruby_span_sort_key(record.fetch(:span)) }
+                      &.fetch(:owner, nil)
+      end
+
+      def ruby_span_contains_line?(span, line)
+        range = Array(span)
+        range[0].to_i <= line.to_i && range[2].to_i >= line.to_i
+      end
+
+      def ruby_span_sort_key(span)
+        range = Array(span)
+        [range[0].to_i, -((range[2].to_i - range[0].to_i).abs)]
       end
 
       def inline_def_argument_list?(node)

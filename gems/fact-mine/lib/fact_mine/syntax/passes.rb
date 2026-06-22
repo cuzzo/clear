@@ -285,11 +285,24 @@ module FactMine
       end
 
       def append_profile_metadata!
-        document = OpenStruct.new(file: @file, language: @language, source: @source, lines: @lines)
+        document = OpenStruct.new(
+          file: @file,
+          language: @language,
+          source: @source,
+          lines: @lines,
+          function_defs: object_rows("functions"),
+          owner_defs: object_rows("owners"),
+          state_declarations: object_rows("state_declarations"),
+          call_sites: object_rows("calls")
+        )
         @row["immutable_struct_readers"] = @profile.immutable_struct_readers(document)
         @row["immutable_struct_reader_types"] = @profile.immutable_struct_reader_types(document)
         @row["type_aliases"] = @profile.type_aliases(document)
         @row["method_param_types"] = @profile.__send__(:method_param_types, document)
+        typed_declarations = @profile.typed_state_declarations(document)
+        @row["state_declarations"].concat(typed_declarations.map { |row| row.to_h.transform_keys(&:to_s) })
+        document.state_declarations = object_rows("state_declarations")
+        @row["type_definitions"] = @profile.type_definitions(document).map { |row| row.transform_keys(&:to_s) }
       end
 
       def append_protocol_facts!

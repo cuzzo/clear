@@ -440,6 +440,14 @@ module FactMine
         {}
       end
 
+      def type_definitions(_document)
+        []
+      end
+
+      def typed_state_declarations(_document)
+        []
+      end
+
       def predicate_def(_document, function_def)
         body = generic_predicate_body(function_def.body)
         return nil unless body
@@ -2725,6 +2733,7 @@ module FactMine
     end
 
     require_relative "syntax/type_profile"
+    require_relative "syntax/type_metadata_facts"
     require_relative "syntax/adapters"
     require_relative "syntax/dynamic_language"
     require_relative "syntax/passes"
@@ -3035,6 +3044,10 @@ module FactMine
 
       def type_aliases
         adapter.type_aliases(self)
+      end
+
+      def type_definitions
+        adapter.type_definitions(self)
       end
     end
 
@@ -3389,6 +3402,10 @@ module FactMine
 
       def type_aliases(document)
         stateful_syntax_pass(document).type_aliases
+      end
+
+      def type_definitions(document)
+        syntax_profile(document.language).type_definitions(document)
       end
 
       private

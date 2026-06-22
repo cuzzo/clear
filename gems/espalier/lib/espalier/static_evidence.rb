@@ -386,6 +386,7 @@ module Espalier
 
       facts[:comparison_sites] = document.comparison_sites if document.respond_to?(:comparison_sites)
       facts[:redundant_nil_guard_findings] = document.redundant_nil_guard_findings if document.respond_to?(:redundant_nil_guard_findings)
+      facts[:type_definitions] = document.type_definitions if document.respond_to?(:type_definitions)
       facts
     end
 

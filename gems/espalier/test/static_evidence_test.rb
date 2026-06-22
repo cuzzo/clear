@@ -67,4 +67,48 @@ class StaticEvidenceTest < Minitest::Test
       assert_equal 0, evidence.dig("summary", "rbi_field_types")
     end
   end
+
+  def test_static_builder_consumes_fact_mine_type_definitions
+    Dir.mktmpdir("espalier-static-mined", Dir.pwd) do |dir|
+      file = File.join(dir, "service.rb")
+      mined = {
+        "language" => "ruby",
+        "type_system" => "sorbet",
+        "kind" => "method_signature",
+        "file" => file,
+        "path" => file,
+        "owner" => "Service",
+        "name" => "call",
+        "line" => 4,
+        "signature" => "sig { returns(Result) }",
+        "return_type" => "Result",
+        "params" => []
+      }
+      document = OpenStruct.new(
+        language: :ruby,
+        file: file,
+        lines: [],
+        root: nil,
+        type_definitions: [mined]
+      )
+      structural_facts = {
+        function_defs: [],
+        owner_defs: [],
+        call_sites: [],
+        state_declarations: [],
+        state_writes: [],
+        state_reads: [],
+        state_param_origins: [],
+        local_methods: [],
+        comparison_sites: []
+      }
+
+      facts = Espalier::FactMineStaticFacts.build(document, structural_facts, root: dir)
+      definition = facts.fetch(:type_definitions).first
+
+      assert_equal "service.rb", definition["path"]
+      assert_equal "Result", definition["return_type"]
+      assert_includes definition["id"], "service.rb"
+    end
+  end
 end
