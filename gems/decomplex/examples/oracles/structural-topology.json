@@ -1,0 +1,30 @@
+{
+  "detector": "structural-topology",
+  "options": {
+  },
+  "expected": {
+    "method_count": 5,
+    "edges": [
+      {
+        "caller_name": "run",
+        "callee_name": "prepare",
+        "type": "always"
+      },
+      {
+        "caller_name": "run",
+        "callee_name": "ready",
+        "type": "conditional"
+      },
+      {
+        "caller_name": "run",
+        "callee_name": "validate",
+        "type": "conditional"
+      },
+      {
+        "caller_name": "run",
+        "callee_name": "helper",
+        "type": "iterates"
+      }
+    ]
+  }
+}

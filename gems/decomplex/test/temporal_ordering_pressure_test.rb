@@ -56,6 +56,23 @@ class TemporalOrderingPressureTest < Minitest::Test
     assert_empty rows
   end
 
+  def test_scan_uses_syntax_facts_not_legacy_ast_parse
+    f = Tempfile.new(["temporal", ".rb"])
+    f.write(<<~RB)
+      class BillingService
+        def set_user(user); @user = user; end
+        def set_cart(cart); @cart = cart; end
+        def validate_user; @validated = @user && @cart; end
+      end
+    RB
+    f.close
+    @files << f
+
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      refute_empty Decomplex::TemporalOrderingPressure.scan([f.path])
+    end
+  end
+
   def test_requires_shared_state_not_just_many_independent_writers
     rows = scan(<<~RB)
       class IndependentSetters

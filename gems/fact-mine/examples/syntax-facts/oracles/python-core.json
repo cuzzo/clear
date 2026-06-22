@@ -1,0 +1,569 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/fact-mine/examples/syntax-facts/python/core.py",
+      "language": "python",
+      "functions": [
+        {
+          "line": 12,
+          "name": "process",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            12,
+            4,
+            52,
+            41
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 54,
+          "name": "_normalize",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "value"
+          ],
+          "span": [
+            54,
+            4,
+            56,
+            22
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 58,
+          "name": "generator",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "values"
+          ],
+          "span": [
+            58,
+            4,
+            60,
+            23
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 62,
+          "name": "simple_with",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "resource"
+          ],
+          "span": [
+            62,
+            4,
+            64,
+            16
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 7,
+          "name": "__init__",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "lock",
+            "resource"
+          ],
+          "span": [
+            7,
+            4,
+            10,
+            22
+          ],
+          "visibility": "public"
+        }
+      ],
+      "owners": [
+        {
+          "kind": "class",
+          "line": 6,
+          "name": "PythonSyntaxFactsCore",
+          "span": [
+            6,
+            0,
+            64,
+            16
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "arguments": [
+            "\"x\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 28,
+          "message": "startswith",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            28,
+            30,
+            28,
+            50
+          ]
+        },
+        {
+          "arguments": [
+            "item"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 29,
+          "message": "callback",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            29,
+            16,
+            29,
+            30
+          ]
+        },
+        {
+          "arguments": [
+            "item"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 37,
+          "message": "append",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "result",
+          "safe_navigation": false,
+          "span": [
+            37,
+            12,
+            37,
+            31
+          ]
+        },
+        {
+          "arguments": [
+            "result"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 40,
+          "message": "len",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            40,
+            22,
+            40,
+            33
+          ]
+        },
+        {
+          "arguments": [
+            "result[index]"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 45,
+          "message": "audit",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            45,
+            16,
+            45,
+            41
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 33,
+          "message": "escalate",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            33,
+            20,
+            33,
+            39
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 35,
+          "message": "default",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            35,
+            20,
+            35,
+            38
+          ]
+        },
+        {
+          "arguments": [
+            "user.path"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 21,
+          "message": "open",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            21,
+            13,
+            21,
+            28
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "_normalize",
+          "line": 55,
+          "message": "strip",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "value",
+          "safe_navigation": false,
+          "span": [
+            55,
+            18,
+            55,
+            31
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 22,
+          "message": "read",
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "handle",
+          "safe_navigation": false,
+          "span": [
+            22,
+            19,
+            22,
+            32
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "append",
+          "function": "process",
+          "line": 37,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "result",
+          "span": [
+            37,
+            12,
+            37,
+            25
+          ]
+        },
+        {
+          "field": "audit",
+          "function": "process",
+          "line": 45,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            45,
+            16,
+            45,
+            26
+          ]
+        },
+        {
+          "field": "default",
+          "function": "process",
+          "line": 35,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            35,
+            20,
+            35,
+            32
+          ]
+        },
+        {
+          "field": "escalate",
+          "function": "process",
+          "line": 33,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            33,
+            20,
+            33,
+            33
+          ]
+        },
+        {
+          "field": "name",
+          "function": "process",
+          "line": 13,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user.profile",
+          "span": [
+            13,
+            20,
+            13,
+            37
+          ]
+        },
+        {
+          "field": "path",
+          "function": "process",
+          "line": 21,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            21,
+            18,
+            21,
+            27
+          ]
+        },
+        {
+          "field": "profile",
+          "function": "process",
+          "line": 13,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            13,
+            20,
+            13,
+            32
+          ]
+        },
+        {
+          "field": "read",
+          "function": "process",
+          "line": 22,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "handle",
+          "span": [
+            22,
+            19,
+            22,
+            30
+          ]
+        },
+        {
+          "field": "ready",
+          "function": "process",
+          "line": 28,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            28,
+            15,
+            28,
+            25
+          ]
+        },
+        {
+          "field": "startswith",
+          "function": "process",
+          "line": 28,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "item",
+          "span": [
+            28,
+            30,
+            28,
+            45
+          ]
+        },
+        {
+          "field": "strip",
+          "function": "_normalize",
+          "line": 55,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "value",
+          "span": [
+            55,
+            18,
+            55,
+            29
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "_lock",
+          "function": "__init__",
+          "line": 8,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            8,
+            8,
+            8,
+            25
+          ]
+        },
+        {
+          "field": "count",
+          "function": "__init__",
+          "line": 10,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            10,
+            8,
+            10,
+            22
+          ]
+        },
+        {
+          "field": "count",
+          "function": "process",
+          "line": 19,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            19,
+            12,
+            19,
+            27
+          ]
+        },
+        {
+          "field": "resource",
+          "function": "__init__",
+          "line": 9,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            9,
+            8,
+            9,
+            32
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            28,
+            12,
+            29,
+            30
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 28,
+          "members": [
+            "item.startswith(\"x\")",
+            "user.ready"
+          ],
+          "predicate": "user.ready and item.startswith(\"x\")",
+          "span": [
+            28,
+            15,
+            28,
+            50
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "process",
+          "line": 28,
+          "predicate": "user.ready and item.startswith(\"x\")",
+          "span": [
+            28,
+            12,
+            29,
+            30
+          ],
+          "state_refs": [
+            "item.startswith",
+            "user.ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "open",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 21,
+          "span": [
+            21,
+            13,
+            21,
+            28
+          ]
+        }
+      ],
+      "predicate_bodies": [
+
+      ]
+    }
+  ]
+}

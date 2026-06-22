@@ -27,6 +27,40 @@ class ArchitectureAnalyzerTest < Minitest::Test
     assert_operator row[:score], :>, 0
   end
 
+  def test_native_owner_edges_use_structured_type_references
+    analyzer = Espalier::ArchitectureAnalyzer.new(
+      [
+        {
+          module: "Service",
+          file: "src/service.ts",
+          language: "typescript",
+          state: [{ name: "record", type: "Promise<User$Store>", type_references: [{ "name" => "User$Store" }] }],
+          functions: [fn("run", reads: ["record"], calls: ["this.record.load"])]
+        },
+        value_object("User$Store", methods: %w[load]).merge(file: "src/store.ts", language: "typescript")
+      ]
+    )
+
+    assert analyzer.owner_edges.any? { |edge| edge[:source] == "Service" && edge[:target] == "User$Store" }
+  end
+
+  def test_native_owner_edges_do_not_parse_type_strings
+    analyzer = Espalier::ArchitectureAnalyzer.new(
+      [
+        {
+          module: "Service",
+          file: "src/service.ts",
+          language: "typescript",
+          state: [{ name: "record", type: "Promise<User$Store>" }],
+          functions: [fn("run", reads: ["record"], calls: ["this.record.load"])]
+        },
+        value_object("User$Store", methods: %w[load]).merge(file: "src/store.ts", language: "typescript")
+      ]
+    )
+
+    refute analyzer.owner_edges.any? { |edge| edge[:target] == "User$Store" }
+  end
+
   private
 
   def value_facade_manifest

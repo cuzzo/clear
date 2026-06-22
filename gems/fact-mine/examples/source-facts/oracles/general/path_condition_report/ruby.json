@@ -1,0 +1,34 @@
+{
+  "path_condition": {
+    "neglected": [
+      {
+        "action": "record(\"missing enabled\")",
+        "at": "examples/source-facts/general/path_condition_report/ruby.rb:missing_enabled:48",
+        "missing": "enabled",
+        "pattern": [
+          "enabled",
+          "feature",
+          "user"
+        ],
+        "support": 3
+      }
+    ],
+    "scattered": [
+      {
+        "guards": [
+          "enabled",
+          "feature",
+          "user"
+        ],
+        "rank": 9,
+        "scatter": 3,
+        "sites": [
+          "examples/source-facts/general/path_condition_report/ruby.rb:first:14",
+          "examples/source-facts/general/path_condition_report/ruby.rb:second:29",
+          "examples/source-facts/general/path_condition_report/ruby.rb:third:39"
+        ],
+        "support": 3
+      }
+    ]
+  }
+}

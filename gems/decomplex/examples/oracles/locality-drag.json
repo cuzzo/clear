@@ -1,0 +1,10 @@
+{
+  "detector": "locality-drag",
+  "options": {
+  },
+  "expected": [
+    {
+      "variable": "receipt_id"
+    }
+  ]
+}

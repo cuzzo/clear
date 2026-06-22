@@ -1,0 +1,205 @@
+{
+  "detector": "weighted-inlined-complexity",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/weighted.rb",
+        "language": "ruby",
+        "lines": [
+          "class Fixture",
+          "  def entry",
+          "    self.helper",
+          "  end",
+          "  def helper",
+          "  end",
+          "end"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/weighted.rb",
+            "name": "entry",
+            "owner": "Fixture",
+            "line": 2,
+            "span": [
+              2,
+              2,
+              4,
+              5
+            ],
+            "body": {
+              "kind": "program",
+              "text": "",
+              "span": [
+                1,
+                0,
+                1,
+                0
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/weighted.rb",
+            "name": "helper",
+            "owner": "Fixture",
+            "line": 5,
+            "span": [
+              5,
+              2,
+              6,
+              5
+            ],
+            "body": {
+              "kind": "program",
+              "text": "",
+              "span": [
+                1,
+                0,
+                1,
+                0
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "private",
+            "params": [
+
+            ]
+          }
+        ],
+        "owner_defs": [
+          {
+            "file": "facts/weighted.rb",
+            "name": "Fixture",
+            "kind": "class",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              7,
+              3
+            ]
+          }
+        ],
+        "call_sites": [
+          {
+            "receiver": "self",
+            "message": "helper",
+            "file": "facts/weighted.rb",
+            "function": "entry",
+            "owner": "Fixture",
+            "line": 3,
+            "span": [
+              3,
+              4,
+              3,
+              15
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          }
+        ],
+        "local_methods": [
+          {
+            "id": "Fixture#entry",
+            "owner": "Fixture",
+            "name": "entry",
+            "file": "facts/weighted.rb",
+            "line": 2,
+            "span": [
+              2,
+              2,
+              4,
+              5
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          },
+          {
+            "id": "Fixture#helper",
+            "owner": "Fixture",
+            "name": "helper",
+            "file": "facts/weighted.rb",
+            "line": 5,
+            "span": [
+              5,
+              2,
+              6,
+              5
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          }
+        ],
+        "local_complexity_scores": {
+          "Fixture#entry": {
+            "score": 3.0,
+            "signals": {
+              "branches": 1
+            }
+          },
+          "Fixture#helper": {
+            "score": 16.0,
+            "signals": {
+              "branches": 4
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "at": "facts/weighted.rb:entry:2",
+      "call_chain": [
+        "entry",
+        "helper"
+      ],
+      "depth": 1,
+      "hidden": 16.0,
+      "inlined": 19.0,
+      "local": 3.0,
+      "method": "entry",
+      "owner": "Fixture",
+      "reason": "1 single-caller helper(s) add 16.0 weighted cognitive points",
+      "signals": {
+        "branches": 1
+      },
+      "single_caller_callees": [
+        "helper"
+      ],
+      "spans": {
+        "facts/weighted.rb:entry:2": [
+          2,
+          2,
+          4,
+          5
+        ]
+      }
+    }
+  ]
+}

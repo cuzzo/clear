@@ -9,6 +9,7 @@ require_relative "decomplex/structural_topology"
 require_relative "decomplex/site_extractor"
 require_relative "decomplex/miner"
 require_relative "decomplex/co_update"
+require_relative "decomplex/detector_runner"
 require_relative "decomplex/predicate_alias"
 require_relative "decomplex/path_condition"
 require_relative "decomplex/semantic_alias"
@@ -32,6 +33,8 @@ require_relative "decomplex/temporal_ordering_pressure"
 require_relative "decomplex/convergence"
 require_relative "decomplex/root_cause"
 require_relative "decomplex/delta"
+require_relative "decomplex/report_facts"
+require_relative "decomplex/syntax_oracle"
 
 # Decomplex: decision-level duplication + neglected-condition detector.
 # See decomplex.gemspec for the rationale. v0 scope is exact-match

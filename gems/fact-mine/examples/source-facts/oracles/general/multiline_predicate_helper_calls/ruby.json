@@ -1,0 +1,86 @@
+{
+  "syntax": {
+    "calls": [
+      {
+        "arguments": [
+          "state_count: state_names.size",
+          "public_methods: public_funcs.size"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "summarize",
+        "line": 5,
+        "message": "data_carrier?",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "data_carrier?",
+        "line": 13,
+        "message": "positive?",
+        "receiver": "public_methods",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "data_carrier?",
+        "line": 13,
+        "message": "zero?",
+        "receiver": "state_count",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "summarize",
+        "line": 6,
+        "message": "size",
+        "receiver": "state_names",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "summarize",
+        "line": 7,
+        "message": "size",
+        "receiver": "public_funcs",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 12,
+        "name": "data_carrier?",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "params": [
+          "state_count",
+          "public_methods"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "summarize",
+        "owner": "SourceFactMultilinePredicateHelperCalls",
+        "params": [
+          "state_names",
+          "public_funcs"
+        ],
+        "visibility": "public"
+      }
+    ]
+  }
+}

@@ -12,7 +12,7 @@ module Decomplex
     DEFAULT_MAX_CONTINUING = 1
     DEFAULT_MIN_SCORE = 12
     DEFAULT_HIGH_CONFIDENCE_MIN_SCORE = 20
-    PHASE_COMMENT_PATTERN = /\A#\s*(?:\d+[a-z]?\s*[.)]|(?:phase|step|stage)\b)/i
+    PHASE_COMMENT_PATTERN = %r{\A(?:#|//|--)\s*(?:\d+[a-z]?\s*[.)]|(?:phase|step|stage)\b)}i
     GRAMMAR_METHOD_PATTERN = /\Aparse(?:_|$)/
 
     RangeInfo = Struct.new(:first, :last, keyword_init: true)

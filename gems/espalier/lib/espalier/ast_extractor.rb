@@ -42,11 +42,30 @@ module Espalier
 
       def extract
         doc = Decomplex::Syntax.parse(@file_path, parser: "tree_sitter")
-        facts = doc.adapter.structural_facts(doc)
+        facts = structural_facts_for(doc)
         build_modules(doc, facts).values
       end
 
       private
+
+      def structural_facts_for(doc)
+        return doc.adapter.structural_facts(doc) if doc.respond_to?(:adapter) && doc.adapter
+
+        {
+          function_defs: fact_array(doc, :function_defs),
+          owner_defs: fact_array(doc, :owner_defs),
+          call_sites: fact_array(doc, :call_sites),
+          state_declarations: fact_array(doc, :state_declarations),
+          state_writes: fact_array(doc, :state_writes),
+          state_reads: fact_array(doc, :state_reads)
+        }
+      end
+
+      def fact_array(doc, name)
+        return [] unless doc.respond_to?(name)
+
+        Array(doc.public_send(name))
+      end
 
       def build_modules(doc, facts)
         modules = {}

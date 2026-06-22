@@ -1,0 +1,14 @@
+{
+  "detector": "semantic-alias",
+  "options": {
+  },
+  "expected": {
+    "alias_clusters": [
+      {
+        "canon": "provenance == FRAME",
+        "name_count": 2
+      }
+    ],
+    "reification_miss_count": 1
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "syntax": {
+    "path_conditions": [
+      {
+        "action": "empty",
+        "function": "load",
+        "guards": [
+          "!::File.file?(path)",
+          "!path"
+        ],
+        "line": 5
+      }
+    ]
+  }
+}

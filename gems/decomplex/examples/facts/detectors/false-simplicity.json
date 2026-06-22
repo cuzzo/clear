@@ -1,0 +1,87 @@
+{
+  "detector": "false-simplicity",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/false_a.rb",
+        "language": "ruby",
+        "source": "",
+        "lines": [],
+        "root": {"kind": "program", "text": "", "span": [1, 0, 1, 0], "named": true, "field_name": null, "children": []},
+        "normalized_root": {"type": "ROOT", "children": [], "first_lineno": 1, "first_column": 0, "last_lineno": 1, "last_column": 0, "text": ""},
+        "function_defs": [
+          {"file": "facts/false_a.rb", "name": "run", "owner": "Project::Thing", "line": 2, "span": [2, 0, 2, 8], "body": {"kind": "body_statement", "text": "", "span": [2, 0, 2, 8], "named": true, "field_name": null, "children": []}, "visibility": null, "params": []}
+        ],
+        "owner_defs": [
+          {"file": "facts/false_a.rb", "name": "Project::Thing", "kind": "class", "line": 1, "span": [1, 0, 1, 20]}
+        ],
+        "call_sites": [],
+        "state_reads": [],
+        "state_writes": [],
+        "decision_sites": [],
+        "branch_decisions": [],
+        "dispatch_sites": [],
+        "semantic_effect_sites": [
+          {"kind": "hidden_io", "detail": "puts", "file": "facts/false_a.rb", "function": "run", "line": 3, "span": [3, 2, 3, 6]}
+        ],
+        "local_complexity_scores": {},
+        "predicate_aliases": [],
+        "comparison_uses": []
+      },
+      {
+        "file": "facts/false_b.rb",
+        "language": "ruby",
+        "source": "",
+        "lines": [],
+        "root": {"kind": "program", "text": "", "span": [1, 0, 1, 0], "named": true, "field_name": null, "children": []},
+        "normalized_root": {"type": "ROOT", "children": [], "first_lineno": 1, "first_column": 0, "last_lineno": 1, "last_column": 0, "text": ""},
+        "function_defs": [
+          {"file": "facts/false_b.rb", "name": "again", "owner": "Project::Thing", "line": 2, "span": [2, 0, 2, 10], "body": {"kind": "body_statement", "text": "", "span": [2, 0, 2, 10], "named": true, "field_name": null, "children": []}, "visibility": null, "params": []}
+        ],
+        "owner_defs": [
+          {"file": "facts/false_b.rb", "name": "Project::Thing", "kind": "class", "line": 1, "span": [1, 0, 1, 20]}
+        ],
+        "call_sites": [],
+        "state_reads": [],
+        "state_writes": [],
+        "decision_sites": [],
+        "branch_decisions": [],
+        "dispatch_sites": [],
+        "semantic_effect_sites": [],
+        "local_complexity_scores": {},
+        "predicate_aliases": [],
+        "comparison_uses": []
+      }
+    ]
+  },
+  "expected": [
+    {
+      "at": "facts/false_a.rb:Project::Thing:1",
+      "detail": "reopen Project::Thing",
+      "kind": "monkeypatch",
+      "scatter": 2,
+      "sites": [
+        "facts/false_a.rb:Project::Thing:1",
+        "facts/false_b.rb:Project::Thing:1"
+      ],
+      "spans": {
+        "facts/false_a.rb:Project::Thing:1": [1, 0, 1, 20],
+        "facts/false_b.rb:Project::Thing:1": [1, 0, 1, 20]
+      },
+      "support": 2
+    },
+    {
+      "at": "facts/false_a.rb:run:3",
+      "detail": "puts",
+      "kind": "hidden_io",
+      "scatter": 1,
+      "sites": [
+        "facts/false_a.rb:run:3"
+      ],
+      "spans": {
+        "facts/false_a.rb:run:3": [3, 2, 3, 6]
+      },
+      "support": 1
+    }
+  ]
+}

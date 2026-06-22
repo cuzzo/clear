@@ -1,0 +1,10 @@
+{
+  "detector": "false-simplicity",
+  "options": {
+  },
+  "expected": [
+    {
+      "kind": "hidden_io"
+    }
+  ]
+}

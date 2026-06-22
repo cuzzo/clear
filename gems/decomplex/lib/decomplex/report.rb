@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../decomplex"
+require_relative "report_facts"
 
 module Decomplex
   # Aggregates every detector over a file set and renders a single
@@ -8,134 +9,68 @@ module Decomplex
   # prioritisation, per-detector sections, run summary). Every number
   # is a ranked CANDIDATE count, never a verdict.
   class Report
-    def initialize(files)
+    def initialize(files, facts: nil)
       @files = files
-      run
+      facts ? apply_facts(facts) : run
+    end
+
+    def self.from_facts(facts)
+      normalized = ReportFacts.normalize(facts)
+      new(normalized.fetch(:files), facts: normalized)
     end
 
     def run
-      m = Miner.scan(@files)
-      @miss   = m.missing_abstractions
-      @negc   = m.neglected_conditions
-      cu      = CoUpdate.scan(@files)
-      @negu   = cu.neglected_updates
-      @copair = cu.co_written_pairs
-      pa      = PredicateAlias.scan(@files)
-      @palias = pa.alias_clusters
-      sa      = SemanticAlias.scan(@files)
-      @salias = sa.alias_clusters
-      @reif   = sa.reification_misses
-      pc      = PathCondition.scan(@files)
-      @pcneg  = pc.neglected
-      @pcsc   = pc.scattered
-      sm      = SequenceMine.scan(@files)
-      @broken = sm.broken_protocol
-      icf     = ImplicitControlFlow.scan(@files)
-      @implicit_control_flow = icf.ordered_protocols(
-        min_support: Integer(ENV.fetch("DECOMPLEX_ICF_MIN_SUPPORT", "1"))
-      )
-      @derived = DerivedState.scan(@files)
-      @rename_clones = InconsistentRenameClone.scan(@files)
-      @similarity = FlaySimilarity.scan(
-        @files,
-        mass: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_MASS",
-                                ENV.fetch("DECOMPLEX_FLAY_MASS", FlaySimilarity::DEFAULT_MASS))),
-        fuzzy: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_FUZZY",
-                                 ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY)))
-      )
-      @pressure = DecisionPressure.scan(@files).ranked
-      @redundant_nil = RedundantNilGuard.scan(@files)
-      @fsimple = FalseSimplicity.scan(@files).findings
-      @oversized_predicates = OversizedPredicate.scan(@files).findings
-      @fatu = FatUnion.scan(@files).fat_unions
-      state_mesh = StateMesh.scan(@files, min_writes: 1)
-      state_mesh.run
-      @state_heat = state_mesh.findings
-      @state_branch = StateBranchDensity.scan(@files).findings
-      @temporal_ordering = TemporalOrderingPressure.scan(@files)
-      @weighted_inlined_complexity = WeightedInlinedCognitiveComplexity.scan(
-        @files,
-        min_score: Float(ENV.fetch(
-          "DECOMPLEX_WICC_MIN_SCORE",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_SCORE
-        )),
-        min_hidden: Float(ENV.fetch(
-          "DECOMPLEX_WICC_MIN_HIDDEN",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_HIDDEN
-        )),
-        max_depth: Integer(ENV.fetch(
-          "DECOMPLEX_WICC_MAX_DEPTH",
-          WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
-        ))
-      )
-      @locality_drag = LocalityDrag.scan(
-        @files,
-        min_unrelated_statements: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_UNRELATED_STATEMENTS",
-          LocalityDrag::DEFAULT_MIN_UNRELATED_STATEMENTS
-        )),
-        min_gap_lines: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_GAP_LINES",
-          LocalityDrag::DEFAULT_MIN_GAP_LINES
-        )),
-        min_local_complexity: Float(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_LOCAL_COMPLEXITY",
-          LocalityDrag::DEFAULT_MIN_LOCAL_COMPLEXITY
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MIN_SCORE",
-          LocalityDrag::DEFAULT_MIN_SCORE
-        )),
-        max_findings_per_method: Integer(ENV.fetch(
-          "DECOMPLEX_LOCALITY_DRAG_MAX_FINDINGS_PER_METHOD",
-          LocalityDrag::DEFAULT_MAX_FINDINGS_PER_METHOD
-        ))
-      )
-      @function_lcom = FunctionLCOM.scan(
-        @files,
-        min_components: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_COMPONENTS",
-          FunctionLCOM::DEFAULT_MIN_COMPONENTS
-        )),
-        min_locals: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_LOCALS",
-          FunctionLCOM::DEFAULT_MIN_LOCALS
-        )),
-        min_statements: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_STATEMENTS",
-          FunctionLCOM::DEFAULT_MIN_STATEMENTS
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_FUNCTION_LCOM_MIN_SCORE",
-          FunctionLCOM::DEFAULT_MIN_SCORE
-        ))
-      )
-      operational_discontinuity = OperationalDiscontinuity.scan(
-        @files,
-        min_dead: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_DEAD",
-          OperationalDiscontinuity::DEFAULT_MIN_DEAD
-        )),
-        min_new: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_NEW",
-          OperationalDiscontinuity::DEFAULT_MIN_NEW
-        )),
-        max_continuing: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MAX_CONTINUING",
-          OperationalDiscontinuity::DEFAULT_MAX_CONTINUING
-        )),
-        min_score: Integer(ENV.fetch(
-          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_SCORE",
-          OperationalDiscontinuity::DEFAULT_MIN_SCORE
-        ))
-      )
+      apply_facts(ReportFacts.from_files(@files, engine: "ruby"))
+    end
+
+    def apply_facts(facts)
+      normalized = ReportFacts.normalize(facts)
+      @files = normalized.fetch(:files)
+      detectors = normalized.fetch(:detectors)
+
+      miner = detectors.fetch(:miner)
+      @miss = miner.fetch(:missing_abstractions, [])
+      @negc = miner.fetch(:neglected_conditions, [])
+
+      co_update = detectors.fetch(:co_update)
+      @negu = co_update.fetch(:neglected_updates, [])
+      @copair = co_update.fetch(:co_written_pairs, [])
+
+      @palias = detectors.fetch(:predicate_alias).fetch(:alias_clusters, [])
+
+      semantic_alias = detectors.fetch(:semantic_alias)
+      @salias = semantic_alias.fetch(:alias_clusters, [])
+      @reif = semantic_alias.fetch(:reification_misses, [])
+
+      path_condition = detectors.fetch(:path_condition)
+      @pcneg = path_condition.fetch(:neglected, [])
+      @pcsc = path_condition.fetch(:scattered, [])
+
+      @broken = detectors.fetch(:sequence_mine).fetch(:broken_protocol, [])
+      @implicit_control_flow = detectors.fetch(:implicit_control_flow).fetch(:ordered_protocols, [])
+      @derived = detectors.fetch(:derived_state, [])
+      @rename_clones = detectors.fetch(:inconsistent_rename_clone, [])
+      @similarity = detectors.fetch(:flay_similarity, [])
+      @pressure = detectors.fetch(:decision_pressure, [])
+      @redundant_nil = detectors.fetch(:redundant_nil_guard, [])
+      @fsimple = detectors.fetch(:false_simplicity, [])
+      @oversized_predicates = detectors.fetch(:oversized_predicate, [])
+      @fatu = detectors.fetch(:fat_union).fetch(:fat_unions, [])
+      @state_heat = detectors.fetch(:state_heatmap, [])
+      @state_branch = detectors.fetch(:state_branch_density, [])
+      @temporal_ordering = detectors.fetch(:temporal_ordering_pressure, [])
+      @weighted_inlined_complexity = detectors.fetch(:weighted_inlined_complexity, [])
+      @locality_drag = detectors.fetch(:locality_drag, [])
+      @function_lcom = detectors.fetch(:function_lcom, [])
+      operational_discontinuity = detectors.fetch(:operational_discontinuity, [])
       @operational_discontinuity_high_confidence, @operational_discontinuity =
-        operational_discontinuity.partition { |finding| OperationalDiscontinuity.high_confidence?(finding) }
+        operational_discontinuity.partition { |finding| finding[:confidence].to_s == "high" }
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
       @convergence = Convergence.rollup(sd)
       @root = RootCause.cluster(sd)
+      self
     end
 
     # tier = signal quality (1 = highest signal / lowest false-positive,
@@ -371,8 +306,7 @@ module Decomplex
     private
 
     def sarif_rules
-      SECTIONS.reject { |title, *_| CONVERGENCE_EXCLUDED_SECTIONS.include?(title) }
-              .map do |title, _ivar, tier, desc|
+      sarif_sections_data(include_findings: false).map do |title, tier, _findings, desc|
         Decomplex::Sarif.rule(
           id: sarif_rule_id(title),
           name: title,
@@ -397,7 +331,7 @@ module Decomplex
     end
 
     def sarif_results(include_finding_payload: true)
-      sections_data.flat_map do |title, tier, findings|
+      sarif_sections_data.flat_map do |title, tier, findings, _desc|
         Array(findings).flat_map do |finding|
           sarif_locations_for_finding(finding).map do |location|
             properties = {
@@ -432,10 +366,100 @@ module Decomplex
     end
 
     def sarif_message(title, finding, location)
+      detail = sarif_message_detail(title, finding)
+      return "#{title}: #{detail}" unless detail.to_s.empty?
+
       subject = location[:method] || finding[:method] || finding[:name] ||
                 finding[:field] || finding[:contract] || finding[:owner] ||
                 finding[:token] || finding[:kind]
       [title, subject].compact.join(": ")
+    end
+
+    def sarif_message_detail(title, finding)
+      case title
+      when "Decision Pressure"
+        "`#{finding[:contract]}` creates #{finding[:decisions]} eliminable guard decision(s) across " \
+          "#{finding[:methods]} method(s)"
+      when "Redundant Nil Guards"
+        "`#{finding[:local]}` is nil-guarded by `#{finding[:guard]}` after proof `#{finding[:proof]}`"
+      when "State Heatmap"
+        writers = Array(finding[:top_writers]).first(3).join(" | ")
+        readers = Array(finding[:top_readers]).first(3).join(" | ")
+        "state `#{finding[:field]}` has pressure=#{finding[:pressure]}, messiness=#{finding[:messiness]} " \
+          "(writes=#{finding[:writes]}, reads=#{finding[:reads]}, re-derived=#{finding[:re_derivations]}, " \
+          "scatter=#{finding[:scatter]}); writers #{writers}; readers #{readers}"
+      when "Missing Abstractions"
+        "guard tuple `#{Array(finding[:members]).join(' | ')}` repeats in #{finding[:support]} site(s) " \
+          "with scatter=#{finding[:scatter]}"
+      when "State-Based Branch Density"
+        refs = Array(finding[:state_refs]).first(8).join(" | ")
+        "#{finding[:decisions]} state-based branch decision(s) over `#{refs}`; " \
+          "example predicate `#{finding[:predicate]}`"
+      when "Temporal Ordering Pressure"
+        "`#{finding[:owner]}` exposes mutable lifecycle pressure score=#{finding[:score]} " \
+          "(public=#{finding[:public_methods]}, state_methods=#{finding[:state_methods]}, " \
+          "writers=#{finding[:writers]})"
+      when "Neglected Conditions", "Neglected Path Conditions"
+        "missing condition `#{finding[:missing]}` from `#{Array(finding[:pattern] || finding[:guards]).join(' | ')}` " \
+          "(support=#{finding[:support]})"
+      when "Oversized Predicates"
+        "#{finding[:count]} condition atoms in predicate `#{finding[:predicate]}`"
+      when "Neglected Updates"
+        "writes `.#{finding[:has]}` but not co-written `.#{finding[:missing]}` on receiver `#{finding[:recv]}` " \
+          "(support=#{finding[:support]})"
+      when "Semantic Predicate Aliases", "Exact Predicate Aliases"
+        "predicate aliases `#{Array(finding[:names]).join(' = ')}` for `#{finding[:canon] || finding[:body]}`"
+      when "Reification Misses"
+        "predicate `#{finding[:predicate]}` is reinvented inline as `#{finding[:raw]}`"
+      when "Broken Protocols"
+        "does `#{finding[:has]}` without co-called `#{finding[:missing]}` " \
+          "(support=#{finding[:support]}, confidence=#{finding[:confidence]})"
+      when "Implicit Control Flow"
+        sarif_implicit_control_flow_detail(finding)
+      when "Weighted Inlined Cognitive Complexity"
+        "inlined=#{finding[:inlined]} (local=#{finding[:local]}, hidden=#{finding[:hidden]}, " \
+          "depth=#{finding[:depth]}); chain `#{Array(finding[:call_chain]).join(' -> ')}`"
+      when "Locality Drag"
+        "`#{finding[:variable]}` is initialized at line #{finding[:defined_at]} but first used at line " \
+          "#{finding[:used_at]} after #{finding[:unrelated_statements]} unrelated statement(s)"
+      when "Function LCOM"
+        mode = finding[:mode] == :late_join ? "late_join" : "disjoint"
+        "#{mode} local data-flow: score=#{finding[:score]}, components=#{finding[:components]}, " \
+          "locals=#{finding[:locals]}, statements=#{finding[:statements]}"
+      when "Operational Discontinuity", "Operational Discontinuity (High Confidence)"
+        "score=#{finding[:score]}, reset_boundaries=#{finding[:resets]}, dead=#{finding[:dead_total]}, " \
+          "new=#{finding[:new_total]}, confidence=#{finding[:confidence] || :review}"
+      when "False Simplicity"
+        "[#{finding[:kind]}] `#{finding[:detail]}` support=#{finding[:support]}, scatter=#{finding[:scatter]}"
+      when "Fat Unions"
+        "union `#{Array(finding[:variant_set]).join(' | ')}` has #{Array(finding[:common]).size} common and " \
+          "#{Array(finding[:variant]).size} variant member(s), scatter=#{finding[:scatter]}"
+      when "Derived-State Staleness"
+        "`#{finding[:derived]}` derived from `#{finding[:source]}` at line #{finding[:derived_at]}; " \
+          "`#{finding[:source]}` reassigned at line #{finding[:source_reassigned_at]} but " \
+          "`#{finding[:derived]}` is not recomputed"
+      when "Inconsistent Rename Clones"
+        "clone of #{finding[:ref_at]}: reference variable `#{finding[:ref_name]}` diverges as " \
+          "#{Array(finding[:divergent]).inspect}"
+      when "Structural Similarity (Type-2/3)"
+        "[#{finding[:clone_type]}] mass=#{finding[:mass]} node=`#{finding[:node]}` across " \
+          "#{Array(finding[:sites]).size} site(s)"
+      else
+        nil
+      end
+    end
+
+    def sarif_implicit_control_flow_detail(finding)
+      protocol = Array(finding[:protocol]).join(" -> ")
+      dependency = Array(finding[:dependency]).join("|")
+      states = Array(finding[:states]).join(" | ")
+      if finding[:kind] == :order_drift
+        observed = Array(finding[:observed]).join(" -> ")
+        return "[order_drift] observed `#{observed}` against protocol `#{protocol}` " \
+               "(#{dependency} state=`#{states}`)"
+      end
+
+      "[protocol_pressure] protocol `#{protocol}` (#{dependency} state=`#{states}`), support=#{finding[:support]}"
     end
 
     def sarif_locations_for_finding(finding)
@@ -475,6 +499,13 @@ module Decomplex
         method: method,
         line: line&.positive? ? line : 1
       }
+    end
+
+    def sarif_sections_data(include_findings: true)
+      SECTIONS.map do |title, ivar, tier, desc|
+        findings = include_findings ? instance_variable_get(ivar) : nil
+        [title, tier, findings, desc]
+      end
     end
 
     def zero_based_column_to_sarif(value)

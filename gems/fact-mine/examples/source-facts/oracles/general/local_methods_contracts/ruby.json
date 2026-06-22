@@ -1,0 +1,307 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "process",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "profile",
+              "user"
+            ]
+          ],
+          "reads": [
+            "user"
+          ],
+          "writes": [
+            "profile"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "names"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "items",
+              "names"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "items",
+            "names"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "names",
+              "profile"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "names",
+            "profile"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "syntax": {
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "process",
+        "line": 5,
+        "message": "profile",
+        "receiver": "user",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "process",
+        "line": 12,
+        "message": "any?",
+        "receiver": "names",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "process",
+        "line": 12,
+        "message": "name",
+        "receiver": "profile",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "process",
+        "line": 8,
+        "message": "ready?",
+        "receiver": "item",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "process",
+        "line": 9,
+        "message": "name",
+        "receiver": "item",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "process",
+        "line": 7,
+        "message": "each",
+        "receiver": "items",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts",
+        "params": [
+          "user",
+          "items"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactLocalMethodsContracts#process",
+        "score": 2.2,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "loops": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactLocalMethodsContracts#process",
+        "line": 4,
+        "local_contract_assignments": {
+          "names": "[]",
+          "profile": "user.profile"
+        },
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "profile",
+                "user"
+              ]
+            ],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "user"
+            ],
+            "source": "profile = user.profile",
+            "span": [
+              5,
+              4,
+              5,
+              26
+            ],
+            "writes": [
+              "profile"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [],
+            "source": "names = []",
+            "span": [
+              6,
+              4,
+              6,
+              14
+            ],
+            "writes": [
+              "names"
+            ]
+          },
+          {
+            "co_uses": [
+              [
+                "items",
+                "names"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 11,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "items",
+              "names"
+            ],
+            "source": "items.each do |item| if item.ready? names << item.name end end",
+            "span": [
+              7,
+              4,
+              11,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "names",
+                "profile"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 3,
+            "line": 12,
+            "reads": [
+              "names",
+              "profile"
+            ],
+            "source": "profile.name if names.any?",
+            "span": [
+              12,
+              4,
+              12,
+              30
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "process",
+        "kind": "hidden_mutation",
+        "line": 9
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "any?",
+        "function": "process",
+        "line": 12,
+        "receiver": "names"
+      },
+      {
+        "field": "each",
+        "function": "process",
+        "line": 7,
+        "receiver": "items"
+      },
+      {
+        "field": "name",
+        "function": "process",
+        "line": 12,
+        "receiver": "profile"
+      },
+      {
+        "field": "name",
+        "function": "process",
+        "line": 9,
+        "receiver": "item"
+      },
+      {
+        "field": "profile",
+        "function": "process",
+        "line": 5,
+        "receiver": "user"
+      },
+      {
+        "field": "ready?",
+        "function": "process",
+        "line": 8,
+        "receiver": "item"
+      }
+    ],
+    "state_writes": []
+  }
+}

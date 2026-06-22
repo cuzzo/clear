@@ -1,11 +1,11 @@
 # typed: false
 # frozen_string_literal: true
 
-sibling_syntax = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
-if File.file?("#{sibling_syntax}.rb")
-  require sibling_syntax
-else
-  require "decomplex/syntax"
+begin
+  require "espalier/tree_sitter"
+rescue LoadError
+  $LOAD_PATH.unshift(File.expand_path("../../../espalier/lib", __dir__))
+  require "espalier/tree_sitter"
 end
 require "set"
 
@@ -55,7 +55,7 @@ module NilKill
       end
 
       def parse
-        parser = Decomplex::Syntax::TreeSitterAdapter.new.send(:parser_for, :ruby)
+        parser = Espalier::TreeSitter.parser_for(:ruby)
         tree = parser.parse(@source)
         context = Context.new(@source, tree.root_node, @path)
         ParseResult.new(context.wrap(tree.root_node), [])
@@ -79,6 +79,9 @@ module NilKill
         @root = root
         @path = path
         @cache = {}
+        @children_cache = {}
+        @named_children_cache = {}
+        @named_field_cache = {}
         @locals_by_scope = {}
         scan_scopes(root)
       end
@@ -110,21 +113,38 @@ module NilKill
       end
 
       def named_field(raw, name)
-        raw.child_by_field_name(name)
+        key = [raw_key(raw), name.to_s]
+        return @named_field_cache[key] if @named_field_cache.key?(key)
+
+        @named_field_cache[key] = raw.child_by_field_name(name)
       rescue StandardError
         nil
       end
 
+      def children(raw)
+        key = raw_key(raw)
+        @children_cache.fetch(key) do
+          @children_cache[key] = Array(raw.children)
+        end
+      rescue StandardError
+        []
+      end
+
       def named_children(raw)
-        Array(raw.named_children)
+        key = raw_key(raw)
+        @named_children_cache.fetch(key) do
+          @named_children_cache[key] = Array(raw.named_children)
+        end
+      rescue StandardError
+        []
       end
 
       def child_token(raw, text)
-        raw.children.find { |child| !child.named? && child.text.to_s == text }
+        children(raw).find { |child| !child.named? && child.text.to_s == text }
       end
 
       def first_child_kind(raw, kind)
-        raw.children.find { |child| child.kind == kind }
+        children(raw).find { |child| child.kind == kind }
       end
 
       def previous_named(raw)
@@ -146,6 +166,10 @@ module NilKill
       def local_name?(raw)
         name = raw.text.to_s
         scope_locals_for(raw).include?(name)
+      end
+
+      def raw_key(raw)
+        [raw.start_byte, raw.end_byte, raw.kind]
       end
 
       def scope_locals_for(raw)

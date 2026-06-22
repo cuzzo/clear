@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # Guarded-pair / protocol mining (Engler "Bugs as Deviant Behavior",
@@ -10,25 +10,12 @@ module Decomplex
   # deviant -- the "similar path, one missing the step" plague that is
   # the literal shape of bugs #1/#2/#9.
   #
-  # Unit = the SET of distinct call message-names in a method (FCALL /
-  # CALL mid). Domain-agnostic (Engler): no name heuristics, mine all
+  # Unit = the SET of distinct semantic call message-names in a method.
+  # Domain-agnostic (Engler): no name heuristics, mine all
   # pairs, rank by support, accept FP. Same proven shape as co_update,
   # over calls instead of assigned attributes.
   class SequenceMine
     Call = Struct.new(:mid, :file, :defn, :line, :span, keyword_init: true)
-    DECLARATIVE_MIDS = %w[
-      abstract! alias_method any attr_accessor attr_reader attr_writer bind
-      cast checked enum extend final include interface! let must must_because
-      nilable override overridable params prepend private private_class_method
-      public require require_relative requires_ancestor sealed! sig type_member
-      type_template untyped unsafe void
-    ].freeze
-    TEST_DSL_MIDS = %w[
-      a_kind_of after around before be be_a be_an be_empty be_falsey be_nil
-      be_truthy change contain_exactly context describe eq eql equal expect
-      have_attributes have_key have_received it match not_to raise_error
-      receive subject to
-    ].freeze
     ZERO_ARG_ACTION_MIDS = %w[
       acquire begin close commit connect deinit disconnect drain finish flush
       lock open release rollback start stop unlock wait
@@ -40,14 +27,12 @@ module Decomplex
       resolve rewrite run scan set stamp sync transform validate verify visit
       walk warn write
     ].freeze
-    IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
-
     def self.scan(files)
       calls = []
       files.each do |f|
-        root, lines = Ast.parse(f)
-        e = new(f)
-        e.walk(root, [])
+        document = Syntax.parse(f, parser: "tree_sitter")
+        e = new(f, document)
+        e.collect
         calls.concat(e.calls)
       end
       Report.new(calls)
@@ -55,49 +40,55 @@ module Decomplex
 
     attr_reader :calls
 
-    def initialize(file)
+    def initialize(file, document)
       @file = file
+      @document = document
+      @ignored_mids = Syntax.protocol_ignored_mids(document.language)
       @calls = []
     end
 
-    def walk(node, defstack)
-      return unless Ast.node?(node)
-
-      defstack = Ast.def_push(node, defstack)
-      if %i[CALL FCALL VCALL].include?(node.type)
-        mid = node.children[node.type == :CALL ? 1 : 0]
-        if protocol_event?(node, mid.to_s)
-          @calls << Call.new(mid: mid.to_s, file: @file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno,
-                             span: [node.first_lineno, node.first_column,
-                                    node.last_lineno, node.last_column])
+    def collect
+      @document.call_sites.each do |call|
+        mid = call.message.to_s
+        nested_protocol_events(call).each do |nested_mid|
+          @calls << Call.new(mid: nested_mid, file: @file,
+                             defn: call.function || "(top-level)",
+                             line: call.line,
+                             span: call.span)
+        end
+        if protocol_event?(call, mid)
+          @calls << Call.new(mid: mid, file: @file,
+                             defn: call.function || "(top-level)",
+                             line: call.line,
+                             span: call.span)
         end
       end
-      node.children.each { |c| walk(c, defstack) }
     end
 
     private
 
-    def protocol_event?(node, mid)
-      return false if IGNORED_MIDS.include?(mid)
-      return false if passive_reader_call?(node, mid)
+    def protocol_event?(call, mid)
+      return false if @ignored_mids.include?(mid)
+      return false if passive_reader_call?(call, mid)
 
       true
     end
 
-    def passive_reader_call?(node, mid)
+    def passive_reader_call?(call, mid)
       return false if zero_arg_action_name?(mid)
 
-      case node.type
-      when :CALL
-        node.children[2].nil?
-      when :VCALL
-        true
-      when :FCALL
-        node.children[1].nil?
-      else
-        false
+      return false unless call.arguments.to_a.empty?
+
+      true
+    end
+
+    def nested_protocol_events(call)
+      return [] unless @ignored_mids.include?(call.message.to_s)
+
+      candidates = call.arguments.to_a
+      candidates += source_text(call.span).scan(/\b[a-z_]\w*[!?]?\b/)
+      candidates.uniq.select do |candidate|
+        !@ignored_mids.include?(candidate) && zero_arg_action_name?(candidate)
       end
     end
 
@@ -108,6 +99,21 @@ module Decomplex
       ZERO_ARG_ACTION_PREFIXES.any? do |prefix|
         mid == prefix || mid.start_with?("#{prefix}_")
       end
+    end
+
+    def source_text(span)
+      return "" unless span
+
+      first_line, first_column, last_line, last_column = span
+      if first_line == last_line
+        return @document.lines[first_line - 1].to_s[first_column...last_column].to_s
+      end
+
+      parts = []
+      parts << @document.lines[first_line - 1].to_s[first_column..].to_s
+      parts.concat(@document.lines[first_line...(last_line - 1)] || [])
+      parts << @document.lines[last_line - 1].to_s[0...last_column].to_s
+      parts.join
     end
 
     class Report
@@ -155,14 +161,15 @@ module Decomplex
             conf = h[:support].to_f / @support[has]
             next if conf < min_confidence
 
-            hc = cs.find { |c| c.mid == has }
+            hc = cs.select { |c| c.mid == has }
+                   .min_by { |c| [c.line.to_i, Array(c.span), c.mid.to_s] }
             loc = "#{file}:#{defn}:#{hc.line}"
             out << { pair: h[:pair], support: h[:support],
                      confidence: conf.round(2), has: has, missing: miss,
                      at: loc, spans: { loc => hc.span } }
           end
         end
-        out.sort_by { |h| [-h[:confidence], -h[:support]] }
+        out.sort_by { |h| [-h[:confidence], -h[:support], h[:at].to_s] }
       end
     end
   end

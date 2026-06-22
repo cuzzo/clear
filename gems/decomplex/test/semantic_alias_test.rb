@@ -19,7 +19,7 @@ class SemanticAliasTest < Minitest::Test
     assert_equal "provenance == :frame", c
     assert_equal "provenance == :frame", Decomplex::SemanticAlias.canon("@provenance == :frame")
     assert_equal "provenance == :frame", Decomplex::SemanticAlias.canon("self.provenance == :frame")
-    t, neg = Decomplex::Ast.canon_polarity("!x.heap?")
+    t, neg = Decomplex::SemanticAlias.canon_polarity("!x.heap?")
     assert_equal "x.heap?", t
     assert neg
   end
@@ -63,5 +63,16 @@ class SemanticAliasTest < Minitest::Test
     rm = r.reification_misses
     assert_equal 1, rm.size
     assert_equal "heap?", rm.first[:predicate]
+  end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      r = scan(<<~RB)
+        def frame?; @provenance == :frame; end
+        def is_frame?; provenance == :frame; end
+      RB
+
+      assert_equal [%w[frame? is_frame?]], r.alias_clusters.map { |cluster| cluster[:names].sort }
+    end
   end
 end

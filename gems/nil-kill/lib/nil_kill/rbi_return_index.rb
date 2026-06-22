@@ -21,7 +21,7 @@ module NilKill
       # post-build index (@returns/@owner_returns written only during
       # `build`, read-only after) and this is a process-global
       # singleton (NilKill.rbi_return_index). They are recomputed
-      # identically for every call site across every SourceIndex pass
+      # identically for every static-analysis call site pass
       # (index_sources re-walks all files ~3-7x for the noreturn
       # fixpoint). Memoizing on the singleton collapses that to one
       # computation per distinct argument for the whole infer run.

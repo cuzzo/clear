@@ -60,6 +60,148 @@ if ARGV[0] == "delta"
   exit 0
 end
 
+if ARGV[0] == "facts"
+  require_relative "../lib/decomplex/report_facts"
+  args = ARGV[1..]
+  engine = "ruby"
+  out_path = nil
+  jobs = nil
+  benchmark = false
+  args = args.reject do |arg|
+    case arg
+    when /\A--engine=(.+)\z/
+      engine = Regexp.last_match(1)
+      true
+    when /\A--output=(.+)\z/
+      out_path = Regexp.last_match(1)
+      true
+    when /\A--jobs=(\d+)\z/
+      jobs = Integer(Regexp.last_match(1))
+      true
+    when "--benchmark"
+      benchmark = true
+      true
+    else
+      false
+    end
+  end
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  facts = Decomplex::ReportFacts.from_files(files, engine: engine, jobs: jobs)
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  output = Decomplex::ReportFacts.to_json(facts)
+  if out_path
+    File.write(out_path, output)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts output
+  end
+  if benchmark
+    warn format("decomplex facts engine=%s files=%d elapsed=%.6fs",
+                engine, files.size, elapsed)
+  end
+  exit 0
+end
+
+if ARGV[0] == "render-report"
+  require_relative "../lib/decomplex/report"
+  args = ARGV[1..]
+  format = "markdown"
+  out_path = nil
+  input_path = nil
+  args = args.reject do |arg|
+    case arg
+    when "--from-stdin"
+      true
+    when /\A--input=(.+)\z/
+      input_path = Regexp.last_match(1)
+      true
+    when /\A--format=(.+)\z/
+      format = Regexp.last_match(1)
+      true
+    when /\A--output=(.+)\z/
+      out_path = Regexp.last_match(1)
+      true
+    else
+      false
+    end
+  end
+  abort "usage: decomplex render-report --from-stdin|--input=FILE [--format=markdown|sarif|json] [--output=FILE]" unless args.empty?
+
+  payload = input_path ? File.read(input_path) : STDIN.read
+  abort "render-report requires facts JSON on stdin or --input=FILE" if payload.to_s.strip.empty?
+
+  report = Decomplex::Report.from_facts(payload)
+  output =
+    case format.to_s
+    when "markdown", "md"
+      report.to_markdown
+    when "sarif", "json"
+      report.to_sarif
+    else
+      abort "unsupported render-report format: #{format}"
+    end
+  if out_path
+    File.write(out_path, output)
+    warn "wrote #{out_path}"
+  else
+    puts output
+  end
+  exit 0
+end
+
+if ARGV[0] == "detector"
+  args = ARGV[1..]
+  detector = args&.shift
+  abort "usage: decomplex detector DETECTOR --engine=ruby|rust --json [--jobs=N] FILE..." unless detector
+
+  engine = "ruby"
+  json = false
+  benchmark = false
+  detector_options = {}
+  args = args.reject do |arg|
+    case arg
+    when /\A--engine=(.+)\z/
+      engine = Regexp.last_match(1)
+      true
+    when "--json"
+      json = true
+      true
+    when "--benchmark"
+      benchmark = true
+      true
+    when /\A--mass=(\d+)\z/
+      detector_options[:mass] = Integer(Regexp.last_match(1))
+      true
+    when /\A--fuzzy=(\d+)\z/
+      detector_options[:fuzzy] = Integer(Regexp.last_match(1))
+      true
+    when /\A--jobs=(\d+)\z/
+      detector_options[:jobs] = Integer(Regexp.last_match(1))
+      true
+    else
+      false
+    end
+  end
+  files = collect_files(args)
+  abort no_files_message if files.empty?
+
+  if json
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    output = Decomplex::DetectorRunner.canonical_json(detector, files, engine: engine, **detector_options)
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    if benchmark
+      warn format("decomplex detector=%s engine=%s files=%d elapsed=%.6fs",
+                  detector, engine, files.size, elapsed)
+    end
+    print output
+  else
+    abort "decomplex detector currently requires --json"
+  end
+  exit 0
+end
+
 if ARGV[0] == "state-mesh"
   require_relative "../lib/decomplex/state_mesh"
   args = ARGV[1..]
@@ -234,6 +376,9 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
 
       decomplex FILE_OR_DIR [FILE_OR_DIR ...]
       decomplex report [--output=FILE] [--emit-json=FILE] [--sarif=FILE] [--exclude=GLOB] FILE_OR_DIR ...
+      decomplex facts [--engine=ruby|rust] [--output=FILE] [--benchmark] [--jobs=N] FILE_OR_DIR ...
+      decomplex render-report --from-stdin|--input=FILE [--format=markdown|sarif|json] [--output=FILE]
+      decomplex detector DETECTOR --engine=ruby|rust --json [--benchmark] [--mass=N] [--fuzzy=N] [--jobs=N] FILE_OR_DIR ...
       decomplex state-mesh [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex state-branches [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
       decomplex temporal-ordering [--output=FILE] [--exclude=GLOB] FILE_OR_DIR ...
@@ -247,6 +392,10 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
 
     Subcommands:
       report       Full markdown report with all detectors
+      facts        Emit report-ready detector facts before convergence/root-cause/rendering
+      render-report
+                   Render a precomputed facts payload without parsing source or running detectors
+      detector     Single-detector canonical JSON for migration/benchmarking
       state-mesh   JSON graph of reader/writer hierarchy by field
       state-branches
                    Markdown table of branches whose predicate reads state

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 require_relative "semantic_alias"
 require "json"
 
@@ -12,9 +12,9 @@ module Decomplex
   # organized by dir -> file -> function.
   #
   # Phases:
-  #   1. Discover state fields (ATTRASGN + IASGN with >= min_writes)
-  #   2. Find all write sites (reusing CoUpdate's walk logic)
-  #   3. Find all read sites (new walker: CALL/IVAR matching field names)
+  #   1. Discover state fields from Syntax state-write facts
+  #   2. Find all write sites from Syntax state-write facts
+  #   3. Find all read sites from Syntax state-read facts
   #   4. Find re-derivation sites via SemanticAlias reification misses
   #   5. Compute messiness per field
   #   6. Render hierarchical JSON graph
@@ -32,16 +32,14 @@ module Decomplex
     # `custom_fields` overrides field discovery with an explicit list.
     # `min_writes` is the threshold for auto-discovered fields (default 2).
     def self.scan(files, min_writes: 2, custom_fields: nil)
-      src_map = {}
-      files.each do |f|
-        root, lines = Ast.parse(f)
-        src_map[f] = { root: root, lines: lines }
+      documents = files.to_h do |file|
+        [file, Syntax.parse(file, parser: "tree_sitter")]
       end
-      new(src_map, min_writes: min_writes, custom_fields: custom_fields)
+      new(documents, min_writes: min_writes, custom_fields: custom_fields)
     end
 
-    def initialize(src_map, min_writes: 2, custom_fields: nil)
-      @src_map = src_map
+    def initialize(documents, min_writes: 2, custom_fields: nil)
+      @documents = documents
       @min_writes = min_writes
       @custom_fields = custom_fields
       @writes = []
@@ -52,44 +50,19 @@ module Decomplex
     # ---- Phase 1+2: discover fields and walk write sites ---------------
 
     def discover_fields!
-      @src_map.each do |file, data|
-        walk_writes(data[:root], data[:lines], [], file)
-      end
-    end
-
-    def walk_writes(node, lines, defstack, file)
-      return unless Ast.node?(node)
-
-      case node.type
-      when :DEFN then defstack = defstack + [node.children[0].to_s]
-      when :DEFS then defstack = defstack + [node.children[1].to_s]
-      when :ATTRASGN
-        recv, msg, = node.children
-        if msg == :[]=
-          node.children.each { |c| walk_writes(c, lines, defstack, file) }
-          return
+      @documents.each do |file, document|
+        document.state_writes.each do |write|
+          @writes << Write.new(
+            attr: write.field,
+            norm: normalize(write.field),
+            recv: write.receiver,
+            file: file,
+            defn: write.function,
+            line: write.line,
+            span: write.span
+          )
         end
-        attr = msg.to_s.sub(/=$/, "")
-        norm = normalize(attr)
-        span = [node.first_lineno, node.first_column,
-                node.last_lineno, node.last_column]
-        @writes << Write.new(attr: attr, norm: norm,
-                             recv: recv_slice(node.children[0], lines),
-                             file: file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno, span: span)
-      when :IASGN
-        attr = node.children[0].to_s  # "@storage"
-        norm = normalize(attr)
-        span = [node.first_lineno, node.first_column,
-                node.last_lineno, node.last_column]
-        @writes << Write.new(attr: attr, norm: norm, recv: "self",
-                             file: file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno, span: span)
       end
-
-      node.children.each { |c| walk_writes(c, lines, defstack, file) }
     end
 
     # ---- Phase 3: walk read sites -------------------------------------
@@ -98,50 +71,23 @@ module Decomplex
       # Build the set of normalized field names we care about.
       field_norms = known_field_norms
 
-      @src_map.each do |file, data|
-        walk_reads(data[:root], data[:lines], [], file, field_norms)
-      end
-    end
+      @documents.each do |file, document|
+        document.state_reads.each do |read|
+          norm = normalize(read.field)
+          next unless field_norms.include?(norm)
+          next if write_target_read?(read)
 
-    def walk_reads(node, lines, defstack, file, field_norms)
-      return unless Ast.node?(node)
-
-      case node.type
-      when :DEFN then defstack = defstack + [node.children[0].to_s]
-      when :DEFS then defstack = defstack + [node.children[1].to_s]
-      when :CALL, :OPCALL
-        # CALL(recv, :method, args) - attribute reads have no args
-        recv = node.children[0]
-        mid  = node.children[1]
-        args = node.children[2]
-
-        # Skip if called with arguments (it's a method call, not attr read)
-        if args.nil? || (Ast.node?(args) && args.type == :LIST && args.children.compact.empty?)
-          name = mid.to_s
-          if field_norms.include?(name)
-            span = [node.first_lineno, node.first_column,
-                    node.last_lineno, node.last_column]
-            @reads << Read.new(attr: name, norm: name,
-                               recv: recv_slice(recv, lines),
-                               file: file,
-                               defn: defstack.last || "(top-level)",
-                               line: node.first_lineno, span: span)
-          end
-        end
-      when :IVAR
-        name = node.children[0].to_s  # e.g. "@storage"
-        norm = normalize(name)
-        if field_norms.include?(norm)
-          span = [node.first_lineno, node.first_column,
-                  node.last_lineno, node.last_column]
-          @reads << Read.new(attr: name, norm: norm, recv: "self",
-                             file: file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno, span: span)
+          @reads << Read.new(
+            attr: read.field,
+            norm: norm,
+            recv: read.receiver,
+            file: file,
+            defn: read.function,
+            line: read.line,
+            span: read.span
+          )
         end
       end
-
-      node.children.each { |c| walk_reads(c, lines, defstack, file, field_norms) }
     end
 
     # ---- Phase 4: re-derivation sites ---------------------------------
@@ -152,7 +98,7 @@ module Decomplex
 
       # Accept pre-computed misses (for testing) or compute them.
       if reification_misses.nil?
-        files = @src_map.keys
+        files = @documents.keys
         sa = SemanticAlias.scan(files)
         reification_misses = sa.reification_misses
       end
@@ -274,15 +220,18 @@ module Decomplex
 
       fields_obj = {}
       field_norms.sort.each do |fn|
-        ws = (writes_by_field[fn] || []).map { |w|
+        ordered_writes = (writes_by_field[fn] || []).sort_by { |w| [w.file.to_s, w.line.to_i, w.defn.to_s] }
+        ordered_reads = (reads_by_field[fn] || []).sort_by { |r| [r.file.to_s, r.line.to_i, r.defn.to_s] }
+        ordered_rederivations = (reder_by_field[fn] || []).sort_by { |d| [d.file.to_s, d.line.to_i, d.defn.to_s] }
+        ws = ordered_writes.map { |w|
           { "file" => w.file, "defn" => w.defn, "line" => w.line,
             "recv" => w.recv, "span" => w.span }
         }
-        rs = (reads_by_field[fn] || []).map { |r|
+        rs = ordered_reads.map { |r|
           { "file" => r.file, "defn" => r.defn, "line" => r.line,
             "recv" => r.recv, "span" => r.span }
         }
-        ds = (reder_by_field[fn] || []).map { |d|
+        ds = ordered_rederivations.map { |d|
           { "file" => d.file, "defn" => d.defn, "line" => d.line,
             "raw" => d.raw, "predicate" => d.predicate, "canon" => d.canon }
         }
@@ -379,8 +328,8 @@ module Decomplex
         ds = reder_by_field[m.name] || []
         sites = (ws + rs).map { |s| "#{s.file}:#{s.defn}:#{s.line}" } +
                 ds.map { |s| "#{s.file}:#{s.defn}:#{s.line}" }
-        spans = (ws + rs).to_h do |s|
-          ["#{s.file}:#{s.defn}:#{s.line}", s.span]
+        spans = (ws + rs).each_with_object({}) do |s, out|
+          out["#{s.file}:#{s.defn}:#{s.line}"] ||= s.span
         end
         {
           at: sites.first,
@@ -428,13 +377,21 @@ module Decomplex
       end
     end
 
-    def recv_slice(node, lines)
-      return "?" unless Ast.node?(node)
+    def write_target_read?(read)
+      @writes.any? do |write|
+        write.file == read.file &&
+          write.defn == read.function &&
+          write.recv == read.receiver &&
+          write.attr == read.field &&
+          write.line == read.line &&
+          same_start?(write.span, read.span)
+      end
+    end
 
-      sl = node.first_lineno
-      el = node.last_lineno
-      t = sl == el ? lines[sl - 1][node.first_column...node.last_column] : lines[sl - 1][node.first_column..]
-      t.to_s.strip.gsub(/\s+/, " ")
+    def same_start?(write_span, read_span)
+      return false unless write_span && read_span
+
+      write_span[0] == read_span[0] && write_span[1] == read_span[1]
     end
   end
 end

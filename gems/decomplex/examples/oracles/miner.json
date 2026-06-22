@@ -1,0 +1,30 @@
+{
+  "detector": "miner",
+  "options": {
+  },
+  "expected": {
+    "missing_abstractions": [
+      {
+        "kind": "conjunction",
+        "members": [
+          "a",
+          "b",
+          "c"
+        ],
+        "support": 3,
+        "scatter": 3
+      }
+    ],
+    "neglected_conditions": [
+      {
+        "pattern": [
+          "a",
+          "b",
+          "c"
+        ],
+        "support": 3,
+        "missing": "c"
+      }
+    ]
+  }
+}

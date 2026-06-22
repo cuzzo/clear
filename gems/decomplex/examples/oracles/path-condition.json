@@ -1,0 +1,17 @@
+{
+  "detector": "path-condition",
+  "options": {
+  },
+  "expected": [
+    {
+      "pattern": [
+        "x.p",
+        "y.q",
+        "z.r"
+      ],
+      "support": 3,
+      "missing": "z.r",
+      "action": "go(x)"
+    }
+  ]
+}

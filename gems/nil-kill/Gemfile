@@ -2,4 +2,8 @@
 
 source "https://rubygems.org"
 
+gem "decomplex", path: "../decomplex", require: false
+gem "espalier", path: "../espalier", require: false
+gem "fact-mine", path: "../fact-mine", require: false
+
 gemspec

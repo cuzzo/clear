@@ -273,7 +273,7 @@ RSpec.describe "nil-kill runtime trace" do
         worker.untyped("untyped")
       RUBY
 
-      methods = NilKill::SourceIndex.new(source).methods.each_with_object({}) { |method, lookup| lookup[method["method"]] = method }
+      methods = NilKill::StaticAnalysis.new(source).methods.each_with_object({}) { |method, lookup| lookup[method["method"]] = method }
       plan = {
         "methods" => {
           ["Worker", "typed", "instance", File.expand_path(source), methods.fetch("typed")["line"]].join("\0") => {
@@ -336,7 +336,7 @@ RSpec.describe "nil-kill runtime trace" do
         Worker.new.oneline
       RUBY
 
-      methods = NilKill::SourceIndex.new(source).methods.each_with_object({}) { |m, h| h[m["method"]] = m }
+      methods = NilKill::StaticAnalysis.new(source).methods.each_with_object({}) { |m, h| h[m["method"]] = m }
       plan = {
         "methods" => {
           ["Worker", "oneline", "instance", File.expand_path(source), methods.fetch("oneline")["line"]].join("\0") => {
@@ -388,7 +388,7 @@ RSpec.describe "nil-kill runtime trace" do
         Worker.new.guarded(42)
       RUBY
 
-      methods = NilKill::SourceIndex.new(source).methods.each_with_object({}) { |m, h| h[m["method"]] = m }
+      methods = NilKill::StaticAnalysis.new(source).methods.each_with_object({}) { |m, h| h[m["method"]] = m }
       # target_dirs MUST be present and match NIL_KILL_TARGETS or the
       # runtime discards the whole plan (trace_plan target-guard) ->
       # the TracePoint fallback never installs. This is exactly the
@@ -460,7 +460,7 @@ RSpec.describe "nil-kill runtime trace" do
         Worker.new.untyped("ok")
       RUBY
 
-      methods = NilKill::SourceIndex.new(source).methods.each_with_object({}) { |method, lookup| lookup[method["method"]] = method }
+      methods = NilKill::StaticAnalysis.new(source).methods.each_with_object({}) { |method, lookup| lookup[method["method"]] = method }
       plan = {
         "methods" => {
           ["Worker", "untyped", "instance", File.expand_path(source), methods.fetch("untyped")["line"]].join("\0") => {
@@ -518,7 +518,7 @@ RSpec.describe "nil-kill runtime trace" do
         worker.mixed(false)
       RUBY
 
-      method = NilKill::SourceIndex.new(source).methods.fetch(0)
+      method = NilKill::StaticAnalysis.new(source).methods.fetch(0)
       plan = {
         "methods" => {
           ["Worker", "mixed", "instance", File.expand_path(source), method["line"]].join("\0") => {
@@ -580,7 +580,7 @@ RSpec.describe "nil-kill runtime trace" do
         Worker.new.guarded("ensured")
       RUBY
 
-      method = NilKill::SourceIndex.new(source).methods.fetch(0)
+      method = NilKill::StaticAnalysis.new(source).methods.fetch(0)
       plan = {
         "version" => 1,
         "target_dirs" => [File.expand_path(dir)],
@@ -656,7 +656,7 @@ RSpec.describe "nil-kill runtime trace" do
         Worker.new.lambda_return("lambda")
       RUBY
 
-      method = NilKill::SourceIndex.new(source).methods.fetch(0)
+      method = NilKill::StaticAnalysis.new(source).methods.fetch(0)
       plan = {
         "version" => 1,
         "target_dirs" => [File.expand_path(dir)],

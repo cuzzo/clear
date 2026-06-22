@@ -1,0 +1,512 @@
+use anyhow::{bail, Context, Result};
+use fact_mine_rust::syntax::{self, Language};
+use fact_mine_rust::syntax_oracle;
+use serde::Serialize;
+use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[test]
+fn syntax_fact_examples_match_oracles() -> Result<()> {
+    let examples_root = examples_root().join("syntax-facts");
+    let oracle_dir = examples_root.join("oracles");
+    let mut failures = Vec::new();
+
+    for fixture in syntax_fact_fixture_paths(&examples_root)? {
+        let language = language_for_fixture(&fixture)?;
+        let name = file_stem(&fixture)?;
+        let oracle_path = oracle_dir.join(format!("{}-{name}.json", language.as_str()));
+        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)
+            .with_context(|| format!("read {}", oracle_path.display()))?;
+        let actual = syntax_oracle::project_files(&[fixture.clone()], language)
+            .with_context(|| format!("project {}", fixture.display()))?;
+        let actual = project_expected_shape(&actual, &expected)?;
+
+        if actual != expected {
+            failures.push(format!(
+                "{}\nexpected: {}\nactual:   {}",
+                fixture.display(),
+                expected,
+                actual
+            ));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!("syntax-facts oracle failures:\n{}", failures.join("\n\n"))
+    }
+}
+
+#[test]
+fn source_fact_examples_match_oracles() -> Result<()> {
+    let examples_root = examples_root().join("source-facts");
+    let mut failures = Vec::new();
+
+    for fixture in source_fact_fixture_paths(&examples_root)? {
+        let language = source_fixture_language(&fixture)?;
+        let oracle_path = source_oracle_path(&examples_root, &fixture)?;
+        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)
+            .with_context(|| format!("read {}", oracle_path.display()))?;
+        let mut actual = Map::new();
+
+        if let Some(syntax_expected) = expected.get("syntax") {
+            actual.insert(
+                "syntax".to_string(),
+                project_source_syntax(&fixture, language, syntax_expected)?,
+            );
+        }
+        if expected.get("local_flow").is_some() {
+            actual.insert(
+                "local_flow".to_string(),
+                project_local_flow(&value(syntax::local_flow::scan_files(
+                    &[fixture.clone()],
+                    language,
+                )?)?),
+            );
+        }
+        if expected.get("path_condition").is_some() {
+            actual.insert(
+                "path_condition".to_string(),
+                project_path_condition(&value(syntax::path_condition::scan_files(
+                    &[fixture.clone()],
+                    language,
+                )?)?),
+            );
+        }
+
+        let actual = Value::Object(actual);
+        if actual != expected {
+            failures.push(format!(
+                "{}\nexpected: {}\nactual:   {}",
+                fixture.display(),
+                expected,
+                actual
+            ));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!("source-facts oracle failures:\n{}", failures.join("\n\n"))
+    }
+}
+
+fn examples_root() -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
+    fs::canonicalize(&root).unwrap_or(root)
+}
+
+fn syntax_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for language_dir in fs::read_dir(examples_root)? {
+        let language_dir = language_dir?.path();
+        if !language_dir.is_dir()
+            || language_dir.file_name().and_then(|name| name.to_str()) == Some("oracles")
+        {
+            continue;
+        }
+        for entry in fs::read_dir(&language_dir)? {
+            let path = entry?.path();
+            if path.is_file() && language_for_fixture(&path).is_ok() {
+                paths.push(path);
+            }
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn source_fact_fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+
+    let general_root = examples_root.join("general");
+    if general_root.is_dir() {
+        for fixture_dir in fs::read_dir(&general_root)? {
+            let fixture_dir = fixture_dir?.path();
+            if !fixture_dir.is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(&fixture_dir)? {
+                let path = entry?.path();
+                if path.is_file() && source_fixture_language(&path).is_ok() {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+
+    let ruby_root = examples_root.join("ruby");
+    if ruby_root.is_dir() {
+        for entry in fs::read_dir(&ruby_root)? {
+            let path = entry?.path();
+            if path.is_file() && source_fixture_language(&path).is_ok() {
+                paths.push(path);
+            }
+        }
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+fn file_stem(path: &Path) -> Result<String> {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+        .with_context(|| format!("missing file stem for {}", path.display()))
+}
+
+fn language_for_fixture(path: &Path) -> Result<Language> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .with_context(|| format!("missing extension for {}", path.display()))?;
+    Language::for_extension(extension)
+        .with_context(|| format!("unsupported fixture extension: {}", path.display()))
+}
+
+fn source_fixture_language(path: &Path) -> Result<Language> {
+    if is_general_source_fixture(path) {
+        return Language::parse(&file_stem(path)?);
+    }
+
+    let language = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .with_context(|| format!("missing source fixture language for {}", path.display()))?;
+    Language::parse(language)
+}
+
+fn source_fixture_name(path: &Path) -> Result<String> {
+    if is_general_source_fixture(path) {
+        return path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+            .with_context(|| {
+                format!("missing general source fixture name for {}", path.display())
+            });
+    }
+
+    file_stem(path)
+}
+
+fn is_general_source_fixture(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == "general")
+}
+
+fn source_oracle_path(examples_root: &Path, path: &Path) -> Result<PathBuf> {
+    let language = source_fixture_language(path)?.as_str();
+    let name = source_fixture_name(path)?;
+    if is_general_source_fixture(path) {
+        return Ok(examples_root
+            .join("oracles")
+            .join("general")
+            .join(name)
+            .join(format!("{language}.json")));
+    }
+
+    Ok(examples_root
+        .join("oracles")
+        .join(format!("{language}-{name}.json")))
+}
+
+fn project_expected_shape(actual: &Value, expected: &Value) -> Result<Value> {
+    match expected {
+        Value::Object(expected_object) => {
+            let actual_object = actual
+                .as_object()
+                .with_context(|| format!("expected object shape, got {actual}"))?;
+            let mut out = Map::new();
+            for (key, expected_value) in expected_object {
+                let actual_value = actual_object
+                    .get(key)
+                    .with_context(|| format!("missing key {key} in {actual}"))?;
+                out.insert(
+                    key.clone(),
+                    project_expected_shape(actual_value, expected_value)?,
+                );
+            }
+            Ok(Value::Object(out))
+        }
+        Value::Array(expected_items) => {
+            if !expected_items.iter().any(Value::is_object) {
+                return Ok(actual.clone());
+            }
+
+            let actual_items = actual
+                .as_array()
+                .with_context(|| format!("expected array shape, got {actual}"))?;
+            let mut keys = BTreeSet::new();
+            for expected_item in expected_items {
+                if let Some(object) = expected_item.as_object() {
+                    keys.extend(object.keys().cloned());
+                }
+            }
+
+            let mut projected = actual_items
+                .iter()
+                .map(|actual_item| {
+                    let Some(actual_object) = actual_item.as_object() else {
+                        return Ok(actual_item.clone());
+                    };
+                    let mut out = Map::new();
+                    for key in &keys {
+                        let expected_value = expected_items
+                            .iter()
+                            .filter_map(Value::as_object)
+                            .find_map(|object| object.get(key));
+                        let Some(actual_value) = actual_object.get(key) else {
+                            continue;
+                        };
+                        out.insert(
+                            key.clone(),
+                            project_expected_shape(
+                                actual_value,
+                                expected_value.unwrap_or(actual_value),
+                            )?,
+                        );
+                    }
+                    Ok(Value::Object(out))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            projected.sort_by_key(|item| item.to_string());
+            Ok(Value::Array(projected))
+        }
+        _ => Ok(actual.clone()),
+    }
+}
+
+fn project_source_syntax(fixture: &Path, language: Language, expected: &Value) -> Result<Value> {
+    let projection = syntax_oracle::project_files(&[fixture.to_path_buf()], language)?;
+    let document = array(field(&projection, "documents"))
+        .first()
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut out = Map::new();
+    if let Some(object) = expected.as_object() {
+        for key in object.keys() {
+            let keys = match key.as_str() {
+                "functions" => &["name", "owner", "line", "visibility", "params"][..],
+                "owners" => &["name", "kind", "line"][..],
+                "calls" => &[
+                    "receiver",
+                    "message",
+                    "function",
+                    "line",
+                    "conditional",
+                    "control",
+                    "safe_navigation",
+                    "block",
+                    "arguments",
+                ][..],
+                "state_declarations" => &["field", "owner", "type", "line"][..],
+                "state_param_origins" => {
+                    &["field", "receiver", "owner", "param", "function", "line"][..]
+                }
+                "state_reads" => &["receiver", "field", "function", "line"][..],
+                "state_writes" => &["receiver", "field", "function", "line"][..],
+                "decisions" => &[
+                    "kind",
+                    "members",
+                    "function",
+                    "line",
+                    "predicate",
+                    "enclosing_span",
+                ][..],
+                "branch_decisions" => &["function", "line", "predicate", "state_refs"][..],
+                "branch_arms" => &[
+                    "function",
+                    "kind",
+                    "line",
+                    "decision_line",
+                    "predicate",
+                    "member",
+                    "body",
+                ][..],
+                "dispatch_sites" => {
+                    &["variant_set", "arm_members", "outside", "function", "line"][..]
+                }
+                "semantic_effects" => &["kind", "detail", "function", "line"][..],
+                "predicate_bodies" => &["name", "owner", "body", "line"][..],
+                "comparisons" => &[
+                    "source",
+                    "raw",
+                    "canon_source",
+                    "operator",
+                    "function",
+                    "line",
+                ][..],
+                "path_conditions" => &["guards", "action", "function", "line"][..],
+                "protocol_method_effects" => &["owner", "name", "line", "reads", "writes"][..],
+                "protocol_call_paths" => &["owner", "name", "line", "calls"][..],
+                "clone_candidates" => &[
+                    "method_name",
+                    "node_name",
+                    "line",
+                    "mass",
+                    "fingerprint",
+                    "child_fingerprints",
+                    "child_masses",
+                ][..],
+                "redundant_nil_guards" => &["defn", "line", "local", "guard", "proof"][..],
+                "local_methods" => &[
+                    "id",
+                    "owner",
+                    "name",
+                    "line",
+                    "statements",
+                    "boundaries",
+                    "local_contract_assignments",
+                ][..],
+                "local_complexity_scores" => &["id", "score", "signals"][..],
+                _ => bail!("unsupported source syntax section: {key}"),
+            };
+            out.insert(key.clone(), rows(field(&document, key), keys));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+fn project_local_flow(output: &Value) -> Value {
+    Value::Array(
+        array(output)
+            .iter()
+            .map(|method| {
+                json!({
+                    "method": field(method, "name").clone(),
+                    "statements": array(field(method, "statements")).iter().map(|statement| {
+                        json!({
+                            "reads": sorted_array(field(statement, "reads")),
+                            "writes": sorted_array(field(statement, "writes")),
+                            "dependencies": field(statement, "dependencies").clone(),
+                            "co_uses": canonical_co_uses(field(statement, "co_uses")),
+                        })
+                    }).collect::<Vec<_>>(),
+                    "boundaries": array(field(method, "boundaries")).iter().map(|boundary| {
+                        pick(boundary, &["before_index", "after_index", "kind"])
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn project_path_condition(output: &Value) -> Value {
+    json!({
+        "neglected": array(field(output, "neglected")).iter().map(|row| {
+            json!({
+                "pattern": field(row, "pattern"),
+                "support": field(row, "support"),
+                "missing": field(row, "missing"),
+                "at": canonical_location(field(row, "at")),
+                "action": field(row, "action"),
+            })
+        }).collect::<Vec<_>>(),
+        "scattered": array(field(output, "scattered")).iter().map(|row| {
+            json!({
+                "guards": field(row, "guards"),
+                "support": field(row, "support"),
+                "scatter": field(row, "scatter"),
+                "rank": field(row, "rank"),
+                "sites": canonical_locations(field(row, "sites")),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn canonical_location(value: &Value) -> Value {
+    value
+        .as_str()
+        .map(canonical_location_text)
+        .map(Value::String)
+        .unwrap_or(Value::Null)
+}
+
+fn canonical_locations(value: &Value) -> Value {
+    Value::Array(
+        array(value)
+            .iter()
+            .map(canonical_location)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn canonical_location_text(text: &str) -> String {
+    text.split_once("/examples/")
+        .map(|(_, suffix)| format!("examples/{suffix}"))
+        .unwrap_or_else(|| text.to_string())
+}
+
+fn canonical_co_uses(value: &Value) -> Value {
+    let mut pairs = array(value)
+        .iter()
+        .map(|pair| {
+            let mut items = array(pair)
+                .iter()
+                .map(|item| item.as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>();
+            items.sort();
+            json!(items)
+        })
+        .collect::<Vec<_>>();
+    pairs.sort_by_key(|item| item.to_string());
+    Value::Array(pairs)
+}
+
+fn rows(value: &Value, keys: &[&str]) -> Value {
+    Value::Array(array(value).iter().map(|row| pick(row, keys)).collect())
+}
+
+fn pick(row: &Value, keys: &[&str]) -> Value {
+    let mut out = Map::new();
+    if let Some(object) = row.as_object() {
+        for key in keys {
+            if let Some(value) = object.get(*key) {
+                out.insert((*key).to_string(), canonical_value(value));
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+fn canonical_value(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut out = Map::new();
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                out.insert(key.clone(), canonical_value(&object[key]));
+            }
+            Value::Object(out)
+        }
+        Value::Array(values) => Value::Array(values.iter().map(canonical_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn sorted_array(value: &Value) -> Value {
+    let mut values = array(value);
+    values.sort_by_key(|item| item.to_string());
+    Value::Array(values)
+}
+
+fn field<'a>(value: &'a Value, key: &str) -> &'a Value {
+    value.get(key).unwrap_or(&Value::Null)
+}
+
+fn array(value: &Value) -> Vec<Value> {
+    value.as_array().cloned().unwrap_or_default()
+}
+
+fn value<T: Serialize>(value: T) -> Result<Value> {
+    Ok(serde_json::to_value(value)?)
+}

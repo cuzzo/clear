@@ -1,0 +1,1 @@
+class Example { static bool one(bool a, bool b, bool c) { return a && b && c; } static bool two(bool a, bool b, bool c) { return a && b && c; } static bool three(bool a, bool b, bool c) { return a && b && c; } static bool broken(bool a, bool b) { return a && b; } }

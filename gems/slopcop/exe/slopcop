@@ -21,6 +21,7 @@ def usage
       slopcop constraints [--repo=.] --base=origin/master [--head=HEAD] \\
                    [--coverage=loom:zig/zig-out/coverage-loom/merged/kcov-merged/cobertura.xml] \\
                    [--coverage=vopr:zig/zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml] \\
+                   [--language=zig|go|rust|c|cpp|csharp] \\
                    [--sarif=slopcop-constraints.sarif] [--json=constraints.sarif] \\
                    [--markdown=constraints.md] [--strict]
 
@@ -29,7 +30,8 @@ def usage
              kcov Cobertura XML, kcov codecov JSON, coverage.py JSON,
              or Nil-Kill branch coverage JSON
     constraints --coverage
-             typed coverage input. Currently supported: loom:PATH and vopr:PATH.
+             typed coverage input. Common types: loom:PATH, vopr:PATH, race:PATH, concurrency:PATH,
+             tsan:PATH, asan:PATH, lsan:PATH, ubsan:PATH, miri:PATH, unsafe:PATH.
              Findings are advisory warnings unless --strict is supplied.
     dark-arms
              Lineage-ready SARIF JSON overlay containing all classified dark arms.
@@ -37,7 +39,7 @@ def usage
   exit 1
 end
 
-TREE_SITTER_EXTS = %w[rb py pyi js jsx mjs cjs ts tsx go rs zig].freeze
+TREE_SITTER_EXTS = %w[rb py pyi js jsx mjs cjs ts tsx go rs zig c h cc cpp cxx hh hpp hxx cs].freeze
 
 def default_file_globs
   roots = %w[app lib src]
@@ -168,6 +170,7 @@ def run_constraints(args)
     base: nil,
     head: "HEAD",
     coverage: [],
+    languages: ["zig"],
     sarif: nil,
     json: nil,
     markdown: nil,
@@ -182,6 +185,8 @@ def run_constraints(args)
     when /\A--head=(.+)/ then opts[:head] = Regexp.last_match(1)
     when /\A--coverage=(.+)/ then opts[:coverage] << Regexp.last_match(1)
     when "--coverage" then opts[:coverage] << args.shift.to_s
+    when /\A--language=(.+)/ then opts[:languages] = Regexp.last_match(1).split(",")
+    when "--language" then opts[:languages] = args.shift.to_s.split(",")
     when /\A--sarif=(.+)/ then opts[:sarif] = Regexp.last_match(1)
     when /\A--json=(.+)/ then opts[:json] = Regexp.last_match(1)
     when /\A--markdown=(.+)/ then opts[:markdown] = Regexp.last_match(1)
@@ -195,7 +200,8 @@ def run_constraints(args)
     repo: opts[:repo],
     base: opts[:base],
     head: opts[:head],
-    coverage_specs: opts[:coverage]
+    coverage_specs: opts[:coverage],
+    languages: opts[:languages]
   )
 
   write_output(opts[:sarif], audit.to_sarif) if opts[:sarif]

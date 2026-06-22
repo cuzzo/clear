@@ -1,0 +1,12 @@
+{
+  "syntax": {
+    "predicate_bodies": [
+      {
+        "name": "simple_predicate?",
+        "owner": "SourceFactPredicateBodies",
+        "body": "value == false",
+        "line": 4
+      }
+    ]
+  }
+}

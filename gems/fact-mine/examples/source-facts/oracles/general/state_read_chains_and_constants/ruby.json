@@ -1,0 +1,48 @@
+{
+  "syntax": {
+    "state_reads": [
+      {
+        "field": "@ranked",
+        "function": "results",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "@top",
+        "function": "results",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "each_with_object",
+        "function": "helper_result",
+        "line": 19,
+        "receiver": "decorate(items)"
+      },
+      {
+        "field": "file",
+        "function": "results",
+        "line": 6,
+        "receiver": "row"
+      },
+      {
+        "field": "flat_map",
+        "function": "provider_paths",
+        "line": 15,
+        "receiver": "language_providers"
+      },
+      {
+        "field": "name",
+        "function": "helper_result",
+        "line": 20,
+        "receiver": "item"
+      },
+      {
+        "field": "path_candidates",
+        "function": "provider_paths",
+        "line": 15,
+        "receiver": "provider"
+      }
+    ]
+  }
+}

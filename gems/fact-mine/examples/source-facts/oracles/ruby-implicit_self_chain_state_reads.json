@@ -1,0 +1,242 @@
+{
+  "syntax": {
+    "calls": [
+      {
+        "arguments": [
+          "adjacency"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "component_list",
+        "line": 18,
+        "message": "new",
+        "receiver": "Tarjan",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "items"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "filtered",
+        "line": 10,
+        "message": "Array",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "manifest"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "self.build",
+        "line": 5,
+        "message": "new",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "component_list",
+        "line": 18,
+        "message": "components",
+        "receiver": "Tarjan.new(adjacency)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "filtered",
+        "line": 9,
+        "message": "nodes",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "owner_nodes",
+        "line": 14,
+        "message": "nodes",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "self.build",
+        "line": 5,
+        "message": "items",
+        "receiver": "new(manifest)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "filtered",
+        "line": 10,
+        "message": "ready?",
+        "receiver": "item",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "filtered",
+        "line": 9,
+        "message": "kind",
+        "receiver": "node",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "owner_nodes",
+        "line": 14,
+        "message": "kind",
+        "receiver": "node",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "filtered",
+        "line": 10,
+        "message": "select",
+        "receiver": "Array(items)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "filtered",
+        "line": 9,
+        "message": "select",
+        "receiver": "nodes",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "owner_nodes",
+        "line": 14,
+        "message": "select",
+        "receiver": "nodes",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 13,
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 17,
+        "name": "component_list",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "params": [
+          "adjacency"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 21,
+        "name": "nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "self.build",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "params": [
+          "manifest"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
+        "name": "filtered",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "params": [
+          "items"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "@nodes",
+        "function": "nodes",
+        "line": 22,
+        "receiver": "self"
+      },
+      {
+        "field": "items",
+        "function": "self.build",
+        "line": 5,
+        "receiver": "new(manifest)"
+      },
+      {
+        "field": "kind",
+        "function": "filtered",
+        "line": 9,
+        "receiver": "node"
+      },
+      {
+        "field": "kind",
+        "function": "owner_nodes",
+        "line": 14,
+        "receiver": "node"
+      },
+      {
+        "field": "ready?",
+        "function": "filtered",
+        "line": 10,
+        "receiver": "item"
+      },
+      {
+        "field": "select",
+        "function": "filtered",
+        "line": 9,
+        "receiver": "nodes"
+      },
+      {
+        "field": "select",
+        "function": "owner_nodes",
+        "line": 14,
+        "receiver": "nodes"
+      }
+    ]
+  }
+}

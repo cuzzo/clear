@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "ast"
 require_relative "syntax"
 
 module Decomplex
@@ -22,47 +21,18 @@ module Decomplex
     def self.scan(files)
       preds = []
       files.each do |f|
-        root, lines = Ast.parse(f)
-        new(f, lines).tap { |p| p.walk(root) }.preds.each { |p| preds << p }
+        Syntax.parse(f, parser: "tree_sitter").predicate_defs.each do |predicate|
+          preds << Pred.new(
+            name: predicate.name,
+            body: predicate.body,
+            file: predicate.file,
+            defn: predicate.name,
+            line: predicate.line,
+            span: predicate.span
+          )
+        end
       end
       Report.new(preds)
-    end
-
-    attr_reader :preds
-
-    def initialize(file, lines)
-      @file = file
-      @lines = lines
-      @preds = []
-    end
-
-    def walk(node)
-      return unless Ast.node?(node)
-
-      record_def(node) if node.type == :DEFN
-      node.children.each { |c| walk(c) }
-    end
-
-    private
-
-    # Single-expression boolean-ish method: `def x?(...) <expr> end`.
-    # The scope node's body is one statement (not a BLOCK of many).
-    def record_def(node)
-      name = node.children[0].to_s
-      scope = node.children[1]
-      return unless Ast.node?(scope) && scope.type == :SCOPE
-
-      body = scope.children[2]
-      return unless Ast.node?(body)
-      return if body.type == :BLOCK # multi-statement => not a pure predicate
-
-      txt = Ast.slice(body, @lines)
-      return if txt.empty? || txt.length > 200
-
-      @preds << Pred.new(name: name, body: txt, file: @file,
-                         defn: name, line: node.first_lineno,
-                         span: [node.first_lineno, node.first_column,
-                                node.last_lineno, node.last_column])
     end
 
     class Report

@@ -1,0 +1,91 @@
+{
+  "detector": "implicit-control-flow",
+  "options": {
+  },
+  "expected": {
+    "ordered_protocols": [
+      {
+        "protocol": [
+          "prepare",
+          "validate"
+        ],
+        "dependency": [
+          "write_read"
+        ],
+        "support": 4,
+        "observed": [
+          "prepare",
+          "validate"
+        ],
+        "missing": [
+
+        ],
+        "states": [
+          "status"
+        ]
+      },
+      {
+        "protocol": [
+          "validate",
+          "commit"
+        ],
+        "dependency": [
+          "write_read"
+        ],
+        "support": 4,
+        "observed": [
+          "validate",
+          "commit"
+        ],
+        "missing": [
+
+        ],
+        "states": [
+          "valid"
+        ]
+      },
+      {
+        "protocol": [
+          "validate",
+          "prepare"
+        ],
+        "dependency": [
+          "read_write"
+        ],
+        "support": 1,
+        "observed": [
+          "validate",
+          "prepare"
+        ],
+        "missing": [
+
+        ],
+        "states": [
+          "status"
+        ]
+      }
+    ],
+    "order_drift": [
+      {
+        "protocol": [
+          "prepare",
+          "validate"
+        ],
+        "dependency": [
+          "write_read"
+        ],
+        "support": 4,
+        "observed": [
+          "validate",
+          "prepare"
+        ],
+        "missing": [
+
+        ],
+        "states": [
+          "status"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "local_flow": [
+    {
+      "method": "summary",
+      "statements": [
+        {
+          "reads": [
+            "label"
+          ],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        },
+        {
+          "reads": [],
+          "writes": [],
+          "dependencies": [],
+          "co_uses": []
+        }
+      ],
+      "boundaries": []
+    }
+  ]
+}

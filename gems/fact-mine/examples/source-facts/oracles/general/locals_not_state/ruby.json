@@ -1,0 +1,231 @@
+{
+  "syntax": {
+    "calls": [
+      {
+        "receiver": "ENV",
+        "message": "[]",
+        "function": "build",
+        "line": 6,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "key"
+        ]
+      },
+      {
+        "receiver": "self",
+        "message": "assert_empty",
+        "function": "build",
+        "line": 12,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": false,
+        "arguments": [
+          "values"
+        ]
+      },
+      {
+        "receiver": "values",
+        "message": "each",
+        "function": "build",
+        "line": 8,
+        "conditional": false,
+        "control": "always",
+        "safe_navigation": false,
+        "block": true,
+        "arguments": [
+
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "name": "build",
+        "owner": "SourceFactLocalsNotState",
+        "line": 4,
+        "visibility": "public",
+        "params": [
+          "values",
+          "config"
+        ]
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "owner": "SourceFactLocalsNotState",
+        "name": "build",
+        "line": 4,
+        "reads": [
+          "assert_empty",
+          "values.each"
+        ],
+        "writes": [
+
+        ]
+      }
+    ],
+    "semantic_effects": [
+      {
+        "kind": "context_dependency",
+        "detail": "ENV",
+        "function": "build",
+        "line": 6
+      },
+      {
+        "kind": "hidden_mutation",
+        "detail": "[]=",
+        "function": "build",
+        "line": 11
+      }
+    ],
+    "state_reads": [
+      {
+        "receiver": "values",
+        "field": "each",
+        "function": "build",
+        "line": 8
+      }
+    ],
+    "state_writes": [
+
+    ]
+  },
+  "local_flow": [
+    {
+      "method": "build",
+      "statements": [
+        {
+          "reads": [
+
+          ],
+          "writes": [
+            "key"
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "key"
+          ],
+          "writes": [
+            "path"
+          ],
+          "dependencies": [
+            [
+              "path",
+              "key"
+            ]
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+
+          ],
+          "writes": [
+            "total"
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "total",
+            "values"
+          ],
+          "writes": [
+            "total"
+          ],
+          "dependencies": [
+            [
+              "total",
+              "values"
+            ]
+          ],
+          "co_uses": [
+            [
+              "total",
+              "values"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "config",
+            "path"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+            [
+              "config",
+              "path"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "values"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+
+          ]
+        },
+        {
+          "reads": [
+            "config",
+            "path",
+            "total"
+          ],
+          "writes": [
+
+          ],
+          "dependencies": [
+
+          ],
+          "co_uses": [
+            [
+              "config",
+              "path"
+            ],
+            [
+              "config",
+              "total"
+            ],
+            [
+              "path",
+              "total"
+            ]
+          ]
+        }
+      ],
+      "boundaries": [
+
+      ]
+    }
+  ]
+}

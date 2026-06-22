@@ -1,0 +1,1 @@
+class Example { static void one() { alloc_mark(x); body1(); cleanup(x); } static void two() { alloc_mark(y); body2(); cleanup(y); } static void three() { alloc_mark(z); body3(); cleanup(z); } static void four() { alloc_mark(w); body4(); cleanup(w); } static void leak() { alloc_mark(q); use_value(q); } }

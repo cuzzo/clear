@@ -1,9 +1,30 @@
 PATH
+  remote: ../decomplex
+  specs:
+    decomplex (0.0.1)
+      fact-mine (>= 0.0.1)
+      tree_sitter (~> 0.1)
+
+PATH
+  remote: ../espalier
+  specs:
+    espalier (0.0.1)
+      decomplex (= 0.0.1)
+      fact-mine (>= 0.0.1)
+
+PATH
+  remote: ../fact-mine
+  specs:
+    fact-mine (0.0.1)
+      tree_sitter (~> 0.1)
+
+PATH
   remote: .
   specs:
     nil-kill (0.1.0)
+      decomplex (= 0.0.1)
+      espalier (>= 0.0.1)
       parlour
-      prism (>= 1.6)
       rbs-trace
       sorbet-runtime
 
@@ -69,14 +90,17 @@ GEM
     simplecov_json_formatter (0.1.4)
     sorbet-runtime (0.6.13210)
     stackprof (0.2.28)
+    tree_sitter (0.1.0-x86_64-linux)
     tsort (0.2.0)
     vernier (1.10.1)
 
 PLATFORMS
-  ruby
   x86_64-linux-gnu
 
 DEPENDENCIES
+  decomplex!
+  espalier!
+  fact-mine!
   nil-kill!
   parallel_rspec
   rspec

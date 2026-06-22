@@ -2,7 +2,7 @@
 
 require "set"
 require_relative "local_flow"
-require_relative "weighted_inlined_cognitive_complexity"
+require_relative "syntax"
 
 module Decomplex
   # Finds locals that are initialized substantially before their first use
@@ -28,8 +28,17 @@ module Decomplex
       min_score: DEFAULT_MIN_SCORE,
       max_findings_per_method: DEFAULT_MAX_FINDINGS_PER_METHOD
     )
+      summaries = LocalFlow.scan(files)
+      complexity_scores = Array(files).each_with_object({}) do |file, scores|
+        document = Syntax.parse(file, parser: "tree_sitter")
+        document.local_methods.each do |method|
+          scores[complexity_key(method)] =
+            document.local_complexity_scores.fetch(method.id, { score: 0.0 })
+        end
+      end
       new(
-        LocalFlow.scan(files),
+        summaries,
+        complexity_scores: complexity_scores,
         min_unrelated_statements: min_unrelated_statements,
         min_gap_lines: min_gap_lines,
         min_local_complexity: min_local_complexity,
@@ -40,6 +49,7 @@ module Decomplex
 
     def initialize(
       summaries,
+      complexity_scores:,
       min_unrelated_statements:,
       min_gap_lines:,
       min_local_complexity:,
@@ -52,7 +62,7 @@ module Decomplex
       @min_local_complexity = min_local_complexity.to_f
       @min_score = min_score.to_i
       @max_findings_per_method = max_findings_per_method.to_i
-      @scorer = WeightedInlinedCognitiveComplexity::LocalScorer.new
+      @complexity_scores = complexity_scores
     end
 
     def findings
@@ -68,7 +78,7 @@ module Decomplex
     def findings_for(summary)
       return [] if summary.statements.size < @min_unrelated_statements + 2
 
-      local_complexity = @scorer.score(summary.node)[:score].to_f
+      local_complexity = @complexity_scores.fetch(complexity_key(summary), { score: 0.0 })[:score].to_f
       return [] if local_complexity < @min_local_complexity
 
       findings = summary.statements.each_with_index.flat_map do |statement, index|
@@ -271,6 +281,14 @@ module Decomplex
 
     def round(value)
       (value * 10).round / 10.0
+    end
+
+    def self.complexity_key(method)
+      [method.file, method.line, method.name]
+    end
+
+    def complexity_key(method)
+      self.class.complexity_key(method)
     end
   end
 end

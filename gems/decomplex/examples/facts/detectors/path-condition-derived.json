@@ -1,0 +1,513 @@
+{
+  "detector": "path-condition",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/path_derived.rb",
+        "language": "ruby",
+        "lines": [
+          "def paths",
+          "  if a",
+          "    if b",
+          "      if c",
+          "        commit_one",
+          "      end",
+          "      if c",
+          "        commit_two",
+          "      end",
+          "      if c",
+          "        commit_three",
+          "      end",
+          "      commit_four",
+          "    end",
+          "  end",
+          "end"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/path_derived.rb",
+            "name": "paths",
+            "owner": "Fixture",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              16,
+              3
+            ],
+            "body": {
+              "kind": "method",
+              "text": "def paths",
+              "span": [
+                1,
+                0,
+                16,
+                3
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+                {
+                  "kind": "identifier",
+                  "text": "paths",
+                  "span": [
+                    1,
+                    4,
+                    1,
+                    9
+                  ],
+                  "named": true,
+                  "field_name": null,
+                  "children": [
+
+                  ]
+                },
+                {
+                  "kind": "body_statement",
+                  "text": "",
+                  "span": [
+                    2,
+                    2,
+                    15,
+                    5
+                  ],
+                  "named": true,
+                  "field_name": "body",
+                  "children": [
+                    {
+                      "kind": "if",
+                      "text": "  if a\n    if b\n      if c\n        commit_one\n      end\n      if c\n        commit_two\n      end\n      if c\n        commit_three\n      end\n      commit_four\n    end\n  end",
+                      "span": [
+                        2,
+                        2,
+                        15,
+                        5
+                      ],
+                      "named": true,
+                      "field_name": null,
+                      "children": [
+                        {
+                          "kind": "identifier",
+                          "text": "a",
+                          "span": [
+                            2,
+                            5,
+                            2,
+                            6
+                          ],
+                          "named": true,
+                          "field_name": "condition",
+                          "children": [
+
+                          ]
+                        },
+                        {
+                          "kind": "then",
+                          "text": "",
+                          "span": [
+                            3,
+                            4,
+                            14,
+                            7
+                          ],
+                          "named": true,
+                          "field_name": "consequence",
+                          "children": [
+                            {
+                              "kind": "if",
+                              "text": "    if b\n      if c\n        commit_one\n      end\n      if c\n        commit_two\n      end\n      if c\n        commit_three\n      end\n      commit_four\n    end",
+                              "span": [
+                                3,
+                                4,
+                                14,
+                                7
+                              ],
+                              "named": true,
+                              "field_name": null,
+                              "children": [
+                                {
+                                  "kind": "identifier",
+                                  "text": "b",
+                                  "span": [
+                                    3,
+                                    7,
+                                    3,
+                                    8
+                                  ],
+                                  "named": true,
+                                  "field_name": "condition",
+                                  "children": [
+
+                                  ]
+                                },
+                                {
+                                  "kind": "then",
+                                  "text": "",
+                                  "span": [
+                                    4,
+                                    6,
+                                    13,
+                                    17
+                                  ],
+                                  "named": true,
+                                  "field_name": "consequence",
+                                  "children": [
+                                    {
+                                      "kind": "if",
+                                      "text": "if c\n  commit_one\nend",
+                                      "span": [
+                                        4,
+                                        6,
+                                        6,
+                                        9
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "c",
+                                          "span": [
+                                            4,
+                                            9,
+                                            4,
+                                            10
+                                          ],
+                                          "named": true,
+                                          "field_name": "condition",
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "then",
+                                          "text": "commit_one",
+                                          "span": [
+                                            5,
+                                            8,
+                                            5,
+                                            18
+                                          ],
+                                          "named": true,
+                                          "field_name": "consequence",
+                                          "children": [
+                                            {
+                                              "kind": "call",
+                                              "text": "commit_one",
+                                              "span": [
+                                                5,
+                                                8,
+                                                5,
+                                                18
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+                                                {
+                                                  "kind": "identifier",
+                                                  "text": "commit_one",
+                                                  "span": [
+                                                    5,
+                                                    8,
+                                                    5,
+                                                    18
+                                                  ],
+                                                  "named": true,
+                                                  "field_name": null,
+                                                  "children": [
+
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "kind": "if",
+                                      "text": "if c\n  commit_two\nend",
+                                      "span": [
+                                        7,
+                                        6,
+                                        9,
+                                        9
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "c",
+                                          "span": [
+                                            7,
+                                            9,
+                                            7,
+                                            10
+                                          ],
+                                          "named": true,
+                                          "field_name": "condition",
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "then",
+                                          "text": "commit_two",
+                                          "span": [
+                                            8,
+                                            8,
+                                            8,
+                                            18
+                                          ],
+                                          "named": true,
+                                          "field_name": "consequence",
+                                          "children": [
+                                            {
+                                              "kind": "call",
+                                              "text": "commit_two",
+                                              "span": [
+                                                8,
+                                                8,
+                                                8,
+                                                18
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+                                                {
+                                                  "kind": "identifier",
+                                                  "text": "commit_two",
+                                                  "span": [
+                                                    8,
+                                                    8,
+                                                    8,
+                                                    18
+                                                  ],
+                                                  "named": true,
+                                                  "field_name": null,
+                                                  "children": [
+
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "kind": "if",
+                                      "text": "if c\n  commit_three\nend",
+                                      "span": [
+                                        10,
+                                        6,
+                                        12,
+                                        9
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "c",
+                                          "span": [
+                                            10,
+                                            9,
+                                            10,
+                                            10
+                                          ],
+                                          "named": true,
+                                          "field_name": "condition",
+                                          "children": [
+
+                                          ]
+                                        },
+                                        {
+                                          "kind": "then",
+                                          "text": "commit_three",
+                                          "span": [
+                                            11,
+                                            8,
+                                            11,
+                                            20
+                                          ],
+                                          "named": true,
+                                          "field_name": "consequence",
+                                          "children": [
+                                            {
+                                              "kind": "call",
+                                              "text": "commit_three",
+                                              "span": [
+                                                11,
+                                                8,
+                                                11,
+                                                20
+                                              ],
+                                              "named": true,
+                                              "field_name": null,
+                                              "children": [
+                                                {
+                                                  "kind": "identifier",
+                                                  "text": "commit_three",
+                                                  "span": [
+                                                    11,
+                                                    8,
+                                                    11,
+                                                    20
+                                                  ],
+                                                  "named": true,
+                                                  "field_name": null,
+                                                  "children": [
+
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "kind": "call",
+                                      "text": "commit_four",
+                                      "span": [
+                                        13,
+                                        6,
+                                        13,
+                                        17
+                                      ],
+                                      "named": true,
+                                      "field_name": null,
+                                      "children": [
+                                        {
+                                          "kind": "identifier",
+                                          "text": "commit_four",
+                                          "span": [
+                                            13,
+                                            6,
+                                            13,
+                                            17
+                                          ],
+                                          "named": true,
+                                          "field_name": null,
+                                          "children": [
+
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          }
+        ],
+        "path_condition_sites": [
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 5,
+            "span": [
+              5,
+              8,
+              5,
+              18
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_one"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 8,
+            "span": [
+              8,
+              8,
+              8,
+              18
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_two"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 11,
+            "span": [
+              11,
+              8,
+              11,
+              20
+            ],
+            "guards": [
+              "a",
+              "b",
+              "c"
+            ],
+            "action": "commit_three"
+          },
+          {
+            "file": "facts/path_derived.rb",
+            "function": "paths",
+            "line": 13,
+            "span": [
+              13,
+              6,
+              13,
+              17
+            ],
+            "guards": [
+              "a",
+              "b"
+            ],
+            "action": "commit_four"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "neglected": [
+      {
+        "action": "commit_four",
+        "at": "facts/path_derived.rb:paths:13",
+        "missing": "c",
+        "pattern": [
+          "a",
+          "b",
+          "c"
+        ],
+        "spans": {
+          "facts/path_derived.rb:paths:13": [
+            13,
+            6,
+            13,
+            17
+          ]
+        },
+        "support": 3
+      }
+    ]
+  }
+}

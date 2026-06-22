@@ -1,0 +1,15 @@
+{% if files.len() == 0 %}
+  <p class="empty-inline">No hazard-heavy files to show.</p>
+{% else %}
+  <div class="dashboard-files">
+    {% for file in files %}
+      <a href="{{ file.href }}">
+        <span class="row-label">
+          <span class="row-title">{{ file.path }}</span>
+          <small>{{ file.detail }}</small>
+        </span>
+        <strong class="hazard-value">{{ file.hazards }}</strong>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}

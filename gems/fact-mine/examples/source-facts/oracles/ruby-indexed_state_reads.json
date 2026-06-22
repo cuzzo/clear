@@ -1,0 +1,30 @@
+{
+  "syntax": {
+    "state_reads": [
+      {
+        "receiver": "self",
+        "field": "@data",
+        "function": "label",
+        "line": 5
+      },
+      {
+        "receiver": "self",
+        "field": "@data",
+        "function": "label",
+        "line": 5
+      },
+      {
+        "receiver": "self",
+        "field": "@lineage",
+        "function": "lineage_summary",
+        "line": 11
+      },
+      {
+        "receiver": "self",
+        "field": "@lineage",
+        "function": "lineage_summary",
+        "line": 12
+      }
+    ]
+  }
+}

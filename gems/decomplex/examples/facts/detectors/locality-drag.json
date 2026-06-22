@@ -1,0 +1,260 @@
+{
+  "detector": "locality-drag",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/locality.rb",
+        "language": "ruby",
+        "local_complexity_scores": {
+          "Fixture#assemble": {
+            "score": 18.0,
+            "signals": {
+              "branches": 2
+            }
+          }
+        },
+        "local_methods": [
+          {
+            "id": "Fixture#assemble",
+            "owner": "Fixture",
+            "name": "assemble",
+            "file": "facts/locality.rb",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "index": 0,
+                "line": 1,
+                "end_line": 1,
+                "span": [
+                  1,
+                  0,
+                  1,
+                  23
+                ],
+                "source": "payload = build_payload",
+                "reads": [
+                  "build_payload"
+                ],
+                "writes": [
+                  "payload"
+                ],
+                "dependencies": [
+                  [
+                    "payload",
+                    "build_payload"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 1,
+                "line": 3,
+                "end_line": 3,
+                "span": [
+                  3,
+                  0,
+                  3,
+                  18
+                ],
+                "source": "alpha = load_alpha",
+                "reads": [
+                  "load_alpha"
+                ],
+                "writes": [
+                  "alpha"
+                ],
+                "dependencies": [
+                  [
+                    "alpha",
+                    "load_alpha"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 2,
+                "line": 5,
+                "end_line": 5,
+                "span": [
+                  5,
+                  0,
+                  5,
+                  16
+                ],
+                "source": "beta = load_beta",
+                "reads": [
+                  "load_beta"
+                ],
+                "writes": [
+                  "beta"
+                ],
+                "dependencies": [
+                  [
+                    "beta",
+                    "load_beta"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 3,
+                "line": 7,
+                "end_line": 7,
+                "span": [
+                  7,
+                  0,
+                  7,
+                  18
+                ],
+                "source": "gamma = load_gamma",
+                "reads": [
+                  "load_gamma"
+                ],
+                "writes": [
+                  "gamma"
+                ],
+                "dependencies": [
+                  [
+                    "gamma",
+                    "load_gamma"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 4,
+                "line": 9,
+                "end_line": 9,
+                "span": [
+                  9,
+                  0,
+                  9,
+                  18
+                ],
+                "source": "delta = load_delta",
+                "reads": [
+                  "load_delta"
+                ],
+                "writes": [
+                  "delta"
+                ],
+                "dependencies": [
+                  [
+                    "delta",
+                    "load_delta"
+                  ]
+                ],
+                "co_uses": [
+
+                ]
+              },
+              {
+                "index": 5,
+                "line": 13,
+                "end_line": 13,
+                "span": [
+                  13,
+                  0,
+                  13,
+                  16
+                ],
+                "source": "consume(payload)",
+                "reads": [
+                  "payload"
+                ],
+                "writes": [
+
+                ],
+                "dependencies": [
+
+                ],
+                "co_uses": [
+
+                ]
+              }
+            ],
+            "boundaries": [
+              {
+                "before_index": 0,
+                "after_index": 5,
+                "line": 11,
+                "kind": "comment",
+                "text": "# phase 2"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "at": "facts/locality.rb:assemble:1",
+      "boundaries": [
+        {
+          "line": 11,
+          "marker": "# phase 2"
+        }
+      ],
+      "boundary_crossings": 1,
+      "defined_at": 1,
+      "definition_deps": [
+        "build_payload"
+      ],
+      "defn": "assemble",
+      "examples": [
+        {
+          "line": 3,
+          "source": "alpha = load_alpha"
+        },
+        {
+          "line": 5,
+          "source": "beta = load_beta"
+        },
+        {
+          "line": 7,
+          "source": "gamma = load_gamma"
+        }
+      ],
+      "file": "facts/locality.rb",
+      "gap_lines": 12,
+      "gap_statements": 4,
+      "line": 1,
+      "local_complexity": 18.0,
+      "method": "assemble",
+      "owner": "Fixture",
+      "reason": "`payload` is initialized 12 line(s) before first use; 4 unrelated intervening statement(s); 1 structural boundary crossing(s); method local complexity 18.0",
+      "related_statements": 0,
+      "score": 63,
+      "setup_statements": 0,
+      "spans": {
+        "facts/locality.rb:assemble:1": [
+          1,
+          0,
+          20,
+          3
+        ]
+      },
+      "unrelated_statements": 4,
+      "use_reads": [
+        "payload"
+      ],
+      "used_at": 13,
+      "variable": "payload"
+    }
+  ]
+}

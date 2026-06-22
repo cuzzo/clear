@@ -1,0 +1,443 @@
+{
+  "detector": "weighted-inlined-complexity",
+  "input": {
+    "documents": [
+      {
+        "file": "facts/weighted_rich.rb",
+        "language": "ruby",
+        "lines": [
+          "class Fixture",
+          "  def entry",
+          "    self.helper",
+          "    self.shared",
+          "  end",
+          "  def helper",
+          "    self.leaf",
+          "  end",
+          "  def leaf; end",
+          "  def shared; end",
+          "  def other",
+          "    self.shared",
+          "  end",
+          "end"
+        ],
+        "function_defs": [
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "entry",
+            "owner": "Fixture",
+            "line": 2,
+            "span": [
+              2,
+              2,
+              5,
+              5
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                2,
+                2,
+                5,
+                5
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "helper",
+            "owner": "Fixture",
+            "line": 6,
+            "span": [
+              6,
+              2,
+              8,
+              5
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                6,
+                2,
+                8,
+                5
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "private",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "leaf",
+            "owner": "Fixture",
+            "line": 9,
+            "span": [
+              9,
+              2,
+              9,
+              15
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                9,
+                2,
+                9,
+                15
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "private",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "shared",
+            "owner": "Fixture",
+            "line": 10,
+            "span": [
+              10,
+              2,
+              10,
+              17
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                10,
+                2,
+                10,
+                17
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          },
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "other",
+            "owner": "Fixture",
+            "line": 11,
+            "span": [
+              11,
+              2,
+              13,
+              5
+            ],
+            "body": {
+              "kind": "body_statement",
+              "text": "",
+              "span": [
+                11,
+                2,
+                13,
+                5
+              ],
+              "named": true,
+              "field_name": null,
+              "children": [
+
+              ]
+            },
+            "visibility": "public",
+            "params": [
+
+            ]
+          }
+        ],
+        "owner_defs": [
+          {
+            "file": "facts/weighted_rich.rb",
+            "name": "Fixture",
+            "kind": "class",
+            "line": 1,
+            "span": [
+              1,
+              0,
+              14,
+              3
+            ]
+          }
+        ],
+        "call_sites": [
+          {
+            "receiver": "self",
+            "message": "helper",
+            "file": "facts/weighted_rich.rb",
+            "function": "entry",
+            "owner": "Fixture",
+            "line": 3,
+            "span": [
+              3,
+              4,
+              3,
+              15
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": "conditional",
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "self",
+            "message": "shared",
+            "file": "facts/weighted_rich.rb",
+            "function": "entry",
+            "owner": "Fixture",
+            "line": 4,
+            "span": [
+              4,
+              4,
+              4,
+              15
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "self",
+            "message": "leaf",
+            "file": "facts/weighted_rich.rb",
+            "function": "helper",
+            "owner": "Fixture",
+            "line": 7,
+            "span": [
+              7,
+              4,
+              7,
+              13
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": "iterates",
+            "safe_navigation": false,
+            "block": false
+          },
+          {
+            "receiver": "self",
+            "message": "shared",
+            "file": "facts/weighted_rich.rb",
+            "function": "other",
+            "owner": "Fixture",
+            "line": 12,
+            "span": [
+              12,
+              4,
+              12,
+              15
+            ],
+            "conditional": false,
+            "arguments": [
+
+            ],
+            "control": null,
+            "safe_navigation": false,
+            "block": false
+          }
+        ],
+        "local_methods": [
+          {
+            "id": "Fixture#entry",
+            "owner": "Fixture",
+            "name": "entry",
+            "file": "facts/weighted_rich.rb",
+            "line": 2,
+            "span": [
+              2,
+              2,
+              5,
+              5
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          },
+          {
+            "id": "Fixture#helper",
+            "owner": "Fixture",
+            "name": "helper",
+            "file": "facts/weighted_rich.rb",
+            "line": 6,
+            "span": [
+              6,
+              2,
+              8,
+              5
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          },
+          {
+            "id": "Fixture#leaf",
+            "owner": "Fixture",
+            "name": "leaf",
+            "file": "facts/weighted_rich.rb",
+            "line": 9,
+            "span": [
+              9,
+              2,
+              9,
+              15
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          },
+          {
+            "id": "Fixture#shared",
+            "owner": "Fixture",
+            "name": "shared",
+            "file": "facts/weighted_rich.rb",
+            "line": 10,
+            "span": [
+              10,
+              2,
+              10,
+              17
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          },
+          {
+            "id": "Fixture#other",
+            "owner": "Fixture",
+            "name": "other",
+            "file": "facts/weighted_rich.rb",
+            "line": 11,
+            "span": [
+              11,
+              2,
+              13,
+              5
+            ],
+            "statements": [
+
+            ],
+            "boundaries": [
+
+            ]
+          }
+        ],
+        "local_complexity_scores": {
+          "Fixture#entry": {
+            "score": 4.0,
+            "signals": {
+              "branches": 1
+            }
+          },
+          "Fixture#helper": {
+            "score": 12.0,
+            "signals": {
+              "branches": 3
+            }
+          },
+          "Fixture#leaf": {
+            "score": 11.0,
+            "signals": {
+              "branches": 2
+            }
+          },
+          "Fixture#shared": {
+            "score": 10.0,
+            "signals": {
+              "branches": 2
+            }
+          },
+          "Fixture#other": {
+            "score": 3.0,
+            "signals": {
+              "branches": 1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "at": "facts/weighted_rich.rb:entry:2",
+      "call_chain": [
+        "entry",
+        "helper"
+      ],
+      "depth": 2,
+      "hidden": 16.8,
+      "inlined": 20.8,
+      "local": 4.0,
+      "method": "entry",
+      "owner": "Fixture",
+      "reason": "1 single-caller helper(s) add 16.8 weighted cognitive points",
+      "signals": {
+        "branches": 1
+      },
+      "single_caller_callees": [
+        "helper"
+      ],
+      "spans": {
+        "facts/weighted_rich.rb:entry:2": [
+          2,
+          2,
+          5,
+          5
+        ]
+      }
+    }
+  ]
+}

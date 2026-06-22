@@ -1,0 +1,114 @@
+{
+  "detector": "local-flow",
+  "options": {
+  },
+  "expected": [
+    {
+      "method": "mixed",
+      "statements": [
+        {
+          "reads": [
+            "price",
+            "tax"
+          ],
+          "writes": [
+            "subtotal"
+          ],
+          "dependencies": [
+            [
+              "subtotal",
+              "price"
+            ],
+            [
+              "subtotal",
+              "tax"
+            ]
+          ],
+          "co_uses": [
+            [
+              "price",
+              "tax"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "subtotal"
+          ],
+          "writes": [
+            "total"
+          ],
+          "dependencies": [
+            [
+              "total",
+              "subtotal"
+            ]
+          ],
+          "co_uses": [
+          ]
+        },
+        {
+          "reads": [
+          ],
+          "writes": [
+            "timestamp"
+          ],
+          "dependencies": [
+          ],
+          "co_uses": [
+          ]
+        },
+        {
+          "reads": [
+          ],
+          "writes": [
+            "buffer"
+          ],
+          "dependencies": [
+          ],
+          "co_uses": [
+          ]
+        },
+        {
+          "reads": [
+            "buffer",
+            "timestamp"
+          ],
+          "writes": [
+          ],
+          "dependencies": [
+          ],
+          "co_uses": [
+            [
+              "buffer",
+              "timestamp"
+            ]
+          ]
+        },
+        {
+          "reads": [
+            "buffer",
+            "total"
+          ],
+          "writes": [
+          ],
+          "dependencies": [
+          ],
+          "co_uses": [
+            [
+              "buffer",
+              "total"
+            ]
+          ]
+        }
+      ],
+      "boundaries": [
+        {
+          "before_index": 1,
+          "after_index": 2,
+          "kind": "blank"
+        }
+      ]
+    }
+  ]
+}

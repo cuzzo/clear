@@ -75,4 +75,15 @@ class PathConditionTest < Minitest::Test
     assert_empty r.scattered(min_scatter: 2)
     assert_empty r.neglected(min_support: 3)
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      r = rep(<<~RB)
+        def one(x, y); go(x) if x.a? && y.b?; end
+        def two(x, y); go(x) if x.a? && y.b?; end
+      RB
+
+      assert_equal 1, r.scattered(min_scatter: 2).size
+    end
+  end
 end

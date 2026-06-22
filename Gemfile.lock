@@ -9,6 +9,20 @@ PATH
   remote: gems/decomplex
   specs:
     decomplex (0.0.1)
+      fact-mine (>= 0.0.1)
+      tree_sitter (~> 0.1)
+
+PATH
+  remote: gems/espalier
+  specs:
+    espalier (0.0.1)
+      decomplex (= 0.0.1)
+      fact-mine (>= 0.0.1)
+
+PATH
+  remote: gems/fact-mine
+  specs:
+    fact-mine (0.0.1)
       tree_sitter (~> 0.1)
 
 PATH
@@ -16,6 +30,7 @@ PATH
   specs:
     nil-kill (0.1.0)
       decomplex (= 0.0.1)
+      espalier (>= 0.0.1)
       parlour
       rbs-trace
       sorbet-runtime
@@ -124,6 +139,8 @@ GEM
     parallel_rspec (3.0.0)
       rake (> 10.0)
       rspec
+    parallel_tests (5.7.0)
+      parallel
     parlour (9.1.2)
       commander (~> 5.0)
       parser
@@ -291,6 +308,8 @@ DEPENDENCIES
   csv
   debride
   decomplex!
+  espalier!
+  fact-mine!
   flog
   minitest (~> 5.25)
   msgpack (~> 1.7, >= 1.7.2)
@@ -298,6 +317,7 @@ DEPENDENCIES
   mutant-rspec
   nil-kill!
   parallel_rspec
+  parallel_tests (~> 5.7)
   reek
   rspec
   rubocop

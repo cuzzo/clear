@@ -32,7 +32,7 @@ RSpec.describe "deterministic guard collapse" do
     Dir.mktmpdir("nil-kill-deterministic-guard") do |dir|
       path = write_guard_sample(dir)
 
-      idx = NilKill::SourceIndex.new(path)
+      idx = NilKill::StaticAnalysis.new(path)
       by_code = idx.deterministic_guards.each_with_object({}) { |guard, h| h[guard["code"]] = guard }
 
       expect(by_code["name.is_a?(String)"]).to include(
@@ -73,7 +73,7 @@ RSpec.describe "deterministic guard collapse" do
         end
       RUBY
 
-      idx = NilKill::SourceIndex.new(path)
+      idx = NilKill::StaticAnalysis.new(path)
 
       expect(idx.deterministic_guards.map { |guard| guard["code"] }).not_to include("node.value.nil?")
     end
@@ -103,7 +103,7 @@ RSpec.describe "deterministic guard collapse" do
         end
       RUBY
 
-      idx = NilKill::SourceIndex.new(path)
+      idx = NilKill::StaticAnalysis.new(path)
       by_code = idx.deterministic_guards.each_with_object({}) { |guard, h| h[guard["code"]] = guard }
 
       expect(by_code["count.is_a?(Numeric)"]).to include(

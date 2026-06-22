@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "set"
+require_relative "static_helpers"
 
 module Espalier
   # Ranks macro-level architecture pressure from the normalized Espalier
@@ -20,10 +21,6 @@ module Espalier
     ].freeze
     ROLE_PATTERN = /(?:Analysis|Analyzer|Builder|Checker|Classifier|Collector|Coordinator|Context|Emit|Emitter|Environment|Facade|Frontend|Helper|Host|Importer|Manager|Mediator|Registry|Resolver|Rewriter|Schemas?|Server|Service|Session|State)\z/
     LIFECYCLE_ROLE_PATTERN = /(?:Collector|Context|Index|Manager|Registry|Resolver|Session|State|Store|Tracker)\z/
-    CORE_TYPES = %w[
-      Array BasicObject Boolean Class FalseClass Float Hash Integer NilClass
-      Object Proc Set String Symbol T TrueClass
-    ].freeze
     TOKEN_STOP_WORDS = (ROLE_TERMS + %w[
       a an and ast base class common data default domain domains entry file fn
       function helper helpers item kind lib lowerer lowering method methods mir
@@ -52,10 +49,10 @@ module Espalier
 
     def initialize(manifest)
       @manifest = Array(manifest)
-      @owners = @manifest.map { |mod| mod[:module].to_s }.to_set
+      @owners = @manifest.map { |mod| value(mod, :module).to_s }.to_set
       @owner_by_simple = build_owner_by_simple
       @module_by_owner = @manifest.each_with_object({}) do |mod, out|
-        out[mod[:module].to_s] ||= mod
+        out[value(mod, :module).to_s] ||= mod
       end
     end
 
@@ -124,11 +121,11 @@ module Espalier
     end
 
     def owner_summary(mod)
-      owner = mod[:module].to_s
+      owner = value(mod, :module).to_s
       funcs = functions(mod)
       public_funcs = funcs.select { |fn| visibility_for(fn) == :public }
       private_funcs = funcs - public_funcs
-      state_names = states(mod).map { |state| state[:name].to_s }
+      state_names = states(mod).map { |state| value(state, :name).to_s }
       write_methods = funcs.count { |fn| effect_list(fn, :writes).any? }
       public_state_methods = public_funcs.count { |fn| state_touch_count(fn).positive? }
       public_mutators = public_funcs.count { |fn| mutating_public_method?(fn) }
@@ -259,7 +256,7 @@ module Espalier
     end
 
     def cohesive_value_facade_profile(mod)
-      owner = mod[:module].to_s
+      owner = value(mod, :module).to_s
       funcs = functions(mod)
       state_rows = states(mod)
       return nil if state_rows.size < 2 || funcs.size < 8
@@ -301,9 +298,8 @@ module Espalier
     end
 
     def value_state_targets(mod)
-      owner = mod[:module].to_s
-      state_type_index(mod).values.filter_map do |type_text|
-        target = owner_for_type(type_text)
+      owner = value(mod, :module).to_s
+      state_owner_target_index(mod).values.filter_map do |target|
         next if target.nil? || target == owner
         next unless value_like_owner?(target)
 
@@ -350,7 +346,7 @@ module Espalier
     end
 
     def state_fragmentation_problem?(mod)
-      state_names = states(mod).map { |state| state[:name].to_s }.to_set
+      state_names = states(mod).map { |state| value(state, :name).to_s }.to_set
       return false if state_names.size < 2
 
       method_touches = direct_method_state_touches(mod, state_names)
@@ -379,13 +375,14 @@ module Espalier
     end
 
     def raw_facade_target_edges(mod)
-      owner = mod[:module].to_s
-      state_types = state_type_index(mod)
+      owner = value(mod, :module).to_s
+      state_targets = state_owner_target_index(mod)
+      language = language_for(mod)
       grouped = {}
 
       functions(mod).each do |fn|
         calls_for(fn).each do |call|
-          target = target_owner_for(call[:name], owner, state_types)
+          target = target_owner_for(call[:name], owner, state_targets, language: language)
           next unless target
           next if target == owner
 
@@ -400,7 +397,7 @@ module Espalier
           row[:count] += 1
           row[:conditional_count] += 1 if call[:conditional]
           row[:stateful_count] += 1 if state_touch_count(fn).positive?
-          row[:methods] << fn[:name].to_s
+          row[:methods] << value(fn, :name).to_s
         end
       end
 
@@ -412,7 +409,7 @@ module Espalier
     def lifecycle_slot_count(mod)
       funcs = functions(mod)
       states(mod).count do |state|
-        name = state[:name].to_s
+        name = value(state, :name).to_s
         readers = funcs.count { |fn| effect_list(fn, :reads).include?(name) }
         writers = funcs.count { |fn| effect_list(fn, :writes).include?(name) }
         readers >= 5 || writers >= 3 || actionable_protocol_state?(state)
@@ -420,7 +417,7 @@ module Espalier
     end
 
     def actionable_protocol_state?(state)
-      Array(state[:properties]).any? do |prop|
+      Array(value(state, :properties)).any? do |prop|
         prop.to_s.include?("protocol interfaces:")
       end
     end
@@ -436,11 +433,12 @@ module Espalier
     def build_owner_edges
       grouped = {}
       @manifest.each do |mod|
-        source = mod[:module].to_s
-        state_types = state_type_index(mod)
+        source = value(mod, :module).to_s
+        state_targets = state_owner_target_index(mod)
+        language = language_for(mod)
         functions(mod).each do |fn|
           calls_for(fn).each do |call|
-            target = target_owner_for(call[:name], source, state_types)
+            target = target_owner_for(call[:name], source, state_targets, language: language)
             next unless target
             next if target == source
             next if collaboration_target_noise?(target)
@@ -458,7 +456,7 @@ module Espalier
             row[:count] += 1
             row[:conditional_count] += 1 if call[:conditional]
             row[:stateful_count] += 1 if state_touch_count(fn).positive?
-            row[:methods] << fn[:name].to_s
+            row[:methods] << value(fn, :name).to_s
             row[:samples] << call[:name].to_s if row[:samples].size < 4
           end
         end
@@ -490,36 +488,34 @@ module Espalier
     end
 
     def calls_for(fn)
-      delegations = fn[:DELEGATIONS] || {}
-      always = Array(delegations[:always_calls]).map do |name|
+      delegations = value(fn, :DELEGATIONS) || {}
+      always = Array(value(delegations, :always_calls)).map do |name|
         { name: name.to_s, conditional: false }
       end
-      conditional = Array(delegations[:conditionally_calls]).map do |name|
+      conditional = Array(value(delegations, :conditionally_calls)).map do |name|
         { name: name.to_s, conditional: true }
       end
       always + conditional
     end
 
-    def target_owner_for(call_name, source_owner, state_types)
+    def target_owner_for(call_name, source_owner, state_targets, language:)
       receiver = receiver_for(call_name)
       return nil unless receiver
       return nil if receiver == "self" || receiver == source_owner
 
       if receiver.start_with?("@")
         state_name = receiver.split(".").first
-        return owner_for_type(state_types[state_name])
+        return state_targets[state_name]
       end
       if receiver.start_with?("self.", "this.")
         state_name = receiver.split(".")[1]
-        return owner_for_type(state_types[state_name])
+        return state_targets[state_name] || state_targets["@#{state_name}"]
       end
-      if state_types.key?(receiver)
-        return owner_for_type(state_types[receiver])
+      if state_targets.key?(receiver)
+        return state_targets[receiver]
       end
 
-      return nil unless receiver.match?(/\A[A-Z]/)
-
-      owner_for_type(receiver)
+      owner_for_direct_receiver(receiver, language: language)
     end
 
     def receiver_for(call_name)
@@ -529,15 +525,46 @@ module Espalier
       parts[0...-1].join(".")
     end
 
-    def owner_for_type(type_text)
+    def owner_for_direct_receiver(receiver, language:)
+      text = receiver.to_s
+      return text if @owners.include?(text)
+      return @owner_by_simple[text] if @owner_by_simple.key?(text)
+      return nil unless ruby_language?(language)
+
+      owner_for_ruby_type(text)
+    end
+
+    def owner_for_state_type(state, mod)
+      structured_type_owner(type_references_for(state)) ||
+        (ruby_language?(language_for(mod)) ? owner_for_ruby_type(value(state, :type)) : nil)
+    end
+
+    def structured_type_owner(references)
+      Array(references).each do |reference|
+        names = if reference.is_a?(Hash)
+                  %i[owner qualified_name name type reference].filter_map { |key| value(reference, key).to_s }
+                else
+                  [reference.to_s]
+                end
+        names.reject(&:empty?).each do |name|
+          return name if @owners.include?(name)
+          return @owner_by_simple[name] if @owner_by_simple.key?(name)
+
+          simple = name.split("::").last.to_s.split(".").last.to_s
+          return @owner_by_simple[simple] if @owner_by_simple.key?(simple)
+        end
+      end
+      nil
+    end
+
+    def owner_for_ruby_type(type_text)
       return nil if type_text.nil?
 
       text = type_text.to_s
       return text if @owners.include?(text)
       return @owner_by_simple[text] if @owner_by_simple.key?(text)
 
-      owner_type_tokens(text).each do |token|
-        next if CORE_TYPES.include?(token)
+      Espalier.type_profile_for(:ruby, type_system: "sorbet").owner_reference_tokens(text).each do |token|
         return token if @owners.include?(token)
         return @owner_by_simple[token] if @owner_by_simple.key?(token)
 
@@ -547,14 +574,28 @@ module Espalier
       nil
     end
 
-    def owner_type_tokens(text)
-      text.scan(/[A-Z][A-Za-z0-9]*(?:::[A-Z][A-Za-z0-9]*)*/)
+    def state_owner_target_index(mod)
+      states(mod).each_with_object({}) do |state, out|
+        target = owner_for_state_type(state, mod)
+        out[value(state, :name).to_s] = target if target
+      end
     end
 
-    def state_type_index(mod)
-      states(mod).each_with_object({}) do |state, out|
-        out[state[:name].to_s] = state[:type].to_s if state[:type]
-      end
+    def type_references_for(state)
+      value(state, :type_references) || value(state, :owner_references) || value(state, :references)
+    end
+
+    def language_for(mod)
+      language = value(mod, :language).to_s
+      return language unless language.empty?
+
+      FactMine::Syntax.language_for(value(mod, :file)).to_s
+    rescue StandardError
+      ""
+    end
+
+    def ruby_language?(language)
+      language.to_s == "ruby"
     end
 
     def hub_meshes
@@ -779,7 +820,7 @@ module Espalier
       mod = @manifest.find { |candidate| candidate[:module].to_s == summary[:owner] }
       return nil unless mod
 
-      state_names = states(mod).map { |state| state[:name].to_s }.to_set
+      state_names = states(mod).map { |state| value(state, :name).to_s }.to_set
       return nil if state_names.size < 2
 
       method_touches = direct_method_state_touches(mod, state_names)
@@ -836,16 +877,16 @@ module Espalier
     def direct_method_state_touches(mod, state_names)
       funcs = functions(mod)
       funcs.each_with_object({}) do |fn, out|
-        next if fn[:name].to_s == "initialize"
+        next if value(fn, :name).to_s == "initialize"
         next if trivial_state_accessor?(fn, state_names)
 
         touches = direct_state_touches(fn, state_names)
-        out[fn[:name].to_s] = touches unless touches.empty?
+        out[value(fn, :name).to_s] = touches unless touches.empty?
       end
     end
 
     def expand_components_with_internal_call_evidence(mod:, components:, direct_touches:, state_names:)
-      by_name = functions(mod).each_with_object({}) { |fn, out| out[fn[:name].to_s] = fn }
+      by_name = functions(mod).each_with_object({}) { |fn, out| out[value(fn, :name).to_s] = fn }
       component_by_state = components.each_with_index.each_with_object({}) do |(component, index), out|
         component[:states].each { |state_name| out[state_name] = index }
       end
@@ -855,7 +896,7 @@ module Espalier
       bridge_methods = []
 
       functions(mod).each do |fn|
-        method_name = fn[:name].to_s
+        method_name = value(fn, :name).to_s
         next if method_name == "initialize"
         next if direct_touches.key?(method_name)
         next if trivial_state_accessor?(fn, state_names)
@@ -885,7 +926,7 @@ module Espalier
     end
 
     def propagated_touches_for(fn, by_name, state_names, visiting = Set.new)
-      name = fn[:name].to_s
+      name = value(fn, :name).to_s
       return Set.new if visiting.include?(name)
 
       visiting.add(name)
@@ -907,8 +948,8 @@ module Espalier
     end
 
     def internal_calls_for(fn)
-      graph = fn[:CALL_GRAPH] || {}
-      Array(graph[:internal_calls]).map(&:to_s)
+      graph = value(fn, :CALL_GRAPH) || {}
+      Array(value(graph, :internal_calls)).map(&:to_s)
     end
 
     def trivial_state_accessor?(fn, state_names)
@@ -918,7 +959,7 @@ module Espalier
       touches = direct_state_touches(fn, state_names)
       return false unless touches.size == 1
 
-      method_name = fn[:name].to_s
+      method_name = value(fn, :name).to_s
       state_name = touches.first.delete_prefix("@")
       method_name == state_name ||
         method_name == "#{state_name}=" ||
@@ -1004,7 +1045,7 @@ module Espalier
 
     def public_component_count(components, mod)
       visibility_by_name = functions(mod).each_with_object({}) do |fn, out|
-        out[fn[:name].to_s] = visibility_for(fn)
+        out[value(fn, :name).to_s] = visibility_for(fn)
       end
       components.count do |component|
         component[:methods].any? { |method_name| visibility_by_name[method_name] == :public }
@@ -1050,20 +1091,20 @@ module Espalier
     end
 
     def functions(mod)
-      Array(mod[:functions])
+      Array(value(mod, :functions))
     end
 
     def states(mod)
-      Array(mod[:state])
+      Array(value(mod, :state))
     end
 
     def visibility_for(fn)
-      (fn[:visibility] || :public).to_sym
+      (value(fn, :visibility) || :public).to_sym
     end
 
     def mutating_public_method?(fn)
       visibility_for(fn) == :public &&
-        fn[:name].to_s != "initialize" &&
+        value(fn, :name).to_s != "initialize" &&
         effect_list(fn, :writes).any?
     end
 
@@ -1072,11 +1113,18 @@ module Espalier
     end
 
     def effect_list(fn, key)
-      Array((fn[:EFFECTS] || {})[key])
+      effects = value(fn, :EFFECTS) || {}
+      Array(value(effects, key))
     end
 
     def delegation_count(funcs)
       funcs.sum { |fn| calls_for(fn).size }
+    end
+
+    def value(hash, key)
+      return nil unless hash.respond_to?(:[])
+
+      hash[key] || hash[key.to_s]
     end
 
     def round(value)

@@ -1,0 +1,14 @@
+<div class="viewer">
+  <section class="dashboard">
+    {{ branch_context|safe }}
+    {{ warnings|safe }}
+    {{ active_hazards|safe }}
+    {{ highest_hazard_files|safe }}
+    {{ highest_risk_units|safe }}
+    {{ highest_architecture_risks|safe }}
+    <section class="dashboard-section">
+      <h2>{{ code_tree_heading }}</h2>
+      {{ code_tree|safe }}
+    </section>
+  </section>
+</div>

@@ -1,0 +1,17 @@
+{% if items.len() == 0 %}
+  <p class="empty-inline">{{ empty_message }}</p>
+{% else %}
+  <div class="{{ wrapper_class }}">
+    {% for item in items %}
+      <a href="{{ item.href }}">
+        <span class="unit-hotspot-kind">{{ item.kind }}</span>
+        <span class="unit-hotspot-main">
+          <strong>{{ item.name }}</strong>
+          <small>{{ item.path }}</small>
+          <small>{{ item.detail }}</small>
+        </span>
+        <strong class="unit-hotspot-score">{{ item.score }}</strong>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}

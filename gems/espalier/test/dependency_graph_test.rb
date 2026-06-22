@@ -112,6 +112,69 @@ class DependencyGraphTest < Minitest::Test
     assert_includes dot, "color=\"#b91c1c\""
   end
 
+  def test_native_type_edges_use_structured_type_references
+    graph = Espalier::DependencyGraph.from_manifest(
+      [
+        {
+          module: "Service",
+          file: "src/service.ts",
+          language: "typescript",
+          state: [
+            {
+              name: "record",
+              type: "Promise<User$Record>",
+              type_references: [{ "name" => "User$Record" }]
+            }
+          ],
+          functions: [
+            {
+              name: "run",
+              EFFECTS: { reads: ["record"], writes: [] },
+              DELEGATIONS: { always_calls: ["this.record.load"] }
+            }
+          ]
+        },
+        {
+          module: "User$Record",
+          file: "src/record.ts",
+          language: "typescript",
+          functions: [{ name: "load", EFFECTS: { reads: [], writes: [] }, DELEGATIONS: {} }]
+        }
+      ]
+    )
+
+    assert graph.edges.any? { |edge| edge.source == "owner:Service" && edge.target == "owner:User$Record" && edge.kind == :state_type }
+    assert graph.edges.any? { |edge| edge.source == "fn:Service#run" && edge.target == "fn:User$Record#load" }
+  end
+
+  def test_native_type_strings_are_not_parsed_as_architecture_edges
+    graph = Espalier::DependencyGraph.from_manifest(
+      [
+        {
+          module: "Service",
+          file: "src/service.ts",
+          language: "typescript",
+          state: [{ name: "record", type: "Promise<User$Record>" }],
+          functions: [
+            {
+              name: "run",
+              EFFECTS: { reads: ["record"], writes: [] },
+              DELEGATIONS: { always_calls: ["this.record.load"] }
+            }
+          ]
+        },
+        {
+          module: "User$Record",
+          file: "src/record.ts",
+          language: "typescript",
+          functions: [{ name: "load", EFFECTS: { reads: [], writes: [] }, DELEGATIONS: {} }]
+        }
+      ]
+    )
+
+    refute graph.edges.any? { |edge| edge.target == "owner:User$Record" || edge.target == "fn:User$Record#load" }
+  end
+
   private
 
   def service_manifest

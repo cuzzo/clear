@@ -1,0 +1,11 @@
+{
+  "detector": "oversized-predicate",
+  "options": {
+  },
+  "expected": [
+    {
+      "count": 4,
+      "atom_count": 4
+    }
+  ]
+}

@@ -1,0 +1,595 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/fact-mine/examples/syntax-facts/swift/core.swift",
+      "language": "swift",
+      "functions": [
+        {
+          "line": 16,
+          "name": "process",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            16,
+            2,
+            42,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 44,
+          "name": "audit",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            44,
+            2,
+            48,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 50,
+          "name": "ready",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+
+          ],
+          "span": [
+            50,
+            2,
+            52,
+            3
+          ],
+          "visibility": "public"
+        }
+      ],
+      "owners": [
+        {
+          "kind": "class",
+          "line": 1,
+          "name": "Status",
+          "span": [
+            1,
+            0,
+            4,
+            1
+          ]
+        },
+        {
+          "kind": "class",
+          "line": 6,
+          "name": "SwiftSyntaxFactsCore",
+          "span": [
+            6,
+            0,
+            53,
+            1
+          ]
+        }
+      ],
+      "calls": [
+        {
+          "arguments": [
+            ".busy"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 32,
+          "message": "publish",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            32,
+            6,
+            32,
+            25
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 34,
+          "message": "print",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            34,
+            6,
+            34,
+            24
+          ]
+        },
+        {
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 46,
+          "message": "send",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "sink",
+          "safe_navigation": false,
+          "span": [
+            46,
+            4,
+            46,
+            29
+          ]
+        },
+        {
+          "arguments": [
+            "account"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 19,
+          "message": "callback",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            19,
+            4,
+            19,
+            21
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 45,
+          "message": "print",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            45,
+            4,
+            45,
+            15
+          ]
+        },
+        {
+          "arguments": [
+            "name: name",
+            "active: user.active"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 18,
+          "message": "Account",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            18,
+            18,
+            18,
+            58
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 23,
+          "message": "escalate",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            23,
+            6,
+            23,
+            25
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 25,
+          "message": "fallback",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            25,
+            6,
+            25,
+            19
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 27,
+          "message": "defaultCase",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            27,
+            6,
+            27,
+            28
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 38,
+          "message": "children",
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            38,
+            6,
+            38,
+            21
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "active",
+          "function": "process",
+          "line": 18,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            18,
+            46,
+            18,
+            57
+          ]
+        },
+        {
+          "field": "children",
+          "function": "process",
+          "line": 38,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "item",
+          "span": [
+            38,
+            6,
+            38,
+            19
+          ]
+        },
+        {
+          "field": "defaultCase",
+          "function": "process",
+          "line": 27,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            27,
+            6,
+            27,
+            22
+          ]
+        },
+        {
+          "field": "escalate",
+          "function": "process",
+          "line": 23,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            23,
+            6,
+            23,
+            19
+          ]
+        },
+        {
+          "field": "fallback",
+          "function": "process",
+          "line": 25,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            25,
+            6,
+            25,
+            19
+          ]
+        },
+        {
+          "field": "name",
+          "function": "process",
+          "line": 17,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "user.profile",
+          "span": [
+            17,
+            15,
+            17,
+            33
+          ]
+        },
+        {
+          "field": "profile",
+          "function": "process",
+          "line": 17,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            17,
+            15,
+            17,
+            27
+          ]
+        },
+        {
+          "field": "publish",
+          "function": "process",
+          "line": 32,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            32,
+            6,
+            32,
+            18
+          ]
+        },
+        {
+          "field": "ready",
+          "function": "process",
+          "line": 30,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            30,
+            31,
+            30,
+            41
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 21,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            21,
+            11,
+            21,
+            20
+          ]
+        },
+        {
+          "field": "send",
+          "function": "audit",
+          "line": 46,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "sink",
+          "span": [
+            46,
+            4,
+            46,
+            13
+          ]
+        },
+        {
+          "field": "status",
+          "function": "process",
+          "line": 30,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            30,
+            7,
+            30,
+            18
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "count",
+          "function": "process",
+          "line": 31,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            31,
+            6,
+            31,
+            21
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "(top-level)",
+          "line": 13,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            13,
+            4,
+            13,
+            20
+          ]
+        },
+        {
+          "field": "status",
+          "function": "(top-level)",
+          "line": 12,
+          "owner": "SwiftSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            12,
+            4,
+            12,
+            24
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            21,
+            4,
+            28,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 21,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.role",
+          "span": [
+            21,
+            4,
+            28,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            30,
+            4,
+            35,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 30,
+          "members": [
+            ".idle",
+            "user.ready"
+          ],
+          "predicate": ".idle && user.ready",
+          "span": [
+            30,
+            22,
+            30,
+            41
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "process",
+          "line": 21,
+          "predicate": "user.role",
+          "span": [
+            21,
+            4,
+            28,
+            5
+          ],
+          "state_refs": [
+            "user.role"
+          ]
+        },
+        {
+          "function": "process",
+          "line": 30,
+          "predicate": "self.status == .idle && user.ready",
+          "span": [
+            30,
+            4,
+            35,
+            5
+          ],
+          "state_refs": [
+            "status",
+            "user.ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "print",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 45,
+          "span": [
+            45,
+            4,
+            45,
+            15
+          ]
+        },
+        {
+          "detail": "print",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 34,
+          "span": [
+            34,
+            6,
+            34,
+            24
+          ]
+        }
+      ],
+      "predicate_bodies": [
+
+      ]
+    }
+  ]
+}

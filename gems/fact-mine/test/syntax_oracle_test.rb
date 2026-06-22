@@ -1,0 +1,64 @@
+# frozen_string_literal: true
+
+require "json"
+require "minitest/autorun"
+require_relative "../lib/fact_mine/syntax_oracle"
+
+class SyntaxOracleTest < Minitest::Test
+  EXAMPLES_ROOT = File.expand_path("../examples/syntax-facts", __dir__)
+  ORACLE_ROOT = File.join(EXAMPLES_ROOT, "oracles")
+  ENGINES = %w[ruby].freeze
+
+  FIXTURES = Dir[File.join(EXAMPLES_ROOT, "*", "*")]
+             .select { |path| File.file?(path) && FactMine::Syntax.supported_source?(path) }
+             .sort
+             .freeze
+
+  def test_syntax_fact_fixtures_exist
+    refute_empty FIXTURES
+  end
+
+  FIXTURES.product(ENGINES).each_with_index do |(fixture_path, engine), index|
+    language = File.basename(File.dirname(fixture_path))
+    name = File.basename(fixture_path, File.extname(fixture_path))
+    method_name = "test_#{index}_#{engine}_#{language}_#{name}_syntax_facts_match_oracle"
+
+    define_method(method_name) do
+      assert_syntax_facts_match_oracle(fixture_path, engine)
+    end
+  end
+
+  private
+
+  def assert_syntax_facts_match_oracle(fixture_path, engine)
+    language = File.basename(File.dirname(fixture_path))
+    name = File.basename(fixture_path, File.extname(fixture_path))
+    oracle_path = File.join(ORACLE_ROOT, "#{language}-#{name}.json")
+
+    assert File.file?(oracle_path), "missing syntax oracle #{oracle_path}"
+
+    expected = JSON.parse(File.read(oracle_path))
+    actual = FactMine::SyntaxOracle.project([fixture_path], engine: engine, language: language)
+    actual = project_expected_shape(actual, expected)
+
+    assert_equal expected, actual, "#{engine} #{fixture_path}"
+  end
+
+  def project_expected_shape(actual, expected)
+    case expected
+    when Hash
+      expected.keys.each_with_object({}) do |key, out|
+        out[key] = project_expected_shape(actual.fetch(key), expected.fetch(key))
+      end
+    when Array
+      return actual unless expected.any? { |item| item.is_a?(Hash) }
+
+      keys = expected.flat_map { |item| item.is_a?(Hash) ? item.keys : [] }.uniq
+      actual.map do |item|
+        item.is_a?(Hash) ? project_expected_shape(item.slice(*keys), expected.find { |row| row.is_a?(Hash) }) : item
+      end.sort_by { |item| JSON.generate(item) }
+    else
+      actual
+    end
+  end
+end

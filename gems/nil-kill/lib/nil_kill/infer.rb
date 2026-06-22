@@ -28,73 +28,7 @@ module NilKill
     end
 
     def index_sources
-      SourceIndex.reset_global_shape_indexes
-      files = NilKill.target_files
-      warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
-      files.each { |path| SourceIndex.new(path, warm_only: warm_only) }
-      files.each { |path| SourceIndex.new(path, warm_only: true) } if warm_only
-      reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
-      cached = nil
-      5.times do
-        before = SourceIndex.noreturn_methods.size
-        pass = reuse ? {} : nil
-        files.each { |path| idx = SourceIndex.new(path); pass[path] = idx if reuse }
-        if SourceIndex.noreturn_methods.size == before
-          cached = pass
-          break
-        end
-      end
-      files.each do |path|
-        idx = (cached && cached[path]) || SourceIndex.new(path)
-        append_source_index_facts(idx, target: true)
-        idx.methods.each do |method|
-          rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
-          rec["source"] = method
-          rec["has_sig"] = method["has_sig"]
-        end
-      end
-      (NilKill.usage_scan_files - files).each do |path|
-        append_source_index_facts(SourceIndex.new(path, usage_only: true), target: false)
-      end
-    end
-
-    def append_source_index_facts(idx, target:)
-      @store.facts["files"][idx.rel] = idx.summary if target
-      @store.facts["unsigned_methods"].concat(idx.methods.reject { |m| m["has_sig"] }) if target
-      @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] }) if target
-      @store.facts["tlet_sites"].concat(idx.tlet_sites) if target
-      @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks) if target
-      @store.facts["deterministic_guards"].concat(idx.deterministic_guards) if target
-      @store.facts["struct_declarations"].concat(idx.struct_declarations) if target
-      @store.facts["struct_field_static"].concat(idx.struct_field_static) if target
-      @store.facts["tuple_arrays"].concat(idx.tuple_arrays) if target
-      @store.facts["hash_shapes"].concat(idx.hash_shapes) if target
-      @store.facts["collection_index_lookups"].concat(idx.collection_index_lookups) if target
-      @store.facts["hash_record_blockers"].concat(idx.hash_record_blockers) if target
-      @store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls) if target
-      @store.facts["type_normalizers"].concat(idx.type_normalizers) if target
-      @store.facts["dispatcher_inferences"].concat(idx.dispatcher_inferences) if target
-      @store.facts["return_origins"].concat(idx.return_origins) if target
-      @store.facts["param_origins"].concat(idx.param_origins) if target
-      (@store.facts["hash_record_escape_sites"] ||= []).concat(idx.hash_record_escape_sites) if target
-      (@store.facts["hidden_enum_observations"] ||= []).concat(idx.hidden_enum_observations) if target
-      (@store.facts["return_usage_sites"] ||= []).concat(idx.return_usage_sites)
-      (@store.facts["return_direct_usage_sites"] ||= []).concat(idx.return_direct_usage_sites)
-      (@store.facts["rescue_handlers"] ||= []).concat(idx.rescue_handlers)
-      return unless target
-
-      @store.facts["ivar_protocols"] ||= {}
-      idx.ivar_protocols.each do |(klass, ivar), methods|
-        key = "#{klass}\0#{ivar}"
-        @store.facts["ivar_protocols"][key] ||= []
-        @store.facts["ivar_protocols"][key] = (@store.facts["ivar_protocols"][key] + methods.to_a).uniq
-      end
-      @store.facts["ivar_param_origins"] ||= {}
-      idx.ivar_param_origins.each do |(klass, ivar), sources|
-        key = "#{klass}\0#{ivar}"
-        @store.facts["ivar_param_origins"][key] ||= []
-        @store.facts["ivar_param_origins"][key] = (@store.facts["ivar_param_origins"][key] + sources.to_a).uniq
-      end
+      StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
     end
 
     def load_sorbet
@@ -164,7 +98,7 @@ module NilKill
       candidates = Report.new.struct_field_candidates(
         Array(@store.facts["struct_field_runtime"]), Array(@store.facts["struct_field_static"])
       )
-      already = SourceIndex.rbi_field_types
+      already = rbi_field_type_index
       candidates.each do |c|
         type = c["type"].to_s
         next if type.empty? || type == "T.untyped"
@@ -413,11 +347,6 @@ module NilKill
     end
 
     def build_fallibility_pressure
-      if @store.facts.key?("return_usage_sites")
-        @store.facts["fallibility_pressure"] = indexed_fallibility_pressure
-        return
-      end
-
       @store.facts["fallibility_pressure"] = FallibilityPressure.scan(
         NilKill.target_files,
         runtime_methods: @store.methods.values,
@@ -425,227 +354,11 @@ module NilKill
       )
     end
 
-    FALLIBILITY_DIRECT_CALLS = %w[raise fail error!].freeze
-
-    def indexed_fallibility_pressure
-      methods = Array(@store.facts["existing_sigs"]) + Array(@store.facts["unsigned_methods"])
-      method_info = methods.each_with_object({}) do |method, index|
-        id = indexed_method_id(method)
-        index[id] = {
-          "id" => id,
-          "path" => method["path"].to_s,
-          "line" => method["line"].to_i,
-          "owner" => method["class"].to_s,
-          "kind" => method["kind"].to_s.empty? ? "instance" : method["kind"].to_s,
-          "name" => method["method"].to_s,
-          "label" => indexed_method_label(method["class"], method["kind"], method["method"]),
-        }
-      end
-      by_path_name = method_info.values.group_by { |method| [method["path"], method["name"]] }
-      by_name = method_info.values.group_by { |method| method["name"] }
-      direct_sources = Hash.new { |hash, key| hash[key] = [] }
-      edges = Hash.new { |hash, key| hash[key] = Set.new }
-
-      Array(@store.facts["return_usage_sites"]).each do |site|
-        caller = indexed_callsite_method(site, by_path_name, by_name)
-        next unless caller
-        name = site["name"].to_s
-        if FALLIBILITY_DIRECT_CALLS.include?(name)
-          direct_sources[caller["id"]] << {
-            "kind" => name,
-            "path" => site["path"].to_s,
-            "line" => site["line"].to_i,
-            "code" => site["code"].to_s.empty? ? name : site["code"].to_s,
-          }
-          next
-        end
-        callee = indexed_unique_method(name, by_name)
-        edges[caller["id"]] << callee["id"] if callee && callee["id"] != caller["id"]
-      end
-
-      runtime_by_method = indexed_runtime_fallibility(method_info)
-      root_ids = (direct_sources.keys + runtime_by_method.keys).uniq
-      return [] if root_ids.empty?
-
-      reachable_cache = {}
-      rows = root_ids.filter_map do |root_id|
-        method = method_info[root_id]
-        next unless method
-        callers = method_info.keys.filter_map do |method_id|
-          next if method_id == root_id
-          indexed_roots_reachable(method_id, edges, direct_sources, runtime_by_method, reachable_cache).include?(root_id) ? method_info[method_id]["label"] : nil
-        end.sort
-        runtime = runtime_by_method[root_id] || {}
-        direct = direct_sources[root_id] || []
-        raised_calls = runtime["raised_calls"].to_i
-        score = (callers.size * 2) + direct.size + raised_calls
-        {
-          "method_id" => root_id,
-          "label" => method["label"],
-          "path" => method["path"],
-          "line" => method["line"],
-          "score" => score,
-          "direct_sources" => direct,
-          "runtime" => {
-            "calls" => runtime["calls"].to_i,
-            "ok_calls" => runtime["ok_calls"].to_i,
-            "raised_calls" => raised_calls,
-            "raised_rate" => runtime["calls"].to_i.positive? ? ((raised_calls.to_f / runtime["calls"].to_i) * 100).round(1) : 0.0,
-            "raised_classes" => Array(runtime["raised"]).uniq.sort,
-          },
-          "fallible_callers" => callers,
-          "handler_pressure" => 0,
-          "exclusive_handlers" => 0,
-          "shared_handlers" => 0,
-          "handlers" => [],
-        }
-      end
-      rows.sort_by { |row| [-row["score"].to_i, -row["fallible_callers"].size, row["path"], row["line"].to_i] }
-    end
-
-    def indexed_callsite_method(site, by_path_name, by_name)
-      current = site["current_method"].to_s
-      return nil if current.empty?
-      path_candidates = by_path_name[[site["path"].to_s, current]]
-      return path_candidates.first if path_candidates&.size == 1
-      indexed_unique_method(current, by_name)
-    end
-
-    def indexed_unique_method(name, by_name)
-      candidates = by_name[name.to_s]
-      candidates&.size == 1 ? candidates.first : nil
-    end
-
-    def indexed_runtime_fallibility(method_info)
-      by_id = {}
-      @store.methods.values.each do |rec|
-        next unless rec["raised_calls"].to_i.positive?
-        source = rec["source"] || {}
-        id = indexed_method_id(source)
-        next unless method_info.key?(id)
-        current = by_id[id] ||= { "calls" => 0, "ok_calls" => 0, "raised_calls" => 0, "raised" => [] }
-        current["calls"] += rec["calls"].to_i
-        current["ok_calls"] += rec["ok_calls"].to_i
-        current["raised_calls"] += rec["raised_calls"].to_i
-        current["raised"] = (Array(current["raised"]) + Array(rec["raised"])).uniq.sort
-      end
-      by_id
-    end
-
-    def indexed_roots_reachable(method_id, edges, direct_sources, runtime_by_method, cache, visiting = Set.new)
-      return cache[method_id] if cache.key?(method_id)
-      return [] if visiting.include?(method_id)
-      roots = []
-      roots << method_id if direct_sources[method_id]&.any? || runtime_by_method[method_id]
-      visiting.add(method_id)
-      Array(edges[method_id]).each do |callee_id|
-        roots.concat(indexed_roots_reachable(callee_id, edges, direct_sources, runtime_by_method, cache, visiting))
-      end
-      visiting.delete(method_id)
-      cache[method_id] = roots.uniq.sort
-    end
-
-    def indexed_method_id(method)
-      [method["path"].to_s, method["line"].to_i, method["class"].to_s, method["kind"].to_s.empty? ? "instance" : method["kind"].to_s, method["method"].to_s].join("\0")
-    end
-
-    def indexed_method_label(owner, kind, name)
-      prefix = owner.to_s.empty? ? "(top-level)" : owner.to_s
-      sep = kind.to_s == "class" ? "." : "#"
-      "#{prefix}#{sep}#{name}"
-    end
-
     def build_hidden_enum_pressure
-      if @store.facts.key?("hidden_enum_observations")
-        @store.facts["hidden_enum_pressure"] = indexed_hidden_enum_pressure
-        return
-      end
-
       @store.facts["hidden_enum_pressure"] = HiddenEnumPressure.scan(
         NilKill.target_files,
         evidence: @store.to_h
       )
-    end
-
-    HIDDEN_ENUM_MIN_VALUES = 2
-    HIDDEN_ENUM_MAX_VALUES = 10
-
-    def indexed_hidden_enum_pressure
-      slots = {}
-      Array(@store.facts["hidden_enum_observations"]).each do |obs|
-        key = obs["key"].to_s
-        next if key.empty?
-        entry = slots[key] ||= {
-          "kind" => obs["kind"],
-          "path" => obs["path"],
-          "line" => obs["line"],
-          "owner" => obs["owner"],
-          "method" => obs["method"],
-          "method_kind" => obs["method_kind"],
-          "slot" => obs["slot"],
-          "type" => obs["type"],
-          "values" => [],
-          "primitive_kinds" => [],
-          "decisions" => [],
-          "producers" => [],
-          "blockers" => [],
-        }
-        values = Array(obs["values"])
-        entry["values"] = (entry["values"] + values.map { |value| value["value"].to_s }).uniq.sort
-        entry["primitive_kinds"] = (entry["primitive_kinds"] + values.map { |value| value["kind"].to_s }).uniq.sort
-        entry["decisions"] << Hash(obs["site"]).merge("values" => values)
-      end
-
-      runtime_index = indexed_hidden_enum_runtime_index
-      slots.values.filter_map do |entry|
-        values = entry["values"]
-        next if values.size < HIDDEN_ENUM_MIN_VALUES || values.size > HIDDEN_ENUM_MAX_VALUES
-        next if entry["decisions"].empty?
-        next unless indexed_hidden_enum_eligible_type?(entry["type"])
-        runtime = indexed_hidden_enum_runtime(entry, runtime_index)
-        decision_pressure = entry["decisions"].sum { |site| Array(site["values"]).size }
-        score = decision_pressure * 3 + values.size * 2 + entry["producers"].size + runtime.delete("support_score").to_i
-        confidence = entry["blockers"].empty? && decision_pressure >= 3 ? "high" : "review"
-        entry.merge(
-          "confidence" => confidence,
-          "decision_pressure" => decision_pressure,
-          "score" => score,
-          "runtime" => runtime,
-          "suggestion" => indexed_hidden_enum_suggestion(entry)
-        )
-      end.sort_by { |row| [-row["score"].to_i, row["path"].to_s, row["line"].to_i, row["slot"].to_s] }
-    end
-
-    def indexed_hidden_enum_runtime_index
-      @store.methods.values.each_with_object({}) do |rec, index|
-        source = rec["source"] || {}
-        path = source["path"].to_s
-        next if path.empty?
-        index[[path, source["line"].to_i, source["class"].to_s, source["method"].to_s, source["kind"].to_s]] = rec
-      end
-    end
-
-    def indexed_hidden_enum_runtime(entry, runtime_index)
-      return {} unless entry["kind"] == "param"
-      rec = runtime_index[[entry["path"], entry["line"].to_i, entry["owner"].to_s, entry["method"].to_s, entry["method_kind"].to_s]]
-      return {} unless rec
-      classes = Array(rec.dig("params_by_name", entry["slot"]))
-      support = classes.any? { |klass| Array(entry["primitive_kinds"]).include?(klass) } ? 2 : 0
-      { "calls" => rec["calls"].to_i, "classes" => classes, "support_score" => support }
-    end
-
-    def indexed_hidden_enum_eligible_type?(type)
-      type = type.to_s.strip
-      return true if type.empty? || type == "T.untyped"
-      stripped = NilKill.strip_nilable_type(type)
-      return true if %w[String Symbol].include?(stripped)
-      stripped.start_with?("T.any(") && stripped.include?("String") && stripped.include?("Symbol")
-    end
-
-    def indexed_hidden_enum_suggestion(entry)
-      base = entry["slot"].to_s.delete_prefix("@").split(/[^A-Za-z0-9]+/).reject(&:empty?).map(&:capitalize).join
-      base = "State" if base.empty?
-      "review for a named #{base} enum or literal-union contract"
     end
 
     def propose_hash_record_cluster_actions
@@ -950,9 +663,6 @@ module NilKill
     # value. One-hop local aliasing is followed; deeper chains are
     # conservatively treated as escaping.
     def hash_record_producers_escaping_into_collection(producers)
-      indexed = hash_record_escape_site_lookup
-      return Array(producers).select { |producer| indexed[hash_record_escape_site_key(producer)] } if indexed
-
       by_path = Array(producers).group_by { |p| p["path"].to_s }
       by_path.flat_map do |rel_path, entries|
         next [] if rel_path.empty?
@@ -968,19 +678,6 @@ module NilKill
           hash_record_value_escapes?(parsed.value, hash_node)
         end
       end
-    end
-
-    def hash_record_escape_site_lookup
-      facts = @store&.facts
-      return nil unless facts&.key?("hash_record_escape_sites")
-      @hash_record_escape_site_lookup ||= Array(facts["hash_record_escape_sites"]).each_with_object({}) do |site, index|
-        next unless site["escapes_collection"]
-        index[hash_record_escape_site_key(site)] = site
-      end
-    end
-
-    def hash_record_escape_site_key(entry)
-      [entry["path"].to_s, entry["line"].to_i, entry["code"].to_s.strip]
     end
 
     def parsed_hash_record_source(abs)
@@ -1214,12 +911,6 @@ module NilKill
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      if evidence.dig("facts")&.key?("return_usage_sites")
-        apply_return_usage_sites(Array(evidence.dig("facts", "return_usage_sites")), candidate_names, method_return_types, used, return_edges)
-        propagate_return_usage!(used, return_edges)
-        return (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
-      end
-
       # Scan a broader file set than just target_files: a method only used by
       # specs / transpile-tests / tools is still "used", and narrowing it to
       # `void` would replace its return value with a Void marker and break
@@ -1232,27 +923,6 @@ module NilKill
       end
       propagate_return_usage!(used, return_edges)
       (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
-    end
-
-    def apply_return_usage_sites(sites, candidate_names, method_return_types, used, return_edges)
-      sites.each do |site|
-        name = site["name"].to_s.to_sym
-        next unless candidate_names.include?(name)
-        context = site["context"].to_s
-        current_method_name = site["current_method"].to_s
-        current_method = current_method_name.empty? ? nil : current_method_name.to_sym
-        if context == "return" && current_method && candidate_names.include?(current_method)
-          if typed_value_return?(method_return_types[current_method])
-            used << name
-          else
-            return_edges[current_method] << name
-          end
-        elsif context == "return" && method_return_types[current_method] != "void"
-          used << name
-        elsif context == "value"
-          used << name
-        end
-      end
     end
 
     def unambiguous_method_return_types(evidence)
@@ -1393,6 +1063,26 @@ module NilKill
       @return_origin_by_location[[src["path"], src["line"]]]
     end
 
+    def rbi_field_type_index
+      raw = @store.facts["rbi_field_types"]
+      return raw if raw.is_a?(Hash)
+
+      Array(raw).each_with_object({}) do |record, index|
+        klass = record["class"].to_s
+        field = record["field"].to_s
+        type = record["type"].to_s
+        next if klass.empty? || field.empty? || type.empty?
+
+        index[[klass, field]] = type
+      end
+    end
+
+    def noreturn_method_names
+      Array(@store.facts["noreturn_methods"]).filter_map do |entry|
+        entry.is_a?(Hash) ? entry["name"].to_s : entry.to_s
+      end.reject(&:empty?).to_set
+    end
+
     # Receiver-type inference: for a `recv.method` call_untyped return
     # where `recv` is a param, resolve the caller-passed classes via
     # param_origins and the callee return via RbiReturnIndex; rewrite
@@ -1454,15 +1144,13 @@ module NilKill
             callee = source["callee"].to_s
             next if callee.empty?
             # Noreturn helpers (error!, fixable!, raise-wrappers) are the
-            # single most common residual blocker. Their noreturn-ness
-            # lives in SourceIndex.noreturn_methods (populated by the
-            # cross-file noreturn fixpoint), NOT as a strong return type
-            # in the index, because their body raises. Resolve them to
-            # T.noreturn directly; static_sorbet_type treats it as
-            # bottom so a `return x if c; error!(...)` origin unifies to
-            # x's type instead of staying blocked.
+            # single most common residual blocker. Static evidence carries
+            # their names separately from ordinary return types because
+            # their body raises. Resolve them to T.noreturn directly;
+            # static_sorbet_type treats it as bottom so a
+            # `return x if c; error!(...)` origin unifies to x's type.
             resolved =
-              if SourceIndex.noreturn_methods.include?(callee)
+              if noreturn_method_names.include?(callee)
                 "T.noreturn"
               else
                 index[[enclosing_class, callee]] || name_unique[callee]
@@ -1528,7 +1216,7 @@ module NilKill
       # sorbet/rbi/ast-struct-fields.rbi (and any other RBIs) carry typed
       # returns for accessors that lack inline `sig {}` and therefore never
       # made it into existing_sigs. Merge them keyed by [class, field].
-      SourceIndex.rbi_field_types.each do |(klass, name), ret|
+      rbi_field_type_index.each do |(klass, name), ret|
         next if klass.to_s.empty? || name.to_s.empty?
         next if ret.to_s.empty? || ret == "T.untyped"
         index[[klass, name]] ||= ret

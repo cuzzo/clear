@@ -1,0 +1,11 @@
+<div class="dashboard-bar-row">
+  <div class="dashboard-bar-head">
+    <strong>{{ label }}</strong>
+    <span>{{ detail }}</span>
+  </div>
+  {{ bar|safe }}
+  <div class="dashboard-bar-foot">
+    <span>{{ total }} {{ total_label }}</span>
+    <span>{{ covered }} {{ covered_label }}</span>
+  </div>
+</div>

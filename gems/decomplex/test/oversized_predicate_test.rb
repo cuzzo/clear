@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tmpdir"
+require_relative "../lib/decomplex/ast"
 require_relative "../lib/decomplex/oversized_predicate"
 
 class OversizedPredicateTest < Minitest::Test
@@ -29,6 +30,24 @@ class OversizedPredicateTest < Minitest::Test
       assert_equal 4, findings.first[:count]
       assert_includes findings.first[:at], ":eligible:2"
       assert_includes findings.first[:predicate], "t.map?"
+    end
+  end
+
+  def test_scan_uses_syntax_not_ast_facades
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      Decomplex::Ast.stub(:parse_semantic, ->(*) { raise "Ast.parse_semantic should not be used" }) do
+        with_file(<<~RUBY) do |file|
+          def eligible(t, info)
+            if t.map? && !t.numeric_map? && !info.close_zig && !t.sharded?
+              true
+            end
+          end
+        RUBY
+          findings = Decomplex::OversizedPredicate.scan([file]).findings
+
+          assert_equal 1, findings.size
+        end
+      end
     end
   end
 

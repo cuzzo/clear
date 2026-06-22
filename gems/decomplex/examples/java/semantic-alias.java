@@ -1,0 +1,1 @@
+class Example { static boolean frame(Node node) { return node.provenance == FRAME; } static boolean is_frame(Node node) { return provenance == FRAME; } static boolean heap(Node node) { return node.provenance == HEAP; } static int somewhere(Node node) { if (node.provenance == FRAME) { return 1; } return 0; } }

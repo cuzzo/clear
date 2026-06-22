@@ -46,6 +46,24 @@ class OrderedProtocolMineTest < Minitest::Test
     assert_equal %w[phase], hit[:states]
   end
 
+  def test_scan_does_not_use_legacy_ast_parse
+    file = Tempfile.new(["ordered_protocol", ".rb"])
+    file.write(<<~RB)
+      class CompilerPhase
+        def prepare; @phase = :prepared; end
+        def validate; @valid = @phase; end
+        def run; prepare; validate; end
+      end
+    RB
+    file.close
+    @files << file
+
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse called" }) do
+      report = Decomplex::OrderedProtocolMine.scan([file.path])
+      refute_empty report.ordered_protocols
+    end
+  end
+
   def test_reports_single_state_dependent_protocol_pressure
     report = scan(<<~RB)
       class BillingService

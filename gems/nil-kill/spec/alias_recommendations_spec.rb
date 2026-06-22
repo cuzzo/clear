@@ -70,11 +70,10 @@ RSpec.describe NilKill::AliasRecommendations do
   end
 end
 
-RSpec.describe NilKill::Languages::Providers::Ruby do
-  FakeDocument = Struct.new(:lines, keyword_init: true)
+RSpec.describe NilKill::FactMineStaticFacts do
+  FakeDocument = Struct.new(:language, :file, :lines, :root, keyword_init: true)
 
-  it "extracts Sorbet type aliases as static type definitions" do
-    provider = described_class.new
+  it "extracts Sorbet type aliases through the Nil-kill FactMine fact provider" do
     document = FakeDocument.new(lines: [
       "module Demo\n",
       "  RawBody = T.type_alias { T::Array[AST::Node] }\n",
@@ -82,15 +81,17 @@ RSpec.describe NilKill::Languages::Providers::Ruby do
       "    T.any(Schemas::EnumSchema, Schemas::StructSchema)\n",
       "  end\n",
       "end\n",
-    ])
+    ], language: :ruby, file: File.join(NilKill::ROOT, "src/demo.rb"), root: nil)
 
-    definitions = provider.type_definitions(
-      document: document,
-      facts: { function_defs: [] },
-      rel_path: "src/demo.rb",
-      methods: [],
-      state_declarations: []
-    )
+    facts = described_class.build(document, {
+      function_defs: [],
+      state_declarations: [],
+      state_writes: [],
+      state_param_origins: [],
+      call_sites: [],
+      owner_defs: [],
+    })
+    definitions = facts.fetch(:type_definitions)
 
     expect(definitions).to include(
       a_hash_including("kind" => "type_alias", "owner" => "Demo", "name" => "RawBody",

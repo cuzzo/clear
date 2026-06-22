@@ -1,0 +1,597 @@
+{
+  "format": "decomplex.syntax-facts.v1",
+  "documents": [
+    {
+      "file": "gems/fact-mine/examples/syntax-facts/lua/core.lua",
+      "language": "lua",
+      "functions": [
+        {
+          "line": 13,
+          "name": "process",
+          "owner": "LuaSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            13,
+            0,
+            38,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 4,
+          "name": "LuaSyntaxFactsCore.new",
+          "owner": "core",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            4,
+            0,
+            11,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 40,
+          "name": "audit",
+          "owner": "LuaSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            40,
+            0,
+            44,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 46,
+          "name": "ready",
+          "owner": "LuaSyntaxFactsCore",
+          "params": [
+
+          ],
+          "span": [
+            46,
+            0,
+            48,
+            3
+          ],
+          "visibility": "public"
+        }
+      ],
+      "owners": [
+
+      ],
+      "calls": [
+        {
+          "arguments": [
+            "\"busy\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 28,
+          "message": "publish",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            28,
+            4,
+            28,
+            24
+          ]
+        },
+        {
+          "arguments": [
+            "\"not ready\""
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 30,
+          "message": "print",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            30,
+            4,
+            30,
+            9
+          ]
+        },
+        {
+          "arguments": [
+            "\"record\"",
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 42,
+          "message": "send",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self.sink",
+          "safe_navigation": false,
+          "span": [
+            42,
+            2,
+            42,
+            32
+          ]
+        },
+        {
+          "arguments": [
+            "account"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 16,
+          "message": "callback",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            16,
+            2,
+            16,
+            19
+          ]
+        },
+        {
+          "arguments": [
+            "instance",
+            "LuaSyntaxFactsCore"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "LuaSyntaxFactsCore.new",
+          "line": 10,
+          "message": "setmetatable",
+          "owner": "core",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            10,
+            9,
+            10,
+            21
+          ]
+        },
+        {
+          "arguments": [
+            "items"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 33,
+          "message": "ipairs",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            33,
+            17,
+            33,
+            23
+          ]
+        },
+        {
+          "arguments": [
+            "name"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "audit",
+          "line": 41,
+          "message": "print",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            41,
+            2,
+            41,
+            13
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 19,
+          "message": "escalate",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            19,
+            4,
+            19,
+            17
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 21,
+          "message": "fallback",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            21,
+            4,
+            21,
+            17
+          ]
+        },
+        {
+          "arguments": [
+            "user"
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "conditional",
+          "function": "process",
+          "line": 23,
+          "message": "default_case",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            23,
+            4,
+            23,
+            21
+          ]
+        },
+        {
+          "arguments": [
+
+          ],
+          "block": false,
+          "conditional": true,
+          "control": "iterates",
+          "function": "process",
+          "line": 34,
+          "message": "children",
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "item",
+          "safe_navigation": false,
+          "span": [
+            34,
+            4,
+            34,
+            17
+          ]
+        }
+      ],
+      "state_reads": [
+        {
+          "field": "active",
+          "function": "process",
+          "line": 15,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            15,
+            42,
+            15,
+            53
+          ]
+        },
+        {
+          "field": "count",
+          "function": "process",
+          "line": 27,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            27,
+            17,
+            27,
+            27
+          ]
+        },
+        {
+          "field": "count",
+          "function": "ready",
+          "line": 47,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            47,
+            9,
+            47,
+            19
+          ]
+        },
+        {
+          "field": "name",
+          "function": "process",
+          "line": 14,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user.profile",
+          "span": [
+            14,
+            15,
+            14,
+            32
+          ]
+        },
+        {
+          "field": "profile",
+          "function": "process",
+          "line": 14,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            14,
+            15,
+            14,
+            27
+          ]
+        },
+        {
+          "field": "ready",
+          "function": "process",
+          "line": 26,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            26,
+            31,
+            26,
+            41
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 18,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            18,
+            29,
+            18,
+            38
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 18,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            18,
+            5,
+            18,
+            14
+          ]
+        },
+        {
+          "field": "role",
+          "function": "process",
+          "line": 20,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "user",
+          "span": [
+            20,
+            9,
+            20,
+            18
+          ]
+        },
+        {
+          "field": "sink",
+          "function": "audit",
+          "line": 42,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            42,
+            2,
+            42,
+            11
+          ]
+        },
+        {
+          "field": "status",
+          "function": "audit",
+          "line": 43,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            43,
+            9,
+            43,
+            20
+          ]
+        },
+        {
+          "field": "status",
+          "function": "process",
+          "line": 26,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            26,
+            5,
+            26,
+            16
+          ]
+        }
+      ],
+      "state_writes": [
+        {
+          "field": "__index",
+          "function": "(top-level)",
+          "line": 2,
+          "owner": "core",
+          "receiver": "LuaSyntaxFactsCore",
+          "span": [
+            2,
+            0,
+            2,
+            47
+          ]
+        },
+        {
+          "field": "count",
+          "function": "process",
+          "line": 27,
+          "owner": "LuaSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            27,
+            4,
+            27,
+            31
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            26,
+            2,
+            31,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 26,
+          "members": [
+            "self.status == \"idle\"",
+            "user.ready"
+          ],
+          "predicate": "self.status == \"idle\" and user.ready",
+          "span": [
+            26,
+            5,
+            26,
+            41
+          ]
+        }
+      ],
+      "branch_decisions": [
+        {
+          "function": "process",
+          "line": 18,
+          "predicate": "user.role == \"owner\" or user.role == \"admin\"",
+          "span": [
+            18,
+            2,
+            24,
+            5
+          ],
+          "state_refs": [
+            "user.role"
+          ]
+        },
+        {
+          "function": "process",
+          "line": 26,
+          "predicate": "self.status == \"idle\" and user.ready",
+          "span": [
+            26,
+            2,
+            31,
+            5
+          ],
+          "state_refs": [
+            "status",
+            "user.ready"
+          ]
+        }
+      ],
+      "dispatch_sites": [
+
+      ],
+      "semantic_effects": [
+        {
+          "detail": "print",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 41,
+          "span": [
+            41,
+            2,
+            41,
+            13
+          ]
+        },
+        {
+          "detail": "print",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 30,
+          "span": [
+            30,
+            4,
+            30,
+            9
+          ]
+        },
+        {
+          "detail": "setmetatable",
+          "function": "LuaSyntaxFactsCore.new",
+          "kind": "metaprogramming",
+          "line": 10,
+          "span": [
+            10,
+            9,
+            10,
+            21
+          ]
+        }
+      ],
+      "predicate_bodies": [
+        {
+          "body": "name or \"missing\"",
+          "line": 13,
+          "name": "process",
+          "owner": "LuaSyntaxFactsCore",
+          "span": [
+            13,
+            0,
+            38,
+            3
+          ]
+        }
+      ]
+    }
+  ]
+}

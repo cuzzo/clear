@@ -8,8 +8,8 @@ currently rejects outright with "requires recursive protocol analysis".
 
 `static_param_backflow_protocol_rejection` (`infer.rb:1283`) rejects any
 backflow candidate whose param-protocol has a non-empty `gaps` set. Gaps
-come from two patterns recorded by `param_protocols` in
-`source_index.rb:1720`:
+come from two patterns recorded by `param_protocols` in the static
+fact-mining layer:
 
 - **Forwarded to helper**: `helper(arg)` -> gap `"forwarded to #{helper}"`.
 - **Captured in ivar**: `@x = arg` -> gap `"captured in @x"`.
@@ -38,14 +38,14 @@ work only relaxes the over-conservative gap-rejection.
 ### Authority boundary
 
 Per CLAUDE.md authority table, **`param_protocols` is owned by the
-annotator stage** (SourceIndex during `walk`). The new resolver lives in
+annotator stage** (Tree-sitter static fact mining). The new resolver lives in
 Infer alongside the other proposers, because it operates on the
 already-collected protocol stamps + cross-method graph -- it is a
 *consumer* of facts, not a new authority.
 
 This means:
 - `param_protocols` keeps its current single-method scope. We do NOT
-  fold transitive resolution into it (that would couple SourceIndex to
+  fold transitive resolution into it (that would couple fact collection to
   cross-file analysis, violating per-file isolation).
 - The resolver reads `protocols`, `existing_sigs`, `unsigned_methods`,
   and a new per-class ivar-protocol fact, then synthesizes the
@@ -119,7 +119,7 @@ Key decisions:
 - **Slot name resolution**: helper's params come positionally. The gap
   records `forwarded to <helper>` without slot index; we recover the
   index by re-parsing the call AST. Add the slot to the gap string at
-  collection time (small `source_index.rb` change) so the resolver
+  collection time (small static fact-mining change) so the resolver
   doesn't need to re-walk: `"forwarded to <helper> slot N at <loc>"`.
 - **Unknown helper -> blocked**: if the helper is an intrinsic
   (`puts`, `raise`, `Array#map`, ...) or a method we don't have in
@@ -154,7 +154,7 @@ Currently `param_protocols.gaps` records "captured in @x at <loc>" with
 no further info. The methods called on `@x` later in the class are not
 tracked. Two-step:
 
-1. **Per-file, in `source_index.rb`:** during `collect_protocols`,
+1. **Per-file, in the static fact-mining layer:** during protocol collection,
    accumulate a *separate* map `@ivar_method_calls` keyed by
    `[class_name, ivar_name]` -> Set of method names. Populated from
    any `InstanceVariableReadNode.method_call` we encounter while
@@ -227,7 +227,7 @@ These were considered and explicitly deferred:
 - **`static_param_backflow_protocol_rejection`** (`infer.rb:1283`): the
   call site for the resolver. Existing rejection rules below the
   resolver-blocked branch are preserved.
-- **`param_protocols`** (`source_index.rb:1720`): the per-file protocol
+- **`param_protocols`**: the per-file protocol
   collector. B2 extends `collect_protocols` for ivar usage.
 - **`static_param_backflow_protocol_index`** (`infer.rb:1305`): the
   class -> methods index the rejection check uses to verify the
@@ -257,7 +257,7 @@ These were considered and explicitly deferred:
 |---|---|
 | B0 resolver (with cycle-stub cache) | 1 |
 | B1 wire-in (rejection check) | 0.5 |
-| B2 ivar-capture collection (source_index + store fact) | 1 |
+| B2 ivar-capture collection (static facts + store fact) | 1 |
 | B3 specs | 1 |
 | B4 end-to-end measurement + verified loop run | 1 |
 | Buffer / cleanup / doc update | 0.5 |

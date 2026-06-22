@@ -1,0 +1,39 @@
+{
+  "syntax": {
+    "decisions": [
+      {
+        "enclosing_span": [
+          12,
+          27,
+          12,
+          63
+        ],
+        "function": "filter_paths",
+        "kind": "conjunction",
+        "line": 12,
+        "members": [
+          "in_scope?(rel)",
+          "current_file?(rel)"
+        ],
+        "predicate": "in_scope?(rel) && current_file?(rel)"
+      },
+      {
+        "enclosing_span": [
+          6,
+          6,
+          7,
+          25
+        ],
+        "function": "fallback",
+        "kind": "conjunction",
+        "line": 6,
+        "members": [
+          "in_scope?(rel)",
+          "current_file?(rel)",
+          "source_file?(rel)"
+        ],
+        "predicate": "in_scope?(rel) && current_file?(rel) && source_file?(rel)"
+      }
+    ]
+  }
+}

@@ -81,4 +81,25 @@ class InconsistentRenameCloneTest < Minitest::Test
     RB
     assert_empty out
   end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      out = scan(<<~RB)
+        def original
+          src = fetch(1)
+          check(src)
+          store(src)
+          finalize(src)
+        end
+        def pasted
+          dst = fetch(2)
+          check(dst)
+          store(src)
+          finalize(dst)
+        end
+      RB
+
+      refute_empty out
+    end
+  end
 end

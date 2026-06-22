@@ -1,0 +1,343 @@
+{
+  "input": {
+    "documents": [
+      {
+        "file": "facts/derived.rb",
+        "language": "ruby",
+        "local_methods": [
+          {
+            "id": "Fixture#refresh",
+            "owner": "Fixture",
+            "name": "refresh",
+            "file": "facts/derived.rb",
+            "line": 1,
+            "span": [1, 0, 20, 3],
+            "statements": [
+              {
+                "index": 0,
+                "line": 1,
+                "end_line": 1,
+                "span": [1, 0, 1, 13],
+                "source": "source = load",
+                "reads": ["load"],
+                "writes": ["source"],
+                "dependencies": [["source", "load"]],
+                "co_uses": []
+              },
+              {
+                "index": 1,
+                "line": 2,
+                "end_line": 2,
+                "span": [2, 0, 2, 16],
+                "source": "derived = source",
+                "reads": ["source"],
+                "writes": ["derived"],
+                "dependencies": [["derived", "source"]],
+                "co_uses": []
+              },
+              {
+                "index": 2,
+                "line": 7,
+                "end_line": 7,
+                "span": [7, 0, 7, 15],
+                "source": "source = reload",
+                "reads": ["reload"],
+                "writes": ["source"],
+                "dependencies": [["source", "reload"]],
+                "co_uses": []
+              },
+              {
+                "index": 3,
+                "line": 9,
+                "end_line": 9,
+                "span": [9, 0, 9, 12],
+                "source": "use(derived)",
+                "reads": ["derived"],
+                "writes": [],
+                "dependencies": [],
+                "co_uses": []
+              }
+            ],
+            "boundaries": []
+          }
+        ]
+      },
+      {
+        "file": "facts/locality.rb",
+        "language": "ruby",
+        "local_complexity_scores": {
+          "Fixture#assemble": {
+            "score": 18.0,
+            "signals": {
+              "branches": 2
+            }
+          }
+        },
+        "local_methods": [
+          {
+            "id": "Fixture#assemble",
+            "owner": "Fixture",
+            "name": "assemble",
+            "file": "facts/locality.rb",
+            "line": 1,
+            "span": [1, 0, 20, 3],
+            "statements": [
+              {
+                "index": 0,
+                "line": 1,
+                "end_line": 1,
+                "span": [1, 0, 1, 23],
+                "source": "payload = build_payload",
+                "reads": ["build_payload"],
+                "writes": ["payload"],
+                "dependencies": [["payload", "build_payload"]],
+                "co_uses": []
+              },
+              {
+                "index": 1,
+                "line": 3,
+                "end_line": 3,
+                "span": [3, 0, 3, 18],
+                "source": "alpha = load_alpha",
+                "reads": ["load_alpha"],
+                "writes": ["alpha"],
+                "dependencies": [["alpha", "load_alpha"]],
+                "co_uses": []
+              },
+              {
+                "index": 2,
+                "line": 5,
+                "end_line": 5,
+                "span": [5, 0, 5, 16],
+                "source": "beta = load_beta",
+                "reads": ["load_beta"],
+                "writes": ["beta"],
+                "dependencies": [["beta", "load_beta"]],
+                "co_uses": []
+              },
+              {
+                "index": 3,
+                "line": 7,
+                "end_line": 7,
+                "span": [7, 0, 7, 18],
+                "source": "gamma = load_gamma",
+                "reads": ["load_gamma"],
+                "writes": ["gamma"],
+                "dependencies": [["gamma", "load_gamma"]],
+                "co_uses": []
+              },
+              {
+                "index": 4,
+                "line": 9,
+                "end_line": 9,
+                "span": [9, 0, 9, 18],
+                "source": "delta = load_delta",
+                "reads": ["load_delta"],
+                "writes": ["delta"],
+                "dependencies": [["delta", "load_delta"]],
+                "co_uses": []
+              },
+              {
+                "index": 5,
+                "line": 13,
+                "end_line": 13,
+                "span": [13, 0, 13, 16],
+                "source": "consume(payload)",
+                "reads": ["payload"],
+                "writes": [],
+                "dependencies": [],
+                "co_uses": []
+              }
+            ],
+            "boundaries": [
+              {
+                "before_index": 0,
+                "after_index": 5,
+                "line": 11,
+                "kind": "comment",
+                "text": "# phase 2"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "file": "facts/lcom.rb",
+        "language": "ruby",
+        "local_methods": [
+          {
+            "id": "Fixture#mixed",
+            "owner": "Fixture",
+            "name": "mixed",
+            "file": "facts/lcom.rb",
+            "line": 1,
+            "span": [1, 0, 20, 3],
+            "statements": [
+              {
+                "index": 0,
+                "line": 1,
+                "end_line": 1,
+                "span": [1, 0, 1, 11],
+                "source": "a = input_a",
+                "reads": ["input_a"],
+                "writes": ["a"],
+                "dependencies": [["a", "input_a"]],
+                "co_uses": []
+              },
+              {
+                "index": 1,
+                "line": 2,
+                "end_line": 2,
+                "span": [2, 0, 2, 16],
+                "source": "b = normalize(a)",
+                "reads": ["a"],
+                "writes": ["b"],
+                "dependencies": [["b", "a"]],
+                "co_uses": []
+              },
+              {
+                "index": 2,
+                "line": 3,
+                "end_line": 3,
+                "span": [3, 0, 3, 11],
+                "source": "c = input_c",
+                "reads": ["input_c"],
+                "writes": ["c"],
+                "dependencies": [["c", "input_c"]],
+                "co_uses": []
+              },
+              {
+                "index": 3,
+                "line": 4,
+                "end_line": 4,
+                "span": [4, 0, 4, 16],
+                "source": "d = normalize(c)",
+                "reads": ["c"],
+                "writes": ["d"],
+                "dependencies": [["d", "c"]],
+                "co_uses": []
+              },
+              {
+                "index": 4,
+                "line": 5,
+                "end_line": 5,
+                "span": [5, 0, 5, 11],
+                "source": "e = input_e",
+                "reads": ["input_e"],
+                "writes": ["e"],
+                "dependencies": [["e", "input_e"]],
+                "co_uses": []
+              },
+              {
+                "index": 5,
+                "line": 6,
+                "end_line": 6,
+                "span": [6, 0, 6, 16],
+                "source": "f = normalize(e)",
+                "reads": ["e"],
+                "writes": ["f"],
+                "dependencies": [["f", "e"]],
+                "co_uses": []
+              }
+            ],
+            "boundaries": []
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "derived-state": [
+      {
+        "at": "facts/derived.rb:refresh:2",
+        "defn": "refresh",
+        "derived": "derived",
+        "derived_at": 2,
+        "file": "facts/derived.rb",
+        "gap": 5,
+        "source": "source",
+        "source_reassigned_at": 7,
+        "spans": {
+          "facts/derived.rb:refresh:2": [2, 0, 2, 16]
+        }
+      }
+    ],
+    "locality-drag": [
+      {
+        "at": "facts/locality.rb:assemble:1",
+        "boundaries": [
+          {
+            "line": 11,
+            "marker": "# phase 2"
+          }
+        ],
+        "boundary_crossings": 1,
+        "defined_at": 1,
+        "definition_deps": ["build_payload"],
+        "defn": "assemble",
+        "examples": [
+          {
+            "line": 3,
+            "source": "alpha = load_alpha"
+          },
+          {
+            "line": 5,
+            "source": "beta = load_beta"
+          },
+          {
+            "line": 7,
+            "source": "gamma = load_gamma"
+          }
+        ],
+        "file": "facts/locality.rb",
+        "gap_lines": 12,
+        "gap_statements": 4,
+        "line": 1,
+        "local_complexity": 18.0,
+        "method": "assemble",
+        "owner": "Fixture",
+        "reason": "`payload` is initialized 12 line(s) before first use; 4 unrelated intervening statement(s); 1 structural boundary crossing(s); method local complexity 18.0",
+        "related_statements": 0,
+        "score": 63,
+        "setup_statements": 0,
+        "spans": {
+          "facts/locality.rb:assemble:1": [1, 0, 20, 3]
+        },
+        "unrelated_statements": 4,
+        "use_reads": ["payload"],
+        "used_at": 13,
+        "variable": "payload"
+      }
+    ],
+    "function-lcom": [
+      {
+        "at": "facts/lcom.rb:mixed:1",
+        "component_lines": [
+          [1, 2],
+          [3, 4],
+          [5, 6]
+        ],
+        "component_vars": [
+          ["a", "b", "input_a"],
+          ["c", "d", "input_c"],
+          ["e", "f", "input_e"]
+        ],
+        "components": 3,
+        "defn": "mixed",
+        "file": "facts/lcom.rb",
+        "line": 1,
+        "locals": 9,
+        "method": "mixed",
+        "mode": "disjoint",
+        "owner": "Fixture",
+        "score": 45,
+        "spans": {
+          "facts/lcom.rb:mixed:1": [1, 0, 20, 3]
+        },
+        "statements": 6,
+        "terminal_join": false
+      }
+    ],
+    "operational-discontinuity": []
+  }
+}

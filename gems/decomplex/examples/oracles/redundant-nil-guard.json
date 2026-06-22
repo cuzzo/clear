@@ -1,0 +1,10 @@
+{
+  "detector": "redundant-nil-guard",
+  "options": {
+  },
+  "expected": [
+    {
+      "local": "value"
+    }
+  ]
+}

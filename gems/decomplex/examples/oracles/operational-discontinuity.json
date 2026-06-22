@@ -1,0 +1,11 @@
+{
+  "detector": "operational-discontinuity",
+  "options": {
+  },
+  "expected": [
+    {
+      "resets": 1,
+      "confidence": "high"
+    }
+  ]
+}

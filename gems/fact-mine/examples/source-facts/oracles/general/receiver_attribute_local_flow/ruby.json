@@ -1,0 +1,94 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "apply",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "repo",
+              "row"
+            ]
+          ],
+          "reads": [
+            "row"
+          ],
+          "writes": [
+            "repo"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "facts",
+              "row"
+            ]
+          ],
+          "dependencies": [
+            [
+              "fact",
+              "facts"
+            ],
+            [
+              "fact",
+              "row"
+            ]
+          ],
+          "reads": [
+            "facts",
+            "row"
+          ],
+          "writes": [
+            "fact"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "fact",
+              "row"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "fact",
+            "row"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "fact",
+              "row"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "fact",
+            "row"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "row"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "fact"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ]
+}

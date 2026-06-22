@@ -5,6 +5,7 @@
 !/.devcontainer/
 !/.github/
 !/.gitignore
+!/.npmrc
 !/.rspec
 !/.vscode/
 !/CLAUDE.md
@@ -17,6 +18,8 @@
 !/gems/**
 !/LICENSE
 !/ONE-PAGER.md
+!/package-lock.json
+!/package.json
 !/README.md
 !/TODO.md
 !/clear
@@ -159,3 +162,6 @@ transpile-tests/fuzz/*.cht
 
 # Generated architecture reports
 gems/espalier/architecture.yml
+
+# Decomplex native Rust build artifacts
+gems/decomplex/rust/target/

@@ -2,6 +2,7 @@
 
 require "minitest/autorun"
 require "tempfile"
+require_relative "../lib/decomplex/ast"
 require_relative "../lib/decomplex/local_flow"
 
 class LocalFlowTest < Minitest::Test
@@ -33,7 +34,7 @@ class LocalFlowTest < Minitest::Test
 
     terminal = summary.statements.last
     assert_equal Set["total", "buffer"], terminal.reads
-    assert_includes terminal.co_uses, ["total", "buffer"]
+    assert_includes terminal.co_uses.map(&:sort), ["buffer", "total"]
   end
 
   def test_collects_top_level_and_inline_private_methods
@@ -56,6 +57,18 @@ class LocalFlowTest < Minitest::Test
     refute_nil helper
     assert_equal "(top-level)", top.owner
     assert_equal Set["input"], helper.statements.first.reads
+  end
+
+  def test_scan_does_not_use_legacy_ast_parse
+    Decomplex::Ast.stub(:parse, ->(*) { raise "legacy Ast.parse should not be used" }) do
+      summaries = scan(<<~RB)
+        def top_level(value)
+          result = value
+        end
+      RB
+
+      assert_equal ["top_level"], summaries.map(&:name)
+    end
   end
 
   private

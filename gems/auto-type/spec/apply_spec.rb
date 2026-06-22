@@ -686,17 +686,16 @@ RSpec.describe AutoType::Apply do
     RUBY
 
     evidence_for = lambda do |path|
-      NilKill::SourceIndex.reset_global_shape_indexes
-      NilKill::SourceIndex.new(path)
-      idx = NilKill::SourceIndex.new(path)
+      static = NilKill::StaticEvidence.build([path], root: NilKill::ROOT, language: :ruby)
+      facts = static.fetch("facts")
       {
         "facts" => {
-          "hash_shapes" => idx.hash_shapes,
-          "collection_index_lookups" => idx.collection_index_lookups,
-          "hash_record_blockers" => idx.hash_record_blockers,
-          "return_origins" => idx.return_origins,
-          "param_origins" => idx.param_origins,
-          "existing_sigs" => idx.methods.select { |method| method["has_sig"] },
+          "hash_shapes" => facts.fetch("hash_shapes"),
+          "collection_index_lookups" => facts.fetch("collection_index_lookups", []),
+          "hash_record_blockers" => facts.fetch("hash_record_blockers", []),
+          "return_origins" => facts.fetch("return_origins", []),
+          "param_origins" => facts.fetch("param_origins", []),
+          "existing_sigs" => facts.fetch("existing_sigs", []),
         },
         "methods" => [],
       }

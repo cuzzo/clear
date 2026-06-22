@@ -1,0 +1,16 @@
+class Worker {
+  func run(items: Items) {
+    self.prepare()
+    if self.ready() {
+      self.validate()
+    }
+    for item in items {
+      self.helper(item: item)
+    }
+  }
+
+  private func prepare() {}
+  private func ready() -> Bool { return true }
+  func validate() {}
+  private func helper(item: Item) { item.use() }
+}

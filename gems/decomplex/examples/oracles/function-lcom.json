@@ -1,0 +1,14 @@
+{
+  "detector": "function-lcom",
+  "options": {
+  },
+  "expected": [
+    {
+      "mode": "late_join",
+      "components": 2,
+      "locals": 8,
+      "statements": 8,
+      "terminal_join": true
+    }
+  ]
+}

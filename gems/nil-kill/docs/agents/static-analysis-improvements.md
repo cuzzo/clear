@@ -38,7 +38,8 @@ four C-lite passes below close the gap.
 
 ## C1 -- Ivar typing in `expression_type`
 
-**Where:** `gems/nil-kill/lib/nil_kill/source_index.rb`
+**Where:** `gems/nil-kill/lib/nil_kill/decomplex_static_facts.rb` and
+`gems/nil-kill/lib/nil_kill/static_analysis.rb`
 
 **Implementation:**
 
@@ -51,7 +52,7 @@ four C-lite passes below close the gap.
    by `[class_name, ivar_name]`, populated by the scope-aware
    `collect_ivar_tlet_names` pre-pass.
 3. Cache class-level RBI struct-field types in
-   `SourceIndex.rbi_field_types` (memoized), parsed once from every
+   StaticAnalysis facts, parsed once from every
    `sorbet/rbi/**/*.rbi` file. Same parser shape as
    `StructRBI#existing_rbi_types`.
 4. Add an `InstanceVariableReadNode` branch to `expression_type` that
@@ -76,7 +77,7 @@ by `enrich_return_origins_with_receiver_inference!`.
 
 1. Existing `existing_sigs` ingestion is preserved (skips T.untyped and
    empty returns; keys by `[class, method]`).
-2. Merge `SourceIndex.rbi_field_types` into the index: for every
+2. Merge StaticAnalysis `rbi_field_types` into the index: for every
    `[class, field]` with a non-`T.untyped` return type, register the
    accessor so receiver-typed calls into struct fields resolve.
 3. Merge strong `return_origins` from the store: every origin whose
@@ -146,9 +147,9 @@ practice convergence is 1-3 iterations.
   filtering on `useful_type?` and `weak_type?` before adding to the
   index.
 - **`StructRBI#existing_rbi_types`** (`struct_rbi.rb:163`): mirrors the
-  parser used by `SourceIndex.rbi_field_types`. Future refactor could
+  RBI field-type parser used by StaticAnalysis facts. Future refactor could
   hoist this into a shared helper, but the duplication is intentional --
-  StructRBI runs in its own CLI without source_index loaded.
+  StructRBI runs in its own CLI without loading the full static analysis path.
 
 ## Empirical yield
 
@@ -236,9 +237,9 @@ C-lite):
 
 | Concern | Spec |
 |---|---|
-| Ivar T.let typed read | `source_index_spec.rb` "uses T.let-declared ivar types when reading the ivar" |
-| Ivar class scoping | `source_index_spec.rb` "scopes ivar T.let types per-class so unrelated classes do not bleed" |
-| Ivar untyped fallback | `source_index_spec.rb` "returns no useful type for unrecorded or T.untyped-typed ivars" |
+| Ivar T.let typed read | `infer_pipeline_spec.rb` provider-backed static evidence coverage |
+| Ivar class scoping | `infer_pipeline_spec.rb` provider-backed static evidence coverage |
+| Ivar untyped fallback | `nil_kill_spec.rb` inferred-return fallback coverage |
 | Index includes existing_sigs strong returns | `nil_kill_spec.rb` "includes existing_sigs entries with strong returns" |
 | Index skips T.untyped | `nil_kill_spec.rb` "skips existing_sigs with T.untyped or empty returns" |
 | Index merges RBI struct-field types | `nil_kill_spec.rb` "merges RBI struct-field accessor types" |

@@ -1,0 +1,14 @@
+{
+  "detector": "state-branch-density",
+  "options": {
+  },
+  "expected": [
+    {
+      "decisions": 1,
+      "method": "check",
+      "state_refs": [
+        "checked"
+      ]
+    }
+  ]
+}

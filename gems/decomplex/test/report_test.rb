@@ -49,6 +49,35 @@ class ReportTest < Minitest::Test
     assert_equal JSON.parse(r.to_sarif), JSON.parse(r.to_json)
   end
 
+  def test_report_facts_round_trip_to_same_markdown
+    f = Tempfile.new(["rep_facts", ".rb"])
+    f.write("def a(n)\n  case n\n  when A then 1\n  when B then 2\n  end\nend\n" \
+            "def b(n)\n  case n\n  when A then 3\n  when B then 4\n  end\nend\n")
+    f.close
+
+    facts = Decomplex::ReportFacts.from_files([f.path], engine: "ruby")
+    from_source = Decomplex::Report.new([f.path]).to_markdown
+    from_facts = Decomplex::Report.from_facts(JSON.generate(facts)).to_markdown
+
+    assert_equal Decomplex::ReportFacts::FORMAT, facts.fetch("format")
+    assert_equal from_source, from_facts
+  ensure
+    f&.unlink
+  end
+
+  def test_report_from_facts_does_not_reparse_source
+    f = Tempfile.new(["rep_facts_deleted", ".rb"])
+    f.write("def a(n)\n  if n && ready?\n    run\n  end\nend\n")
+    f.close
+
+    facts = Decomplex::ReportFacts.from_files([f.path], engine: "ruby")
+    f.unlink
+
+    md = Decomplex::Report.from_facts(JSON.generate(facts)).to_markdown
+    assert_includes md, "# Decomplex Report"
+    assert_includes md, "Files analyzed: 1"
+  end
+
   def test_compact_sarif_omits_heavy_payloads_for_ci_uploads
     sarif = JSON.parse(report.to_sarif(include_snapshot: false, include_finding_payload: false, max_results: 2))
     run = sarif.fetch("runs").first
@@ -71,6 +100,63 @@ class ReportTest < Minitest::Test
     assert_match(/rep/, location.dig("artifactLocation", "uri"))
     assert_operator location.dig("region", "startLine"), :>=, 1
     assert result.fetch("partialFingerprints").fetch("decomplexFinding")
+  end
+
+  def test_sarif_message_includes_detector_specific_derived_state_context
+    r = Decomplex::Report.allocate
+    message = r.send(:sarif_message, "Derived-State Staleness", {
+      derived: "style",
+      source: "options",
+      derived_at: 12,
+      source_reassigned_at: 30
+    }, {})
+
+    assert_includes message, "`style` derived from `options` at line 12"
+    assert_includes message, "`options` reassigned at line 30"
+    assert_includes message, "`style` is not recomputed"
+  end
+
+  def test_sarif_message_includes_detector_specific_protocol_context
+    r = Decomplex::Report.allocate
+    message = r.send(:sarif_message, "Broken Protocols", {
+      has: "lock",
+      missing: "unlock",
+      support: 8,
+      confidence: 0.89
+    }, {})
+
+    assert_includes message, "does `lock` without co-called `unlock`"
+    assert_includes message, "support=8"
+    assert_includes message, "confidence=0.89"
+  end
+
+  def test_sarif_includes_actionable_state_heatmap_context
+    f = Tempfile.new(["rep_state_sarif", ".rb"])
+    f.write(<<~RB)
+      class BillingService
+        def set_user(user); @user = user; end
+        def set_cart(cart); @cart = cart; end
+        def process
+          charge(@user) if @cart
+          audit(@user)
+        end
+      end
+    RB
+    f.close
+
+    sarif = JSON.parse(Decomplex::Report.new([f.path]).to_sarif)
+    result = sarif.fetch("runs").first.fetch("results").find do |entry|
+      entry.fetch("ruleId") == "decomplex.state-heatmap"
+    end
+
+    refute_nil result
+    message = result.fetch("message").fetch("text")
+    assert_includes message, "state `"
+    assert_includes message, "writes="
+    assert_includes message, "reads="
+    assert_includes message, "writers"
+  ensure
+    f&.unlink
   end
 
   def test_markdown_orders_sections_by_signal_tier_not_volume

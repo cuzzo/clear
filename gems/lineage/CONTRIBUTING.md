@@ -76,9 +76,11 @@ provider adapters direct database authority.
 Logical-unit identity is the core contract. Changes to extraction should
 be conservative and tested against renames, moves, and refactors.
 
-The current extractor is heuristic. Planned Tree-sitter-backed profiles
-should replace extraction internals without changing the storage and
-history contracts.
+Supported production languages should use Tree-sitter-backed extraction,
+not line regexes. Regex-style heuristics are acceptable only as a
+bootstrap fallback for secondary languages that are explicitly marked
+experimental. If a Tree-sitter-backed file cannot be parsed, prefer
+returning no units over inventing low-confidence boundaries.
 
 ## UI And LSP
 

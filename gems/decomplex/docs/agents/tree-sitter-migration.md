@@ -200,6 +200,36 @@ Example capability flags:
 Detectors should skip unsupported sub-signals rather than infer them
 from unrelated syntax.
 
+## Native Rust Port Contract
+
+The Rust implementation is a performance port, not a new Decomplex.
+It must stay structurally symmetric with the Ruby implementation so the
+remaining detectors and languages can be migrated mechanically.
+
+Rules:
+
+- Port Ruby files file-for-file and function-for-function unless a
+  later optimization is proven after parity.
+- Keep the normalized AST API aligned with `lib/decomplex/ast.rb`:
+  `parse`, `node`, `slice`, `body_stmts`, `def_push`,
+  `canon_polarity`, `flatten_and`, and the `Node` vocabulary.
+- Keep language adapters responsible for syntax normalization, not
+  detector decisions. Detectors should consume the same normalized AST
+  or the same syntax facts their Ruby counterpart consumes.
+- Do not hide AST drift by sorting, filtering, or reshaping detector
+  results. Fix the normalizer or the detector port so the canonical
+  JSON matches Ruby output.
+- Every native detector needs an engine-parity test and a real `src/`
+  parity smoke before it is treated as migrated.
+
+Current split:
+
+- `DecisionPressure`, `PredicateAlias`, and `SemanticAlias` are
+  AST-backed ports and compare byte-for-byte with Ruby on `src/`.
+- `CoUpdate` and `Miner` consume syntax facts because their Ruby
+  counterparts consume `Syntax.parse` / `SiteExtractor` facts.
+- `FlaySimilarity` consumes `Syntax.parse` in both Ruby and Rust.
+
 ## Preserving Output
 
 Ruby migration must be gated by exact-output tests before Tree-sitter
@@ -490,3 +520,57 @@ That slice protects the current consumers, proves the output discipline
 on the highest-value detectors, and creates the extension point needed
 for Python/JavaScript/TypeScript/Go/Rust/Zig profiles without forcing a
 full rewrite.
+
+## Native Rust Detector Migration
+
+Status: in progress. The native Rust port must stay a structural mirror
+of the Ruby implementation: shared syntax/AST facts first, detector
+reducers second. Do not add detector-specific Tree-sitter walkers.
+
+Migration order follows the Decomplex Metrics Expo tiers. Tier 1
+detectors move first because they carry the highest signal and should
+benefit earliest from native speed.
+
+Benchmarks below use `src/` on this repository through:
+
+```
+ruby gems/decomplex/exe/decomplex detector DETECTOR --engine=ruby --json src/
+ruby gems/decomplex/exe/decomplex detector DETECTOR --engine=rust --json --jobs=8 src/
+```
+
+The JSON outputs are canonical detector-only payloads and are byte-for-
+byte compared before recording a detector as migrated.
+
+| Tier | Detector / section | Native status | Ruby | Rust | Speedup | Notes |
+|---|---|---:|---:|---:|---:|---|
+| 1 | Missing Abstractions | migrated | 13.02s | 0.64s | 20.3x | Implemented by `miner`; consumes shared `DecisionSite` facts, matching Ruby `SiteExtractor`. |
+| 1 | Semantic Predicate Aliases | migrated | 86.41s | 2.60s | 33.2x | AST-backed file/function port of `SemanticAlias`. |
+| 1 | Reification Misses | migrated | 86.41s | 2.60s | 33.2x | Same AST-backed native pass as semantic aliases. |
+| 1 | Exact Predicate Aliases | migrated | 85.50s | 2.58s | 33.1x | AST-backed file/function port of `PredicateAlias`. |
+| 1 | Decision Pressure | migrated | 84.45s | 2.77s | 30.5x | AST-backed file/function port of `DecisionPressure`. |
+| 1 | Redundant Nil Guards | pending | - | - | - | Needs local dominance/null-check normalized AST facts. |
+| 1 | State Heatmap | pending | - | - | - | Needs shared `StateRead`, `StateWrite`, and semantic re-derivation facts. |
+| 1 | State-Based Branch Density | pending | - | - | - | Needs branch decision facts with state refs. |
+| 1 | Temporal Ordering Pressure | pending | - | - | - | Needs owner/method visibility plus state read/write facts. |
+| 2 | Structural Similarity (Type-2/3) | migrated | 85.34s | 2.88s | 29.6x | File/function port of structural fingerprinting over shared `RawNode`. |
+| 2 | Neglected Updates | migrated | 43.90s | 0.62s | 70.8x | Same native pass as co-update. |
+| 2 | Neglected Conditions | migrated | 13.02s | 0.64s | 20.3x | Implemented by `miner`; consumes shared `DecisionSite` facts, matching Ruby `SiteExtractor`. |
+| 2 | Derived-State Staleness | pending | - | - | - | Needs local write/read/dependency facts or Rust normalized AST. |
+| 2 | Inconsistent Rename Clones | pending | - | - | - | Can likely share structural clone tokenization with Rust AST facade. |
+| 2 | Implicit Control Flow | pending | - | - | - | Needs topology/path protocol and state effect facts. |
+| 2 | Weighted Inlined Cognitive Complexity | pending | - | - | - | Needs topology plus local cognitive scorer. |
+| 2 | Locality Drag | pending | - | - | - | Needs local flow summaries and boundaries. |
+| 2/3 | Operational Discontinuity | pending | - | - | - | Needs local flow summaries and boundaries. |
+| 3 | Neglected Path Conditions | pending | - | - | - | Needs path-condition facts over normalized branch syntax. |
+| 3 | Oversized Predicates | pending | - | - | - | Needs normalized boolean atom counting. |
+| 3 | Broken Protocols | pending | - | - | - | Needs call-sequence mining facts. |
+| 3 | Function LCOM | pending | - | - | - | Needs local flow summaries. |
+| 3 | False Simplicity | pending | - | - | - | Needs language lexicons plus call/mutation/reopen facts. |
+| 3 | Fat Unions | pending | - | - | - | Needs class/variant dispatch and member-use facts. |
+
+Earlier single-thread / pre-architecture-correction timings recorded before the
+AST-backed alias and decision-pressure ports:
+
+- co-update: Ruby 43.205838s, Rust 2.144622s, 20.1x.
+- predicate-alias: Ruby 81.583126s, Rust 2.136387s, 38.2x.
+- structural-similarity: Ruby 85.163481s, Rust 4.331976s, 19.7x.

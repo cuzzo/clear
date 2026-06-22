@@ -1,0 +1,286 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        },
+        {
+          "after_index": 3,
+          "before_index": 2,
+          "kind": "blank"
+        }
+      ],
+      "method": "build",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "rows"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "grammar"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "audit",
+              "file"
+            ],
+            [
+              "audit",
+              "key"
+            ],
+            [
+              "audit",
+              "meth"
+            ],
+            [
+              "audit",
+              "rows"
+            ],
+            [
+              "audit",
+              "sections"
+            ],
+            [
+              "file",
+              "key"
+            ],
+            [
+              "file",
+              "meth"
+            ],
+            [
+              "file",
+              "rows"
+            ],
+            [
+              "file",
+              "sections"
+            ],
+            [
+              "key",
+              "meth"
+            ],
+            [
+              "key",
+              "rows"
+            ],
+            [
+              "key",
+              "sections"
+            ],
+            [
+              "meth",
+              "rows"
+            ],
+            [
+              "meth",
+              "sections"
+            ],
+            [
+              "rows",
+              "sections"
+            ]
+          ],
+          "dependencies": [
+            [
+              "file",
+              "audit"
+            ],
+            [
+              "file",
+              "key"
+            ],
+            [
+              "file",
+              "meth"
+            ],
+            [
+              "file",
+              "rows"
+            ],
+            [
+              "file",
+              "sections"
+            ],
+            [
+              "key",
+              "audit"
+            ],
+            [
+              "key",
+              "file"
+            ],
+            [
+              "key",
+              "meth"
+            ],
+            [
+              "key",
+              "rows"
+            ],
+            [
+              "key",
+              "sections"
+            ],
+            [
+              "meth",
+              "audit"
+            ],
+            [
+              "meth",
+              "file"
+            ],
+            [
+              "meth",
+              "key"
+            ],
+            [
+              "meth",
+              "rows"
+            ],
+            [
+              "meth",
+              "sections"
+            ]
+          ],
+          "reads": [
+            "audit",
+            "file",
+            "key",
+            "meth",
+            "rows",
+            "sections"
+          ],
+          "writes": [
+            "file",
+            "key",
+            "meth"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "audit"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "rows"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "syntax": {
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactLocalFlowEdges#build",
+        "score": 4.8,
+        "signals": {
+          "boolean_ops": 4,
+          "branches": 3,
+          "loops": 2
+        }
+      }
+    ],
+    "path_conditions": [
+      {
+        "action": "skip \"missing grammar\"",
+        "function": "build",
+        "guards": [
+          "!File.file?(grammar)",
+          "!grammar"
+        ],
+        "line": 6
+      }
+    ],
+    "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "build",
+        "kind": "hidden_mutation",
+        "line": 16
+      },
+      {
+        "detail": "File.file?",
+        "function": "build",
+        "kind": "hidden_io",
+        "line": 6
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "each",
+        "function": "build",
+        "line": 11,
+        "receiver": "findings"
+      },
+      {
+        "field": "each",
+        "function": "build",
+        "line": 8,
+        "receiver": "sections"
+      },
+      {
+        "field": "empty?",
+        "function": "build",
+        "line": 13,
+        "receiver": "file"
+      },
+      {
+        "field": "empty?",
+        "function": "build",
+        "line": 13,
+        "receiver": "meth"
+      },
+      {
+        "field": "findings",
+        "function": "build",
+        "line": 16,
+        "receiver": "audit"
+      },
+      {
+        "field": "findings",
+        "function": "build",
+        "line": 20,
+        "receiver": "audit"
+      },
+      {
+        "field": "join",
+        "function": "build",
+        "line": 16,
+        "receiver": "key"
+      },
+      {
+        "field": "loc",
+        "function": "build",
+        "line": 12,
+        "receiver": "finding"
+      },
+      {
+        "field": "size",
+        "function": "build",
+        "line": 16,
+        "receiver": "audit.findings"
+      }
+    ]
+  }
+}

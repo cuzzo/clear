@@ -1433,6 +1433,7 @@ impl Storage {
             line_exposure AS (
               SELECT e.path,
                      e.line,
+                     l.hits,
                      COUNT(DISTINCT CASE WHEN e.is_verified = 1 THEN e.test_type END) AS verified_test_types,
                      MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_verified = 1 THEN 1 ELSE 0 END) AS mutant_verified,
                      MAX(CASE WHEN e.is_verified = 1 AND e.is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
@@ -1475,7 +1476,7 @@ impl Storage {
                      SUM(stochastic_mutant_killed) AS stochastic_mutant_killed_covered_lines,
                      SUM(invariant_mutant_verified) AS invariant_mutant_verified_covered_lines,
                      SUM(invariant_mutant_killed) AS invariant_mutant_killed_covered_lines,
-                     SUM(CASE WHEN verified_test_types >= 2 THEN 1 ELSE 0 END) AS multi_type_covered_lines
+                     SUM(CASE WHEN verified_test_types >= 2 OR hits > 1 THEN 1 ELSE 0 END) AS multi_type_covered_lines
               FROM line_exposure
               GROUP BY path
             ),

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # Semantic predicate alias. The exact-text PredicateAlias misses the
@@ -26,73 +26,66 @@ module Decomplex
       preds = []
       uses = []
       files.each do |f|
-        root, lines = Ast.parse(f)
-        e = new(f, lines)
-        e.walk(root, [])
-        preds.concat(e.preds)
-        uses.concat(e.uses)
+        document = Syntax.parse(f, parser: "tree_sitter")
+        document.predicate_defs.each do |predicate|
+          next unless semantic_predicate_definition?(predicate)
+
+          preds << Pred.new(
+            name: predicate.name,
+            canon: canon(predicate.body),
+            file: predicate.file,
+            line: predicate.line,
+            span: predicate.span
+          )
+        end
+        document.comparison_sites.each do |comparison|
+          uses << Use.new(
+            canon: canon(comparison.source),
+            file: comparison.file,
+            defn: comparison.function,
+            line: comparison.line,
+            raw: comparison.source,
+            span: comparison.span
+          )
+        end
+        document.branch_arms.each do |arm|
+          next unless arm.predicate.to_s.match?(/(?:==|!=)/)
+
+          uses << Use.new(
+            canon: canon(arm.predicate),
+            file: arm.file,
+            defn: arm.function,
+            line: arm.decision_line,
+            raw: arm.predicate,
+            span: arm.decision_span
+          )
+        end
       end
+      uses.uniq! { |use| [use.file, use.defn, use.line, use.canon, use.raw] }
       Report.new(preds, uses)
     end
 
-    attr_reader :preds, :uses
-
-    def initialize(file, lines)
-      @file = file
-      @lines = lines
-      @preds = []
-      @uses = []
-    end
-
-    def walk(node, defstack)
-      return unless Ast.node?(node)
-
-      defstack = Ast.def_push(node, defstack)
-      record_pred(node) if node.type == :DEFN
-      if %i[CALL OPCALL].include?(node.type) && comparison?(node)
-        c = canon(Ast.slice(node, @lines))
-        @uses << Use.new(canon: c, file: @file,
-                         defn: defstack.last || "(top-level)",
-                         line: node.first_lineno,
-                         raw: Ast.slice(node, @lines),
-                         span: [node.first_lineno, node.first_column,
-                                node.last_lineno, node.last_column])
-      end
-      node.children.each { |ch| walk(ch, defstack) }
+    def self.semantic_predicate_definition?(predicate)
+      predicate.name.to_s.end_with?("?") ||
+        predicate.body.to_s.match?(/(?:==|!=|&&|\|\||\band\b|\bor\b)/)
     end
 
     # Canonical predicate form: drop a leading `!`, strip a leading
     # receiver chain (`a.b.`, `@`, `self.`) before the final
     # `name OP value`, collapse spaces. Pure syntactic folding.
     def self.canon(text)
-      t, = Ast.canon_polarity(text)
+      t, = canon_polarity(text)
       t = t.sub(/\Aself\./, "").sub(/\A@/, "")
       # strip a single receiver hop: `recv.attr == :v` -> `attr == :v`
       t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
       t.gsub(/\s+/, " ").strip
     end
 
-    private
+    def self.canon_polarity(text)
+      source = text.to_s.strip
+      return [source[1..].to_s.strip, true] if source.start_with?("!")
 
-    def canon(text) = self.class.canon(text)
-
-    def comparison?(node)
-      mid = node.children[node.type == :OPCALL ? 1 : 1]
-      %i[== != nil?].include?(mid) ||
-        (node.type == :CALL && node.children[1] == :nil?)
-    end
-
-    def record_pred(node)
-      name = node.children[0].to_s
-      return unless name.end_with?("?")
-
-      stmts = Ast.body_stmts(node)
-      return unless stmts.size == 1
-
-      @preds << Pred.new(name: name, canon: canon(Ast.slice(stmts.first, @lines)),
-                         file: @file, line: node.first_lineno,
-                         span: [node.first_lineno, node.first_column,
-                                node.last_lineno, node.last_column])
+      [source, false]
     end
 
     class Report
@@ -122,7 +115,7 @@ module Decomplex
         @uses.filter_map do |u|
           ps = bycanon[u.canon]
           next unless ps && !ps.empty?
-          next if u.defn.end_with?("?") && ps.any? { |p| p.name == u.defn }
+          next if ps.any? { |p| p.name == u.defn }
 
           { predicate: ps.first.name, canon: u.canon,
             at: "#{u.file}:#{u.defn}:#{u.line}",

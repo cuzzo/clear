@@ -1,86 +1,62 @@
 # frozen_string_literal: true
 
-require_relative "ast"
+require_relative "local_flow"
 
 module Decomplex
   # Narrow clone bug detector: a pasted block was renamed, but one
   # occurrence kept the old spelling. This is intentionally not a
   # general Type-2/Type-3 clone detector; the structural similarity
   # scanner owns that broader signal.
-  #
-  # The important false-positive guard is cross-method evidence. Local
-  # branch symmetry inside one method often has the same skeleton with
-  # different receiver/container variables, but that is not a pasted
-  # rename bug.
   class InconsistentRenameClone
     Block = Struct.new(:skeleton, :names, :file, :defn, :line, :span,
                        keyword_init: true)
 
-    HOLE_TYPES = %i[LVAR DVAR IVAR LASGN DASGN IASGN].freeze
     MIN_TOKENS = 8
 
     def self.scan(files)
-      blocks = []
-      files.each do |f|
-        root, = Ast.parse(f)
-        new(f).collect(root, [], blocks)
+      blocks = LocalFlow.scan(files).filter_map do |method|
+        next if method.statements.size < 3
+
+        new.add_block(method)
       end
       Report.new(blocks).inconsistent_renames
     end
 
-    def initialize(file)
-      @file = file
-    end
+    def add_block(method)
+      skeleton = []
+      names = []
+      method.statements.each { |statement| tokenize(statement.source, skeleton, names) }
+      return nil if skeleton.size < MIN_TOKENS
 
-    def collect(node, defstack, blocks)
-      return unless Ast.node?(node)
-
-      defstack = Ast.def_push(node, defstack)
-      if node.type == :BLOCK
-        stmts = node.children.compact
-        add_block(stmts, defstack, blocks) if stmts.size >= 3
-      end
-      node.children.each { |child| collect(child, defstack, blocks) }
+      Block.new(
+        skeleton: skeleton,
+        names: names,
+        file: method.file,
+        defn: method.name,
+        line: method.statements.first.line,
+        span: [
+          method.statements.first.span[0],
+          method.statements.first.span[1],
+          method.statements.last.span[2],
+          method.statements.last.span[3]
+        ]
+      )
     end
 
     private
 
-    def add_block(stmts, defstack, blocks)
-      skeleton = []
-      names = []
-      stmts.each { |stmt| tokenize(stmt, skeleton, names) }
-      return if skeleton.size < MIN_TOKENS
-
-      blocks << Block.new(skeleton: skeleton, names: names, file: @file,
-                          defn: defstack.last || "(top-level)",
-                          line: stmts.first.first_lineno,
-                          span: [stmts.first.first_lineno,
-                                 stmts.first.first_column,
-                                 stmts.last.last_lineno,
-                                 stmts.last.last_column])
-    end
-
-    def tokenize(node, skeleton, names)
-      return unless Ast.node?(node)
-
-      case node.type
-      when *HOLE_TYPES
-        skeleton << :ID
-        names << node.children[0].to_s
-      when :VCALL
-        skeleton << :ID
-        names << node.children[0].to_s
-      when :CALL, :FCALL
-        skeleton << node.type
-        mid = node.children[node.type == :CALL ? 1 : 0]
-        skeleton << :MID
-        names << mid.to_s
-      when :LIT, :STR, :SYM, :INTEGER, :FLOAT
-        skeleton << node.type
-      else
-        skeleton << node.type
+    def tokenize(source, skeleton, names)
+      source.to_s.scan(/[A-Za-z_]\w*[!?=]?|@\w+|\d+(?:\.\d+)?|:[A-Za-z_]\w*|\"[^\"]*\"|'[^']*'|\S/) do |token|
+        case token
+        when /\A[@A-Za-z_]\w*[!?=]?\z/
+          skeleton << :ID
+          names << token.delete_prefix("@").delete_suffix("=")
+        when /\A(?::[A-Za-z_]\w*|\d+(?:\.\d+)?|\"[^\"]*\"|'[^']*')\z/
+          skeleton << :LIT
+        else
+          skeleton << token
+        end
       end
-      node.children.each { |child| tokenize(child, skeleton, names) }
     end
 
     class Report

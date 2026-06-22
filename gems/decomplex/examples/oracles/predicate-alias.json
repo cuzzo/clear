@@ -1,0 +1,12 @@
+{
+  "detector": "predicate-alias",
+  "options": {
+  },
+  "expected": {
+    "alias_clusters": [
+      {
+        "name_count": 2
+      }
+    ]
+  }
+}

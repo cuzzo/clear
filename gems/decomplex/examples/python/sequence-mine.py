@@ -1,0 +1,5 @@
+def one(): alloc_mark(x); body1(); cleanup(x)
+def two(): alloc_mark(y); body2(); cleanup(y)
+def three(): alloc_mark(z); body3(); cleanup(z)
+def four(): alloc_mark(w); body4(); cleanup(w)
+def leak(): alloc_mark(q); use_value(q)
