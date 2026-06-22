@@ -37,6 +37,9 @@ pub struct ProfileOutput {
     /// Edges from an owner to another owner via typed state fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_type_edges: Vec<StateTypeEdge>,
+    /// Internal call edges between functions in the same owner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_graph_edges: Vec<CallGraphEdge>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
@@ -52,6 +55,18 @@ pub struct ProfileOutput {
     pub return_origins: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub noreturn_methods: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CallGraphEdge {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub label: String,
+    #[serde(default)]
+    pub conditional: bool,
+    #[serde(default)]
+    pub weight: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -219,10 +234,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         extract_state_param_origins(document, &language, &path);
     let signatures = extract_signatures(&lines, document);
     let type_definitions = extract_type_definitions(&lines, document, &language, &path);
-    let hash_shapes = Vec::new(); // TODO Phase 2c
-    let array_shapes = Vec::new(); // TODO Phase 2c
+    let hash_shapes = extract_hash_shapes(&lines, &language, &path);
+    let array_shapes = extract_array_shapes(&lines, &language, &path);
     let struct_declarations = extract_struct_declarations(document, &language, &path);
     let state_type_edges = extract_state_type_edges(document, &language, &path);
+    let call_graph_edges = extract_call_graph_edges(document);
 
     ProfileOutput {
         methods,
@@ -239,6 +255,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         hash_shapes,
         array_shapes,
         state_type_edges,
+        call_graph_edges,
         collection_index_lookups: if nil_kill { Vec::new() } else { Vec::new() },
         hash_record_blockers: Vec::new(),
         tlet_sites: if nil_kill { Vec::new() } else { Vec::new() },
@@ -266,6 +283,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut hash_shapes = Vec::new();
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
+    let mut call_graph_edges = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -334,6 +352,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_shapes,
         array_shapes,
         state_type_edges,
+        call_graph_edges,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -1211,6 +1230,300 @@ fn type_reference_candidates(type_text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Hash shapes (Phase 2c)
+// ---------------------------------------------------------------------------
+
+fn extract_hash_shapes(lines: &[String], _language: &str, path: &str) -> Vec<HashShape> {
+    let mut shapes = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if is_hash_literal_start(line) {
+            if let Some(shape) = try_extract_hash_shape(lines, i, path) {
+                i = shape.line + count_lines(lines, shape.line, &shape.code) - 1;
+                shapes.push(shape);
+            }
+        }
+        i += 1;
+    }
+    shapes
+}
+
+fn is_hash_literal_start(line: &str) -> bool {
+    let line = line.trim();
+    (line.starts_with('{') || line.contains("= {") || line.contains("=> {") || line == "{")
+        && !line.contains("#{")
+}
+
+fn try_extract_hash_shape(lines: &[String], start: usize, path: &str) -> Option<HashShape> {
+    let (code, _end_line) = collect_braced_block(lines, start)?;
+    let pairs = extract_hash_pairs(&code);
+    if pairs.is_empty() {
+        return None;
+    }
+    let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
+    let value_types: Vec<String> = pairs.iter().map(|(_, v)| infer_literal_type(v)).collect();
+    Some(HashShape {
+        path: path.to_string(),
+        line: start + 1, // 1-indexed
+        keys,
+        value_types,
+        code: code.trim().to_string(),
+        value_hash_shapes: None,
+        value_array_element_shapes: None,
+    })
+}
+
+fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize)> {
+    let mut depth = 0u32;
+    let mut started = false;
+    let mut buf = String::new();
+    let mut end_line = start;
+    for (offset, line) in lines.iter().enumerate().skip(start) {
+        for ch in line.chars() {
+            match ch {
+                '{' => {
+                    started = true;
+                    depth += 1;
+                }
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    buf.push(ch);
+                    if depth == 0 && started {
+                        end_line = offset;
+                        return Some((buf, end_line));
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            buf.push(ch);
+        }
+        if started {
+            buf.push(' ');
+        }
+        end_line = offset;
+    }
+    None
+}
+
+fn extract_hash_pairs(code: &str) -> Vec<(String, String)> {
+    // Find the { ... } block within the code
+    let inner = match find_brace_block(code) {
+        Some(inner) => inner,
+        None => return Vec::new(),
+    };
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    let mut pairs = Vec::new();
+    for part in split_top_level_pairs(&inner) {
+        if let Some((key, value)) = parse_hash_pair(&part) {
+            pairs.push((key, value));
+        }
+    }
+    pairs
+}
+
+fn parse_hash_pair(part: &str) -> Option<(String, String)> {
+    let part = part.trim();
+    // Ruby symbol key: name: value or name: Type
+    if let Some((key, rest)) = part.split_once(':') {
+        let key = key.trim();
+        if key.chars().all(|c| c.is_alphanumeric() || c == '_') && !key.is_empty() {
+            return Some((key.to_string(), rest.trim().to_string()));
+        }
+    }
+    // String key: "key" => value
+    if let Some(rest) = part.strip_prefix('"') {
+        if let Some((key, value)) = rest.split_once("\" =>") {
+            return Some((key.to_string(), value.trim().to_string()));
+        }
+    }
+    // Symbol key: :key => value
+    if let Some(rest) = part.strip_prefix(':') {
+        if let Some((key, value)) = rest.split_once(" =>") {
+            return Some((key.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    None
+}
+
+fn split_top_level_pairs(code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, c) in code.char_indices() {
+        match c {
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(code[start..i].to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let remainder = code[start..].trim().to_string();
+    if !remainder.is_empty() {
+        out.push(remainder);
+    }
+    out
+}
+
+fn find_brace_block(code: &str) -> Option<String> {
+    let start = code.find('{')?;
+    let mut depth = 0u32;
+    for (i, c) in code[start..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(code[start + 1..start + i].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn count_lines(_lines: &[String], _start_line: usize, code: &str) -> usize {
+    let newlines = code.chars().filter(|&c| c == '\n').count();
+    newlines + 1
+}
+
+fn infer_literal_type(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return "T.untyped".to_string();
+    }
+    if value.starts_with('"') || value.starts_with('\'') {
+        return "String".to_string();
+    }
+    if value.starts_with(':') {
+        return "Symbol".to_string();
+    }
+    if value == "true" || value == "false" {
+        return "T::Boolean".to_string();
+    }
+    if value == "nil" || value == "null" || value == "None" {
+        return "NilClass".to_string();
+    }
+    if value.parse::<i64>().is_ok() {
+        return "Integer".to_string();
+    }
+    if value.parse::<f64>().is_ok() {
+        return "Float".to_string();
+    }
+    if value.starts_with('[') {
+        return "T::Array[T.untyped]".to_string();
+    }
+    if value.starts_with('{') {
+        return "T::Hash[T.untyped, T.untyped]".to_string();
+    }
+    if value.chars().next().map_or(false, |c| c.is_uppercase()) {
+        return value.to_string();
+    }
+    "T.untyped".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Array shapes (Phase 2c)
+// ---------------------------------------------------------------------------
+
+fn extract_array_shapes(lines: &[String], _language: &str, path: &str) -> Vec<ArrayShape> {
+    let mut shapes = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') && line.len() > 2 {
+            let inner = &line[1..line.len() - 1];
+            let types: Vec<String> = inner
+                .split(',')
+                .map(|e| infer_literal_type(e.trim()))
+                .collect();
+            if types.len() >= 2 {
+                shapes.push(ArrayShape {
+                    path: path.to_string(),
+                    line: i + 1,
+                    tuple_types: types,
+                    size: 0,
+                    code: line.to_string(),
+                });
+            }
+        }
+    }
+    shapes
+}
+
+// ---------------------------------------------------------------------------
+// Call-graph edges (Phase 2d)
+// ---------------------------------------------------------------------------
+
+fn extract_call_graph_edges(document: &Document) -> Vec<CallGraphEdge> {
+    let mut edges = Vec::new();
+
+    // Build function name index per owner
+    let fn_by_owner: BTreeMap<String, BTreeSet<String>> = document
+        .function_defs
+        .iter()
+        .fold(BTreeMap::new(), |mut acc, f| {
+            acc.entry(f.owner.clone())
+                .or_default()
+                .insert(f.name.clone());
+            acc
+        });
+
+    for call in &document.call_sites {
+        let receiver = call.receiver.as_str();
+        // Internal call: self/this receiver or implicit self (empty)
+        if receiver == "self" || receiver == "this" || receiver.is_empty() {
+            let owner_fns = match fn_by_owner.get(&call.owner) {
+                Some(fns) => fns,
+                None => continue,
+            };
+            if owner_fns.contains(&call.message) {
+                edges.push(CallGraphEdge {
+                    source: format!("fn:{}#{}", call.owner, call.function),
+                    target: format!("fn:{}#{}", call.owner, call.message),
+                    kind: "internal_call".to_string(),
+                    label: if call.conditional {
+                        "conditional internal".to_string()
+                    } else {
+                        "internal".to_string()
+                    },
+                    conditional: call.conditional,
+                    weight: 1,
+                });
+            }
+        }
+    }
+
+    // Deduplicate and aggregate weights
+    edges.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    let mut merged: Vec<CallGraphEdge> = Vec::new();
+    for edge in edges {
+        if let Some(last) = merged.last_mut() {
+            if last.source == edge.source
+                && last.target == edge.target
+                && last.kind == edge.kind
+            {
+                last.weight += edge.weight;
+                continue;
+            }
+        }
+        merged.push(edge);
+    }
+    merged
 }
 
 // ---------------------------------------------------------------------------
