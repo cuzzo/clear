@@ -12,7 +12,7 @@ rescue LoadError
 end
 
 module Espalier
-  ROOT = File.expand_path("../../../..", __dir__) unless const_defined?(:ROOT)
+  ROOT = File.expand_path("../../../..", __dir__)
 
   HIGH = "high"
   REVIEW = "review"
