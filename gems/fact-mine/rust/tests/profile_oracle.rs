@@ -197,9 +197,8 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
                 if let Some(actual_val) = actual_map.get(key) {
                     let mut normalized = normalize_for_oracle(actual_val, &expected_map[key]);
                     // Normalize paths to be relative (strip absolute prefixes)
-                    if key == "path" {
+                    if key == "path" || key == "id" {
                         if let Value::String(path) = &normalized {
-                            // Keep only the part after 'examples/profile/'
                             if let Some(idx) = path.find("examples/profile/") {
                                 normalized =
                                     Value::String(path[idx..].to_string());
