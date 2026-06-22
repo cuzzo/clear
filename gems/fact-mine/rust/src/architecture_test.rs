@@ -96,18 +96,23 @@ fn tree_sitter_adapter_does_not_define_concrete_language_profiles() {
 
 #[test]
 fn ast_normalizer_does_not_define_a_language_adapter_enum() {
-    let path = crate_src().join("ast.rs");
-    let source = fs::read_to_string(&path).expect("read ast.rs");
+    let checked = [
+        crate_src().join("ast.rs"),
+        crate_src().join("ast/normalizer.rs"),
+    ];
     for pattern in [
         "enum TreeSitterNormalizationAdapter",
         "impl TreeSitterNormalizationAdapter",
         "TreeSitterNormalizationAdapter::",
     ] {
-        assert!(
-            !source.contains(pattern),
-            "{} should live as polymorphic ast/adapters implementations",
-            pattern
-        );
+        for path in &checked {
+            let source = fs::read_to_string(path).expect("read shared AST file");
+            assert!(
+                !source.contains(pattern),
+                "{} should live as polymorphic ast/adapters implementations",
+                pattern
+            );
+        }
     }
 }
 
@@ -167,6 +172,7 @@ fn ast_adapter_base_does_not_own_concrete_language_selectors_or_lexicons() {
 fn shared_ast_normalizer_does_not_own_concrete_parser_tokens() {
     let checked = [
         crate_src().join("ast.rs"),
+        crate_src().join("ast/normalizer.rs"),
         crate_src().join("ast/adapters/base.rs"),
     ];
     let forbidden = [
@@ -665,12 +671,8 @@ fn production_source(source: &str) -> String {
 
 #[test]
 fn ast_normalizer_does_not_branch_on_language_after_parser_setup() {
-    let path = crate_src().join("ast.rs");
-    let source = fs::read_to_string(&path).expect("read ast.rs");
-    let normalizer_source = source
-        .split_once("struct TreeSitterNormalizer")
-        .map(|(_, rest)| rest)
-        .unwrap_or(&source);
+    let path = crate_src().join("ast/normalizer.rs");
+    let normalizer_source = fs::read_to_string(&path).expect("read ast/normalizer.rs");
     let language_branch_count = [
         "Language::Ruby",
         "Language::Python",
@@ -701,6 +703,6 @@ fn ast_normalizer_does_not_branch_on_language_after_parser_setup() {
 
     assert_eq!(
         language_branch_count, 0,
-        "ast.rs normalizer branches on language; put behavior in ast/adapters instead"
+        "ast/normalizer.rs branches on language; put behavior in ast/adapters instead"
     );
 }
