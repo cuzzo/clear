@@ -2,6 +2,7 @@ source 'https://rubygems.org'
 
 gem 'csv'
 gem 'msgpack', '~> 1.7', '>= 1.7.2'
+gem 'tree_sitter', '~> 0.1'
 
 group :development do
   gem 'byebug', '~> 12.0'
