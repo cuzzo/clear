@@ -61,6 +61,10 @@ module Espalier
         !@document.respond_to?(:adapter) || @document.adapter.nil?
       end
 
+      def ruby_type_profile
+        @ruby_type_profile ||= FactMine::Syntax.type_profile(:ruby, type_system: "sorbet")
+      end
+
       def local_methods
         Array(@facts[:local_methods])
       end
@@ -151,6 +155,7 @@ module Espalier
           "line" => state.line,
           "span" => state.span,
           "declared_type" => state.respond_to?(:type) && !state.type.to_s.empty? ? state.type.to_s : nil,
+          "type_references" => state.respond_to?(:type_references) ? Array(state.type_references) : [],
           "static_origin" => origin,
           "source" => "syntax",
         }
@@ -177,6 +182,7 @@ module Espalier
             "owner" => state.owner.to_s,
             "field" => field.to_s,
             "declared_type" => type,
+            "type_references" => state.respond_to?(:type_references) ? Array(state.type_references) : [],
             "line" => state.line,
             "span" => state.span,
             "key" => state_key(state.owner, field),
@@ -541,8 +547,8 @@ module Espalier
           "name" => fn.name.to_s,
           "line" => fn.line,
           "signature" => signature,
-          "return_type" => Espalier.extract_return_type(signature),
-          "params" => Espalier.extract_param_entries(signature).map { |name, type| { "name" => name, "type" => type } },
+          "return_type" => ruby_type_profile.extract_return_type(signature),
+          "params" => ruby_type_profile.extract_param_entries(signature).map { |name, type| { "name" => name, "type" => type } },
         }
       end
 
@@ -602,6 +608,7 @@ module Espalier
           "name" => field,
           "line" => state.line,
           "declared_type" => type,
+          "type_references" => state.respond_to?(:type_references) ? Array(state.type_references) : [],
         }
       end
 
@@ -1044,7 +1051,7 @@ module Espalier
 
         Array(@facts[:function_defs]).filter_map do |fn|
           signature = method_signature(fn)
-          return_type = Espalier.extract_return_type(signature).to_s
+          return_type = ruby_type_profile.extract_return_type(signature).to_s
           reason =
             if return_type == "T.noreturn"
               "declared T.noreturn"
@@ -1071,7 +1078,7 @@ module Espalier
           signature = method_signature(fn)
           next if signature.empty?
 
-          return_type = Espalier.extract_return_type(signature).to_s
+          return_type = ruby_type_profile.extract_return_type(signature).to_s
           next unless return_type == "T.untyped"
 
           origin = ruby_return_origin(fn, signature)
@@ -1139,7 +1146,7 @@ module Espalier
           signature = method_signature(fn)
           next if signature.empty?
 
-          param_types = Espalier.extract_param_entries(signature).to_h
+          param_types = ruby_type_profile.extract_param_entries(signature).to_h
           non_nil = param_types.filter_map do |name, type|
             next if nullable_or_untyped?(type)
 
@@ -1157,8 +1164,7 @@ module Espalier
       end
 
       def nullable_or_untyped?(type)
-        raw = type.to_s.strip
-        raw.empty? || raw == "T.untyped" || raw == "NilClass" || raw.include?("T.nilable")
+        ruby_type_profile.nullable_or_untyped?(type)
       end
 
       def walk_method_calls(fn)
@@ -1182,31 +1188,24 @@ module Espalier
       end
 
       def ruby_nil_check_receiver(text)
-        text.to_s.strip[/\A([a-z_]\w*)\.nil\?\z/, 1]
+        ruby_type_profile.nil_check_receiver(text)
       end
 
       def ruby_safe_nav_receiver(text)
-        text.to_s.strip[/\A([a-z_]\w*)&\./, 1]
+        ruby_type_profile.safe_nav_receiver(text)
       end
 
       def ruby_always_noreturn_body?(node)
-        text = node_text(node)
-        return false if text.match?(/\breturn\b/)
-        return true if text.match?(/\braise\b/)
-        return true if text.match?(/\bfail\b/)
-        return true if text.match?(/\babort\b/)
-        return true if text.match?(/\bT\.absurd\s*\(/)
-
-        false
+        ruby_type_profile.always_noreturn_body_text?(node_text(node))
       end
 
       def ruby_return_origin(fn, signature)
-        param_types = Espalier.extract_param_entries(signature).to_h
+        param_types = ruby_type_profile.extract_param_entries(signature).to_h
         sources = ruby_return_sources(fn, param_types)
         return nil if sources.empty?
 
         types = sources.map { |source| source["type"].to_s }.reject(&:empty?)
-        candidate = Espalier.static_sorbet_type(types)
+        candidate = ruby_type_profile.static_type(types)
         blockers = sources.select { |source| source["kind"] == "unknown" }.map do |source|
           "unknown return expression #{source["code"]} at #{rel(fn.file)}:#{source["line"]}"
         end
@@ -1217,7 +1216,7 @@ module Espalier
           "method" => normalized_method_name(fn.name),
           "kind" => fn.name.to_s.start_with?("self.") ? "class" : "instance",
           "candidate_type" => candidate,
-          "confidence" => blockers.empty? && Espalier.useful_type?(candidate) ? "strong" : "blocked",
+          "confidence" => blockers.empty? && ruby_type_profile.useful_type?(candidate) ? "strong" : "blocked",
           "sources" => sources,
           "blockers" => blockers,
           "return_syntax" => ruby_return_syntax(sources),
@@ -1268,23 +1267,7 @@ module Espalier
       end
 
       def ruby_return_expression_type(code, param_types)
-        return ["NilClass", "nil", nil, false] if code == "nil"
-        return ["String", "static", nil, false] if code.match?(/\A["']/)
-        return ["Symbol", "static", nil, false] if code.start_with?(":")
-        return ["Integer", "static", nil, false] if code.match?(/\A[-+]?\d+\z/)
-        return ["T::Boolean", "static", nil, false] if %w[true false].include?(code)
-        return [param_types[code], "static", nil, false] if param_types[code]
-
-        if (match = code.match(/\A([a-z_]\w*)\.join\b/))
-          receiver_type = param_types[match[1]].to_s
-          return ["String", "typed_call", "join", true] if receiver_type.match?(/\A(?:Array|T::Array)\[String\]/)
-        end
-
-        if code.match?(/\A[a-z_]\w*[!?]?\z/)
-          return [nil, "call_untyped", code, false]
-        end
-
-        [nil, "unknown", nil, false]
+        ruby_type_profile.return_expression_type(code, param_types)
       end
 
       def ruby_return_syntax(sources)
@@ -1315,7 +1298,7 @@ module Espalier
 
         receiver, predicate, wanted = match[1], match[2], match[3].to_s.strip
         receiver_type = param_types[receiver].to_s
-        truth = class_guard_truth(receiver_type, wanted, exact: predicate == "instance_of?")
+        truth = ruby_type_profile.class_guard_truth(receiver_type, wanted, exact: predicate == "instance_of?")
         return nil if truth.nil?
 
         {
@@ -1368,55 +1351,6 @@ module Espalier
           parent = parent_node(parent)
         end
         { kind: "if", inverted: false }
-      end
-
-      def class_guard_truth(receiver_type, class_name, exact:)
-        raw = receiver_type.to_s
-        return nil if raw.empty? || raw == "T.untyped" || raw.include?("T.any(") || raw.start_with?("T.nilable(")
-
-        bare = bare_class_name(raw)
-        wanted = bare_class_name(class_name)
-        return false if exact && known_disjoint_guard_classes?(bare, wanted)
-        return nil if exact
-        return true if bare == wanted || known_guard_subclass?(bare, wanted)
-        return false if known_disjoint_guard_classes?(bare, wanted)
-
-        nil
-      end
-
-      def bare_class_name(type)
-        raw = type.to_s.delete_prefix("::")
-        case raw
-        when /\AT::Array\b/, /\AArray\b/ then "Array"
-        when /\AT::Hash\b/, /\AHash\b/ then "Hash"
-        when /\AT::Set\b/, /\ASet\b/ then "Set"
-        when "T::Boolean" then "T::Boolean"
-        else raw.split("::").last
-        end
-      end
-
-      CORE_RUNTIME_GUARD_CLASSES = %w[
-        Array Hash Set String Symbol Integer Float NilClass TrueClass FalseClass Numeric Range Regexp Time
-      ].freeze
-      NUMERIC_GUARD_SUBCLASSES = %w[Integer Float].freeze
-      BOOLEAN_GUARD_SUBCLASSES = %w[TrueClass FalseClass].freeze
-
-      def known_guard_subclass?(bare, wanted)
-        return true if wanted == "Numeric" && NUMERIC_GUARD_SUBCLASSES.include?(bare)
-        return true if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
-
-        false
-      end
-
-      def known_disjoint_guard_classes?(bare, wanted)
-        return false if bare == wanted
-        return false if known_guard_subclass?(bare, wanted) || known_guard_subclass?(wanted, bare)
-        return false if bare == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(wanted)
-        return false if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
-        return true if bare == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
-        return true if wanted == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(bare)
-
-        CORE_RUNTIME_GUARD_CLASSES.include?(bare) && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
       end
 
       def method_for_line(line)
@@ -1886,18 +1820,7 @@ module Espalier
       end
 
       def literal_text_type(text, constant_types = {})
-        value = text.to_s.strip
-        return "String" if value.match?(/\A["']/)
-        return "Symbol" if value.match?(/\A:/)
-        return "T::Array[Symbol]" if value.match?(/\A%i[\[\(\{]/)
-        return "T::Array[String]" if value.match?(/\A%w[\[\(\{]/)
-        return "Integer" if value.match?(/\A[-+]?\d+\z/)
-        return "Float" if value.match?(/\A[-+]?\d+\.\d+\z/)
-        return "T::Boolean" if %w[true false True False].include?(value)
-        return "NilClass" if %w[nil null None].include?(value)
-        return constant_types[value] if constant_types.key?(value)
-
-        "T.untyped"
+        ruby_type_profile.literal_text_type(text, constant_types)
       end
 
       def array_literal_type(node, constant_types)

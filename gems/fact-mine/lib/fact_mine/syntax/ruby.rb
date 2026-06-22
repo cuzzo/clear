@@ -1139,6 +1139,211 @@ module FactMine
       end
     end
 
+    class RubySorbetTypeProfile < TypeProfile
+      MAX_UNION_TYPES = 3
+      CORE_RUNTIME_GUARD_CLASSES = %w[
+        Array Hash Set String Symbol Integer Float NilClass TrueClass FalseClass Numeric Range Regexp Time
+      ].freeze
+      NUMERIC_GUARD_SUBCLASSES = %w[Integer Float].freeze
+      BOOLEAN_GUARD_SUBCLASSES = %w[TrueClass FalseClass].freeze
+
+      def useful_type?(type)
+        super && normalize_type(type) != "T.untyped"
+      end
+
+      def static_type(types, union_policy: ENV.fetch("NIL_KILL_UNION_POLICY", "untyped"))
+        values = Array(types).compact.map(&:to_s).reject(&:empty?)
+        return "T.untyped" if values.empty?
+
+        has_nil = false
+        others = []
+        values.each do |type|
+          if type == "NilClass"
+            has_nil = true
+          elsif type.start_with?("T.nilable(") && type.end_with?(")")
+            has_nil = true
+            others << type[10..-2]
+          else
+            others << normalize_static_type(type)
+          end
+        end
+
+        others = others.uniq.sort
+        if others.include?("T.noreturn")
+          return has_nil ? "NilClass" : "T.noreturn" if others == ["T.noreturn"]
+
+          others.delete("T.noreturn")
+        end
+        return "NilClass" if others.empty? && has_nil
+        return "T.untyped" if others.empty?
+
+        base =
+          if others.all? { |type| %w[TrueClass FalseClass T::Boolean].include?(type) }
+            "T::Boolean"
+          elsif others.size == 1
+            others.first
+          elsif union_policy == "any" && others.size <= MAX_UNION_TYPES
+            "T.any(#{others.join(", ")})"
+          else
+            "T.untyped"
+          end
+        return "T.untyped" if base == "T.untyped"
+
+        has_nil ? "T.nilable(#{base})" : base
+      end
+
+      def normalize_static_type(type)
+        case type.to_s
+        when "Array" then "T::Array[T.untyped]"
+        when "Hash" then "T::Hash[T.untyped, T.untyped]"
+        when "Set" then "T::Set[T.untyped]"
+        else type.to_s
+        end
+      end
+
+      def extract_param_entries(signature)
+        params = extract_call_args(signature, "params")
+        return [] unless params
+
+        split_top_level(params).filter_map do |entry|
+          name, type = entry.split(/:\s*/, 2)
+          next unless name && type
+
+          [name.strip, type.strip]
+        end
+      end
+
+      def extract_return_type(signature)
+        extract_call_args(signature, "returns")
+      end
+
+      def strip_nilable_type(type)
+        text = type.to_s.strip
+        return text unless text.start_with?("T.nilable(")
+
+        extract_call_args(text, "T.nilable") || text
+      end
+
+      def nullable_or_untyped?(type)
+        raw = type.to_s.strip
+        raw.empty? || raw == "T.untyped" || raw == "NilClass" || raw.include?("T.nilable")
+      end
+
+      def nil_check_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)\.nil\?\z/, 1]
+      end
+
+      def safe_nav_receiver(text)
+        text.to_s.strip[/\A([a-z_]\w*)&\./, 1]
+      end
+
+      def always_noreturn_body_text?(text)
+        source = text.to_s
+        return false if source.match?(/\breturn\b/)
+
+        source.match?(/\braise\b/) ||
+          source.match?(/\bfail\b/) ||
+          source.match?(/\babort\b/) ||
+          source.match?(/\bT\.absurd\s*\(/)
+      end
+
+      def return_expression_type(code, param_types)
+        source = code.to_s.strip
+        return ["NilClass", "nil", nil, false] if source == "nil"
+        return ["String", "static", nil, false] if source.match?(/\A["']/)
+        return ["Symbol", "static", nil, false] if source.start_with?(":")
+        return ["Integer", "static", nil, false] if source.match?(/\A[-+]?\d+\z/)
+        return ["T::Boolean", "static", nil, false] if %w[true false].include?(source)
+        return [param_types[source], "static", nil, false] if param_types[source]
+
+        if (match = source.match(/\A([a-z_]\w*)\.join\b/))
+          receiver_type = param_types[match[1]].to_s
+          return ["String", "typed_call", "join", true] if receiver_type.match?(/\A(?:Array|T::Array)\[String\]/)
+        end
+
+        return [nil, "call_untyped", source, false] if source.match?(/\A[a-z_]\w*[!?]?\z/)
+
+        [nil, "unknown", nil, false]
+      end
+
+      def literal_text_type(text, constant_types = {})
+        value = text.to_s.strip
+        return "String" if value.match?(/\A["']/)
+        return "Symbol" if value.match?(/\A:/)
+        return "T::Array[Symbol]" if value.match?(/\A%i[\[\(\{]/)
+        return "T::Array[String]" if value.match?(/\A%w[\[\(\{]/)
+        return "Integer" if value.match?(/\A[-+]?\d+\z/)
+        return "Float" if value.match?(/\A[-+]?\d+\.\d+\z/)
+        return "T::Boolean" if %w[true false True False].include?(value)
+        return "NilClass" if %w[nil null None].include?(value)
+        return constant_types[value] if constant_types.key?(value)
+
+        "T.untyped"
+      end
+
+      def class_guard_truth(receiver_type, class_name, exact:)
+        raw = receiver_type.to_s
+        return nil if raw.empty? || raw == "T.untyped" || raw.include?("T.any(") || raw.start_with?("T.nilable(")
+
+        bare = bare_class_name(raw)
+        wanted = bare_class_name(class_name)
+        return false if exact && known_disjoint_guard_classes?(bare, wanted)
+        return nil if exact
+        return true if bare == wanted || known_guard_subclass?(bare, wanted)
+        return false if known_disjoint_guard_classes?(bare, wanted)
+
+        nil
+      end
+
+      private
+
+      def bare_class_name(type)
+        raw = type.to_s.delete_prefix("::")
+        case raw
+        when /\AT::Array\b/, /\AArray\b/ then "Array"
+        when /\AT::Hash\b/, /\AHash\b/ then "Hash"
+        when /\AT::Set\b/, /\ASet\b/ then "Set"
+        when "T::Boolean" then "T::Boolean"
+        else raw.split("::").last
+        end
+      end
+
+      def known_guard_subclass?(bare, wanted)
+        return true if wanted == "Numeric" && NUMERIC_GUARD_SUBCLASSES.include?(bare)
+        return true if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+
+        false
+      end
+
+      def known_disjoint_guard_classes?(bare, wanted)
+        return false if bare == wanted
+        return false if known_guard_subclass?(bare, wanted) || known_guard_subclass?(wanted, bare)
+        return false if bare == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(wanted)
+        return false if wanted == "T::Boolean" && BOOLEAN_GUARD_SUBCLASSES.include?(bare)
+        return true if bare == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+        return true if wanted == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.include?(bare)
+
+        CORE_RUNTIME_GUARD_CLASSES.include?(bare) && CORE_RUNTIME_GUARD_CLASSES.include?(wanted)
+      end
+    end
+
+    RUBY_TYPE_PROFILE = RubySorbetTypeProfile.new(
+      language: :ruby,
+      type_system: "sorbet",
+      broad_types: %w[T.untyped T.anything Object BasicObject],
+      intrinsic_types: %w[
+        Array BasicObject Class Complex Encoding Enumerator Exception FalseClass Fiber Float Hash Integer Module NilClass
+        Numeric Object Proc Range Rational Regexp String Struct Symbol Thread Time TrueClass
+      ],
+      nil_types: %w[NilClass],
+      boolean_types: %w[TrueClass FalseClass T::Boolean],
+      collection_types: %w[Array Hash Set T::Array T::Hash T::Set],
+      generic_wrappers: %w[T.nilable T.any],
+      alias_wrappers: [{ name: "T.nilable", open: "(", close: ")" }],
+      union_wrappers: [{ name: "T.any", open: "(", close: ")" }]
+    ).freeze
+    Syntax.register_type_profile(:ruby, RUBY_TYPE_PROFILE)
+
     NormalizedExtractionBehavior.register(:ruby, RubyNormalizedExtractionBehavior)
   end
 end

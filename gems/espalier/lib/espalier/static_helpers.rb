@@ -4,6 +4,13 @@
 require "pathname"
 require "set"
 
+begin
+  require "fact_mine/syntax"
+rescue LoadError
+  $LOAD_PATH.unshift(File.expand_path("../../../fact-mine/lib", __dir__))
+  require "fact_mine/syntax"
+end
+
 module Espalier
   ROOT = File.expand_path("../../../..", __dir__) unless const_defined?(:ROOT)
 
@@ -11,10 +18,6 @@ module Espalier
   REVIEW = "review"
   GAP = "gap"
   MAX_UNION_TYPES = 3
-  CORE_CLASS_CONSTANTS = Set.new(%w[
-    Array BasicObject Class Complex Encoding Enumerator Exception FalseClass Fiber Float Hash Integer Module NilClass
-    Numeric Object Proc Range Rational Regexp String Struct Symbol Thread Time TrueClass
-  ]).freeze
 
   module_function
 
@@ -43,150 +46,48 @@ module Espalier
   end
 
   def useful_type?(type)
-    !type.to_s.empty? && type != "T.untyped"
+    ruby_type_profile.useful_type?(type)
   end
 
   def static_sorbet_type(types)
-    types = Array(types).compact.reject(&:empty?)
-    return "T.untyped" if types.empty?
-
-    has_nil = false
-    others = []
-    types.each do |type|
-      if type == "NilClass"
-        has_nil = true
-      elsif type.start_with?("T.nilable(") && type.end_with?(")")
-        has_nil = true
-        others << type[10..-2]
-      else
-        others << normalize_static_sorbet_type(type)
-      end
-    end
-
-    others = others.uniq.sort
-    if others.include?("T.noreturn")
-      return has_nil ? "NilClass" : "T.noreturn" if others == ["T.noreturn"]
-
-      others.delete("T.noreturn")
-    end
-    return "NilClass" if others.empty? && has_nil
-    return "T.untyped" if others.empty?
-
-    base =
-      if others.all? { |type| type == "TrueClass" || type == "FalseClass" || type == "T::Boolean" }
-        "T::Boolean"
-      elsif others.size == 1
-        others.first
-      elsif ENV.fetch("NIL_KILL_UNION_POLICY", "untyped") == "any" && others.size <= MAX_UNION_TYPES
-        "T.any(#{others.join(", ")})"
-      else
-        "T.untyped"
-      end
-    return "T.untyped" if base == "T.untyped"
-
-    has_nil ? "T.nilable(#{base})" : base
+    ruby_type_profile.static_type(types)
   end
 
   def normalize_static_sorbet_type(type)
-    case type.to_s
-    when "Array" then "T::Array[T.untyped]"
-    when "Hash" then "T::Hash[T.untyped, T.untyped]"
-    when "Set" then "T::Set[T.untyped]"
-    else type.to_s
-    end
+    ruby_type_profile.normalize_static_type(type)
   end
 
   def extract_call_args(source, name)
-    idx = source.to_s.index("#{name}(")
-    return nil unless idx
-
-    start = idx + name.length + 1
-    depth = 1
-    i = start
-    while i < source.length
-      case source[i]
-      when "(" then depth += 1
-      when ")"
-        depth -= 1
-        return source[start...i] if depth.zero?
-      end
-      i += 1
-    end
-    nil
+    FactMine::Syntax.type_profile(:generic).extract_call_args(source, name)
   end
 
   def split_top_level(source)
-    parts = []
-    start = 0
-    depth = 0
-    source.to_s.each_char.with_index do |char, idx|
-      case char
-      when "(", "[", "{"
-        depth += 1
-      when ")", "]", "}"
-        depth -= 1 if depth.positive?
-      when ","
-        if depth.zero?
-          parts << source[start...idx].strip
-          start = idx + 1
-        end
-      end
-    end
-    parts << source[start..].to_s.strip
-    parts.reject(&:empty?)
+    FactMine::Syntax.type_profile(:generic).split_top_level(source)
   end
 
   def broad_union_type?(type, max: MAX_UNION_TYPES)
-    source = type.to_s
-    idx = 0
-    total = 0
-    while (start = source.index("T.any(", idx))
-      args_start = start + "T.any(".length
-      depth = 1
-      i = args_start
-      while i < source.length
-        case source[i]
-        when "("
-          depth += 1
-        when ")"
-          depth -= 1
-          break if depth.zero?
-        end
-        i += 1
-      end
-      return true if depth.positive?
-
-      size = split_top_level(source[args_start...i]).size
-      return true if size > max
-
-      total += size
-      return true if total > max
-
-      idx = start + 1
-    end
-    false
+    ruby_type_profile.broad_union_type?(type, max: max)
   end
 
   def extract_param_entries(sig)
-    params = extract_call_args(sig, "params")
-    return [] unless params
-
-    split_top_level(params).filter_map do |entry|
-      name, type = entry.split(/:\s*/, 2)
-      next unless name && type
-
-      [name.strip, type.strip]
-    end
+    ruby_type_profile.extract_param_entries(sig)
   end
 
   def extract_return_type(sig)
-    extract_call_args(sig, "returns")
+    ruby_type_profile.extract_return_type(sig)
   end
 
   def strip_nilable_type(type)
-    type = type.to_s.strip
-    return type unless type.start_with?("T.nilable(")
+    ruby_type_profile.strip_nilable_type(type)
+  end
 
-    extract_call_args(type, "T.nilable") || type
+  def type_profile_for(language = nil, type_system: nil)
+    FactMine::Syntax.type_profile(language || :generic, type_system: type_system)
+  rescue StandardError
+    FactMine::Syntax.type_profile(:generic)
+  end
+
+  def ruby_type_profile
+    type_profile_for(:ruby, type_system: "sorbet")
   end
 end

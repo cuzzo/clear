@@ -9,7 +9,6 @@ module Espalier
   class AliasRecommendations
     MAX_ALIAS_UNION_TYPES = 4
     MAX_ALIAS_TARGET_LENGTH = 240
-    BROAD_TYPE_PATTERN = /\b(?:T\.untyped|T\.anything|typing\.Any|Any|any|unknown|Object|BasicObject)\b/.freeze
 
     def self.build(type_definitions:, minimum_slots: 1)
       new(type_definitions, minimum_slots: minimum_slots).build
@@ -24,12 +23,13 @@ module Espalier
       slots = slot_records
       aliases.filter_map do |definition|
         target = alias_target(definition)
-        next if target.empty? || noisy_alias_target?(target)
+        profile = type_profile_for_definition(definition)
+        next if target.empty? || noisy_alias_target?(target, profile)
 
         alias_name = qualified_alias_name(definition)
         next if alias_name.empty?
 
-        matches = slots.filter_map { |slot| alias_slot_match(slot, definition, alias_name, target) }
+        matches = slots.filter_map { |slot| alias_slot_match(slot, definition, alias_name, target, profile) }
         next if matches.size < @minimum_slots
 
         recommendation(definition, alias_name, target, matches)
@@ -102,13 +102,13 @@ module Espalier
       }
     end
 
-    def alias_slot_match(slot, definition, alias_name, target)
+    def alias_slot_match(slot, definition, alias_name, target, profile)
       return nil if same_definition?(slot, definition)
       return nil unless slot["language"].to_s == definition["language"].to_s
       return nil unless alias_scope_matches_slot?(slot, definition)
-      return nil if references_alias?(slot["current_type"], alias_name, definition["name"])
+      return nil if references_alias?(slot["current_type"], alias_name, definition["name"], profile)
 
-      replacement = replacement_for(slot["current_type"], target, alias_name)
+      replacement = replacement_for(slot["current_type"], target, alias_name, profile)
       return nil unless replacement
 
       slot.merge("replacement_type" => replacement)
@@ -131,25 +131,8 @@ module Espalier
         slot["name"].to_s == definition["name"].to_s
     end
 
-    def replacement_for(current, target, alias_name)
-      current = current.to_s.strip
-      target = target.to_s.strip
-      return alias_name if normalize_type(current) == normalize_type(target)
-
-      nilable_inner = Espalier.extract_call_args(current, "T.nilable")
-      if nilable_inner && normalize_type(nilable_inner) == normalize_type(target)
-        return "T.nilable(#{alias_name})"
-      end
-
-      optional_inner = optional_type_inner(current)
-      return "Optional[#{alias_name}]" if optional_inner && normalize_type(optional_inner) == normalize_type(target)
-
-      nil
-    end
-
-    def optional_type_inner(current)
-      match = current.to_s.strip.match(/\AOptional\[(.*)\]\z/)
-      match && match[1]
+    def replacement_for(current, target, alias_name, profile)
+      profile.alias_replacement(current, target, alias_name)
     end
 
     def alias_target(definition)
@@ -163,26 +146,21 @@ module Espalier
       "#{definition["owner"]}::#{name}"
     end
 
-    def noisy_alias_target?(target)
-      text = target.to_s.strip
-      return true if text.empty?
-      return true if text.length > MAX_ALIAS_TARGET_LENGTH
-      return true if text.match?(BROAD_TYPE_PATTERN)
-      return true if CORE_CLASS_CONSTANTS.include?(text)
-
-      Espalier.broad_union_type?(text, max: MAX_ALIAS_UNION_TYPES)
+    def noisy_alias_target?(target, profile)
+      profile.noisy_alias_target?(
+        target,
+        max_union_types: MAX_ALIAS_UNION_TYPES,
+        max_length: MAX_ALIAS_TARGET_LENGTH
+      )
     end
 
-    def references_alias?(type, qualified_name, short_name)
+    def references_alias?(type, qualified_name, short_name, profile = Espalier.type_profile_for(:generic))
       aliases = [qualified_name, short_name].map(&:to_s).reject(&:empty?).uniq
-      aliases.any? do |name|
-        escaped = Regexp.escape(name)
-        type.to_s.match?(/(?<![A-Za-z0-9_:])#{escaped}(?![A-Za-z0-9_:])/)
-      end
+      profile.references_alias?(type, aliases)
     end
 
-    def normalize_type(type)
-      type.to_s.gsub(/\s+/, "")
+    def type_profile_for_definition(definition)
+      Espalier.type_profile_for(definition["language"], type_system: definition["type_system"])
     end
 
     def recommendation(definition, alias_name, target, slots)

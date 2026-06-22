@@ -72,6 +72,7 @@ class FactMineArchitectureInvariantsTest < Minitest::Test
     ruby.rb
     rust.rb
     swift.rb
+    type_profile.rb
     typescript.rb
     zig.rb
   ].freeze
