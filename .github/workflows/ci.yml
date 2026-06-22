@@ -1302,6 +1302,8 @@ jobs:
           name: lineage-rust-coverage
           path: tmp/generalized-gems-coverage/lineage-rust-coverage
       - name: Generate ordered SARIF reports
+        env:
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
         run: |
           git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif

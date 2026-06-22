@@ -3,8 +3,10 @@
 
 require "open3"
 require "digest"
+require "json"
 require "pathname"
 require "set"
+require "tempfile"
 require "time"
 
 sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
@@ -14,16 +16,19 @@ else
   require "decomplex/source_filter"
 end
 require_relative "alias_recommendations"
-require_relative "fact_mine_static_facts"
 require_relative "languages"
 require_relative "static_helpers"
 require_relative "tree_sitter"
 
 module Espalier
-  # Static, language-neutral evidence for Espalier. This intentionally avoids
-  # Nil-Kill's Ruby runtime/Sorbet inference path and consumes the shared
-  # Tree-sitter facts mined by FactMine.
+  # Static, language-neutral evidence for Espalier. Uses the Rust FactMine
+  # binary exclusively for fact extraction.
   class StaticEvidence
+    FACT_MINE_RUST_BINARY = ENV.fetch(
+      "FACT_MINE_RUST_BINARY",
+      File.join(Espalier::ROOT, "gems", "fact-mine", "rust", "target", "release", "fact-mine-rust")
+    ).freeze
+
     def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
       new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
     end
@@ -37,56 +42,57 @@ module Espalier
     end
 
     def build
-      methods = []
-      fields = []
-      state_types = {}
-      struct_declarations = []
-      state_type_records = []
-      state_protocols = Hash.new { |h, k| h[k] = Set.new }
-      state_param_origins = Hash.new { |h, k| h[k] = Set.new }
-      state_protocol_records = []
-      state_param_origin_records = []
-      signatures = {}
-      type_definitions = []
-      hash_shapes = []
-      array_shapes = []
-      collection_index_lookups = []
-      hash_record_blockers = []
-      tlet_sites = []
-      dead_nil_checks = []
-      deterministic_guards = []
-      return_origins = []
-      noreturn_methods = []
       files = target_files
+      return empty_evidence if files.empty?
 
-      files.each do |file|
-        doc = TreeSitter.parse(file, parser: "tree_sitter", language: @language)
-        facts = static_facts_for(doc)
-        methods.concat(facts.fetch(:methods, []))
-        fields.concat(facts.fetch(:fields, []))
-        struct_declarations.concat(facts.fetch(:struct_declarations, []))
-        state_types.merge!(facts.fetch(:state_types, {}))
-        state_type_records.concat(facts.fetch(:state_type_records, []))
-        merge_set_map!(state_protocols, facts.fetch(:state_protocols, {}))
-        merge_set_map!(state_param_origins, facts.fetch(:state_param_origins, {}))
-        state_protocol_records.concat(facts.fetch(:state_protocol_records, []))
-        state_param_origin_records.concat(facts.fetch(:state_param_origin_records, []))
-        signatures.merge!(facts.fetch(:signatures, {}))
-        type_definitions.concat(facts.fetch(:type_definitions, []))
-        hash_shapes.concat(facts.fetch(:hash_shapes, []))
-        array_shapes.concat(facts.fetch(:array_shapes, []))
-        collection_index_lookups.concat(facts.fetch(:collection_index_lookups, []))
-        hash_record_blockers.concat(facts.fetch(:hash_record_blockers, []))
-        tlet_sites.concat(facts.fetch(:tlet_sites, []))
-        dead_nil_checks.concat(facts.fetch(:dead_nil_checks, []))
-        deterministic_guards.concat(facts.fetch(:deterministic_guards, []))
-        return_origins.concat(facts.fetch(:return_origins, []))
-        noreturn_methods.concat(facts.fetch(:noreturn_methods, []))
-      end
-      type_definitions.concat(ruby_annotation_type_definitions(files))
+      profile = @include_annotations ? "nil-kill" : "espalier"
+      tmp = Tempfile.new(["espalier-rust-facts", ".json"])
+      tmp.close
 
-      state_protocols = stringify_set_map(state_protocols)
-      state_param_origins = stringify_set_map(state_param_origins)
+      args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path, *files]
+      ok = system(*args)
+      raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok
+
+      facts_by_file = JSON.parse(File.read(tmp.path))
+      build_from_rust_facts(facts_by_file, files)
+    ensure
+      tmp&.unlink
+    end
+
+    private
+
+    def build_from_rust_facts(facts_by_file, files)
+      methods = Array(facts_by_file["methods"])
+      fields = Array(facts_by_file["fields"])
+      state_types = facts_by_file["state_types"] || {}
+      struct_declarations = Array(facts_by_file["struct_declarations"])
+      state_type_records = Array(facts_by_file["state_type_records"])
+      state_protocols = facts_by_file["state_protocols"] || {}
+      state_param_origins_in = facts_by_file["state_param_origins"] || {}
+      state_protocol_records = Array(facts_by_file["state_protocol_records"])
+      state_param_origin_records = Array(facts_by_file["state_param_origin_records"])
+      signatures = facts_by_file["signatures"] || {}
+      type_definitions = Array(facts_by_file["type_definitions"])
+      hash_shapes = Array(facts_by_file["hash_shapes"])
+      array_shapes = Array(facts_by_file["array_shapes"])
+      collection_index_lookups = Array(facts_by_file["collection_index_lookups"])
+      hash_record_blockers = Array(facts_by_file["hash_record_blockers"])
+      tlet_sites = Array(facts_by_file["tlet_sites"])
+      dead_nil_checks = Array(facts_by_file["dead_nil_checks"])
+      deterministic_guards = Array(facts_by_file["deterministic_guards"])
+      return_origins = Array(facts_by_file["return_origins"])
+      noreturn_methods = Array(facts_by_file["noreturn_methods"])
+
+      type_definitions.concat(ruby_annotation_type_definitions(files)) if @include_annotations
+
+      state_protocols_map = Hash.new { |h, k| h[k] = Set.new }
+      merge_set_map!(state_protocols_map, state_protocols)
+      state_protocols = stringify_set_map(state_protocols_map)
+
+      state_param_origins_map = Hash.new { |h, k| h[k] = Set.new }
+      merge_set_map!(state_param_origins_map, state_param_origins_in)
+      state_param_origins = stringify_set_map(state_param_origins_map)
+
       state_type_records = state_type_records.uniq do |record|
         [record["language"], record["path"], record["owner"],
           record["field"], record["declared_type"], record["line"]]
@@ -114,27 +120,6 @@ module Espalier
       array_shapes = array_shapes.uniq do |shape|
         [shape["path"], shape["line"], Array(shape["tuple_types"]), shape["size"]]
       end
-      collection_index_lookups = collection_index_lookups.uniq do |lookup|
-        [lookup["path"], lookup["line"], lookup["code"], lookup.dig("origin", "path"), lookup.dig("origin", "line")]
-      end
-      hash_record_blockers = hash_record_blockers.uniq do |blocker|
-        [blocker["path"], blocker["line"], blocker["kind"], blocker["code"], blocker.dig("origin", "path"), blocker.dig("origin", "line")]
-      end
-      tlet_sites = tlet_sites.uniq do |site|
-        [site["path"], site["line"], site["type"]]
-      end
-      dead_nil_checks = dead_nil_checks.uniq do |finding|
-        [finding["path"], finding["line"], finding["kind"], finding["code"]]
-      end
-      deterministic_guards = deterministic_guards.uniq do |finding|
-        [finding["path"], finding["line"], finding["predicate_kind"], finding["code"]]
-      end
-      return_origins = return_origins.uniq do |origin|
-        [origin["path"], origin["line"], origin["class"], origin["method"], origin["kind"]]
-      end
-      noreturn_methods = noreturn_methods.uniq do |method|
-        [method["language"], method["path"], method["owner"], method["name"], method["line"]]
-      end
       rbi_field_types = rbi_field_type_records(type_definitions)
 
       {
@@ -153,25 +138,25 @@ module Espalier
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "state_types" => Hash[state_types.sort],
-          "state_type_records" => state_type_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s] },
+          "state_type_records" => state_type_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s] },
           "state_protocols" => state_protocols,
           "state_param_origins" => state_param_origins,
-          "state_protocol_records" => state_protocol_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s, record["protocol"].to_s] },
-          "state_param_origin_records" => state_param_origin_records.sort_by { |record| [record["language"].to_s, record["path"].to_s, record["owner"].to_s, record["field"].to_s, record["param"].to_s] },
+          "state_protocol_records" => state_protocol_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["protocol"].to_s] },
+          "state_param_origin_records" => state_param_origin_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["param"].to_s] },
           "signatures" => Hash[signatures.sort],
-          "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
+          "type_definitions" => type_definitions.sort_by { |d| [d["path"].to_s, d["owner"].to_s, d["kind"].to_s, d["name"].to_s] },
           "alias_recommendations" => alias_recommendations,
           "struct_declarations" => struct_declarations.sort_by { |decl| [decl["path"].to_s, decl["class"].to_s] },
           "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
           "array_shapes" => array_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
-          "collection_index_lookups" => collection_index_lookups.sort_by { |lookup| [lookup["path"].to_s, lookup["line"].to_i, lookup["code"].to_s] },
-          "hash_record_blockers" => hash_record_blockers.sort_by { |blocker| [blocker["path"].to_s, blocker["line"].to_i, blocker["kind"].to_s] },
+          "collection_index_lookups" => collection_index_lookups.sort_by { |l| [l["path"].to_s, l["line"].to_i, l["code"].to_s] },
+          "hash_record_blockers" => hash_record_blockers.sort_by { |b| [b["path"].to_s, b["line"].to_i, b["kind"].to_s] },
           "tlet_sites" => tlet_sites.sort_by { |site| [site["path"].to_s, site["line"].to_i] },
-          "dead_nil_checks" => dead_nil_checks.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["kind"].to_s] },
-          "deterministic_guards" => deterministic_guards.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["code"].to_s] },
-          "return_origins" => return_origins.sort_by { |origin| [origin["path"].to_s, origin["line"].to_i, origin["method"].to_s] },
-          "noreturn_methods" => noreturn_methods.sort_by { |method| [method["path"].to_s, method["owner"].to_s, method["name"].to_s] },
-          "rbi_field_types" => rbi_field_types.sort_by { |record| [record["class"].to_s, record["field"].to_s] },
+          "dead_nil_checks" => dead_nil_checks.sort_by { |f| [f["path"].to_s, f["line"].to_i, f["kind"].to_s] },
+          "deterministic_guards" => deterministic_guards.sort_by { |f| [f["path"].to_s, f["line"].to_i, f["code"].to_s] },
+          "return_origins" => return_origins.sort_by { |o| [o["path"].to_s, o["line"].to_i, o["method"].to_s] },
+          "noreturn_methods" => noreturn_methods.sort_by { |m| [m["path"].to_s, m["owner"].to_s, m["name"].to_s] },
+          "rbi_field_types" => rbi_field_types.sort_by { |r| [r["class"].to_s, r["field"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -209,7 +194,25 @@ module Espalier
       }
     end
 
-    private
+    def empty_evidence
+      {
+        "version" => 2,
+        "schema_version" => 2,
+        "kind" => "espalier_static_evidence",
+        "parser" => "tree_sitter",
+        "generated_at" => Time.now.utc.iso8601,
+        "root" => @root,
+        "target_dirs" => target_dirs.map { |dir| rel(dir) },
+        "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "runtime_fields" => false,
+        "files" => [],
+        "fields" => [],
+        "methods" => [],
+        "facts" => {},
+        "summary" => { "files" => 0 },
+        "language_capabilities" => {},
+      }
+    end
 
     def target_dirs
       return Espalier.target_dirs(root: @root) if @targets.empty?
@@ -300,13 +303,21 @@ module Espalier
       return [] unless ruby_annotation_index?(files)
 
       ruby_annotation_files.flat_map do |file|
-        static_facts_for(TreeSitter.parse(file, parser: "tree_sitter", language: :ruby))
-          .fetch(:type_definitions, [])
-      rescue LoadError
-        raise
-      rescue StandardError
-        []
+        profile_for_rbi_file(file)
       end
+    end
+
+    def profile_for_rbi_file(file)
+      tmp = Tempfile.new(["espalier-rbi-facts", ".json"])
+      tmp.close
+      ok = system(FACT_MINE_RUST_BINARY, "profile", "nil-kill", "--output", tmp.path, file)
+      return [] unless ok
+
+      JSON.parse(File.read(tmp.path)).fetch("type_definitions", [])
+    rescue StandardError
+      []
+    ensure
+      tmp&.unlink
     end
 
     def ruby_annotation_index?(files)
@@ -375,33 +386,6 @@ module Espalier
       return :git if text == "git"
 
       raise ArgumentError, "unsupported --vcs=#{vcs}; supported values: git"
-    end
-
-    def static_facts_for(document)
-      FactMineStaticFacts.build(document, structural_facts_for(document), root: @root)
-    end
-
-    def structural_facts_for(document)
-      facts =
-        if document.respond_to?(:adapter) && document.adapter
-          document.adapter.structural_facts(document)
-        else
-          {
-            function_defs: document.function_defs,
-            owner_defs: document.owner_defs,
-            call_sites: document.call_sites,
-            state_declarations: document.state_declarations,
-            state_writes: document.state_writes,
-            state_reads: document.state_reads,
-            state_param_origins: document.state_param_origins,
-            local_methods: document.local_methods,
-          }
-        end
-
-      facts[:comparison_sites] = document.comparison_sites if document.respond_to?(:comparison_sites)
-      facts[:redundant_nil_guard_findings] = document.redundant_nil_guard_findings if document.respond_to?(:redundant_nil_guard_findings)
-      facts[:type_definitions] = document.type_definitions if document.respond_to?(:type_definitions)
-      facts
     end
 
     def merge_set_map!(target, source)
