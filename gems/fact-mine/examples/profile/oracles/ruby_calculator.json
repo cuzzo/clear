@@ -1,0 +1,56 @@
+{
+  "methods": [
+    {
+      "key": [
+        "Calculator",
+        "add",
+        "instance"
+      ],
+      "owner": "Calculator",
+      "name": "add",
+      "kind": "instance",
+      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "line": 4,
+      "span": [
+        4,
+        2,
+        6,
+        5
+      ],
+      "language": "ruby",
+      "signature": "def add(value)",
+      "params": [
+        "value"
+      ],
+      "source": {
+        "signature": "def add(value)",
+        "type_system": "sorbet"
+      }
+    },
+    {
+      "key": [
+        "Calculator",
+        "result",
+        "instance"
+      ],
+      "owner": "Calculator",
+      "name": "result",
+      "kind": "instance",
+      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "line": 8,
+      "span": [
+        8,
+        2,
+        10,
+        5
+      ],
+      "language": "ruby",
+      "signature": "def result()",
+      "params": [],
+      "source": {
+        "signature": "def result()",
+        "type_system": "sorbet"
+      }
+    }
+  ]
+}

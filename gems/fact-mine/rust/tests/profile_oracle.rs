@@ -1,6 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
+use serde_json::Value;
+use std::fs;
 use std::path::PathBuf;
 
 fn examples_dir() -> PathBuf {
@@ -77,4 +79,112 @@ fn nil_kill_profile_produces_same_core_structure() -> Result<()> {
     assert!(output.dead_nil_checks.is_empty());
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Oracle-based cross-language tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn profile_oracle_matches_ruby_output() -> Result<()> {
+    let examples = examples_dir();
+    let oracle_dir = examples.join("oracles");
+
+    for entry in fs::read_dir(&examples)? {
+        let entry = entry?;
+        let fixture = entry.path();
+        if !fixture.is_file() {
+            continue;
+        }
+        let ext = fixture
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if ext == "json" {
+            continue;
+        }
+
+        let stem = fixture.file_stem().unwrap().to_str().unwrap();
+        let oracle_path = oracle_dir.join(format!("{stem}.json"));
+        if !oracle_path.is_file() {
+            continue;
+        }
+
+        let lang = fixture
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(|e| Language::for_extension(&e.to_ascii_lowercase()))
+            .with_context(|| format!("cannot detect language for {}", fixture.display()))?;
+
+        let document = syntax::parse_file(fixture.clone(), lang)
+            .with_context(|| format!("parse {}", fixture.display()))?;
+        let actual = profile::extract(&document, Profile::Espalier);
+        let actual_json = serde_json::to_value(&actual)?;
+
+        let expected: Value =
+            serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+
+        let normalized = normalize_for_oracle(&actual_json, &expected);
+        let expected_normalized = normalize_for_oracle(&expected, &expected);
+
+        if normalized != expected_normalized {
+            bail!(
+                "{}: oracle mismatch\nexpected: {}\nactual:   {}",
+                fixture.display(),
+                expected_normalized,
+                normalized
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Normalize a profile JSON value to match oracle expectations.
+/// Only compares keys present in expected; sorts arrays for determinism.
+fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
+    match (value, expected) {
+        (Value::Object(actual_map), Value::Object(expected_map)) => {
+            let mut out = serde_json::Map::new();
+            for key in expected_map.keys() {
+                if let Some(actual_val) = actual_map.get(key) {
+                    let mut normalized = normalize_for_oracle(actual_val, &expected_map[key]);
+                    // Normalize paths to be relative (strip absolute prefixes)
+                    if key == "path" {
+                        if let Value::String(path) = &normalized {
+                            // Keep only the part after 'examples/profile/'
+                            if let Some(idx) = path.find("examples/profile/") {
+                                normalized =
+                                    Value::String(path[idx..].to_string());
+                            }
+                        }
+                    }
+                    out.insert(key.clone(), normalized);
+                }
+            }
+            Value::Object(out)
+        }
+        (Value::Array(actual_arr), Value::Array(expected_arr)) => {
+            if expected_arr.is_empty() {
+                return Value::Array(Vec::new());
+            }
+            let mut normalized: Vec<Value> = actual_arr
+                .iter()
+                .map(|item| {
+                    normalize_for_oracle(
+                        item,
+                        expected_arr.first().unwrap_or(item),
+                    )
+                })
+                .collect();
+            // Sort for determinism
+            normalized.sort_by(|a, b| {
+                serde_json::to_string(a)
+                    .unwrap_or_default()
+                    .cmp(&serde_json::to_string(b).unwrap_or_default())
+            });
+            Value::Array(normalized)
+        }
+        _ => value.clone(),
+    }
 }

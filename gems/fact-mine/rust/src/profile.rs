@@ -34,6 +34,9 @@ pub struct ProfileOutput {
     pub type_definitions: Vec<TypeDefinition>,
     pub hash_shapes: Vec<HashShape>,
     pub array_shapes: Vec<ArrayShape>,
+    /// Edges from an owner to another owner via typed state fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_type_edges: Vec<StateTypeEdge>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_index_lookups: Vec<serde_json::Value>,
@@ -49,6 +52,16 @@ pub struct ProfileOutput {
     pub return_origins: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub noreturn_methods: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StateTypeEdge {
+    pub source: String,
+    pub target: String,
+    pub label: String,
+    pub kind: String,
+    #[serde(default)]
+    pub weight: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -202,6 +215,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let hash_shapes = Vec::new(); // TODO Phase 2c
     let array_shapes = Vec::new(); // TODO Phase 2c
     let struct_declarations = extract_struct_declarations(document, &language, &path);
+    let state_type_edges = extract_state_type_edges(document, &language, &path);
 
     ProfileOutput {
         methods,
@@ -217,6 +231,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         type_definitions,
         hash_shapes,
         array_shapes,
+        state_type_edges,
         collection_index_lookups: if nil_kill { Vec::new() } else { Vec::new() },
         hash_record_blockers: Vec::new(),
         tlet_sites: if nil_kill { Vec::new() } else { Vec::new() },
@@ -243,6 +258,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut type_definitions = Vec::new();
     let mut hash_shapes = Vec::new();
     let mut array_shapes = Vec::new();
+    let mut state_type_edges = Vec::new();
     let mut collection_index_lookups = Vec::new();
     let mut hash_record_blockers = Vec::new();
     let mut tlet_sites = Vec::new();
@@ -275,6 +291,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         type_definitions.extend(output.type_definitions);
         hash_shapes.extend(output.hash_shapes);
         array_shapes.extend(output.array_shapes);
+        state_type_edges.extend(output.state_type_edges);
         if nil_kill {
             collection_index_lookups.extend(output.collection_index_lookups);
             hash_record_blockers.extend(output.hash_record_blockers);
@@ -309,6 +326,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         type_definitions,
         hash_shapes,
         array_shapes,
+        state_type_edges,
         collection_index_lookups,
         hash_record_blockers,
         tlet_sites,
@@ -318,10 +336,6 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         noreturn_methods,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Methods
-// ---------------------------------------------------------------------------
 
 fn extract_methods(document: &Document, language: &str, path: &str) -> Vec<MethodRecord> {
     document
@@ -936,6 +950,85 @@ fn extract_struct_declarations(
             }
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// State type edges
+// ---------------------------------------------------------------------------
+
+fn extract_state_type_edges(
+    document: &Document,
+    _language: &str,
+    _path: &str,
+) -> Vec<StateTypeEdge> {
+    let mut edges = Vec::new();
+    let owner_names: BTreeSet<String> = document
+        .owner_defs
+        .iter()
+        .map(|o| o.name.clone())
+        .collect();
+
+    for state in &document.state_declarations {
+        let type_text = match &state.r#type {
+            Some(t) if !t.is_empty() => t.as_str(),
+            _ => continue,
+        };
+        // Find owner references in the type text (qualified names)
+        for candidate in type_reference_candidates(type_text) {
+            if owner_names.contains(&candidate) {
+                edges.push(StateTypeEdge {
+                    source: state.owner.clone(),
+                    target: candidate.clone(),
+                    label: format!("state {}", state.field),
+                    kind: "state_type".to_string(),
+                    weight: 1,
+                });
+            } else {
+                // Try simple name matching
+                let simple = candidate
+                    .split("::")
+                    .last()
+                    .unwrap_or(&candidate)
+                    .to_string();
+                if owner_names.contains(&simple) && simple != candidate {
+                    edges.push(StateTypeEdge {
+                        source: state.owner.clone(),
+                        target: simple,
+                        label: format!("state {}", state.field),
+                        kind: "state_type".to_string(),
+                        weight: 1,
+                    });
+                }
+            }
+        }
+    }
+
+    // Deduplicate
+    edges.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    edges.dedup_by(|a, b| a.source == b.source && a.target == b.target && a.label == b.label);
+
+    edges
+}
+
+/// Extract potential owner reference names from a type string.
+fn type_reference_candidates(type_text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for word in type_text.split(|c: char| !c.is_alphanumeric() && c != ':' && c != '_' && c != '$') {
+        let word = word.trim_matches(|c: char| c == '<' || c == '>' || c == '[' || c == ']' || c == ',' || c == '?');
+        if word.is_empty() {
+            continue;
+        }
+        // Filter out builtins and lowercase names
+        if word.chars().next().map_or(false, |c| c.is_uppercase() || c == '_') {
+            out.push(word.to_string());
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
