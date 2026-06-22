@@ -907,21 +907,25 @@ module NilKill
       candidate_names = all_candidates_by_name.select { |_name, methods| methods.size == 1 }.keys.to_set
       untyped_candidate_names = untyped_candidates_by_name.select { |name, methods| methods.size == 1 && candidate_names.include?(name) }.keys.to_set
       return [] if untyped_candidate_names.empty?
-      method_return_types = unambiguous_method_return_types(evidence)
 
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
-      # Scan a broader file set than just target_files: a method only used by
-      # specs / transpile-tests / tools is still "used", and narrowing it to
-      # `void` would replace its return value with a Void marker and break
-      # those callers at runtime. `usage_scan_files` respects NIL_KILL_TARGETS
-      # for test isolation.
-      NilKill.usage_scan_files.each do |path|
-        parsed = NilKill.cached_parse_file(path)
-        next unless parsed.success?
-        mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
+
+      # Fast path: use indexed return-usage facts when available
+      if evidence.dig("facts", "return_usage_sites")&.any?
+        evidence["facts"]["return_usage_sites"].each do |site|
+          name = site["name"].to_s
+          used << name.to_sym if candidate_names.include?(name.to_sym)
+        end
+      else
+        method_return_types = unambiguous_method_return_types(evidence)
+        NilKill.usage_scan_files.each do |path|
+          parsed = NilKill.cached_parse_file(path)
+          next unless parsed.success?
+          mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
+        end
+        propagate_return_usage!(used, return_edges)
       end
-      propagate_return_usage!(used, return_edges)
       (untyped_candidate_names - used).filter_map { |name| untyped_candidates_by_name.fetch(name).first }
     end
 
