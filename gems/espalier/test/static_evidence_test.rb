@@ -7,7 +7,7 @@ require_relative "../lib/espalier"
 
 class StaticEvidenceTest < Minitest::Test
   def test_builds_static_evidence_inside_espalier_without_nil_kill
-    refute Object.const_defined?(:NilKill)
+    nil_kill_features = loaded_nil_kill_features
 
     Dir.mktmpdir("espalier-static", Dir.pwd) do |dir|
       src = File.join(dir, "src")
@@ -35,6 +35,7 @@ class StaticEvidenceTest < Minitest::Test
       assert_equal ["client"], evidence.dig("facts", "state_param_origins", "ClientUser\u0000@client")
       assert_equal ["fetch"], evidence.dig("facts", "state_protocols", "ClientUser\u0000@client")
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
+      assert_equal nil_kill_features, loaded_nil_kill_features
     end
   end
 
@@ -65,6 +66,29 @@ class StaticEvidenceTest < Minitest::Test
 
       assert_empty rbi_definitions
       assert_equal 0, evidence.dig("summary", "rbi_field_types")
+    end
+  end
+
+  def test_static_evidence_includes_hash_record_lookup_facts
+    Dir.mktmpdir("espalier-static-hash", Dir.pwd) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "worker.rb"), <<~RUBY)
+        class Worker
+          def label
+            user = {name: "Ada", id: 1}
+            "\#{user[:name]}:\#{user.fetch(:id)}"
+          end
+        end
+      RUBY
+
+      evidence = Espalier::StaticEvidence.build([src], root: dir)
+      lookups = evidence.dig("facts", "collection_index_lookups")
+
+      assert_equal 2, evidence.dig("summary", "collection_index_lookups")
+      assert_includes lookups.map { |lookup| lookup["code"] }, "user[:name]"
+      assert_includes lookups.map { |lookup| lookup["code"] }, "user.fetch(:id)"
+      assert lookups.all? { |lookup| lookup.dig("origin", "kind") == "hash literal" }
     end
   end
 
@@ -110,5 +134,11 @@ class StaticEvidenceTest < Minitest::Test
       assert_equal "Result", definition["return_type"]
       assert_includes definition["id"], "service.rb"
     end
+  end
+
+  private
+
+  def loaded_nil_kill_features
+    $LOADED_FEATURES.grep(%r{/nil[-_]kill/}).sort
   end
 end

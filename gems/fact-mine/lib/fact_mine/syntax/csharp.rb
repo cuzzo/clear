@@ -151,9 +151,10 @@ module FactMine
 
       def field_name_from_declaration(node)
         return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION VARIABLE_DECLARATOR PROPERTY_ELEMENT].include?(node.type.to_s)
-        return nil if node.text.to_s.include?("(")
 
         text = node.text.to_s.strip.sub(/=.*/, "").delete_suffix(";").strip
+        return nil if text.include?("(")
+
         name = text.scan(/[A-Za-z_]\w*/).last
         return nil unless name && name.match?(/\A[A-Za-z_]\w*\z/)
         return nil if %w[private protected public internal readonly static const volatile string int long short byte bool decimal double float var].include?(name)
@@ -163,7 +164,6 @@ module FactMine
 
       def state_declaration_from_node(node, owner:)
         return nil unless %w[FIELD_DECLARATION PROPERTY_DECLARATION].include?(node.type.to_s)
-        return nil if node.text.to_s.include?("(")
 
         member = csharp_member_declaration(node.text)
         member && { "field" => member.fetch(:name), "type" => member.fetch(:type) }

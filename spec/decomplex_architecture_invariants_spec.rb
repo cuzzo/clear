@@ -3,6 +3,7 @@ require "rspec"
 RSpec.describe "architecture invariants: decomplex syntax boundaries" do
   ROOT = File.expand_path("..", __dir__)
   DECOMPLEX_LIB = File.join(ROOT, "gems", "decomplex", "lib", "decomplex")
+  FACT_MINE_LIB = File.join(ROOT, "gems", "fact-mine", "lib", "fact_mine")
   DETECTOR_BASENAMES = %w[
     co_update decision_pressure derived_state false_simplicity fat_union
     flay_similarity function_lcom inconsistent_rename_clone local_flow
@@ -32,7 +33,7 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
   }.freeze
 
   SYNTAX_RB_ADAPTER_IMPLEMENTATION_PATTERNS = {
-    "concrete language adapters belong under lib/decomplex/syntax/" =>
+    "concrete language adapters belong under lib/fact_mine/syntax/" =>
       /^\s*class\s+(?!TreeSitterLanguageAdapter\b)\w+SyntaxAdapter\b/,
     "language profiles must instantiate concrete adapters, not the base adapter" =>
       /:\s*TreeSitterLanguageAdapter\.new\(/
@@ -88,15 +89,15 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
   end
 
   it "keeps detector-facing syntax extensions out of syntax.rb" do
-    syntax_rb = File.join(DECOMPLEX_LIB, "syntax.rb")
+    syntax_rb = File.join(FACT_MINE_LIB, "syntax.rb")
     offenders = scan_files([syntax_rb], SYNTAX_RB_EXTENSION_HOST_PATTERNS)
 
     expect(offenders).to be_empty,
-      format_offenders("Detector-facing parser extensions must live under lib/decomplex/syntax/", offenders)
+      format_offenders("Detector-facing parser extensions must live under lib/fact_mine/syntax/", offenders)
   end
 
   it "keeps concrete language adapter implementation out of syntax.rb" do
-    syntax_rb = File.join(DECOMPLEX_LIB, "syntax.rb")
+    syntax_rb = File.join(FACT_MINE_LIB, "syntax.rb")
     offenders = scan_files([syntax_rb], SYNTAX_RB_ADAPTER_IMPLEMENTATION_PATTERNS)
 
     expect(offenders).to be_empty,
@@ -105,7 +106,7 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
 
   it "keeps one adapter file per supported language" do
     offenders = LANGUAGE_ADAPTER_FILES.filter_map do |file_name, class_name|
-      path = File.join(DECOMPLEX_LIB, "syntax", file_name)
+      path = File.join(FACT_MINE_LIB, "syntax", file_name)
       next "#{file_name}: missing file" unless File.file?(path)
 
       source = File.read(path)
@@ -119,7 +120,7 @@ RSpec.describe "architecture invariants: decomplex syntax boundaries" do
   end
 
   it "keeps the adapter loader from absorbing language implementations" do
-    adapters_rb = File.join(DECOMPLEX_LIB, "syntax", "adapters.rb")
+    adapters_rb = File.join(FACT_MINE_LIB, "syntax", "adapters.rb")
     offenders = scan_files([adapters_rb], ADAPTER_LOADER_LANGUAGE_IMPLEMENTATION_PATTERNS)
 
     expect(offenders).to be_empty,

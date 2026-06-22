@@ -2,6 +2,7 @@
 
 require "json"
 require "minitest/autorun"
+require_relative "../../decomplex/lib/decomplex/path_condition"
 require_relative "../lib/fact_mine/syntax_oracle"
 
 class SourceFactsOracleTest < Minitest::Test
@@ -59,6 +60,7 @@ class SourceFactsOracleTest < Minitest::Test
     actual = {}
     actual["syntax"] = project_syntax(fixture_path, engine, language, expected.fetch("syntax", {})) if expected.key?("syntax")
     actual["local_flow"] = project_local_flow(fixture_path, engine, language) if expected.key?("local_flow")
+    actual["path_condition"] = project_path_condition(fixture_path) if expected.key?("path_condition")
 
     assert_equal expected, actual, "#{engine} #{fixture_path}"
   end
@@ -134,6 +136,34 @@ class SourceFactsOracleTest < Minitest::Test
   def canonical_co_uses(co_uses)
     Array(co_uses).map { |pair| Array(pair).map(&:to_s).sort }
                   .sort_by { |pair| JSON.generate(pair) }
+  end
+
+  def project_path_condition(fixture_path)
+    report = Decomplex::PathCondition.scan([fixture_path])
+    {
+      "neglected" => Array(report.neglected(min_support: 3)).map do |row|
+        {
+          "action" => row.fetch(:action),
+          "at" => logical_source_fact_site(row.fetch(:at)),
+          "missing" => row.fetch(:missing),
+          "pattern" => row.fetch(:pattern),
+          "support" => row.fetch(:support)
+        }
+      end.sort_by { |row| JSON.generate(row) },
+      "scattered" => Array(report.scattered(min_scatter: 2)).map do |row|
+        {
+          "guards" => row.fetch(:guards),
+          "rank" => row.fetch(:rank),
+          "scatter" => row.fetch(:scatter),
+          "sites" => Array(row.fetch(:sites)).map { |site| logical_source_fact_site(site) },
+          "support" => row.fetch(:support)
+        }
+      end.sort_by { |row| JSON.generate(row) }
+    }
+  end
+
+  def logical_source_fact_site(site)
+    site.to_s.sub(%r{\A.*?(examples/source-facts/)}, 'examples/source-facts/')
   end
 
   def pick(row, keys)

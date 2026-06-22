@@ -104,6 +104,19 @@ module FactMine
         message
       end
 
+      def project_call(_node, call)
+        return call unless call.fetch("message").to_s == "call"
+
+        receiver = call.fetch("receiver").to_s
+        return call unless receiver.include?("::")
+
+        parts = receiver.split("::")
+        message = parts.pop
+        return call unless message&.match?(/\A[A-Za-z_]\w*[!?=]?\z/) && parts.any?
+
+        call.merge("receiver" => parts.join("::"), "message" => message)
+      end
+
       def self_member_receiver(message)
         "self.#{message}"
       end
@@ -173,6 +186,10 @@ module FactMine
         when "is_none"
           { local: subject, non_nil_when_true: false }
         end
+      end
+
+      def predicate_like_body?(text)
+        text.to_s.match?(/\.(?:is_some|is_none)\s*\(\)\z/)
       end
     end
 

@@ -276,6 +276,12 @@ module FactMine
       end
 
       def scan_case(node)
+        if node.type.to_s == "CASE" && child_node(node, 0)&.type.to_s == "CASE"
+          record_branch_decision(node, child_node(node, 0))
+          scan(child_node(node, 0))
+          return
+        end
+
         value_index = node.type.to_s == "CASE" ? 0 : nil
         chain_index = node.type.to_s == "CASE" ? 1 : 0
         value = value_index && child_node(node, value_index)
@@ -470,7 +476,8 @@ module FactMine
       def suppress_call_site?(node, call)
         message = call.fetch("message").to_s
         receiver = call.fetch("receiver").to_s
-        return true if receiver == "self" && message.match?(/\A[A-Z]/) && call.fetch("arguments").empty?
+        return true if receiver == "self" && message.match?(/\A[A-Z]/) &&
+                       call.fetch("arguments").empty? && !node.text.to_s.include?("(")
         return true if constant_receiver?(receiver) && !receiver.include?("(") &&
                        call.fetch("arguments").empty? && !call.fetch("block") &&
                        !@extraction_behavior.preserve_constant_receiver_call?(call)
@@ -1347,6 +1354,8 @@ module FactMine
 
       def predicate_like_body?(text)
         lower = text.downcase
+        return true if @extraction_behavior.predicate_like_body?(text)
+
         %w[true false].include?(lower) ||
           lower.match?(/true|false|null|nil/) ||
           text.match?(/==|!=|&&|\|\|/) ||

@@ -220,7 +220,40 @@ module FactMine
         definitions.uniq { |row| [row["language"], row["file"], row["owner"], row["kind"], row["name"], row["line"], row["type_system"]] }
       end
 
+      def typed_state_declarations(document)
+        document.lines.each_with_index.filter_map do |line, index|
+          line_no = index + 1
+          owner = TypeMetadataFacts.owner_for_line(document, line_no)
+          next if owner.empty?
+
+          stripped = line.strip
+          next if stripped.empty? || stripped.start_with?("#")
+
+          match = stripped.match(/\A(?:self|cls)\.([A-Za-z_]\w*)\s*:\s*(.+)\z/)
+          next unless match
+
+          type = python_declared_assignment_type(match[2])
+          next if type.empty?
+
+          StateDeclaration.new(
+            field: match[1],
+            owner: owner,
+            type: type,
+            type_references: [],
+            file: document.file,
+            line: line_no,
+            span: TypeMetadataFacts.source_line_span(line, line_no)
+          )
+        end
+      end
+
       private
+
+      def python_declared_assignment_type(source)
+        type = TypeMetadataFacts.split_top_level(source, delimiter: "=").first.to_s
+        type = TypeMetadataFacts.split_top_level(type, delimiter: "#").first.to_s
+        TypeMetadataFacts.normalize_text(type)
+      end
 
       def python_method_type_definitions(document)
         Array(document.function_defs).filter_map do |function|

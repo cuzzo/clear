@@ -50,6 +50,8 @@ module Espalier
       type_definitions = []
       hash_shapes = []
       array_shapes = []
+      collection_index_lookups = []
+      hash_record_blockers = []
       tlet_sites = []
       dead_nil_checks = []
       deterministic_guards = []
@@ -73,6 +75,8 @@ module Espalier
         type_definitions.concat(facts.fetch(:type_definitions, []))
         hash_shapes.concat(facts.fetch(:hash_shapes, []))
         array_shapes.concat(facts.fetch(:array_shapes, []))
+        collection_index_lookups.concat(facts.fetch(:collection_index_lookups, []))
+        hash_record_blockers.concat(facts.fetch(:hash_record_blockers, []))
         tlet_sites.concat(facts.fetch(:tlet_sites, []))
         dead_nil_checks.concat(facts.fetch(:dead_nil_checks, []))
         deterministic_guards.concat(facts.fetch(:deterministic_guards, []))
@@ -109,6 +113,12 @@ module Espalier
       end
       array_shapes = array_shapes.uniq do |shape|
         [shape["path"], shape["line"], Array(shape["tuple_types"]), shape["size"]]
+      end
+      collection_index_lookups = collection_index_lookups.uniq do |lookup|
+        [lookup["path"], lookup["line"], lookup["code"], lookup.dig("origin", "path"), lookup.dig("origin", "line")]
+      end
+      hash_record_blockers = hash_record_blockers.uniq do |blocker|
+        [blocker["path"], blocker["line"], blocker["kind"], blocker["code"], blocker.dig("origin", "path"), blocker.dig("origin", "line")]
       end
       tlet_sites = tlet_sites.uniq do |site|
         [site["path"], site["line"], site["type"]]
@@ -154,6 +164,8 @@ module Espalier
           "struct_declarations" => struct_declarations.sort_by { |decl| [decl["path"].to_s, decl["class"].to_s] },
           "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
           "array_shapes" => array_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
+          "collection_index_lookups" => collection_index_lookups.sort_by { |lookup| [lookup["path"].to_s, lookup["line"].to_i, lookup["code"].to_s] },
+          "hash_record_blockers" => hash_record_blockers.sort_by { |blocker| [blocker["path"].to_s, blocker["line"].to_i, blocker["kind"].to_s] },
           "tlet_sites" => tlet_sites.sort_by { |site| [site["path"].to_s, site["line"].to_i] },
           "dead_nil_checks" => dead_nil_checks.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["kind"].to_s] },
           "deterministic_guards" => deterministic_guards.sort_by { |finding| [finding["path"].to_s, finding["line"].to_i, finding["code"].to_s] },
@@ -180,6 +192,8 @@ module Espalier
           "struct_declarations" => struct_declarations.size,
           "hash_shapes" => hash_shapes.size,
           "array_shapes" => array_shapes.size,
+          "collection_index_lookups" => collection_index_lookups.size,
+          "hash_record_blockers" => hash_record_blockers.size,
           "tlet_sites" => tlet_sites.size,
           "dead_nil_checks" => dead_nil_checks.size,
           "deterministic_guards" => deterministic_guards.size,

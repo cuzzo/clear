@@ -105,6 +105,34 @@ class TypeMetadataFactsTest < Minitest::Test
     assert_equal "Client", alias_definition["target"]
   end
 
+  def test_python_provider_emits_typed_state_declarations
+    document = OpenStruct.new(
+      file: "worker.py",
+      language: :python,
+      lines: [
+        "class Worker:\n",
+        "    def __init__(self, items: list[str]):\n",
+        "        self.items: list[str] = items\n"
+      ],
+      function_defs: [],
+      owner_defs: [OpenStruct.new(name: "Worker", span: [1, 0, 3, 37])],
+      state_declarations: [],
+      call_sites: []
+    )
+    profile = FactMine::Syntax.language_profile(:python)
+
+    typed_state = profile.typed_state_declarations(document).first
+    document.state_declarations = [typed_state]
+    definitions = profile.type_definitions(document)
+    state_field = definitions.find { |definition| definition["kind"] == "state_field" }
+
+    assert_equal "items", typed_state.field
+    assert_equal "Worker", typed_state.owner
+    assert_equal "list[str]", typed_state.type
+    assert_equal "@items", state_field["name"]
+    assert_equal "list[str]", state_field["declared_type"]
+  end
+
   def test_typescript_provider_emits_typed_state_declarations_and_interface_definitions
     document = OpenStruct.new(
       file: "service.ts",

@@ -12,6 +12,8 @@ class TypeProfileTest < Minitest::Test
     assert_equal %w[Repository], profile.owner_reference_tokens("T.nilable(Repository)")
     assert profile.references_alias?("T.nilable(User)", %w[User])
     refute profile.references_alias?("User$Record", %w[User])
+    refute profile.noisy_alias_target?("T::Array[AST::Node]", max_union_types: 4, max_length: 240)
+    assert profile.noisy_alias_target?("T::Array[String]", max_union_types: 4, max_length: 240)
   end
 
   def test_ruby_sorbet_profile_owns_static_type_synthesis

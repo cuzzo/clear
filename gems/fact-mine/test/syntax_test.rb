@@ -62,6 +62,49 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_ruby_case_decision_span_excludes_later_method_statements
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Ruby Tree-sitter adapter span test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RB) do |path|
+      def dispatch(n, z)
+        case n
+        when 1 then 10
+        when 2 then 20
+        end
+        return 99 if z
+        n
+      end
+    RB
+      decisions = FactMine::Syntax.parse(path, language: :ruby).decision_sites.select { |site| site.kind == :case_dispatch }
+
+      assert_equal 1, decisions.size
+      assert_equal [2, 2, 5, 5], decisions.first.span
+    end
+  end
+
+  def test_ruby_symbol_case_patterns_emit_decisions_and_branch_arms
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Ruby Tree-sitter adapter symbol case test" unless grammar && File.file?(grammar)
+
+    with_file(<<~RB) do |path|
+      def dispatch(k)
+        case k
+        when :x then 11
+        when :y then 21
+        else 31
+        end
+      end
+    RB
+      doc = FactMine::Syntax.parse(path, language: :ruby)
+      decision = doc.decision_sites.find { |site| site.kind == :case_dispatch }
+
+      refute_nil decision
+      assert_equal %w[:x :y], decision.members
+      assert_equal %w[:x :y], doc.branch_arms.map(&:member)
+    end
+  end
+
   def test_unknown_parser_fails_loudly
     with_file("def a; end\n") do |path|
       error = assert_raises(ArgumentError) do

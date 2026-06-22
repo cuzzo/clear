@@ -47,6 +47,8 @@ module Espalier
           type_definitions: type_definitions(state_declarations),
           hash_shapes: literal_shapes(:hash),
           array_shapes: literal_shapes(:array),
+          collection_index_lookups: collection_index_lookups,
+          hash_record_blockers: [],
           tlet_sites: tlet_sites,
           dead_nil_checks: dead_nil_checks,
           deterministic_guards: deterministic_guards,
@@ -372,6 +374,38 @@ module Espalier
           shapes << shape if shape
         end
         shapes.uniq { |shape| [shape["path"], shape["line"], shape["code"]] }
+      end
+
+      def collection_index_lookups
+        Array(@facts[:call_sites]).filter_map do |call|
+          index = hash_lookup_index(call)
+          next unless index
+
+          receiver = call.receiver.to_s
+          origin = local_hash_origins[[call.owner.to_s, call.function.to_s, receiver]]
+          next unless origin
+
+          lookup_type = hash_lookup_type(origin.fetch(:types).fetch(hash_lookup_key(index), "T.untyped"))
+          {
+            "path" => rel(call.file),
+            "line" => call.line,
+            "span" => call.span,
+            "code" => hash_lookup_code(call, index),
+            "receiver" => receiver,
+            "index" => index,
+            "lookup_type" => lookup_type,
+            "status" => useful_lookup_type?(lookup_type) ? "typed lookup" : "weak lookup",
+            "enclosing_scope" => call.owner.to_s,
+            "origin" => {
+              "kind" => "hash literal",
+              "path" => origin.fetch(:shape).fetch("path"),
+              "line" => origin.fetch(:shape).fetch("line"),
+              "name" => receiver,
+              "code" => origin.fetch(:shape).fetch("code"),
+              "keys" => origin.fetch(:shape).fetch("keys")
+            }
+          }
+        end.uniq { |lookup| [lookup["path"], lookup["line"], lookup["code"], lookup.dig("origin", "line")] }
       end
 
       def normalized_state_declarations
@@ -940,6 +974,92 @@ module Espalier
           "code" => node_text(node),
           "source" => "syntax",
         }
+      end
+
+      def local_hash_origins
+        @local_hash_origins ||= begin
+          origins = {}
+          walk_tree(@document.root) do |node|
+            name, hash = local_hash_assignment(node)
+            next unless name && hash
+
+            function = function_for_line(node_line(node))
+            next unless function
+
+            shape = hash_shape(hash)
+            next unless shape
+
+            owner = method_owner(function)
+            origins[[owner, function.name.to_s, name]] = {
+              shape: shape,
+              types: Hash[Array(shape["keys"]).zip(Array(shape["value_types"]))]
+            }
+          end
+          origins
+        end
+      end
+
+      def local_hash_assignment(node)
+        return [nil, nil] unless %w[assignment assignment_expression assignment_statement LASGN].include?(node.kind.to_s)
+
+        children = node_named_children(node)
+        target = named_child(node, "left") || children.first
+        value = named_child(node, "right") || children[1]
+        value ||= children.find { |child| ts_node?(child) && hash_literal_node?(child) }
+        name = local_assignment_name(target)
+        return [nil, nil] unless name && value && hash_literal_node?(value)
+
+        [name, value]
+      end
+
+      def local_assignment_name(node)
+        return node.to_s if node.is_a?(String) || node.is_a?(Symbol)
+
+        text = node_text(node)
+        text.match?(/\A[A-Za-z_]\w*\z/) ? text : nil
+      end
+
+      def function_for_line(line)
+        Array(@facts[:function_defs]).select { |fn| span_contains_line?(fn.span, line) }
+                                    .max_by { |fn| span_sort_key(fn.span) }
+      end
+
+      def hash_lookup_index(call)
+        message = call.message.to_s
+        return nil unless %w[[] fetch].include?(message)
+
+        index = Array(call.arguments).first.to_s
+        hash_lookup_key(index) ? index : nil
+      end
+
+      def hash_lookup_key(index)
+        case index.to_s
+        when /\A:([A-Za-z_]\w*[!?=]?)\z/
+          Regexp.last_match(1)
+        when /\A["']([^"']+)["']\z/
+          Regexp.last_match(1)
+        end
+      end
+
+      def hash_lookup_type(value_type)
+        type = value_type.to_s
+        return "T.untyped" if type.empty? || type == "T.untyped"
+        return type if type.start_with?("T.nilable(")
+
+        "T.nilable(#{type})"
+      end
+
+      def useful_lookup_type?(type)
+        ruby_type_profile.useful_type?(type)
+      end
+
+      def hash_lookup_code(call, index)
+        receiver = call.receiver.to_s
+        case call.message.to_s
+        when "[]" then "#{receiver}[#{index}]"
+        when "fetch" then "#{receiver}.fetch(#{index})"
+        else fact_call_text(call)
+        end
       end
 
       def tlet_sites

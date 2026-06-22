@@ -164,6 +164,8 @@ module FactMine
         first = params.split(",", 2).first.to_s.strip
         typed_self = first[/\A(?:const\s+)?(?:struct\s+)?([A-Za-z_]\w*)\s*\*\s*self\z/, 1]
         return typed_self if typed_self
+        typed_receiver = first[/\A(?:const\s+)?(?:struct\s+)?([A-Za-z_]\w*)\s*\*\s*[A-Za-z_]\w*\z/, 1]
+        return typed_receiver if typed_receiver && name.downcase.start_with?("#{typed_receiver.downcase}_")
 
         name[/\A([A-Z]\w*)_/, 1] || current_owner
       end
@@ -211,6 +213,7 @@ module FactMine
 
         type = text.sub(/\b#{Regexp.escape(name)}\b\s*\z/, "").split.reject { |token| C_FIELD_MODIFIERS.include?(token) }.join(" ")
         type = type.gsub(/\s+\*/, " *").strip
+        type = type.delete_suffix(" *").strip
         return nil if type.empty?
 
         { name: name, type: type }

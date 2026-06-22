@@ -289,6 +289,10 @@ module FactMine
         []
       end
 
+      def predicate_like_body?(_text)
+        false
+      end
+
       def visibility_events_from_calls(_calls)
         []
       end

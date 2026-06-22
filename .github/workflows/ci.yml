@@ -126,6 +126,7 @@ jobs:
             tree-sitter-typescript@0.23.2 \
             tree-sitter-go@0.25.0 \
             tree-sitter-rust@0.24.0 \
+            tree-sitter-php@0.24.2 \
             @tree-sitter-grammars/tree-sitter-zig@1.1.2 \
             @tree-sitter-grammars/tree-sitter-lua@0.4.1 \
             tree-sitter-c@0.24.1 \
@@ -161,6 +162,7 @@ jobs:
             tree-sitter-typescript@0.23.2 \
             tree-sitter-go@0.25.0 \
             tree-sitter-rust@0.24.0 \
+            tree-sitter-php@0.24.2 \
             @tree-sitter-grammars/tree-sitter-zig@1.1.2 \
             @tree-sitter-grammars/tree-sitter-lua@0.4.1 \
             tree-sitter-c@0.24.1 \

@@ -68,10 +68,12 @@ module FactMine
         return true if text.empty?
         return true if text.length > max_length.to_i
         return true if broad_type?(text) || contains_broad_type?(text)
-        return true if intrinsic_type?(text) || nil_type?(text) || boolean_type?(text)
         return true if broad_union_type?(text, max: max_union_types)
 
-        owner_reference_tokens(text).empty?
+        owner_references = owner_reference_tokens(text)
+        return true if owner_references.empty? && (intrinsic_type?(text) || nil_type?(text) || boolean_type?(text))
+
+        owner_references.empty?
       end
 
       def owner_reference_tokens(type_expression)
