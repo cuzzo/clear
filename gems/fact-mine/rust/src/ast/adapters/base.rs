@@ -1,32 +1,20 @@
 use super::super::{
     bracketed, case_arm_descendant, concatenated_string_node, concatenated_string_target,
-    descendant, direct_binary_operator, element_reference_shape, function_kind,
-    identifier_kind_name, named_children, node_text, question_colon_ternary_parts,
-    raw_named_children, ruby_exception_constant_text, statement_block_wrapper, TernaryParts,
-    ARRAY_LITERAL_NODE_KINDS, ARRAY_LITERAL_WRAPPER_KINDS, BOOLEAN_EXPRESSION_KINDS,
-    CASE_ARGUMENT_WHEN_KINDS, CASE_ELSE_KINDS, CASE_NODE_KINDS, COMPARISON_EXPRESSION_KINDS,
-    CONCATENATED_STRING_WRAPPER_KINDS, DOTTED_EXPRESSION_WRAPPER_KINDS,
-    ELEMENT_REFERENCE_NODE_KINDS, ELEMENT_REFERENCE_WRAPPER_KINDS, EMPTY_BODY_WRAPPER_KINDS,
-    ENSURE_BODY_WRAPPER_KINDS, HASH_LITERAL_NODE_KINDS, HASH_LITERAL_WRAPPER_KINDS,
-    HEREDOC_BODY_WRAPPER_KINDS, IF_NODE_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS,
-    LEADING_CASE_WRAPPER_KINDS, LEADING_FUNCTION_WRAPPER_KINDS, LEADING_IF_WRAPPER_KINDS,
-    LEADING_LOOP_WRAPPER_KINDS, LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS,
-    OWNER_STATEMENT_NESTED_KINDS, QUESTION_COLON_TERNARY_KINDS, RESCUE_BODY_WRAPPER_KINDS,
+    descendant, direct_binary_operator, element_reference_shape, identifier_kind_name,
+    named_children, node_text, question_colon_ternary_parts, raw_named_children,
+    statement_block_wrapper, TernaryParts, ARRAY_LITERAL_NODE_KINDS, ARRAY_LITERAL_WRAPPER_KINDS,
+    BOOLEAN_EXPRESSION_KINDS, CASE_ARGUMENT_WHEN_KINDS, CASE_ELSE_KINDS, CASE_NODE_KINDS,
+    COMPARISON_EXPRESSION_KINDS, CONCATENATED_STRING_WRAPPER_KINDS,
+    DOTTED_EXPRESSION_WRAPPER_KINDS, ELEMENT_REFERENCE_NODE_KINDS, ELEMENT_REFERENCE_WRAPPER_KINDS,
+    EMPTY_BODY_WRAPPER_KINDS, HASH_LITERAL_NODE_KINDS, HASH_LITERAL_WRAPPER_KINDS,
+    HEREDOC_BODY_WRAPPER_KINDS, INTERPOLATED_STATEMENT_WRAPPER_KINDS, LEADING_CASE_WRAPPER_KINDS,
+    LEADING_FUNCTION_WRAPPER_KINDS, LEADING_IF_WRAPPER_KINDS, LEADING_LOOP_WRAPPER_KINDS,
+    LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS, OWNER_STATEMENT_NESTED_KINDS,
+    QUESTION_COLON_TERNARY_KINDS,
 };
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) const COMMON_ASSIGNMENT_OPERATORS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
-pub(crate) const RUBY_ASSIGNMENT_OPERATORS: &[&str] = &[
-    "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "&=", "|=", "^=", "<<=", ">>=",
-];
-pub(crate) const PYTHON_ASSIGNMENT_OPERATORS: &[&str] = &[
-    "=", "+=", "-=", "*=", "/=", "%=", "//=", "**=", "@=", "&=", "|=", "^=", "<<=", ">>=", ":=",
-];
-pub(crate) const LUA_ASSIGNMENT_OPERATORS: &[&str] = &["="];
-pub(crate) const TYPESCRIPT_ASSIGNMENT_OPERATORS: &[&str] = &[
-    "=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=",
-    "??=",
-];
 
 pub(crate) enum NamedChildrenAction<'tree> {
     Default,
@@ -42,7 +30,7 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 }
 
 pub(crate) trait AstNormalizationAdapter: Sync {
-    fn ruby(&self) -> bool {
+    fn tracks_dynamic_local_scope(&self) -> bool {
         false
     }
 
@@ -56,6 +44,63 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn safe_navigation_call(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
+    }
+
+    fn begin_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn rescue_modifier_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn ensure_clause_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
+    fn if_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "if" | "if_statement" | "if_modifier" | "if_expression" | "conditional"
+        )
+    }
+
+    fn conditional_modifier_kind(&self, kind: &str) -> bool {
+        kind == "if_modifier"
+    }
+
+    fn conditional_node_type(&self, kind: &str) -> Option<&'static str> {
+        self.if_node_kind(kind).then_some("IF")
+    }
+
+    fn conditional_keyword_node_type(&self, keyword: &str) -> Option<&'static str> {
+        match keyword {
+            "if" => Some("IF"),
+            _ => None,
+        }
+    }
+
+    fn modifier_node_type(&self, keyword: &str) -> Option<&'static str> {
+        match keyword {
+            "if" => Some("IF"),
+            "while" => Some("WHILE"),
+            _ => None,
+        }
+    }
+
+    fn conditional_branch_skip_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "comment" | "then" | "else" | "else_clause" | "else_statement"
+        )
+    }
+
+    fn branch_child_skip_kind(&self, kind: &str) -> bool {
+        matches!(kind, "comment" | "else")
+    }
+
+    fn conditional_consequence_kind(&self, kind: &str) -> bool {
+        kind == "then"
     }
 
     fn ternary_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -108,7 +153,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             if CASE_ARGUMENT_WHEN_KINDS.contains(&child.kind()) {
                 continue;
             }
-            if !function_kind(child.kind()) {
+            if !self.function_kind(child.kind()) {
                 stack.extend(named_children(child));
             }
         }
@@ -127,6 +172,30 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    fn function_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "method"
+                | "function_definition"
+                | "function_declaration"
+                | "method_definition"
+                | "method_declaration"
+                | "function_item"
+        )
+    }
+
+    fn singleton_function_kind(&self, _kind: &str) -> bool {
+        false
+    }
+
+    fn leading_function_keyword(&self, _kind: &str) -> bool {
+        false
+    }
+
+    fn leading_function_target_kind(&self, kind: &str) -> bool {
+        self.function_kind(kind) || self.singleton_function_kind(kind)
+    }
+
     fn leading_function_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -138,14 +207,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         if node
             .children(&mut node.walk())
             .next()
-            .map(|child| child.kind() == "def")
+            .map(|child| self.leading_function_keyword(child.kind()))
             .unwrap_or(false)
         {
             return Some(node);
         }
         let raw_named = named_children(node);
         if raw_named.len() == 1
-            && matches!(raw_named[0].kind(), "method" | "singleton_method")
+            && self.leading_function_target_kind(raw_named[0].kind())
             && node_text(raw_named[0], source) == node_text(node, source)
         {
             return Some(raw_named[0]);
@@ -198,12 +267,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         target
             .children(&mut target.walk())
             .next()
-            .map(|child| matches!(child.kind(), "if" | "unless"))
+            .map(|child| self.conditional_keyword_node_type(child.kind()).is_some())
             .unwrap_or(false)
             && named_children(target).len() >= 2
             && named_children(target)
                 .first()
-                .map(|child| !IF_NODE_KINDS.contains(&child.kind()))
+                .map(|child| !self.if_node_kind(child.kind()))
                 .unwrap_or(false)
     }
 
@@ -217,7 +286,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
         let raw_named = named_children(node);
         if raw_named.len() == 1
-            && IF_NODE_KINDS.contains(&raw_named[0].kind())
+            && self.if_node_kind(raw_named[0].kind())
             && node_text(raw_named[0], source) == node_text(node, source)
         {
             return Some(raw_named[0]);
@@ -291,14 +360,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn rescue_body_target<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        if RESCUE_BODY_WRAPPER_KINDS.contains(&node.kind()) {
-            Some(node)
-        } else {
-            None
-        }
+        None
     }
 
     fn rescue_body_nodes<'tree>(
@@ -332,71 +397,44 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn rescue_clause_exceptions<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
         source: &str,
     ) -> Vec<TreeSitterNode<'tree>> {
-        let Some(exceptions) = named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "exceptions")
-        else {
-            return Vec::new();
-        };
-        let text = node_text(exceptions, source).trim();
-        if ruby_exception_constant_text(text)
-            || (named_children(exceptions).is_empty() && !text.is_empty())
-        {
-            return vec![exceptions];
-        }
-        named_children(exceptions)
+        let _ = source;
+        Vec::new()
     }
 
     fn rescue_clause_exceptions_source<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "exceptions")
+        None
     }
 
     fn rescue_clause_exception_variable_name<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "exception_variable")
-            .and_then(|variable| {
-                named_children(variable)
-                    .into_iter()
-                    .find(|child| identifier_kind_name(child.kind()))
-            })
+        None
     }
 
     fn rescue_clause_exception_variable_source<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        named_children(node)
-            .into_iter()
-            .find(|child| child.kind() == "exception_variable")
+        None
     }
 
     fn rescue_clause_handler<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        named_children(node).into_iter().rev().find(|child| {
-            !matches!(
-                child.kind(),
-                "exceptions" | "exception_variable" | "comment"
-            )
-        })
+        None
     }
 
-    fn rescue_clause(&self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "rescue"
+    fn rescue_clause(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
     }
 
     fn ensure_body_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -405,14 +443,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn ensure_body_target<'tree>(
         &self,
-        node: TreeSitterNode<'tree>,
+        _node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        if ENSURE_BODY_WRAPPER_KINDS.contains(&node.kind()) {
-            Some(node)
-        } else {
-            None
-        }
+        None
     }
 
     fn ensure_body_nodes<'tree>(
@@ -451,8 +485,8 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
-    fn ensure_clause_kind(&self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "ensure"
+    fn ensure_clause_kind(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
     }
 
     fn array_literal_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -765,8 +799,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
-    fn loop_node_type(&self, _kind: &str) -> Option<&'static str> {
-        None
+    fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
+        match kind {
+            "while" | "while_statement" | "while_modifier" => Some("WHILE"),
+            "for" | "for_statement" | "for_in_clause" => Some("FOR"),
+            _ => None,
+        }
     }
 
     fn member_access_operator(&self, text: &str) -> bool {
@@ -785,12 +823,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
-    fn instance_variable(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        node.kind() == "instance_variable"
+    fn instance_variable(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
     }
 
-    fn global_variable(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        node.kind() == "global_variable"
+    fn global_variable(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
     }
 
     fn literal_fragment_assignment_context(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -952,6 +990,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn inline_def_wrapper_mid(&self, _text: &str) -> bool {
         false
+    }
+
+    fn inline_def_receiver_text(&self, _text: &str) -> bool {
+        false
+    }
+
+    fn inline_def_function_kind(&self, kind: &str) -> bool {
+        self.function_kind(kind) || self.singleton_function_kind(kind)
     }
 
     fn inline_def_function_text_source<'tree>(

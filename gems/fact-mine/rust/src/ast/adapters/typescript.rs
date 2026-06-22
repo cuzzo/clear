@@ -1,9 +1,21 @@
 use super::super::{
     named_children, node_text, question_colon_ternary_parts, raw_named_children, TernaryParts,
-    TYPESCRIPT_TERNARY_KINDS,
 };
-use super::base::{AstNormalizationAdapter, TYPESCRIPT_ASSIGNMENT_OPERATORS};
+use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
+
+const TYPESCRIPT_ASSIGNMENT_OPERATORS: &[&str] = &[
+    "=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=",
+    "??=",
+];
+const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "conditional",
+    "ternary_expression",
+];
 
 pub(crate) struct TypeScriptAstAdapter;
 

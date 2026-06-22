@@ -34,6 +34,10 @@ use swift::SwiftAstAdapter;
 use typescript::TypeScriptAstAdapter;
 use zig::ZigAstAdapter;
 
+pub(in crate::ast) use ruby::{
+    dynamic_constant_pattern_text, dynamic_exception_constant_text, dynamic_instance_variable_text,
+};
+
 static RUBY: RubyAstAdapter = RubyAstAdapter;
 static PYTHON: PythonAstAdapter = PythonAstAdapter;
 static JAVASCRIPT: JavaScriptAstAdapter = JavaScriptAstAdapter;

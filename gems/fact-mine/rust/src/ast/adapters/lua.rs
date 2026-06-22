@@ -1,12 +1,12 @@
 use super::super::{
-    bracketed, direct_binary_operator, lua_keyed_table_target, lua_positional_table_target,
-    named_children, node_text, raw_named_children, LUA_LEADING_FUNCTION_WRAPPER_KINDS,
-    LUA_LEADING_IF_WRAPPER_KINDS,
+    bracketed, direct_binary_operator, named_children, node_text, raw_named_children,
 };
-use super::base::{
-    AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction, LUA_ASSIGNMENT_OPERATORS,
-};
+use super::base::{AstNormalizationAdapter, ConditionalBranchParts, NamedChildrenAction};
 use tree_sitter::Node as TreeSitterNode;
+
+const LUA_ASSIGNMENT_OPERATORS: &[&str] = &["="];
+const LUA_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
+const LUA_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
 
 pub(crate) struct LuaAstAdapter;
 
@@ -563,6 +563,123 @@ fn lua_single_assignment_block_child(node: TreeSitterNode<'_>, source: &str) -> 
     grandparent.kind() == "block"
         && node_text(grandparent, source) == node_text(parent, source)
         && raw_named_children(grandparent).len() == 1
+}
+
+fn lua_positional_table_target<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<TreeSitterNode<'tree>> {
+    if node.kind() == "block" {
+        let named = named_children(node);
+        if named.len() == 1 && named[0].kind() == "function_call" {
+            return lua_positional_table_target(named[0], source);
+        }
+    }
+
+    if node.kind() == "function_call" {
+        let named = named_children(node);
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_positional_table_target(named[1], source);
+        }
+    }
+
+    if node.kind() == "arguments" {
+        let table = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "table_constructor")?;
+        if node_text(node, source).trim() == node_text(table, source).trim() {
+            return lua_positional_table_target(table, source).map(|_| node);
+        }
+        return None;
+    }
+
+    if node.kind() == "table_constructor" {
+        let fields = named_children(node);
+        if fields.is_empty() {
+            return None;
+        }
+        if fields.iter().all(|field| {
+            field.kind() == "field" && {
+                let named = named_children(*field);
+                named.len() <= 1
+            }
+        }) {
+            return Some(node);
+        }
+    }
+
+    None
+}
+
+fn lua_keyed_table_target<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<TreeSitterNode<'tree>> {
+    if node.kind() == "block" {
+        let named = named_children(node);
+        if named.len() == 1 && node_text(named[0], source).trim() == node_text(node, source).trim()
+        {
+            return lua_keyed_table_target(named[0], source);
+        }
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_keyed_table_target(named[1], source);
+        }
+    }
+
+    if node.kind() == "function_call" {
+        let named = named_children(node);
+        if named.len() == 2
+            && named[0].kind() == "identifier"
+            && node_text(named[0], source).is_empty()
+        {
+            return lua_keyed_table_target(named[1], source);
+        }
+    }
+
+    if node.kind() == "arguments" {
+        if bracketed(node, source, "{", "}") {
+            let fields = named_children(node);
+            if fields.is_empty() {
+                return Some(node);
+            }
+            if fields
+                .iter()
+                .any(|field| field.kind() != "field" || named_children(*field).len() > 1)
+            {
+                return Some(node);
+            }
+            return None;
+        }
+
+        let table = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "table_constructor")?;
+        if node_text(node, source).trim() == node_text(table, source).trim() {
+            return lua_keyed_table_target(table, source).map(|_| node);
+        }
+        return None;
+    }
+
+    if node.kind() == "table_constructor" {
+        let fields = named_children(node);
+        if fields.is_empty() {
+            return Some(node);
+        }
+        if fields
+            .iter()
+            .any(|field| field.kind() != "field" || named_children(*field).len() > 1)
+        {
+            return Some(node);
+        }
+    }
+
+    None
 }
 
 fn lua_no_paren_string_call(node: TreeSitterNode<'_>, source: &str) -> bool {

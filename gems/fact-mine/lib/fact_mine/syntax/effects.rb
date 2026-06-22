@@ -63,6 +63,10 @@ module FactMine
         lexicon = effect_lexicon
         message = call.message.to_s
 
+        if call.safe_navigation && !call.receiver.to_s.empty?
+          return semantic_effect_site_from_call(call, :eliminable_guard, call.receiver.to_s)
+        end
+
         if effect_callback_call?(call, message)
           return semantic_effect_site_from_call(call, :callback_inversion, message)
         end

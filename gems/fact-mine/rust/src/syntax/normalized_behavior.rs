@@ -1,8 +1,6 @@
 use super::{
-    normalized_c, normalized_cpp, normalized_csharp, normalized_go, normalized_java,
-    normalized_javascript, normalized_kotlin, normalized_lua, normalized_php, normalized_python,
-    normalized_ruby, normalized_rust, normalized_swift, normalized_typescript, normalized_zig,
-    CallSite, FunctionDef, Language, StateDeclaration,
+    c, cpp, csharp, go, java, javascript, kotlin, lua, php, python, ruby, rust, swift, typescript,
+    zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
@@ -516,21 +514,21 @@ pub(crate) fn eliminable_guard_from_call(
 
 pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBehavior {
     match language {
-        Language::Ruby => normalized_ruby::behavior(),
-        Language::C => normalized_c::behavior(),
-        Language::Cpp => normalized_cpp::behavior(),
-        Language::Go => normalized_go::behavior(),
-        Language::Java => normalized_java::behavior(),
-        Language::JavaScript => normalized_javascript::behavior(),
-        Language::CSharp => normalized_csharp::behavior(),
-        Language::TypeScript => normalized_typescript::behavior(),
-        Language::Kotlin => normalized_kotlin::behavior(),
-        Language::Lua => normalized_lua::behavior(),
-        Language::Php => normalized_php::behavior(),
-        Language::Python => normalized_python::behavior(),
-        Language::Rust => normalized_rust::behavior(),
-        Language::Swift => normalized_swift::behavior(),
-        Language::Zig => normalized_zig::behavior(),
+        Language::Ruby => ruby::behavior(),
+        Language::C => c::behavior(),
+        Language::Cpp => cpp::behavior(),
+        Language::Go => go::behavior(),
+        Language::Java => java::behavior(),
+        Language::JavaScript => javascript::behavior(),
+        Language::CSharp => csharp::behavior(),
+        Language::TypeScript => typescript::behavior(),
+        Language::Kotlin => kotlin::behavior(),
+        Language::Lua => lua::behavior(),
+        Language::Php => php::behavior(),
+        Language::Python => python::behavior(),
+        Language::Rust => rust::behavior(),
+        Language::Swift => swift::behavior(),
+        Language::Zig => zig::behavior(),
     }
 }
 

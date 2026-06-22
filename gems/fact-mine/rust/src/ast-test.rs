@@ -207,7 +207,9 @@ fn assert_ruby_parity(source: &str, language: Language, suffix: &str) {
 fn raw_tree(source: &str, language: Language) -> tree_sitter::Tree {
     let mut parser = TreeSitterParser::new();
     parser
-        .set_language(&super::language_grammar(language))
+        .set_language(&crate::syntax::parser_grammar::grammar_for_language(
+            language,
+        ))
         .expect("set raw parser language");
     parser.parse(source, None).expect("parse raw source")
 }
@@ -16391,8 +16393,10 @@ fn normalize_loop_matches_ruby_private_method() {
     ] {
         let tree = raw_tree(source, language);
         let node = first_raw_node(tree.root_node(), source, kind, text);
-        let node_type = super::loop_kind(node.kind()).expect("test node should be a loop kind");
         let mut normalizer = super::TreeSitterNormalizer::new(source, language);
+        let node_type = normalizer
+            .loop_node_type(node.kind())
+            .expect("test node should be a loop kind");
         let rust = normalizer
             .normalize_loop(node, node_type)
             .map(|node| node_value(&node))

@@ -28,7 +28,7 @@ fn syntax_adapters_directory_does_not_exist() {
     let adapters = crate_src().join("syntax/adapters");
     assert!(
         !adapters.exists(),
-        "syntax/adapters was the old raw fact-profile boundary; use ast/adapters for normalization and syntax/normalized_<lang>.rs for language behavior"
+        "syntax/adapters was the old raw fact-profile boundary; use ast/adapters for normalization and syntax/<lang>.rs for language behavior"
     );
 }
 
@@ -88,7 +88,7 @@ fn tree_sitter_adapter_does_not_define_concrete_language_profiles() {
     for pattern in forbidden {
         assert!(
             !source.contains(pattern),
-            "{} should not live in tree_sitter_adapter.rs; parser setup is grammar-only and language behavior belongs in normalized_<lang>.rs",
+            "{} should not live in tree_sitter_adapter.rs; parser setup is grammar-only and language behavior belongs in syntax/<lang>.rs",
             pattern
         );
     }
@@ -136,6 +136,71 @@ fn ast_adapters_do_not_delegate_through_a_language_kind_selector() {
 }
 
 #[test]
+fn ast_adapter_base_does_not_own_concrete_language_selectors_or_lexicons() {
+    let path = crate_src().join("ast/adapters/base.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read ast adapter base"));
+    let forbidden = [
+        "fn ruby",
+        "ruby_",
+        "RUBY_",
+        "python_",
+        "PYTHON_",
+        "lua_",
+        "LUA_",
+        "typescript_",
+        "TYPESCRIPT_",
+    ];
+    let offenders = forbidden
+        .into_iter()
+        .filter(|pattern| source.contains(pattern))
+        .map(|pattern| pattern.to_string())
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Shared AST adapter base must not own concrete-language selectors or lexicons:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn shared_ast_normalizer_does_not_own_ruby_parser_tokens() {
+    let checked = [
+        crate_src().join("ast.rs"),
+        crate_src().join("ast/adapters/base.rs"),
+    ];
+    let forbidden = [
+        "\"unless\"",
+        "\"unless_modifier\"",
+        "\"elsif\"",
+        "\"rescue_modifier\"",
+        "\"rescue\"",
+        "\"ensure\"",
+        "\"begin\"",
+        "\"instance_variable\"",
+        "\"global_variable\"",
+        "\"def\"",
+        "\"singleton_method\"",
+    ];
+    let mut offenders = Vec::new();
+
+    for path in checked {
+        let source = production_source(&fs::read_to_string(&path).expect("read shared AST file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Ruby parser tokens belong in ast/adapters/ruby.rs, not shared AST normalization:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
 fn syntax_directory_does_not_gain_unreviewed_helper_files() {
     let syntax_dir = crate_src().join("syntax");
     let expected = [
@@ -144,22 +209,22 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "effects.rs",
         "local_flow.rs",
         "normalized_behavior.rs",
-        "normalized_c.rs",
-        "normalized_cpp.rs",
-        "normalized_csharp.rs",
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
         "normalized_extractor.rs",
-        "normalized_go.rs",
-        "normalized_java.rs",
-        "normalized_javascript.rs",
-        "normalized_kotlin.rs",
-        "normalized_lua.rs",
-        "normalized_php.rs",
-        "normalized_python.rs",
-        "normalized_ruby.rs",
-        "normalized_rust.rs",
-        "normalized_swift.rs",
-        "normalized_typescript.rs",
-        "normalized_zig.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
         "parser_grammar.rs",
         "passes.rs",
         "path_condition.rs",
@@ -192,6 +257,75 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
     assert!(
         offenders.is_empty(),
         "Syntax helper files are an architecture boundary; update this invariant deliberately:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn syntax_language_files_use_plain_language_names() {
+    let syntax_dir = crate_src().join("syntax");
+    let offenders = rust_files_recursive(&syntax_dir)
+        .into_iter()
+        .filter_map(|path| {
+            let file_name = path.file_name()?.to_str()?;
+            (file_name.starts_with("normalized_")
+                && file_name != "normalized_behavior.rs"
+                && file_name != "normalized_extractor.rs")
+                .then(|| path.display().to_string())
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Concrete language syntax files must be syntax/<lang>.rs; normalized_* is reserved for generic normalized passes:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn language_specific_ast_files_live_only_in_ast_adapters() {
+    let ast_dir = crate_src().join("ast");
+    let forbidden_names = [
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
+        "ruby_normalization.rs",
+        "python_normalization.rs",
+        "lua_normalization.rs",
+        "typescript_normalization.rs",
+    ];
+    let offenders = rust_files_recursive(&ast_dir)
+        .into_iter()
+        .filter_map(|path| {
+            let relative = path
+                .strip_prefix(&ast_dir)
+                .expect("ast file under ast dir")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative.starts_with("adapters/") {
+                return None;
+            }
+            let file_name = path.file_name()?.to_str()?;
+            (forbidden_names.contains(&file_name) || file_name.ends_with("_normalization.rs"))
+                .then(|| relative)
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "Language-specific AST normalization belongs in ast/adapters/<lang>.rs, not extra ast helper files:\n{}",
         offenders.join("\n")
     );
 }
@@ -256,21 +390,21 @@ fn removed_raw_syntax_profile_architecture_stays_removed() {
 fn generic_syntax_files_do_not_own_language_guard_or_metadata_lexicons() {
     let syntax_dir = crate_src().join("syntax");
     let language_files = [
-        "normalized_c.rs",
-        "normalized_cpp.rs",
-        "normalized_csharp.rs",
-        "normalized_go.rs",
-        "normalized_java.rs",
-        "normalized_javascript.rs",
-        "normalized_kotlin.rs",
-        "normalized_lua.rs",
-        "normalized_php.rs",
-        "normalized_python.rs",
-        "normalized_ruby.rs",
-        "normalized_rust.rs",
-        "normalized_swift.rs",
-        "normalized_typescript.rs",
-        "normalized_zig.rs",
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
     ];
     let forbidden = [
         "\"nil?\"",
@@ -307,7 +441,7 @@ fn generic_syntax_files_do_not_own_language_guard_or_metadata_lexicons() {
 
     assert!(
         offenders.is_empty(),
-        "Concrete guard/metadata spellings belong in normalized_<language>.rs, not generic syntax files:\n{}",
+        "Concrete guard/metadata spellings belong in syntax/<language>.rs, not generic syntax files:\n{}",
         offenders.join("\n")
     );
 }
@@ -489,7 +623,7 @@ fn tree_sitter_adapter_does_not_own_stateful_enrichment_engines() {
 fn rust_syntax_passes_do_not_touch_parser_internals() {
     let checked = [
         crate_src().join("syntax/normalized_behavior.rs"),
-        crate_src().join("syntax/normalized_ruby.rs"),
+        crate_src().join("syntax/ruby.rs"),
         crate_src().join("syntax/passes.rs"),
         crate_src().join("syntax/effects.rs"),
     ];

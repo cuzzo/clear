@@ -1,12 +1,30 @@
 use super::super::{
     bare_identifier_text, named_children, node_text, raw_named_children, TernaryParts,
-    PYTHON_CONCATENATED_STRING_WRAPPER_KINDS, PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS,
-    PYTHON_LEADING_FUNCTION_WRAPPER_KINDS, PYTHON_LEADING_IF_WRAPPER_KINDS,
-    PYTHON_LEADING_OWNER_WRAPPER_KINDS,
 };
-use super::base::{AstNormalizationAdapter, NamedChildrenAction, PYTHON_ASSIGNMENT_OPERATORS};
+use super::base::{AstNormalizationAdapter, NamedChildrenAction};
 use tree_sitter::Node as TreeSitterNode;
 
+const PYTHON_ASSIGNMENT_OPERATORS: &[&str] = &[
+    "=", "+=", "-=", "*=", "/=", "%=", "//=", "**=", "@=", "&=", "|=", "^=", "<<=", ">>=", ":=",
+];
+const PYTHON_DOTTED_EXPRESSION_WRAPPER_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "expression_statement",
+];
+const PYTHON_LEADING_FUNCTION_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_LEADING_OWNER_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_LEADING_IF_WRAPPER_KINDS: &[&str] = &["block"];
+const PYTHON_CONCATENATED_STRING_WRAPPER_KINDS: &[&str] = &[
+    "body_statement",
+    "block_body",
+    "statement",
+    "argument_list",
+    "block",
+    "expression_statement",
+];
 const PYTHON_BODY_FIELD_KINDS: &[&str] = &[
     "elif_clause",
     "else_clause",

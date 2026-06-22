@@ -1,10 +1,10 @@
 use super::effects::effect_from_call_with_lexicon;
+use super::javascript;
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
-use super::normalized_javascript;
 use super::CallSite;
 use crate::ast::{Node, Span};
 
@@ -48,7 +48,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
-        normalized_javascript::property_read_call(node, parts)
+        javascript::property_read_call(node, parts)
     }
 
     fn state_read_uses_access_span(&self, call: &NormalizedCallProjection) -> bool {
@@ -77,9 +77,8 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     }
 
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
-        eliminable_guard_from_call(call, TYPESCRIPT_GUARD_MIDS).or_else(|| {
-            effect_from_call_with_lexicon(call, &normalized_javascript::JAVASCRIPT_EFFECT_LEXICON)
-        })
+        eliminable_guard_from_call(call, TYPESCRIPT_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &javascript::JAVASCRIPT_EFFECT_LEXICON))
     }
 
     fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
