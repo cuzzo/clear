@@ -5,6 +5,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 
 const PYTHON_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -192,9 +193,43 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         )
     }
 
-    fn predicate_body_language_signal(&self, text: &str) -> bool {
-        let lower = text.to_ascii_lowercase();
-        lower.contains("none") || lower.contains(" and ") || lower.contains(" or ")
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        // Python class field annotations: `name: Type` or `name: Type = value`
+        // Node types: assignment, expression_statement, LASGN, or any with colon
+        if let Some((name, rest)) = text.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty()
+                && !name.contains(' ')
+                && !name.contains('.')
+                && !name.contains('(')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+            {
+                let type_text = rest
+                    .split('=')
+                    .next()
+                    .unwrap_or(rest)
+                    .trim()
+                    .trim_end_matches(',')
+                    .to_string();
+                if !type_text.is_empty() && type_text != ":" {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
     }
 }
 
@@ -202,6 +237,16 @@ static BEHAVIOR: PythonNormalizedBehavior = PythonNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<NormalizedStateRead> {
@@ -260,8 +305,9 @@ fn simple_dotted_part(value: &str) -> bool {
     !value.is_empty() && value.split('.').all(simple_identifier)
 }
 
-fn simple_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
+
+fn simple_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && chars.all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

@@ -6,6 +6,7 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect,
 };
 use super::CallSite;
+use super::StateDeclaration;
 use crate::ast::{Node, Span};
 
 const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
@@ -118,12 +119,53 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     fn predicate_body_language_signal(&self, text: &str) -> bool {
         text.to_ascii_lowercase().contains("null") || text.contains("??")
     }
+
+    fn state_declaration_from_node(
+        &self,
+        node: &Node,
+        _owner: &str,
+    ) -> Option<StateDeclaration> {
+        let text = node.text.trim();
+        if let Some((name, rest)) = text.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty()
+                && !name.contains(' ')
+                && !name.contains('.')
+                && !name.contains('(')
+                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                && name.chars().all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
+            {
+                let type_text = rest.split('=').next().unwrap_or(rest).trim()
+                    .trim_end_matches(',').trim_end_matches(';').to_string();
+                if !type_text.is_empty() && type_text != ":" {
+                    return Some(StateDeclaration {
+                        field: name.to_string(),
+                        owner: String::new(),
+                        r#type: Some(type_text),
+                        file: String::new(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 static BEHAVIOR: TypeScriptNormalizedBehavior = TypeScriptNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn simple_identifier(name: &str) -> bool {

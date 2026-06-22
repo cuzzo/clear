@@ -1060,7 +1060,19 @@ impl<'a> Extractor<'a> {
             "FIELD_DECLARATION" | "PROPERTY_DECLARATION" | "FIELD_DECLARATION_LIST"
         ) {
             if let Some(name) = self.behavior.field_name_from_declaration(node) {
-                self.push_owner_field(owner, name);
+                self.push_owner_field(owner, name.clone());
+                // Also try to extract the type and emit a StateDeclaration
+                if let Some(ty) = extract_type_from_field_node(node, &name) {
+                    let decl = super::StateDeclaration {
+                        field: name,
+                        owner: owner.to_string(),
+                        r#type: Some(ty),
+                        file: self.file.clone(),
+                        line: node.first_lineno,
+                        span: span(node),
+                    };
+                    self.facts.state_declarations.push(decl);
+                }
             }
             for child in child_nodes(node) {
                 self.collect_owner_fields_from_node(owner, child);
@@ -2200,6 +2212,31 @@ fn dispatch_constant_pattern(pattern: &str) -> bool {
 fn span_contains(outer: Span, inner: Span) -> bool {
     (outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]))
         && (outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]))
+}
+
+/// From a FIELD_DECLARATION-like node, extract the type after the field name.
+/// Handles patterns like: `count int`, `count: int`, `count: int = 0`, `items: list[str]`
+fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String> {
+    let text = node.text.trim();
+    // Find field name in text and take everything after it
+    let after_name = text
+        .find(field_name)
+        .map(|idx| text[idx + field_name.len()..].trim_start())?;
+    // Strip leading colon if present
+    let after_name = after_name.strip_prefix(':').unwrap_or(after_name).trim_start();
+    // Strip trailing assignment if present (e.g., " = 0", " = []")
+    let type_text = after_name.split('=').next()?.trim();
+    // Filter out common non-type lookalikes
+    if type_text.is_empty()
+        || type_text == ";"
+        || type_text.starts_with('(')
+        || type_text.starts_with("{")
+        || type_text == "?"
+    {
+        return None;
+    }
+    // Handle nullable shorthand: `string?` -> `string | null` or keep as-is
+    Some(type_text.to_string())
 }
 
 fn simple_identifier(value: &str) -> bool {
