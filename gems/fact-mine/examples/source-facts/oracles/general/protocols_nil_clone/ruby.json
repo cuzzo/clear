@@ -644,7 +644,14 @@
         "proof": "value is already proven non-nil on this path"
       }
     ],
-    "semantic_effects": [],
+    "semantic_effects": [
+      {
+        "detail": "value",
+        "function": "guard",
+        "kind": "eliminable_guard",
+        "line": 20
+      }
+    ],
     "state_reads": [
       {
         "receiver": "user.profile",

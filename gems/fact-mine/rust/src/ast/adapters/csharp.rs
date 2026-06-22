@@ -52,5 +52,4 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             .collect::<Vec<_>>();
         (!body.is_empty()).then_some(body)
     }
-
 }

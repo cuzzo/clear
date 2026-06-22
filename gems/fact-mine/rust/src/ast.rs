@@ -338,6 +338,16 @@ pub fn canon_polarity(text: &str) -> (String, bool) {
 }
 
 pub fn flatten_and(node: &Node) -> Vec<&Node> {
+    if matches!(node.r#type.as_str(), "CONDITION_CLAUSE") {
+        let children = node
+            .children
+            .iter()
+            .filter_map(self::node)
+            .collect::<Vec<_>>();
+        if children.len() == 1 {
+            return flatten_and(children[0]);
+        }
+    }
     if node.r#type != "AND" {
         return vec![node];
     }
@@ -1664,19 +1674,23 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     fn normalize_patterns(&mut self, node: TreeSitterNode<'_>) -> Vec<Node> {
         let mut patterns = self
-            .raw_named_children(node)
-            .into_iter()
-            .filter(|child| {
-                matches!(
-                    child.kind(),
-                    "pattern"
-                        | "case_pattern"
-                        | "match_pattern"
-                        | "switch_pattern"
-                        | "when_condition"
-                )
-            })
-            .collect::<Vec<_>>();
+            .normalization_adapter
+            .case_arm_pattern_nodes(node, self.source)
+            .unwrap_or_else(|| {
+                self.raw_named_children(node)
+                    .into_iter()
+                    .filter(|child| {
+                        matches!(
+                            child.kind(),
+                            "pattern"
+                                | "case_pattern"
+                                | "match_pattern"
+                                | "switch_pattern"
+                                | "when_condition"
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
         if patterns.is_empty() {
             if let Some(value) = self.named_field(node, "value") {
                 patterns.push(value);
@@ -1757,6 +1771,15 @@ impl<'source> TreeSitterNormalizer<'source> {
             .case_else_arm(else_node, self.source)
             || else_node.kind() == "switch_default"
         {
+            if let Some(body_nodes) = self
+                .normalization_adapter
+                .case_arm_body_nodes(else_node, self.source)
+            {
+                return body_nodes
+                    .first()
+                    .copied()
+                    .and_then(|source| self.normalize_body_nodes(body_nodes, source));
+            }
             if let Some(body) = self.when_body(else_node) {
                 return self.normalize_body(body);
             }
@@ -5440,6 +5463,15 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'_>,
         function: Option<TreeSitterNode<'_>>,
     ) -> Vec<Node> {
+        if let Some(children) =
+            self.normalization_adapter
+                .call_argument_nodes(node, function, self.source)
+        {
+            return children
+                .into_iter()
+                .filter_map(|child| self.normalize_node(child))
+                .collect();
+        }
         let Some(args) = self
             .named_field(node, "arguments")
             .or_else(|| self.named_field(node, "argument"))

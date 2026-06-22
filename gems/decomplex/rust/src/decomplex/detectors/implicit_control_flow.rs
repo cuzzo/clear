@@ -56,8 +56,7 @@ const OPTIONAL_DIAGNOSTIC_MIDS: &[&str] =
     &["error!", "fixable!", "read_interpolated_string", "warn!"];
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<ImplicitControlFlowReport> {
-    let mut documents = syntax::parse_files(files, language)?;
-    syntax::materialize_protocol_facts(&mut documents)?;
+    let documents = syntax::parse_files(files, language)?;
     Ok(scan_documents(&documents))
 }
 

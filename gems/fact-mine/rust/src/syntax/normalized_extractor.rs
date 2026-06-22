@@ -92,6 +92,11 @@ impl<'a> Extractor<'a> {
     }
 
     fn finish(mut self) -> NormalizedFacts {
+        collect_equality_dispatch_sites(
+            &self.facts.comparison_uses,
+            &self.facts.call_sites,
+            &mut self.facts.dispatch_sites,
+        );
         dedupe_decision_sites(&mut self.facts.decision_sites);
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
@@ -99,6 +104,7 @@ impl<'a> Extractor<'a> {
 
     fn scan(&mut self, node: &Node) {
         self.record_behavior_node_reads(node);
+        self.record_behavior_node_calls(node);
         match node.r#type.as_str() {
             "CLASS" | "MODULE" => self.scan_owner(node),
             "DEFN" | "DEFS" => self.scan_function(node),
@@ -122,7 +128,11 @@ impl<'a> Extractor<'a> {
             "OPCALL" => self.scan_operator_call(node),
             "OP_ASGN1" | "OP_ASGN2" => self.scan_operator_assignment(node),
             _ => {
-                if self.behavior.declarative_owner(node, &self.current_owner()).is_some() {
+                if self
+                    .behavior
+                    .declarative_owner(node, &self.current_owner())
+                    .is_some()
+                {
                     self.scan_declarative_owner(node);
                 } else {
                     self.scan_children(node);
@@ -209,13 +219,15 @@ impl<'a> Extractor<'a> {
         if let Some(alias) = predicate_alias(node, &self.file, &owner, self.behavior) {
             self.facts.predicate_aliases.push(alias);
         }
-        self.record_initializer_field_reads(node, &owner, &name);
         let owner_pushed = owner != current_owner;
         if owner_pushed {
             self.owners.push(owner);
         }
         self.functions.push(name);
         self.function_params.push(params);
+        let function_name = self.current_function();
+        let owner_name = self.current_owner();
+        self.record_initializer_field_reads(node, &owner_name, &function_name);
         self.receiver_aliases
             .push(self.behavior.receiver_aliases_for_function(node));
         let body_context = self.current_owner();
@@ -301,7 +313,7 @@ impl<'a> Extractor<'a> {
             self.scan_children(node);
             return;
         };
-        if normalized_ternary_if(node) {
+        if self.ternary_if_node(node) {
             if self.behavior.ternary_children_conditional(node) {
                 for child in child_nodes(node) {
                     self.with_control("conditional", |this| this.scan(child));
@@ -425,7 +437,12 @@ impl<'a> Extractor<'a> {
                             node,
                             span(node),
                         );
-                        self.record_state_write_target_span(receiver_name, field.clone(), node, write_span);
+                        self.record_state_write_target_span(
+                            receiver_name,
+                            field.clone(),
+                            node,
+                            write_span,
+                        );
                     }
                 } else {
                     let write_span =
@@ -470,7 +487,7 @@ impl<'a> Extractor<'a> {
                     function: self.current_function(),
                     line: node.first_lineno,
                     span: span(node),
-                    enclosing_span: span(node),
+                    enclosing_span: self.decision_spans.last().copied().unwrap_or(span(node)),
                 });
             }
         }
@@ -532,7 +549,7 @@ impl<'a> Extractor<'a> {
             self.record_state_read_for_call(&projected, node);
             return;
         }
-        if self.suppress_call_site(node, &projected) {
+        if self.suppress_call_site(node, &projected, block) {
             return;
         }
 
@@ -747,12 +764,18 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    fn record_behavior_node_calls(&mut self, node: &Node) {
+        let conditional = self.conditional_context();
+        for projected in self.behavior.node_call_projections(node) {
+            if self.suppress_call_site(node, &projected, false) {
+                continue;
+            }
+            self.append_call_site(projected, node, conditional, false);
+        }
+    }
+
     fn record_initializer_field_reads(&mut self, node: &Node, owner: &str, function_name: &str) {
-        let fields = self
-            .owner_fields
-            .get(owner)
-            .cloned()
-            .unwrap_or_default();
+        let fields = self.owner_fields.get(owner).cloned().unwrap_or_default();
         for read in self
             .behavior
             .initializer_field_reads(node, owner, &fields, function_name)
@@ -783,7 +806,13 @@ impl<'a> Extractor<'a> {
         if self.behavior.suppress_self_call_state_read(call) {
             return;
         }
-        if call.receiver == "self" && call.message.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) {
+        if call.receiver == "self"
+            && call
+                .message
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase())
+        {
             return;
         }
         if call.receiver.is_empty()
@@ -888,7 +917,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_branch_decision(&mut self, node: &Node, condition: &Node) {
-        if normalized_ternary_if(node) || self.behavior.suppress_branch_decision(node) {
+        if self.ternary_if_node(node) || self.behavior.suppress_branch_decision(node) {
             return;
         }
         let mut refs = BTreeSet::new();
@@ -908,7 +937,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_if_arms(&mut self, node: &Node, condition: &Node) {
-        if normalized_ternary_if(node) || self.behavior.suppress_branch_decision(node) {
+        if self.ternary_if_node(node) || self.behavior.suppress_branch_decision(node) {
             return;
         }
         let predicate = self.normalized_text(condition);
@@ -953,7 +982,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_dispatch_site(&mut self, node: &Node, value: &Node, whens: &[&Node]) {
-        let predicate = self.normalized_text(value);
+        let predicate = self.case_predicate_text(value);
         if predicate.is_empty() {
             return;
         }
@@ -1064,6 +1093,9 @@ impl<'a> Extractor<'a> {
     }
 
     fn collect_state_refs(&self, node: &Node, refs: &mut BTreeSet<String>) {
+        for read in self.behavior.node_state_reads(node) {
+            refs.insert(state_read_ref(&read));
+        }
         match node.r#type.as_str() {
             "OPCALL" => {
                 for child in child_nodes(node) {
@@ -1138,7 +1170,10 @@ impl<'a> Extractor<'a> {
             .lines()
             .next()
             .and_then(|line| line.trim_start().strip_prefix("case "))
-            .and_then(|line| line.split_once(':').map(|(source, _)| source.trim().to_string()))
+            .and_then(|line| {
+                line.rsplit_once(':')
+                    .map(|(source, _)| source.trim().to_string())
+            })
         {
             if case_source == "default" {
                 return Vec::new();
@@ -1254,7 +1289,9 @@ impl<'a> Extractor<'a> {
     fn call_source_text(&self, parts: &CallParts<'_>, node: Option<&Node>) -> String {
         if node.is_some_and(|node| node.first_lineno != node.last_lineno && node.text.contains('('))
         {
-            return node.map(|node| self.normalized_text(node)).unwrap_or_default();
+            return node
+                .map(|node| self.normalized_text(node))
+                .unwrap_or_default();
         }
         let receiver = parts.receiver.as_str();
         let message = self.source_call_message(parts, node);
@@ -1329,7 +1366,10 @@ impl<'a> Extractor<'a> {
         if quoted_literal_node(node) {
             return vec![quoted_literal_text(node, self.behavior)];
         }
-        if matches!(node.r#type.as_str(), "LVAR" | "DVAR" | "CONST" | "IVAR" | "GVAR") {
+        if matches!(
+            node.r#type.as_str(),
+            "LVAR" | "DVAR" | "CONST" | "IVAR" | "GVAR"
+        ) {
             if let Some(value) = first_string_or_symbol(node) {
                 return vec![value];
             }
@@ -1358,11 +1398,15 @@ impl<'a> Extractor<'a> {
                 }
             })
         });
-        self.behavior
-            .call_access_span(node, computed, span(node))
+        self.behavior.call_access_span(node, computed, span(node))
     }
 
-    fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
+    fn suppress_call_site(
+        &self,
+        node: &Node,
+        call: &NormalizedCallProjection,
+        block: bool,
+    ) -> bool {
         if call.receiver == "self"
             && call
                 .message
@@ -1376,6 +1420,7 @@ impl<'a> Extractor<'a> {
         if constant_receiver(&call.receiver)
             && !call.receiver.contains('(')
             && call.arguments.is_empty()
+            && !block
             && !self.behavior.preserve_constant_receiver_call(call)
         {
             return true;
@@ -1385,6 +1430,10 @@ impl<'a> Extractor<'a> {
 
     fn normalized_text(&self, node: &Node) -> String {
         normalized_text_with_behavior(node, self.behavior)
+    }
+
+    fn ternary_if_node(&self, node: &Node) -> bool {
+        normalized_ternary_if(node) || self.behavior.ternary_if_node(node)
     }
 
     fn current_receiver_aliases(&self) -> BTreeMap<String, String> {
@@ -1432,54 +1481,6 @@ struct CallParts<'a> {
     args_node: Option<&'a Node>,
 }
 
-fn call_parts(node: &Node) -> Option<CallParts<'_>> {
-    match node.r#type.as_str() {
-        "VCALL" => Some(CallParts {
-            receiver: "self".to_string(),
-            message: child_symbol(node, 0)?,
-            arguments: Vec::new(),
-            receiver_node: None,
-            args_node: None,
-        }),
-        "FCALL" => {
-            let args_node = child_node(node, 1);
-            Some(CallParts {
-                receiver: "self".to_string(),
-                message: child_symbol(node, 0)?,
-                arguments: basic_arguments(args_node),
-                receiver_node: None,
-                args_node,
-            })
-        }
-        "CALL" | "QCALL" => {
-            let receiver_node = child_node(node, 0);
-            let args_node = child_node(node, 2);
-            Some(CallParts {
-                receiver: receiver_node
-                    .map(normalized_text)
-                    .unwrap_or_else(|| "self".to_string()),
-                message: child_symbol(node, 1)?,
-                arguments: basic_arguments(args_node),
-                receiver_node,
-                args_node,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn basic_arguments(args_node: Option<&Node>) -> Vec<String> {
-    args_node
-        .filter(|node| node.r#type != "ZLIST")
-        .map(|node| {
-            child_nodes(node)
-                .into_iter()
-                .map(normalized_text)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
 fn child_node(node: &Node, index: usize) -> Option<&Node> {
     node.children.get(index).and_then(ast::node)
 }
@@ -1500,6 +1501,14 @@ fn first_string_or_symbol(node: &Node) -> Option<String> {
         Child::Symbol(value) | Child::String(value) => Some(value.clone()),
         _ => None,
     })
+}
+
+fn state_read_ref(read: &NormalizedStateRead) -> String {
+    if read.receiver == "self" {
+        read.field.clone()
+    } else {
+        format!("{}.{}", read.receiver, read.field)
+    }
 }
 
 fn span(node: &Node) -> Span {
@@ -1527,7 +1536,11 @@ fn normalized_text_with_behavior(node: &Node, behavior: &dyn NormalizedLanguageB
 fn quoted_literal_node(node: &Node) -> bool {
     matches!(
         node.r#type.as_str(),
-        "STR" | "STRING" | "STRING_LITERAL" | "STRING_LITERAL_CONTENT" | "STRING_CONTENT"
+        "STR"
+            | "STRING"
+            | "STRING_LITERAL"
+            | "STRING_LITERAL_CONTENT"
+            | "STRING_CONTENT"
             | "LINE_STR_TEXT"
     )
 }
@@ -1565,11 +1578,7 @@ fn owner_kind(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> String 
     behavior.owner_kind(node, default_kind)
 }
 
-fn owner_name_span(
-    name: &str,
-    node: &Node,
-    behavior: &dyn NormalizedLanguageBehavior,
-) -> Span {
+fn owner_name_span(name: &str, node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> Span {
     if let Some(owner_span) = behavior.owner_name_span(name, node, span(node)) {
         return owner_span;
     }
@@ -1694,7 +1703,7 @@ fn predicate_alias(
     let name = function_name_with_behavior(node, behavior)?;
     let body = function_scope(node).and_then(scope_body)?;
     let body = predicate_expression(body, behavior)?;
-    let text = predicate_body_text(&normalized_text_with_behavior(body, behavior))?;
+    let text = predicate_body_text(&normalized_text_with_behavior(body, behavior), behavior)?;
     Some(PredicateAlias {
         name: name.clone(),
         body: text,
@@ -1727,7 +1736,7 @@ fn predicate_expression<'a>(
         }
     }
     if !predicate_container_node(node)
-        && predicate_body_text(&normalized_text_with_behavior(node, behavior)).is_some()
+        && predicate_body_text(&normalized_text_with_behavior(node, behavior), behavior).is_some()
     {
         return Some(node);
     }
@@ -1763,22 +1772,21 @@ fn predicate_container_node(node: &Node) -> bool {
     )
 }
 
-fn predicate_body_text(source: &str) -> Option<String> {
+fn predicate_body_text(source: &str, behavior: &dyn NormalizedLanguageBehavior) -> Option<String> {
     let text = source
         .strip_prefix("return ")
         .unwrap_or(source)
         .trim_end_matches(';')
         .trim()
         .to_string();
-    if text.contains("undefined")
-        || text.is_empty()
-        || text == "nil"
+    if text.is_empty()
         || text.len() > 200
         || assignment_like_predicate_body(&text)
+        || behavior.suppress_predicate_body_text(&text)
     {
         return None;
     }
-    predicate_like_body(&text).then_some(text)
+    predicate_like_body(&text, behavior).then_some(text)
 }
 
 fn assignment_like_predicate_body(text: &str) -> bool {
@@ -1796,20 +1804,16 @@ fn assignment_like_predicate_body(text: &str) -> bool {
             .any(|window| matches!(window, [left, '=', right] if !matches!(left, '=' | '!' | '<' | '>') && *right != '='))
 }
 
-fn predicate_like_body(text: &str) -> bool {
+fn predicate_like_body(text: &str, behavior: &dyn NormalizedLanguageBehavior) -> bool {
     let lower = text.to_ascii_lowercase();
     matches!(lower.as_str(), "true" | "false")
         || lower.contains("true")
         || lower.contains("false")
-        || lower.contains("null")
-        || lower.contains("nil")
         || text.contains("==")
         || text.contains("!=")
         || text.contains("&&")
         || text.contains("||")
-        || text.contains("??")
-        || lower.contains(" and ")
-        || lower.contains(" or ")
+        || behavior.predicate_body_language_signal(text)
 }
 
 fn flatten_and(node: &Node) -> Vec<&Node> {
@@ -1835,49 +1839,12 @@ fn when_chain(node: &Node) -> Vec<&Node> {
     out
 }
 
-fn when_patterns(when: &Node) -> Vec<String> {
-    child_node(when, 0)
-        .map(|patterns| {
-            child_nodes(patterns)
-                .into_iter()
-                .map(normalized_text)
-                .filter(|text| !text.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn case_fallback(node: &Node) -> Option<&Node> {
     let chain = child_node(node, if node.r#type == "CASE" { 1 } else { 0 })?;
     let whens = when_chain(chain);
     whens
         .last()
         .and_then(|when| child_node(when, 2).filter(|child| child.r#type != "WHEN"))
-}
-
-fn collect_state_refs(node: &Node, refs: &mut BTreeSet<String>) {
-    match node.r#type.as_str() {
-        "IVAR" | "GVAR" => {
-            if let Some(name) = first_string_or_symbol(node) {
-                refs.insert(name);
-            }
-        }
-        "CALL" | "QCALL" => {
-            if let Some(parts) = call_parts(node) {
-                if parts.receiver != "self" {
-                    refs.insert(format!("{}.{}", parts.receiver, parts.message));
-                }
-            }
-            for child in child_nodes(node) {
-                collect_state_refs(child, refs);
-            }
-        }
-        _ => {
-            for child in child_nodes(node) {
-                collect_state_refs(child, refs);
-            }
-        }
-    }
 }
 
 fn constant_receiver(receiver: &str) -> bool {
@@ -1943,33 +1910,6 @@ fn block_like_hash(node: &Node) -> bool {
 
 fn normalized_ternary_if(node: &Node) -> bool {
     node.r#type == "IF" && node.text.contains(" ? ") && node.text.contains(" : ")
-}
-
-fn normalize_comparison_source(source: &str) -> String {
-    let mut text = source.trim().to_string();
-    if let Some(stripped) = text.strip_prefix('!') {
-        text = stripped
-            .trim_start_matches('(')
-            .trim_end_matches(')')
-            .trim()
-            .to_string();
-    }
-    if let Some(stripped) = text.strip_prefix("self.") {
-        text = stripped.to_string();
-    }
-    if let Some(stripped) = text.strip_prefix('@') {
-        text = stripped.to_string();
-    }
-    if let Some(dot_index) = text.find('.') {
-        let receiver = &text[..dot_index];
-        let rest = &text[dot_index + 1..];
-        if simple_identifier(receiver)
-            && (rest.contains(" == ") || rest.contains(" != ") || rest.contains('.'))
-        {
-            text = rest.to_string();
-        }
-    }
-    crate::ast::normalize_text(&text)
 }
 
 pub(crate) fn raw_from_normalized(node: &Node) -> RawNode {
@@ -2076,10 +2016,161 @@ fn dispatch_member_name(call: &CallSite) -> String {
     call.message.trim_end_matches('=').to_string()
 }
 
+fn collect_equality_dispatch_sites(
+    comparisons: &[ComparisonUse],
+    call_sites: &[CallSite],
+    out: &mut Vec<DispatchSite>,
+) {
+    let mut groups: BTreeMap<(String, String, String), Vec<(&ComparisonUse, String)>> =
+        BTreeMap::new();
+    for comparison in comparisons {
+        let Some((predicate, variant)) = dispatch_equality(&comparison.canon_source) else {
+            continue;
+        };
+        groups
+            .entry((
+                comparison.file.clone(),
+                comparison.function.clone(),
+                predicate,
+            ))
+            .or_default()
+            .push((comparison, variant));
+    }
+
+    for ((file, function, predicate), entries) in groups {
+        let variant_set = entries
+            .iter()
+            .map(|(_, variant)| variant.clone())
+            .collect::<BTreeSet<_>>();
+        if variant_set.len() < 2 {
+            continue;
+        }
+
+        let mut arm_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut branch_spans = Vec::new();
+        for (comparison, variant) in entries {
+            branch_spans.push(comparison.enclosing_span);
+            let members = dispatch_members_inside(
+                call_sites,
+                &predicate,
+                &function,
+                comparison.enclosing_span,
+            );
+            arm_members.entry(variant).or_default().extend(members);
+        }
+        if arm_members.len() < 2 {
+            continue;
+        }
+        for members in arm_members.values_mut() {
+            members.sort();
+            members.dedup();
+        }
+
+        let outside =
+            dispatch_members_outside_any(call_sites, &predicate, &function, &branch_spans);
+        let mut variant_set = arm_members.keys().cloned().collect::<Vec<_>>();
+        variant_set.sort();
+        let span = branch_spans
+            .into_iter()
+            .reduce(union_span)
+            .unwrap_or([0, 0, 0, 0]);
+        let site = DispatchSite {
+            variant_set,
+            arm_members,
+            outside,
+            file,
+            function,
+            line: span[0],
+            span,
+        };
+        if out.iter().any(|existing| existing == &site) {
+            continue;
+        }
+        out.push(site);
+    }
+}
+
+fn dispatch_equality(source: &str) -> Option<(String, String)> {
+    for operator in ["===", "=="] {
+        let Some((left, right)) = source.split_once(operator) else {
+            continue;
+        };
+        let left = strip_enclosing_parentheses(&crate::ast::normalize_text(left));
+        let right = strip_enclosing_parentheses(&crate::ast::normalize_text(right));
+        let left_variant = dispatch_constant_pattern(&left);
+        let right_variant = dispatch_constant_pattern(&right);
+        return match (left_variant, right_variant) {
+            (true, false) => Some((right, left)),
+            (false, true) => Some((left, right)),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn dispatch_members_outside_any(
+    call_sites: &[CallSite],
+    predicate: &str,
+    function: &str,
+    decision_spans: &[Span],
+) -> Vec<String> {
+    let mut members = dispatch_member_calls(call_sites, predicate, function)
+        .into_iter()
+        .filter(|call| {
+            !decision_spans
+                .iter()
+                .any(|decision_span| span_contains(*decision_span, call.span))
+        })
+        .map(dispatch_member_name)
+        .collect::<Vec<_>>();
+    members.sort();
+    members.dedup();
+    members
+}
+
+fn strip_enclosing_parentheses(source: &str) -> String {
+    let mut text = source.trim();
+    loop {
+        let Some(inner) = text
+            .strip_prefix('(')
+            .and_then(|value| value.strip_suffix(')'))
+        else {
+            return text.to_string();
+        };
+        text = inner.trim();
+    }
+}
+
+fn union_span(left: Span, right: Span) -> Span {
+    [
+        left[0].min(right[0]),
+        if left[0] < right[0] {
+            left[1]
+        } else if right[0] < left[0] {
+            right[1]
+        } else {
+            left[1].min(right[1])
+        },
+        left[2].max(right[2]),
+        if left[2] > right[2] {
+            left[3]
+        } else if right[2] > left[2] {
+            right[3]
+        } else {
+            left[3].max(right[3])
+        },
+    ]
+}
+
 fn dispatch_constant_patterns(member: &str) -> Vec<String> {
     member
         .split(',')
-        .map(|pattern| pattern.trim())
+        .map(|pattern| {
+            pattern
+                .trim()
+                .strip_prefix("case ")
+                .unwrap_or(pattern.trim())
+        })
         .filter(|pattern| dispatch_constant_pattern(pattern))
         .map(ToString::to_string)
         .collect()

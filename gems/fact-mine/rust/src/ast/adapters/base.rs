@@ -86,6 +86,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    fn case_arm_pattern_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
     fn case_else_node<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -734,6 +742,15 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn call_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
+    }
+
+    fn call_argument_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _function: Option<TreeSitterNode<'tree>>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
     }
 
     fn intrinsic_call_name(

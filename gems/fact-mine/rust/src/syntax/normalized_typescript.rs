@@ -1,8 +1,16 @@
+use super::effects::effect_from_call_with_lexicon;
 use super::normalized_behavior::{
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedSemanticEffect,
 };
 use super::normalized_javascript;
+use super::CallSite;
 use crate::ast::{Node, Span};
+
+const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const TYPESCRIPT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const TYPESCRIPT_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 pub(crate) struct TypeScriptNormalizedBehavior;
 
@@ -57,6 +65,59 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
+    }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(
+            message,
+            subject,
+            TYPESCRIPT_NIL_PREDICATES,
+            TYPESCRIPT_NON_NIL_PREDICATES,
+        )
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, TYPESCRIPT_GUARD_MIDS).or_else(|| {
+            effect_from_call_with_lexicon(call, &normalized_javascript::JAVASCRIPT_EFFECT_LEXICON)
+        })
+    }
+
+    fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
+        matches!(keyword, "const" | "let" | "var")
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        self.local_flow_declaration_keyword(name)
+            || matches!(
+                name,
+                "as" | "break"
+                    | "case"
+                    | "class"
+                    | "continue"
+                    | "default"
+                    | "else"
+                    | "false"
+                    | "for"
+                    | "function"
+                    | "if"
+                    | "in"
+                    | "null"
+                    | "private"
+                    | "protected"
+                    | "public"
+                    | "return"
+                    | "this"
+                    | "true"
+                    | "while"
+            )
+    }
+
+    fn suppress_predicate_body_text(&self, text: &str) -> bool {
+        text.contains("undefined")
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        text.to_ascii_lowercase().contains("null") || text.contains("??")
     }
 }
 

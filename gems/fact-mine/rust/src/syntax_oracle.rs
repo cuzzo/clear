@@ -7,8 +7,7 @@ use std::path::PathBuf;
 pub const FORMAT: &str = "decomplex.syntax-facts.v1";
 
 pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
-    let mut documents = syntax::parse_files(files, language)?;
-    syntax::materialize_protocol_facts(&mut documents)?;
+    let documents = syntax::parse_files(files, language)?;
     let metadata = SyntaxFactMetadata::from_documents(&documents);
     Ok(json!({
         "format": FORMAT,

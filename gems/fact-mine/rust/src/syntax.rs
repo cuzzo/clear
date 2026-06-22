@@ -1,15 +1,15 @@
-pub(crate) mod adapters;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
 pub(crate) mod effects;
 pub mod local_flow;
 pub(crate) mod normalized_behavior;
 pub(crate) mod normalized_c;
+pub(crate) mod normalized_cpp;
+pub(crate) mod normalized_csharp;
 pub(crate) mod normalized_extractor;
 pub(crate) mod normalized_go;
-pub(crate) mod normalized_javascript;
-pub(crate) mod normalized_csharp;
 pub(crate) mod normalized_java;
+pub(crate) mod normalized_javascript;
 pub(crate) mod normalized_kotlin;
 pub(crate) mod normalized_lua;
 pub(crate) mod normalized_php;
@@ -19,12 +19,11 @@ pub(crate) mod normalized_rust;
 pub(crate) mod normalized_swift;
 pub(crate) mod normalized_typescript;
 pub(crate) mod normalized_zig;
+pub(crate) mod parser_grammar;
 pub(crate) mod passes;
 pub mod path_condition;
 pub(crate) mod protocols;
-pub(crate) mod raw_tree;
 pub mod redundant_nil_guard;
-pub(crate) mod ruby_metadata;
 pub mod tree_sitter_adapter;
 pub(crate) mod visibility;
 
@@ -165,6 +164,8 @@ pub struct Document {
     #[serde(default)]
     pub local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
     #[serde(default)]
+    pub local_methods: Vec<local_flow::MethodSummary>,
+    #[serde(default)]
     pub predicate_aliases: Vec<PredicateAlias>,
     #[serde(default)]
     pub comparison_uses: Vec<ComparisonUse>,
@@ -176,6 +177,8 @@ pub struct Document {
     pub protocol_call_paths: Vec<ProtocolMethodPath>,
     #[serde(default)]
     pub(crate) clone_candidates: Vec<CloneCandidate>,
+    #[serde(default)]
+    pub redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]
@@ -403,12 +406,6 @@ pub struct ProtocolMethodPath {
     pub calls: Vec<ProtocolCall>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ProtocolFacts {
-    pub(crate) method_effects: Vec<ProtocolMethodEffect>,
-    pub(crate) call_paths: Vec<ProtocolMethodPath>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct CloneCandidate {
     pub file: String,
@@ -446,45 +443,20 @@ pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
 }
 
-pub fn materialize_protocol_facts(documents: &mut [Document]) -> Result<()> {
-    let facts = parallel::map_ordered(documents, |document| Ok(protocol_facts(document)))?;
-    for (document, facts) in documents.iter_mut().zip(facts) {
-        document.protocol_method_effects = facts.method_effects;
-        document.protocol_call_paths = facts.call_paths;
-    }
-    Ok(())
-}
-
-pub(crate) fn protocol_facts(document: &Document) -> ProtocolFacts {
-    ProtocolFacts {
-        method_effects: protocol_method_effects(document),
-        call_paths: protocol_call_paths(document),
-    }
-}
-
 pub(crate) fn protocol_method_effects(document: &Document) -> Vec<ProtocolMethodEffect> {
-    if !document.protocol_method_effects.is_empty() {
-        return document.protocol_method_effects.clone();
-    }
-    protocols::method_effects_from_document_facts(document)
+    document.protocol_method_effects.clone()
 }
 
 pub(crate) fn protocol_call_paths(document: &Document) -> Vec<ProtocolMethodPath> {
-    if !document.protocol_call_paths.is_empty() {
-        return document.protocol_call_paths.clone();
-    }
-    protocols::call_paths_from_document_facts(document)
+    document.protocol_call_paths.clone()
 }
 
 pub fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
-    if !document.clone_candidates.is_empty() {
-        return document.clone_candidates.clone();
-    }
-    clone_similarity::clone_candidates(document)
+    document.clone_candidates.clone()
 }
 
 pub fn core_owner_names(document: &Document) -> &'static [&'static str] {
-    adapters::false_simplicity_lexicon::false_simplicity_lexicon(document.language).core_consts
+    normalized_behavior::behavior(document.language).core_owner_names()
 }
 
 #[cfg(test)]

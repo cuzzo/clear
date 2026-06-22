@@ -1,9 +1,53 @@
+use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner, NormalizedStateRead,
-    NormalizedStateWrite,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
+    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
-use super::StateDeclaration;
+use super::{CallSite, StateDeclaration};
 use crate::ast::{Child, Node, Span};
+
+const ZIG_CONTEXT_PAIRS: &[(&str, &[&str])] =
+    &[("time", &["timestamp", "nanoTimestamp", "milliTimestamp"])];
+
+const ZIG_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
+    dispatch_mids: &["field", "fieldParentPtr", "ptrCast", "alignCast", "call"],
+    meta_mids: &[
+        "typeInfo",
+        "TypeOf",
+        "ptrCast",
+        "intFromPtr",
+        "ptrFromInt",
+        "eval",
+    ],
+    method_obj_mids: &["method"],
+    io_consts: &[
+        "std", "os", "fs", "process", "net", "Thread", "Mutex", "Atomic",
+    ],
+    io_bare: &["panic", "print", "println", "eprintln", "printf", "puts"],
+    context_pairs: ZIG_CONTEXT_PAIRS,
+    callback_set: &[
+        "transaction",
+        "synchronize",
+        "lock",
+        "with_lock",
+        "unlock",
+        "mutex",
+        "atomic",
+        "subscribe",
+        "callback",
+        "hook",
+        "spawn",
+        "wait",
+        "signal",
+    ],
+    callback_requires_block: true,
+    ..EffectLexicon::empty()
+};
+
+const ZIG_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const ZIG_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const ZIG_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 pub(crate) struct ZigNormalizedBehavior;
 
@@ -28,6 +72,15 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         _node: &Node,
         default_span: Span,
     ) -> Vec<NormalizedStateWrite> {
+        if let Some(field) = field.and_then(|field| field.strip_prefix("self.")) {
+            if simple_identifier(field) {
+                return vec![NormalizedStateWrite {
+                    receiver: "self".to_string(),
+                    field: field.to_string(),
+                    span: default_span,
+                }];
+            }
+        }
         let Some(field) = field.and_then(|field| field.strip_prefix('.')) else {
             return Vec::new();
         };
@@ -71,7 +124,16 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         call: &NormalizedCallProjection,
         _span_source: &str,
     ) -> bool {
-        call.receiver == "std" && call.message == "debug"
+        (call.receiver == "std" && call.message == "debug")
+            || (call.receiver == "self" && call.message == "callback")
+    }
+
+    fn state_read_uses_access_span(&self, _call: &NormalizedCallProjection) -> bool {
+        true
+    }
+
+    fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
+        node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
@@ -108,7 +170,9 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
             return None;
         }
         let source = node.text.trim_start();
-        if source.starts_with(&format!("fn {name}")) || source.starts_with(&format!("pub fn {name}")) {
+        if source.starts_with(&format!("fn {name}"))
+            || source.starts_with(&format!("pub fn {name}"))
+        {
             Some(NormalizedOwner {
                 name: name.to_string(),
                 kind: "struct".to_string(),
@@ -123,10 +187,12 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
             return None;
         }
         let field = node.children.iter().find_map(|child| match child {
-            Child::Node(child) if child.r#type == "LVAR" => child.children.first().and_then(|item| match item {
-                Child::String(value) | Child::Symbol(value) => Some(value.clone()),
-                _ => None,
-            }),
+            Child::Node(child) if child.r#type == "LVAR" => {
+                child.children.first().and_then(|item| match item {
+                    Child::String(value) | Child::Symbol(value) => Some(value.clone()),
+                    _ => None,
+                })
+            }
             _ => None,
         })?;
         let ty = node
@@ -192,6 +258,47 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
         false
     }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(message, subject, ZIG_NIL_PREDICATES, ZIG_NON_NIL_PREDICATES)
+    }
+
+    fn terminating_call_message(&self, message: &str) -> bool {
+        matches!(message, "panic" | "unreachable")
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, ZIG_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &ZIG_EFFECT_LEXICON))
+    }
+
+    fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
+        matches!(keyword, "const" | "var")
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        self.local_flow_declaration_keyword(name)
+            || matches!(
+                name,
+                "break"
+                    | "continue"
+                    | "else"
+                    | "false"
+                    | "fn"
+                    | "for"
+                    | "if"
+                    | "null"
+                    | "pub"
+                    | "return"
+                    | "struct"
+                    | "true"
+                    | "while"
+            )
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        text.to_ascii_lowercase().contains("null")
+    }
 }
 
 static BEHAVIOR: ZigNormalizedBehavior = ZigNormalizedBehavior;
@@ -201,7 +308,12 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
 }
 
 fn span(node: &Node) -> Span {
-    [node.first_lineno, node.first_column, node.last_lineno, node.last_column]
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
 }
 
 fn target_span_from_text(node: &Node, target: &str) -> Option<Span> {
@@ -221,7 +333,11 @@ fn literal_span(node: &Node, text: &str, node_span: Span, source_text: &str) -> 
     if node.first_lineno != node.last_lineno {
         return node_span;
     }
-    let source = if source_text.is_empty() { node.text.as_str() } else { source_text };
+    let source = if source_text.is_empty() {
+        node.text.as_str()
+    } else {
+        source_text
+    };
     let Some(index) = source.find(text) else {
         return node_span;
     };
@@ -244,13 +360,24 @@ fn self_owner_from_zig_fn(text: &str) -> Option<String> {
 fn keyword_block_span(node: &Node, keyword: &str) -> Option<Span> {
     let lines = node.text.lines().collect::<Vec<_>>();
     let start_offset = lines.iter().position(|line| line.contains(keyword))?;
-    let end_offset = lines.iter().rposition(|line| line.contains('}')).unwrap_or(lines.len() - 1);
+    let end_offset = lines
+        .iter()
+        .rposition(|line| line.contains('}'))
+        .unwrap_or(lines.len() - 1);
     let start_line = node.first_lineno + start_offset;
     let end_line = node.first_lineno + end_offset;
-    let start_column =
-        if start_offset == 0 { node.first_column } else { 0 } + lines[start_offset].find(keyword).unwrap_or(0);
-    let end_column = if end_offset == 0 { node.first_column } else { 0 }
-        + lines[end_offset].find('}').unwrap_or(lines[end_offset].len())
+    let start_column = if start_offset == 0 {
+        node.first_column
+    } else {
+        0
+    } + lines[start_offset].find(keyword).unwrap_or(0);
+    let end_column = if end_offset == 0 {
+        node.first_column
+    } else {
+        0
+    } + lines[end_offset]
+        .find('}')
+        .unwrap_or(lines[end_offset].len())
         + 1;
     Some([start_line, start_column, end_line, end_column])
 }

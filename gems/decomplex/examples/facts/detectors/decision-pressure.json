@@ -159,6 +159,19 @@
               2,
               25
             ]
+          },
+          {
+            "kind": "eliminable_guard",
+            "detail": "candidate",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "line": 3,
+            "span": [
+              3,
+              2,
+              3,
+              16
+            ]
           }
         ]
       }

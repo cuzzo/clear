@@ -68,6 +68,37 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
         matches!(node.kind(), "interpolation" | "template_substitution")
     }
 
+    fn case_arm_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_case" {
+            return None;
+        }
+        let body = named_children(node)
+            .into_iter()
+            .skip(1)
+            .filter(|child| child.kind() != "break_statement")
+            .collect::<Vec<_>>();
+        (!body.is_empty()).then_some(body)
+    }
+
+    fn case_arm_pattern_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_case" {
+            return None;
+        }
+        let patterns = named_children(node)
+            .into_iter()
+            .take_while(|child| child.kind() != "expression_statement")
+            .collect::<Vec<_>>();
+        (!patterns.is_empty()).then_some(patterns)
+    }
+
     fn rescue_body_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,

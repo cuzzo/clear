@@ -8,17 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-const GUARD_MIDS: &[&str] = &[
-    "is_a?",
-    "kind_of?",
-    "instance_of?",
-    "nil?",
-    "respond_to?",
-    "is_none",
-    "is_some",
-    "is_null",
-    "isNull",
-];
 const TRANSIENT_NOARG_MIDS: &[&str] = &["pop", "shift"];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -59,6 +48,7 @@ pub fn scan_documents_with_summaries(
     let assignment_maps = build_assignment_maps(&methods);
 
     for document in documents {
+        let eliminable_guard_calls = eliminable_guard_call_keys(document);
         for call in &document.call_sites {
             if call.receiver.is_empty() {
                 continue;
@@ -67,11 +57,7 @@ pub fn scan_documents_with_summaries(
             let assignment_map = assignment_maps
                 .get(&(call.file.clone(), call.function.clone()))
                 .unwrap_or(&empty);
-            if eliminable_guard(call) {
-                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
-                    guard.push(hit(contract, call));
-                }
-            } else if essential_dispatch(call) {
+            if essential_dispatch(call) && !eliminable_guard_calls.contains(&call_key(call)) {
                 if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
                     dispatch.push(hit(contract, call));
                 }
@@ -111,8 +97,29 @@ pub fn scan_documents_with_summaries(
     Report::new(guard, dispatch).ranked()
 }
 
-fn eliminable_guard(call: &CallSite) -> bool {
-    GUARD_MIDS.contains(&call.message.as_str()) || call.safe_navigation
+fn eliminable_guard_call_keys(document: &Document) -> BTreeSet<(String, String, usize, Span)> {
+    document
+        .semantic_effect_sites
+        .iter()
+        .filter(|effect| effect.kind == "eliminable_guard")
+        .map(|effect| {
+            (
+                effect.file.clone(),
+                effect.function.clone(),
+                effect.line,
+                effect.span,
+            )
+        })
+        .collect()
+}
+
+fn call_key(call: &CallSite) -> (String, String, usize, Span) {
+    (
+        call.file.clone(),
+        call.function.clone(),
+        call.line,
+        call.span,
+    )
 }
 
 fn essential_dispatch(call: &CallSite) -> bool {

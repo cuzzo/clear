@@ -1,8 +1,64 @@
+use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedStateRead,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedSemanticEffect, NormalizedStateRead,
 };
+use super::CallSite;
 use crate::ast::{Node, Span};
+
+const PYTHON_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("time", &["time", "monotonic", "perf_counter"]),
+    ("datetime", &["now", "today", "utcnow"]),
+    ("random", &["random", "randint", "randrange", "choice"]),
+];
+
+const PYTHON_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
+    dispatch_mids: &[
+        "getattr",
+        "setattr",
+        "hasattr",
+        "__getattr__",
+        "__setattr__",
+        "import_module",
+    ],
+    meta_mids: &[
+        "eval", "exec", "compile", "type", "globals", "locals", "vars", "setattr", "delattr",
+    ],
+    method_obj_mids: &["method"],
+    io_consts: &[
+        "Path",
+        "pathlib",
+        "os",
+        "sys",
+        "subprocess",
+        "socket",
+        "shutil",
+    ],
+    io_bare: &[
+        "print", "println", "printf", "puts", "panic", "input", "open", "exec", "eval",
+    ],
+    context_pairs: PYTHON_CONTEXT_PAIRS,
+    context_bare: &["random", "randint", "randrange"],
+    callback_set: &[
+        "transaction",
+        "synchronize",
+        "lock",
+        "with_lock",
+        "unlock",
+        "mutex",
+        "atomic",
+        "subscribe",
+        "callback",
+        "hook",
+    ],
+    callback_requires_block: true,
+    ..EffectLexicon::empty()
+};
+
+const PYTHON_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "is_none"];
+const PYTHON_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const PYTHON_GUARD_MIDS: &[&str] = &["isNull", "is_null", "is_none", "is_some"];
 
 pub(crate) struct PythonNormalizedBehavior;
 
@@ -70,11 +126,23 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
             return Vec::new();
         }
         let rhs = node.text.split_once('=').map(|(_, rhs)| rhs).unwrap_or("");
-        dotted_member_reads(rhs, node.first_lineno, node.first_column + node.text.len() - rhs.len())
+        dotted_member_reads(
+            rhs,
+            node.first_lineno,
+            node.first_column + node.text.len() - rhs.len(),
+        )
     }
 
     fn ternary_children_conditional(&self, _node: &Node) -> bool {
         false
+    }
+
+    fn ternary_if_node(&self, node: &Node) -> bool {
+        if node.r#type != "IF" || node.first_lineno != node.last_lineno {
+            return false;
+        }
+        let source = format!(" {} ", node.text.as_str());
+        source.contains(" if ") && source.contains(" else ")
     }
 
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
@@ -83,6 +151,50 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
+    }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(
+            message,
+            subject,
+            PYTHON_NIL_PREDICATES,
+            PYTHON_NON_NIL_PREDICATES,
+        )
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, PYTHON_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &PYTHON_EFFECT_LEXICON))
+    }
+
+    fn local_flow_declaration_keyword(&self, _keyword: &str) -> bool {
+        false
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "as" | "break"
+                | "class"
+                | "continue"
+                | "else"
+                | "False"
+                | "false"
+                | "for"
+                | "if"
+                | "in"
+                | "None"
+                | "return"
+                | "self"
+                | "True"
+                | "true"
+                | "while"
+        )
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        lower.contains("none") || lower.contains(" and ") || lower.contains(" or ")
     }
 }
 
@@ -133,7 +245,12 @@ fn dotted_segments(text: &str) -> Vec<(String, String, usize, usize)> {
         let receiver = &text[receiver_start..index];
         let field = &text[(index + 1)..field_end];
         if simple_dotted_part(receiver) && simple_identifier(field) {
-            out.push((receiver.to_string(), field.to_string(), receiver_start, field_end));
+            out.push((
+                receiver.to_string(),
+                field.to_string(),
+                receiver_start,
+                field_end,
+            ));
         }
     }
     out

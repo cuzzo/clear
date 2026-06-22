@@ -268,7 +268,10 @@ impl AstNormalizationAdapter for LuaAstAdapter {
 
         let named = named_children(node);
         let sibling_alternative = node.next_named_sibling().filter(|sibling| {
-            matches!(sibling.kind(), "elseif_statement" | "else" | "else_statement")
+            matches!(
+                sibling.kind(),
+                "elseif_statement" | "else" | "else_statement"
+            )
         });
         Some(ConditionalBranchParts {
             condition: *named.first()?,
@@ -485,6 +488,11 @@ impl AstNormalizationAdapter for LuaAstAdapter {
 
     fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {
         node.kind() == "field"
+            || (node.kind() == "dot_index_expression"
+                && node
+                    .parent()
+                    .map(|parent| parent.kind() == "binary_expression")
+                    .unwrap_or(false))
     }
 
     fn no_paren_string_argument_content<'tree>(
@@ -528,7 +536,9 @@ impl AstNormalizationAdapter for LuaAstAdapter {
     fn call_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         if node.kind() == "expression_list" {
             let children = named_children(node);
-            return children.first().is_some_and(|child| child.kind() == "identifier")
+            return children
+                .first()
+                .is_some_and(|child| child.kind() == "identifier")
                 && children.iter().any(|child| child.kind() == "arguments");
         }
 

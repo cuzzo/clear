@@ -1255,6 +1255,30 @@
           ]
         },
         {
+          "detail": "user",
+          "function": "process",
+          "kind": "eliminable_guard",
+          "line": 27,
+          "span": [
+            27,
+            11,
+            27,
+            24
+          ]
+        },
+        {
+          "detail": "user&.profile",
+          "function": "process",
+          "kind": "eliminable_guard",
+          "line": 27,
+          "span": [
+            27,
+            11,
+            27,
+            30
+          ]
+        },
+        {
           "detail": "warn",
           "function": "process",
           "kind": "hidden_io",

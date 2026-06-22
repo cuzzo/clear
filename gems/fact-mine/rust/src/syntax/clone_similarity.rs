@@ -1,22 +1,19 @@
-use super::{CloneCandidate, Document};
+use super::CloneCandidate;
 use crate::ast::{normalize_text, Child, Node};
 use std::collections::HashSet;
 
-pub(crate) fn clone_candidates(document: &Document) -> Vec<CloneCandidate> {
+pub(crate) fn clone_candidates_from_normalized(
+    file: &str,
+    normalized_root: &Node,
+) -> Vec<CloneCandidate> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    normalized_walk_candidates(
-        document,
-        &document.normalized_root,
-        None,
-        &mut out,
-        &mut seen,
-    );
+    normalized_walk_candidates(file, normalized_root, None, &mut out, &mut seen);
     out
 }
 
 fn normalized_walk_candidates(
-    document: &Document,
+    file: &str,
     node: &Node,
     function_name: Option<String>,
     out: &mut Vec<CloneCandidate>,
@@ -27,12 +24,12 @@ fn normalized_walk_candidates(
         normalized_add_candidate(
             out,
             seen,
-            normalized_clone_candidate_for(document, node, current_function.as_deref()),
+            normalized_clone_candidate_for(file, node, current_function.as_deref()),
         );
     }
 
     for child in normalized_node_children(node) {
-        normalized_walk_candidates(document, child, current_function.clone(), out, seen);
+        normalized_walk_candidates(file, child, current_function.clone(), out, seen);
     }
 }
 
@@ -52,7 +49,7 @@ fn normalized_add_candidate(
 }
 
 fn normalized_clone_candidate_for(
-    document: &Document,
+    file: &str,
     node: &Node,
     function_name: Option<&str>,
 ) -> Option<CloneCandidate> {
@@ -68,7 +65,7 @@ fn normalized_clone_candidate_for(
         .collect::<Vec<_>>();
 
     Some(CloneCandidate {
-        file: document.file.clone(),
+        file: file.to_string(),
         line: node.first_lineno,
         span: [
             node.first_lineno,

@@ -189,7 +189,7 @@ fn false_simplicity_detector_does_not_own_language_lexicons() {
     ] {
         assert!(
             !source.contains(pattern),
-            "{} belongs in syntax/adapters, not the false_simplicity detector",
+            "{} belongs in FactMine normalized language behavior, not the false_simplicity detector",
             pattern
         );
     }
@@ -226,6 +226,17 @@ fn decision_pressure_detector_uses_semantic_effect_facts_for_eliminable_guards()
         "statement.source",
         "fn rescue_nil_hits",
         "fn inside_span",
+        "GUARD_MIDS",
+        "\"nil?\"",
+        "\"respond_to?\"",
+        "\"is_a?\"",
+        "\"kind_of?\"",
+        "\"instance_of?\"",
+        "\"isNull\"",
+        "\"is_null\"",
+        "\"is_none\"",
+        "\"is_some\"",
+        "call.safe_navigation",
     ] {
         assert!(
             !source.contains(pattern),
@@ -269,7 +280,7 @@ fn flay_similarity_detector_does_not_own_clone_fingerprint_grammar() {
     ] {
         assert!(
             !source.contains(pattern),
-            "{} belongs in syntax/adapters, not flay_similarity",
+            "{} belongs in FactMine normalized clone facts, not flay_similarity",
             pattern
         );
     }

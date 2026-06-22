@@ -1,18 +1,51 @@
 use super::{
-    adapters::false_simplicity_lexicon::{false_simplicity_lexicon, FalseSimplicityLexicon},
-    CallSite, FunctionDef, Language, SemanticEffectSite,
+    normalized_behavior::{NormalizedLanguageBehavior, NormalizedSemanticEffect},
+    CallSite, FunctionDef, SemanticEffectSite,
 };
 use std::collections::HashSet;
 
-const GENERIC_SYSTEM_IO_BARE: &[&str] =
-    &["print", "println", "eprintln", "printf", "puts", "panic"];
+#[derive(Clone, Copy)]
+pub(crate) struct EffectLexicon {
+    pub(crate) dispatch_mids: &'static [&'static str],
+    pub(crate) meta_mids: &'static [&'static str],
+    pub(crate) method_obj_mids: &'static [&'static str],
+    pub(crate) io_consts: &'static [&'static str],
+    pub(crate) io_pairs: &'static [(&'static str, &'static [&'static str])],
+    pub(crate) io_receiver_prefixes: &'static [&'static str],
+    pub(crate) io_bare: &'static [&'static str],
+    pub(crate) context_pairs: &'static [(&'static str, &'static [&'static str])],
+    pub(crate) context_consts: &'static [&'static str],
+    pub(crate) context_bare: &'static [&'static str],
+    pub(crate) callback_set: &'static [&'static str],
+    pub(crate) callback_requires_block: bool,
+    pub(crate) bang_mutation: bool,
+}
+
+impl EffectLexicon {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            dispatch_mids: &[],
+            meta_mids: &[],
+            method_obj_mids: &[],
+            io_consts: &[],
+            io_pairs: &[],
+            io_receiver_prefixes: &[],
+            io_bare: &[],
+            context_pairs: &[],
+            context_consts: &[],
+            context_bare: &[],
+            callback_set: &[],
+            callback_requires_block: false,
+            bang_mutation: false,
+        }
+    }
+}
 
 pub(crate) fn semantic_effect_sites_from_calls(
-    language: Language,
+    behavior: &dyn NormalizedLanguageBehavior,
     call_sites: &[CallSite],
     function_defs: &[FunctionDef],
 ) -> Vec<SemanticEffectSite> {
-    let lexicon = false_simplicity_lexicon(language);
     let local_methods = function_defs
         .iter()
         .map(|function| (function.owner.clone(), function.name.clone()))
@@ -20,7 +53,7 @@ pub(crate) fn semantic_effect_sites_from_calls(
     call_sites
         .iter()
         .filter(|call| !local_self_call_to_known_function(call, &local_methods))
-        .filter_map(|call| semantic_effect_site_for_call(call, &lexicon))
+        .filter_map(|call| semantic_effect_site_for_call(call, behavior))
         .collect()
 }
 
@@ -47,8 +80,30 @@ fn local_self_call_to_known_function(
 
 fn semantic_effect_site_for_call(
     call: &CallSite,
-    lexicon: &FalseSimplicityLexicon,
+    behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<SemanticEffectSite> {
+    let effect = if call.safe_navigation && !call.receiver.is_empty() {
+        NormalizedSemanticEffect {
+            kind: "eliminable_guard".to_string(),
+            detail: call.receiver.clone(),
+        }
+    } else {
+        behavior.semantic_effect_for_call(call)?
+    };
+    Some(SemanticEffectSite {
+        kind: effect.kind,
+        detail: effect.detail,
+        file: call.file.clone(),
+        function: call.function.clone(),
+        line: call.line,
+        span: call.span,
+    })
+}
+
+pub(crate) fn effect_from_call_with_lexicon(
+    call: &CallSite,
+    lexicon: &EffectLexicon,
+) -> Option<NormalizedSemanticEffect> {
     let message = call.message.as_str();
     let (kind, detail) = if effect_callback_call(call, message, lexicon) {
         ("callback_inversion", message.to_string())
@@ -66,32 +121,30 @@ fn semantic_effect_site_for_call(
         }
     } else if let Some((kind, detail)) = const_effect_kind_detail(call, message, lexicon) {
         (kind, detail)
-    } else if call.receiver == "self"
-        && (lexicon.io_bare.contains(&message) || GENERIC_SYSTEM_IO_BARE.contains(&message))
-    {
+    } else if call.receiver == "self" && lexicon.io_bare.contains(&message) {
         ("hidden_io", message.to_string())
     } else if call.receiver == "self" && lexicon.context_bare.contains(&message) {
         ("context_dependency", message.to_string())
-    } else if message.len() > 1 && message.ends_with('!') && !matches!(message, "!=" | "!~") {
+    } else if lexicon.bang_mutation
+        && message.len() > 1
+        && message.ends_with('!')
+        && !matches!(message, "!=" | "!~")
+    {
         ("hidden_mutation", message.to_string())
     } else {
         return None;
     };
 
-    Some(SemanticEffectSite {
+    Some(NormalizedSemanticEffect {
         kind: kind.to_string(),
         detail,
-        file: call.file.clone(),
-        function: call.function.clone(),
-        line: call.line,
-        span: call.span,
     })
 }
 
 fn const_effect_kind_detail(
     call: &CallSite,
     message: &str,
-    lexicon: &FalseSimplicityLexicon,
+    lexicon: &EffectLexicon,
 ) -> Option<(&'static str, String)> {
     let receiver = call.receiver.as_str();
     if receiver.is_empty() || receiver == "self" {
@@ -102,20 +155,26 @@ fn const_effect_kind_detail(
         .split("::")
         .next()
         .unwrap_or("");
-    if base == "Dir" && lexicon.dir_context.contains(&message) {
-        return Some(("context_dependency", format!("Dir.{message}")));
-    }
-    if receiver == "URI" && message == "open" {
-        return Some(("hidden_io", "URI.open".to_string()));
-    }
-    if lexicon.io_consts.contains(&base) || receiver.starts_with("Net::") {
+    if lexicon.io_consts.contains(&base)
+        || lexicon
+            .io_pairs
+            .iter()
+            .any(|(name, mids)| *name == base && mids.contains(&message))
+        || lexicon
+            .io_receiver_prefixes
+            .iter()
+            .any(|prefix| receiver.starts_with(prefix))
+    {
         return Some((
             "hidden_io",
             format!("{}.{}", receiver.trim_start_matches("::"), message),
         ));
     }
-    if receiver == "ENV" {
-        return Some(("context_dependency", "ENV".to_string()));
+    if lexicon.context_consts.contains(&base) {
+        return Some((
+            "context_dependency",
+            receiver.trim_start_matches("::").to_string(),
+        ));
     }
     if lexicon
         .context_pairs
@@ -127,7 +186,7 @@ fn const_effect_kind_detail(
     None
 }
 
-fn effect_callback_call(call: &CallSite, message: &str, lexicon: &FalseSimplicityLexicon) -> bool {
+fn effect_callback_call(call: &CallSite, message: &str, lexicon: &EffectLexicon) -> bool {
     effect_callback_name(message, lexicon)
         && !lexicon.meta_mids.contains(&message)
         && (!lexicon.callback_requires_block
@@ -135,7 +194,7 @@ fn effect_callback_call(call: &CallSite, message: &str, lexicon: &FalseSimplicit
             || call.arguments.iter().any(|arg| arg.starts_with('&')))
 }
 
-fn effect_callback_name(message: &str, lexicon: &FalseSimplicityLexicon) -> bool {
+fn effect_callback_name(message: &str, lexicon: &EffectLexicon) -> bool {
     lexicon.callback_set.contains(&message)
         || message.starts_with("with_")
         || message.starts_with("around_")
@@ -145,7 +204,7 @@ fn effect_callback_name(message: &str, lexicon: &FalseSimplicityLexicon) -> bool
         || message.ends_with("_hook")
 }
 
-fn method_object_receiver(receiver: &str, lexicon: &FalseSimplicityLexicon) -> bool {
+fn method_object_receiver(receiver: &str, lexicon: &EffectLexicon) -> bool {
     lexicon
         .method_obj_mids
         .iter()

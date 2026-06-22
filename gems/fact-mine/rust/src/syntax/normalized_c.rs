@@ -1,8 +1,44 @@
+use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
+    NormalizedSemanticEffect,
 };
+use super::CallSite;
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
+
+const C_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
+    dispatch_mids: &["dlsym", "dlopen", "GetProcAddress"],
+    meta_mids: &["setjmp", "longjmp", "va_start", "va_arg"],
+    method_obj_mids: &["method"],
+    io_consts: &["FILE", "DIR", "pthread", "mutex", "atomic"],
+    io_bare: &[
+        "print", "printf", "fprintf", "fopen", "open", "read", "write", "close", "system", "exec",
+        "abort", "exit", "assert", "puts", "panic",
+    ],
+    context_bare: &["rand", "time", "clock"],
+    callback_set: &[
+        "transaction",
+        "synchronize",
+        "lock",
+        "with_lock",
+        "unlock",
+        "mutex",
+        "atomic",
+        "subscribe",
+        "callback",
+        "hook",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock",
+    ],
+    callback_requires_block: true,
+    ..EffectLexicon::empty()
+};
+
+const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 struct CNormalizedBehavior;
 
@@ -33,6 +69,10 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
     fn suppress_self_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
         call.receiver == "self" && !call.arguments.is_empty()
+    }
+
+    fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
+        node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
@@ -118,6 +158,51 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
             .map(|tail| format!("AST.{tail}"))
             .unwrap_or_else(|| pattern.to_string())
     }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(message, subject, C_NIL_PREDICATES, C_NON_NIL_PREDICATES)
+    }
+
+    fn terminating_call_message(&self, message: &str) -> bool {
+        matches!(message, "abort" | "exit" | "panic")
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, C_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &C_EFFECT_LEXICON))
+    }
+
+    fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
+        matches!(
+            keyword,
+            "auto" | "bool" | "char" | "double" | "float" | "int" | "long" | "short" | "void"
+        )
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        self.local_flow_declaration_keyword(name)
+            || matches!(
+                name,
+                "break"
+                    | "case"
+                    | "const"
+                    | "continue"
+                    | "default"
+                    | "else"
+                    | "false"
+                    | "for"
+                    | "if"
+                    | "return"
+                    | "static"
+                    | "struct"
+                    | "true"
+                    | "while"
+            )
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        text.to_ascii_lowercase().contains("null")
+    }
 }
 
 static BEHAVIOR: CNormalizedBehavior = CNormalizedBehavior;
@@ -148,13 +233,24 @@ fn typed_self_owner(parameter: &str) -> Option<String> {
 fn keyword_block_span(node: &Node, keyword: &str) -> Option<Span> {
     let lines = node.text.lines().collect::<Vec<_>>();
     let start_offset = lines.iter().position(|line| line.contains(keyword))?;
-    let end_offset = lines.iter().rposition(|line| line.contains('}')).unwrap_or(lines.len() - 1);
+    let end_offset = lines
+        .iter()
+        .rposition(|line| line.contains('}'))
+        .unwrap_or(lines.len() - 1);
     let start_line = node.first_lineno + start_offset;
     let end_line = node.first_lineno + end_offset;
-    let start_column =
-        if start_offset == 0 { node.first_column } else { 0 } + lines[start_offset].find(keyword).unwrap_or(0);
-    let end_column = if end_offset == 0 { node.first_column } else { 0 }
-        + lines[end_offset].find('}').unwrap_or(lines[end_offset].len())
+    let start_column = if start_offset == 0 {
+        node.first_column
+    } else {
+        0
+    } + lines[start_offset].find(keyword).unwrap_or(0);
+    let end_column = if end_offset == 0 {
+        node.first_column
+    } else {
+        0
+    } + lines[end_offset]
+        .find('}')
+        .unwrap_or(lines[end_offset].len())
         + 1;
     Some([start_line, start_column, end_line, end_column])
 }

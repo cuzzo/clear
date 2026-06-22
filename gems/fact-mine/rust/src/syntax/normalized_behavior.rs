@@ -1,8 +1,8 @@
 use super::{
-    normalized_c, normalized_csharp, normalized_go, normalized_java, normalized_javascript,
-    normalized_kotlin, normalized_lua, normalized_php, normalized_python, normalized_ruby,
-    normalized_rust, normalized_swift, normalized_typescript, normalized_zig, FunctionDef,
-    Language, StateDeclaration,
+    normalized_c, normalized_cpp, normalized_csharp, normalized_go, normalized_java,
+    normalized_javascript, normalized_kotlin, normalized_lua, normalized_php, normalized_python,
+    normalized_ruby, normalized_rust, normalized_swift, normalized_typescript, normalized_zig,
+    CallSite, FunctionDef, Language, StateDeclaration,
 };
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
@@ -58,6 +58,20 @@ pub(crate) struct NormalizedSemanticEffect {
     pub(crate) detail: String,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedVisibilityEvent {
+    pub(crate) owner: String,
+    pub(crate) visibility: String,
+    pub(crate) line: usize,
+    pub(crate) target_names: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedNilGuardFact {
+    pub(crate) local: String,
+    pub(crate) non_nil_when_true: bool,
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn yield_semantic_effect(&self, _node: &Node) -> bool {
         true
@@ -77,12 +91,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_span
     }
 
-    fn call_access_span(
-        &self,
-        _node: &Node,
-        computed_span: Option<Span>,
-        full_span: Span,
-    ) -> Span {
+    fn call_access_span(&self, _node: &Node, computed_span: Option<Span>, full_span: Span) -> Span {
         computed_span.unwrap_or(full_span)
     }
 
@@ -105,8 +114,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         parts.receiver.clone()
     }
 
-    fn project_call(&self, _node: &Node, call: NormalizedCallProjection) -> NormalizedCallProjection {
+    fn project_call(
+        &self,
+        _node: &Node,
+        call: NormalizedCallProjection,
+    ) -> NormalizedCallProjection {
         call
+    }
+
+    fn node_call_projections(&self, _node: &Node) -> Vec<NormalizedCallProjection> {
+        Vec::new()
     }
 
     fn suppress_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
@@ -146,11 +163,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
-    fn state_declaration_from_node(
-        &self,
-        _node: &Node,
-        _owner: &str,
-    ) -> Option<StateDeclaration> {
+    fn state_declaration_from_node(&self, _node: &Node, _owner: &str) -> Option<StateDeclaration> {
         None
     }
 
@@ -206,6 +219,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         true
     }
 
+    fn ternary_if_node(&self, _node: &Node) -> bool {
+        false
+    }
+
     fn normalize_source_text(&self, text: &str) -> String {
         text.to_string()
     }
@@ -218,12 +235,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         message.to_string()
     }
 
-    fn owner_name_span(
-        &self,
-        _name: &str,
-        _node: &Node,
-        _default_span: Span,
-    ) -> Option<Span> {
+    fn owner_name_span(&self, _name: &str, _node: &Node, _default_span: Span) -> Option<Span> {
         None
     }
 
@@ -277,7 +289,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     fn function_name_from_text(&self, text: &str) -> Option<String> {
         let source = text.trim();
-        let before_paren = source.split_once('(').map(|(before, _)| before).unwrap_or(source);
+        let before_paren = source
+            .split_once('(')
+            .map(|(before, _)| before)
+            .unwrap_or(source);
         before_paren
             .split_whitespace()
             .next_back()
@@ -388,6 +403,66 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         self.normalize_source_text(source.trim())
     }
 
+    fn visibility_events_from_calls(&self, _calls: &[CallSite]) -> Vec<NormalizedVisibilityEvent> {
+        Vec::new()
+    }
+
+    fn protocol_read_label_from_state(&self, receiver: &str, field: &str) -> Option<String> {
+        if receiver.trim().is_empty() || receiver == "self" {
+            Some(field.to_string())
+        } else {
+            Some(format!("{receiver}.{field}"))
+        }
+    }
+
+    fn protocol_read_label_from_call(&self, receiver: &str, message: &str) -> Option<String> {
+        (receiver == "self").then(|| message.to_string())
+    }
+
+    fn protocol_write_label(&self, receiver: &str, field: &str) -> Option<String> {
+        if receiver.trim().is_empty() || receiver == "self" {
+            Some(field.to_string())
+        } else {
+            Some(format!("{receiver}.{field}"))
+        }
+    }
+
+    fn nil_guard_fact(&self, _message: &str, _subject: &str) -> Option<NormalizedNilGuardFact> {
+        None
+    }
+
+    fn terminating_call_message(&self, _message: &str) -> bool {
+        false
+    }
+
+    fn local_flow_assignment_operator(&self, operator: &str) -> bool {
+        operator == "="
+    }
+
+    fn local_flow_declaration_keyword(&self, _keyword: &str) -> bool {
+        false
+    }
+
+    fn local_flow_keyword(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn suppress_predicate_body_text(&self, _text: &str) -> bool {
+        false
+    }
+
+    fn predicate_body_language_signal(&self, _text: &str) -> bool {
+        false
+    }
+
+    fn semantic_effect_for_call(&self, _call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        None
+    }
+
+    fn core_owner_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     fn structural_semantic_effects(
         &self,
         _node: &Node,
@@ -405,16 +480,45 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 }
 
-struct BaseNormalizedBehavior;
+pub(crate) fn nil_guard_from_predicates(
+    message: &str,
+    subject: &str,
+    nil_predicates: &[&str],
+    non_nil_predicates: &[&str],
+) -> Option<NormalizedNilGuardFact> {
+    if nil_predicates.contains(&message) {
+        return Some(NormalizedNilGuardFact {
+            local: subject.to_string(),
+            non_nil_when_true: false,
+        });
+    }
+    if non_nil_predicates.contains(&message) {
+        return Some(NormalizedNilGuardFact {
+            local: subject.to_string(),
+            non_nil_when_true: true,
+        });
+    }
+    None
+}
 
-impl NormalizedLanguageBehavior for BaseNormalizedBehavior {}
-
-static BASE_BEHAVIOR: BaseNormalizedBehavior = BaseNormalizedBehavior;
+pub(crate) fn eliminable_guard_from_call(
+    call: &CallSite,
+    guard_messages: &[&str],
+) -> Option<NormalizedSemanticEffect> {
+    if call.receiver.is_empty() || !guard_messages.contains(&call.message.as_str()) {
+        return None;
+    }
+    Some(NormalizedSemanticEffect {
+        kind: "eliminable_guard".to_string(),
+        detail: call.receiver.clone(),
+    })
+}
 
 pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBehavior {
     match language {
         Language::Ruby => normalized_ruby::behavior(),
         Language::C => normalized_c::behavior(),
+        Language::Cpp => normalized_cpp::behavior(),
         Language::Go => normalized_go::behavior(),
         Language::Java => normalized_java::behavior(),
         Language::JavaScript => normalized_javascript::behavior(),
@@ -427,7 +531,6 @@ pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBeh
         Language::Rust => normalized_rust::behavior(),
         Language::Swift => normalized_swift::behavior(),
         Language::Zig => normalized_zig::behavior(),
-        _ => &BASE_BEHAVIOR,
     }
 }
 

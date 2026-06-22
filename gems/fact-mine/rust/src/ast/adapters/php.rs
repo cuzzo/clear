@@ -1,4 +1,4 @@
-use super::super::node_text;
+use super::super::{named_children, node_text};
 use super::base::{AstNormalizationAdapter, COMMON_ASSIGNMENT_OPERATORS};
 use tree_sitter::Node as TreeSitterNode;
 
@@ -40,6 +40,22 @@ impl AstNormalizationAdapter for PhpAstAdapter {
 
     fn intrinsic_call_name(&self, node: TreeSitterNode<'_>, _source: &str) -> Option<&'static str> {
         (node.kind() == "print_intrinsic").then_some("print")
+    }
+
+    fn call_argument_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _function: Option<TreeSitterNode<'tree>>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "print_intrinsic" {
+            return None;
+        }
+        let args = named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() != "print")
+            .collect::<Vec<_>>();
+        (!args.is_empty()).then_some(args)
     }
 
     fn block_node_kind(&self, kind: &str) -> bool {
@@ -114,6 +130,13 @@ impl AstNormalizationAdapter for PhpAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() == "default_statement" {
+            let body = php_named_children(node)
+                .into_iter()
+                .filter(|child| child.kind() != "break_statement")
+                .collect::<Vec<_>>();
+            return (!body.is_empty()).then_some(body);
+        }
         if node.kind() != "case_statement" {
             return None;
         }
@@ -127,6 +150,27 @@ impl AstNormalizationAdapter for PhpAstAdapter {
             body.push(child);
         }
         Some(body)
+    }
+
+    fn case_else_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        let mut stack = php_named_children(node);
+        while let Some(child) = stack.pop() {
+            if self.case_else_arm(child, source) {
+                return Some(child);
+            }
+            stack.extend(php_named_children(child));
+        }
+        None
+    }
+
+    fn case_else_arm(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        node.kind() == "default_statement"
+            || (node.kind() == "case_statement"
+                && node_text(node, source).trim_start().starts_with("default"))
     }
 
     fn assignment_operators(&self) -> &'static [&'static str] {

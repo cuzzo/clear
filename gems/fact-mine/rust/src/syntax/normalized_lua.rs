@@ -1,14 +1,67 @@
+use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedStateRead,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedSemanticEffect, NormalizedStateRead,
 };
-use crate::ast::{Node, Span};
+use super::CallSite;
+use crate::ast::{Child, Node, Span};
+
+const LUA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    ("os", &["time", "clock", "date", "getenv"]),
+    ("math", &["random"]),
+];
+
+const LUA_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
+    dispatch_mids: &["load", "loadfile", "dofile", "require", "rawget", "rawset"],
+    meta_mids: &[
+        "setmetatable",
+        "getmetatable",
+        "debug",
+        "eval",
+        "load",
+        "loadfile",
+    ],
+    method_obj_mids: &["method"],
+    io_consts: &["io", "os", "debug", "package"],
+    io_bare: &[
+        "print",
+        "println",
+        "printf",
+        "puts",
+        "panic",
+        "error",
+        "assert",
+        "require",
+        "collectgarbage",
+    ],
+    context_pairs: LUA_CONTEXT_PAIRS,
+    callback_set: &[
+        "transaction",
+        "synchronize",
+        "lock",
+        "with_lock",
+        "unlock",
+        "mutex",
+        "atomic",
+        "subscribe",
+        "callback",
+        "hook",
+    ],
+    callback_requires_block: true,
+    ..EffectLexicon::empty()
+};
+
+const LUA_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
+const LUA_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const LUA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
     fn project_call(
         &self,
-        node: &Node,
+        _node: &Node,
         mut call: NormalizedCallProjection,
     ) -> NormalizedCallProjection {
         if call.message == "call" {
@@ -24,6 +77,10 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         true
     }
 
+    fn node_call_projections(&self, node: &Node) -> Vec<NormalizedCallProjection> {
+        lua_expression_list_call(node).into_iter().collect()
+    }
+
     fn call_site_span(
         &self,
         node: &Node,
@@ -35,7 +92,10 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         let source = node.text.trim_start();
         if source.starts_with("self:escalate(")
             || source.starts_with("self:fallback(")
+            || source.starts_with("self:default_case(")
             || source.starts_with("item:children(")
+            || (parts.receiver == "self"
+                && matches!(parts.message.as_str(), "ipairs" | "setmetatable"))
             || (current_function == "process" && parts.message == "print")
         {
             return access_span;
@@ -72,6 +132,17 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         dotted_member_reads(&node.text, node.first_lineno, node.first_column)
     }
 
+    fn node_state_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
+        if matches!(
+            node.r#type.as_str(),
+            "DOT_INDEX_EXPRESSION" | "EXPRESSION_LIST"
+        ) {
+            dotted_member_reads(&node.text, node.first_lineno, node.first_column)
+        } else {
+            Vec::new()
+        }
+    }
+
     fn function_visibility(&self, _name: &str, _node: &Node, _lines: &[String]) -> String {
         "public".to_string()
     }
@@ -93,6 +164,55 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
     fn suppress_branch_decision(&self, node: &Node) -> bool {
         node.text.trim_start().starts_with("elseif ")
     }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(message, subject, LUA_NIL_PREDICATES, LUA_NON_NIL_PREDICATES)
+    }
+
+    fn terminating_call_message(&self, message: &str) -> bool {
+        matches!(message, "error")
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, LUA_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &LUA_EFFECT_LEXICON))
+    }
+
+    fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
+        keyword == "local"
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        self.local_flow_declaration_keyword(name)
+            || matches!(
+                name,
+                "and"
+                    | "break"
+                    | "do"
+                    | "else"
+                    | "elseif"
+                    | "end"
+                    | "false"
+                    | "for"
+                    | "function"
+                    | "if"
+                    | "in"
+                    | "nil"
+                    | "return"
+                    | "then"
+                    | "true"
+                    | "while"
+            )
+    }
+
+    fn suppress_predicate_body_text(&self, text: &str) -> bool {
+        text == "nil"
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        lower.contains("nil") || lower.contains(" and ") || lower.contains(" or ")
+    }
 }
 
 static BEHAVIOR: LuaNormalizedBehavior = LuaNormalizedBehavior;
@@ -104,6 +224,109 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
 fn lua_method_receiver_message(receiver: &str) -> Option<(String, String)> {
     let (receiver, message) = receiver.rsplit_once(':')?;
     Some((receiver.to_string(), message.to_string()))
+}
+
+fn lua_expression_list_call(node: &Node) -> Option<NormalizedCallProjection> {
+    if node.r#type != "EXPRESSION_LIST" {
+        return None;
+    }
+    let named = child_nodes(node);
+    let callee = named.first()?;
+    if callee.r#type == "CALL" {
+        let receiver = child_nodes(callee)
+            .first()
+            .map(|receiver| normalized_text(receiver))
+            .unwrap_or_default();
+        let message = child_symbol(callee, 1)?;
+        let args = named.iter().find(|child| child.r#type == "ARGUMENTS")?;
+        let arguments = child_nodes(args)
+            .into_iter()
+            .map(lua_argument_text)
+            .collect();
+        return Some(NormalizedCallProjection {
+            receiver,
+            message,
+            arguments,
+            access_span: span(callee),
+            span: span(node),
+        });
+    }
+    if callee.r#type != "LVAR" {
+        return None;
+    }
+    let message = first_string_or_symbol(callee)?;
+    if !matches!(message.as_str(), "ipairs" | "setmetatable") {
+        return None;
+    }
+    let arguments = named
+        .iter()
+        .find(|child| child.r#type == "ARGUMENTS")
+        .map(|args| {
+            child_nodes(args)
+                .into_iter()
+                .map(lua_argument_text)
+                .collect()
+        })
+        .unwrap_or_default();
+    let span = [
+        node.first_lineno,
+        node.first_column,
+        node.first_lineno,
+        node.first_column + message.len(),
+    ];
+    Some(NormalizedCallProjection {
+        receiver: "self".to_string(),
+        message,
+        arguments,
+        access_span: span,
+        span,
+    })
+}
+
+fn child_symbol(node: &Node, index: usize) -> Option<String> {
+    match node.children.get(index)? {
+        Child::Symbol(value) | Child::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn normalized_text(node: &Node) -> String {
+    match node.r#type.as_str() {
+        "LVAR" | "DVAR" | "CONST" | "IVAR" | "GVAR" => {
+            first_string_or_symbol(node).unwrap_or_else(|| crate::ast::normalize_text(&node.text))
+        }
+        _ => crate::ast::normalize_text(&node.text),
+    }
+}
+
+fn span(node: &Node) -> Span {
+    [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ]
+}
+
+fn lua_argument_text(node: &Node) -> String {
+    first_string_or_symbol(node).unwrap_or_else(|| crate::ast::normalize_text(&node.text))
+}
+
+fn child_nodes(node: &Node) -> Vec<&Node> {
+    node.children
+        .iter()
+        .filter_map(|child| match child {
+            Child::Node(node) => Some(node.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn first_string_or_symbol(node: &Node) -> Option<String> {
+    node.children.iter().find_map(|child| match child {
+        Child::Symbol(value) | Child::String(value) => Some(value.clone()),
+        _ => None,
+    })
 }
 
 fn dotted_member_reads(text: &str, line: usize, column: usize) -> Vec<NormalizedStateRead> {
@@ -148,7 +371,12 @@ fn dotted_segments(text: &str) -> Vec<(String, String, usize, usize)> {
         let receiver = &text[receiver_start..index];
         let field = &text[(index + 1)..field_end];
         if simple_dotted_part(receiver) && simple_identifier(field) {
-            out.push((receiver.to_string(), field.to_string(), receiver_start, field_end));
+            out.push((
+                receiver.to_string(),
+                field.to_string(),
+                receiver_start,
+                field_end,
+            ));
         }
     }
     out

@@ -1,8 +1,71 @@
+use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect,
 };
+use super::CallSite;
 use crate::ast::{Node, Span};
+
+const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
+    (
+        "System",
+        &["currentTimeMillis", "nanoTime", "getenv", "getProperty"],
+    ),
+    ("Instant", &["now"]),
+    ("UUID", &["randomUUID"]),
+    ("Math", &["random"]),
+];
+
+const JAVA_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
+    dispatch_mids: &[
+        "invoke",
+        "getMethod",
+        "getDeclaredMethod",
+        "getField",
+        "getDeclaredField",
+        "forName",
+    ],
+    meta_mids: &["invoke", "setAccessible", "newInstance", "Proxy"],
+    method_obj_mids: &["method"],
+    io_consts: &[
+        "System",
+        "File",
+        "Files",
+        "Paths",
+        "ProcessBuilder",
+        "Socket",
+        "HttpClient",
+        "Thread",
+        "Lock",
+        "AtomicReference",
+    ],
+    io_bare: &["print", "println", "printf", "puts", "panic", "throw"],
+    context_pairs: JAVA_CONTEXT_PAIRS,
+    callback_set: &[
+        "transaction",
+        "synchronize",
+        "lock",
+        "with_lock",
+        "unlock",
+        "mutex",
+        "atomic",
+        "subscribe",
+        "callback",
+        "hook",
+        "wait",
+        "notify",
+        "notifyAll",
+        "submit",
+        "execute",
+    ],
+    callback_requires_block: true,
+    ..EffectLexicon::empty()
+};
+
+const JAVA_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const JAVA_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
+const JAVA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 pub(crate) struct JavaNormalizedBehavior;
 
@@ -31,11 +94,7 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         if let Some(rest) = call.receiver.strip_prefix("System.").map(str::to_string) {
             if !call.arguments.is_empty() {
                 call.receiver = "System".to_string();
-                call.message = rest
-                    .split('.')
-                    .next()
-                    .map(str::to_string)
-                    .unwrap_or(rest);
+                call.message = rest.split('.').next().map(str::to_string).unwrap_or(rest);
                 return call;
             }
         }
@@ -47,11 +106,7 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         if let Some(field) = call.receiver.strip_prefix("this.").map(str::to_string) {
             if call.arguments.is_empty() && node.text.contains('(') {
                 call.receiver = "self".to_string();
-                call.message = field
-                    .split('.')
-                    .next()
-                    .map(str::to_string)
-                    .unwrap_or(field);
+                call.message = field.split('.').next().map(str::to_string).unwrap_or(field);
             }
         }
         call
@@ -93,7 +148,10 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
     }
 
     fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
-        if node.text.contains("this.status.name()") && call.receiver == "self" && call.message == "status" {
+        if node.text.contains("this.status.name()")
+            && call.receiver == "self"
+            && call.message == "status"
+        {
             return false;
         }
         false
@@ -137,6 +195,70 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
             return None;
         }
         Some(default_ref)
+    }
+
+    fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
+        nil_guard_from_predicates(
+            message,
+            subject,
+            JAVA_NIL_PREDICATES,
+            JAVA_NON_NIL_PREDICATES,
+        )
+    }
+
+    fn terminating_call_message(&self, message: &str) -> bool {
+        matches!(message, "throw" | "exit")
+    }
+
+    fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
+        eliminable_guard_from_call(call, JAVA_GUARD_MIDS)
+            .or_else(|| effect_from_call_with_lexicon(call, &JAVA_EFFECT_LEXICON))
+    }
+
+    fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
+        matches!(
+            keyword,
+            "boolean"
+                | "bool"
+                | "char"
+                | "double"
+                | "float"
+                | "int"
+                | "long"
+                | "short"
+                | "String"
+                | "string"
+                | "var"
+                | "void"
+        )
+    }
+
+    fn local_flow_keyword(&self, name: &str) -> bool {
+        self.local_flow_declaration_keyword(name)
+            || matches!(
+                name,
+                "break"
+                    | "case"
+                    | "class"
+                    | "continue"
+                    | "default"
+                    | "else"
+                    | "false"
+                    | "for"
+                    | "if"
+                    | "private"
+                    | "protected"
+                    | "public"
+                    | "return"
+                    | "static"
+                    | "this"
+                    | "true"
+                    | "while"
+            )
+    }
+
+    fn predicate_body_language_signal(&self, text: &str) -> bool {
+        text.to_ascii_lowercase().contains("null")
     }
 }
 

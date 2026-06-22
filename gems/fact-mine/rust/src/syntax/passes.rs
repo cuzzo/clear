@@ -1,10 +1,11 @@
 use super::{
-    effects,
+    clone_similarity, complexity, effects, local_flow,
     normalized_behavior::{NormalizedLanguageBehavior, SyntaxMetadata},
-    normalized_extractor, visibility, Language, LocalComplexityScore,
+    normalized_extractor, path_condition, protocols, redundant_nil_guard, visibility,
+    CloneCandidate, LocalComplexityScore, PathConditionSite, ProtocolMethodEffect,
+    ProtocolMethodPath,
 };
 use crate::ast::Node;
-use crate::syntax::complexity::local_complexity_scores;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -37,14 +38,21 @@ impl<'a> StatelessSyntaxPass<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StatefulSyntaxMetadata {
+    pub(crate) local_methods: Vec<local_flow::MethodSummary>,
     pub(crate) local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
+    pub(crate) path_condition_sites: Vec<PathConditionSite>,
+    pub(crate) protocol_method_effects: Vec<ProtocolMethodEffect>,
+    pub(crate) protocol_call_paths: Vec<ProtocolMethodPath>,
+    pub(crate) clone_candidates: Vec<CloneCandidate>,
+    pub(crate) redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
     pub(crate) syntax: SyntaxMetadata,
 }
 
 pub(crate) struct StatefulSyntaxPass<'a> {
     file: &'a Path,
     source: &'a str,
-    language: Language,
+    lines: &'a [String],
+    normalized_root: &'a Node,
     behavior: &'a dyn NormalizedLanguageBehavior,
 }
 
@@ -52,13 +60,15 @@ impl<'a> StatefulSyntaxPass<'a> {
     pub(crate) fn new(
         file: &'a Path,
         source: &'a str,
-        language: Language,
+        lines: &'a [String],
+        normalized_root: &'a Node,
         behavior: &'a dyn NormalizedLanguageBehavior,
     ) -> Self {
         Self {
             file,
             source,
-            language,
+            lines,
+            normalized_root,
             behavior,
         }
     }
@@ -67,21 +77,62 @@ impl<'a> StatefulSyntaxPass<'a> {
         &self,
         facts: &mut normalized_extractor::NormalizedFacts,
     ) -> StatefulSyntaxMetadata {
-        visibility::apply_normalized_visibility(&mut facts.function_defs, &facts.call_sites);
+        let visibility_events = self
+            .behavior
+            .visibility_events_from_calls(&facts.call_sites);
+        visibility::apply_normalized_visibility(&mut facts.function_defs, &visibility_events);
         facts
             .semantic_effect_sites
             .extend(effects::semantic_effect_sites_from_calls(
-                self.language,
+                self.behavior,
                 &facts.call_sites,
                 &facts.function_defs,
             ));
         effects::dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
 
+        let file = self.file.to_string_lossy().to_string();
+        let local_methods = local_flow::local_methods_from_normalized(
+            &file,
+            self.lines,
+            self.normalized_root,
+            &facts.function_defs,
+            self.behavior,
+        );
+        let path_condition_sites =
+            path_condition::normalized_fact_sites(&file, self.lines, self.normalized_root);
+        let protocol_method_effects = protocols::method_effects_from_facts(
+            self.behavior,
+            &facts.function_defs,
+            &facts.state_reads,
+            &facts.state_writes,
+            &facts.call_sites,
+            &facts.semantic_effect_sites,
+        );
+        let protocol_call_paths = protocols::call_paths_from_facts(
+            self.behavior,
+            &facts.function_defs,
+            &facts.call_sites,
+            &facts.semantic_effect_sites,
+        );
+        let clone_candidates =
+            clone_similarity::clone_candidates_from_normalized(&file, self.normalized_root);
+        let redundant_nil_guards = redundant_nil_guard::scan_normalized(
+            &file,
+            self.lines,
+            self.normalized_root,
+            self.behavior,
+        );
+
         StatefulSyntaxMetadata {
-            local_complexity_scores: local_complexity_scores(
-                &self.file.to_string_lossy(),
-                &facts.function_defs,
+            local_complexity_scores: complexity::local_complexity_scores_from_methods(
+                &local_methods,
             ),
+            local_methods,
+            path_condition_sites,
+            protocol_method_effects,
+            protocol_call_paths,
+            clone_candidates,
+            redundant_nil_guards,
             syntax: self
                 .behavior
                 .syntax_metadata(self.source, &facts.function_defs),
