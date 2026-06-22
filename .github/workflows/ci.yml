@@ -272,6 +272,17 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  decomplex-rust-test:
+    name: Decomplex Rust tests
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run Rust Decomplex tests
+        run: cargo test --manifest-path gems/decomplex/rust/Cargo.toml
+
   sorbet:
     name: Sorbet type-check (typed:true files only)
     needs: changes
@@ -1252,6 +1263,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -1269,6 +1281,8 @@ jobs:
             tree-sitter-go \
             tree-sitter-rust \
             @tree-sitter-grammars/tree-sitter-zig
+      - name: Build Rust Decomplex binary
+        run: cargo build --release --manifest-path gems/decomplex/rust/Cargo.toml
       - name: Download Ruby coverage artifacts
         if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
         uses: actions/download-artifact@v4
@@ -1307,6 +1321,7 @@ jobs:
             --head=HEAD \
             --out-dir=tmp/generalized-gems-sarif \
             --top=80 \
+            --decomplex-binary=./gems/decomplex/rust/target/release/decomplex-rust \
             "${coverage_args[@]}"
       - name: Upload Decomplex SARIF
         uses: github/codeql-action/upload-sarif@v3

@@ -28,7 +28,8 @@ options = {
   out_dir: "tmp/generalized-gems-sarif",
   coverage: [],
   exclude: [],
-  top: 50
+  top: 50,
+  decomplex_binary: nil
 }
 
 OptionParser.new do |parser|
@@ -40,6 +41,7 @@ OptionParser.new do |parser|
   parser.on("--out-dir=PATH") { |value| options[:out_dir] = value }
   parser.on("--top=N", Integer) { |value| options[:top] = value }
   parser.on("--exclude=GLOB") { |value| options[:exclude] << value }
+  parser.on("--decomplex-binary=PATH") { |value| options[:decomplex_binary] = value }
 end.parse!
 
 abort "--base is required" unless options[:base]
@@ -101,6 +103,22 @@ def empty_markdown(tool_name)
   "# #{tool_name} Report\n\n_No changed Tree-sitter-supported source files in this PR._\n"
 end
 
+def run_decomplex_rust(binary, files, out_dir, repo)
+  abs_files = files.map { |f| File.join(repo, f) }
+
+  sarif_out = File.join(out_dir, "decomplex.sarif")
+  md_out = File.join(out_dir, "decomplex.md")
+
+  ok = system(binary, "report", "--format", "sarif", "--output", sarif_out, *abs_files)
+  abort "decomplex-rust report --format sarif failed" unless ok
+
+  ok = system(binary, "report", "--format", "markdown", "--output", md_out, *abs_files)
+  abort "decomplex-rust report --format markdown failed" unless ok
+
+  warn "wrote #{sarif_out}"
+  warn "wrote #{md_out}"
+end
+
 def build_espalier_manifest(files)
   modules = files.flat_map { |file| Espalier::AstExtractor.new(file).extract }
   Espalier::Aggregator.new.aggregate(modules)
@@ -151,17 +169,21 @@ previous_parser = ENV["DECOMPLEX_PARSER"]
 ENV["DECOMPLEX_PARSER"] = "tree_sitter"
 
 begin
-  Dir.chdir(repo) do
-    decomplex = Decomplex::Report.new(rel_files)
-    write(
-      File.join(out_dir, "decomplex.sarif"),
-      decomplex.to_sarif(
-        include_snapshot: false,
-        include_finding_payload: false,
-        max_results: DECOMPLEX_SARIF_MAX_RESULTS
+  if options[:decomplex_binary]
+    run_decomplex_rust(options[:decomplex_binary], rel_files, out_dir, repo)
+  else
+    Dir.chdir(repo) do
+      decomplex = Decomplex::Report.new(rel_files)
+      write(
+        File.join(out_dir, "decomplex.sarif"),
+        decomplex.to_sarif(
+          include_snapshot: false,
+          include_finding_payload: false,
+          max_results: DECOMPLEX_SARIF_MAX_RESULTS
+        )
       )
-    )
-    write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+      write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+    end
   end
 
   boobytrap = Boobytrap::Report.new(
