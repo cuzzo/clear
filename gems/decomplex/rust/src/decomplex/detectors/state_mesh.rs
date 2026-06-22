@@ -1,6 +1,5 @@
-use crate::decomplex::ast::Span;
 use crate::decomplex::detectors::semantic_alias;
-use crate::decomplex::syntax::{self, Document, Language};
+use crate::decomplex::syntax::{self, Document, Language, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};

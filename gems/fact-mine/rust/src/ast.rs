@@ -1,9 +1,16 @@
-use crate::syntax::{parser_grammar::grammar_for_language, Language};
+#[cfg(test)]
+use crate::syntax::parser_grammar::grammar_for_language;
+use crate::syntax::Language;
+#[cfg(test)]
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use std::fs;
+#[cfg(test)]
 use std::path::Path;
-use tree_sitter::{Node as TreeSitterNode, Parser};
+use tree_sitter::Node as TreeSitterNode;
+#[cfg(test)]
+use tree_sitter::Parser;
 
 mod adapters;
 mod normalizer;
@@ -37,150 +44,6 @@ pub struct RawNode {
     pub children: Vec<RawNode>,
 }
 
-impl RawNode {
-    pub fn from_tree_sitter(node: TreeSitterNode<'_>, source: &str) -> Self {
-        let mut cursor = node.walk();
-        let mut children: Vec<RawNode> = node
-            .children(&mut cursor)
-            .enumerate()
-            .map(|(index, child)| {
-                let mut raw = Self::from_tree_sitter(child, source);
-                raw.field_name = node.field_name_for_child(index as u32).map(str::to_string);
-                raw
-            })
-            .collect();
-
-        if node.kind() == "argument_list"
-            && !node_text(node, source).trim_start().starts_with('(')
-            && children.len() == 1
-            && children[0].kind == "scope_resolution"
-        {
-            children = children[0].children.clone();
-        }
-
-        if node.kind() == "call" {
-            let mut flattened = Vec::new();
-            for child in children {
-                if child.kind == "argument_list"
-                    && !child.text.trim_start().starts_with('(')
-                    && child.children.len() == 1
-                    && child.children[0].kind != "scope_resolution"
-                {
-                    flattened.extend(child.children);
-                } else {
-                    flattened.push(child);
-                }
-            }
-            children = flattened;
-        }
-
-        if node.kind() == "bare_string" {
-            children.clear();
-        }
-
-        if matches!(node.kind(), "return" | "next" | "break" | "yield") {
-            let mut flattened = Vec::new();
-            for child in children {
-                if child.kind == "argument_list" {
-                    flattened.extend(child.children);
-                } else {
-                    flattened.push(child);
-                }
-            }
-            children = flattened;
-        }
-
-        if node.kind() == "pattern" && children.len() == 1 && children[0].kind == "scope_resolution"
-        {
-            children = children[0].children.clone();
-        }
-
-        if node.kind() == "when" {
-            let mut flattened = Vec::new();
-            for child in children {
-                if child.kind == "pattern"
-                    && child.children.len() == 1
-                    && child.children[0].kind != "scope_resolution"
-                {
-                    flattened.extend(child.children);
-                } else {
-                    flattened.push(child);
-                }
-            }
-            children = flattened;
-        }
-
-        if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "array" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "call" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "body_statement"
-            && children.len() == 1
-            && children[0].kind == "conditional"
-        {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "module" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "body_statement" && children.len() == 1 && children[0].kind == "binary" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "body_statement"
-            && children.len() == 1
-            && children[0].kind == "assignment"
-            && children[0]
-                .children
-                .first()
-                .map(|child| child.kind == "element_reference")
-                .unwrap_or(false)
-        {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "block_body" && children.len() == 1 && children[0].kind == "call" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "block_body" && children.len() == 1 && children[0].kind == "assignment" {
-            children = children[0].children.clone();
-        }
-        if node.kind() == "block_body"
-            && children.len() == 1
-            && matches!(
-                children[0].kind.as_str(),
-                "array" | "binary" | "string" | "unary"
-            )
-        {
-            children = children[0].children.clone();
-        }
-
-        Self {
-            kind: node.kind().to_string(),
-            text: node_text(node, source).to_string(),
-            span: span(node),
-            named: node.is_named(),
-            field_name: None,
-            children,
-        }
-    }
-
-    pub fn named_children(&self) -> Vec<&RawNode> {
-        self.children.iter().filter(|child| child.named).collect()
-    }
-
-    pub fn walk<'a>(&'a self, out: &mut Vec<&'a RawNode>) {
-        out.push(self);
-        for child in &self.children {
-            child.walk(out);
-        }
-    }
-
-    pub fn line(&self) -> usize {
-        self.span[0]
-    }
-}
-
 pub fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -189,10 +52,6 @@ pub fn span(node: TreeSitterNode<'_>) -> Span {
     let start = node.start_position();
     let end = node.end_position();
     [start.row + 1, start.column, end.row + 1, end.column]
-}
-
-pub fn line(node: TreeSitterNode<'_>) -> usize {
-    node.start_position().row + 1
 }
 
 pub fn node_text<'a>(node: TreeSitterNode<'_>, source: &'a str) -> &'a str {
@@ -220,6 +79,7 @@ pub struct Node {
     pub text: String,
 }
 
+#[cfg(test)]
 pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
     let language = file
         .extension()
@@ -229,6 +89,7 @@ pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
     parse_with_language(file, language)
 }
 
+#[cfg(test)]
 pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec<String>)> {
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -777,14 +638,6 @@ fn operator_assignment_statement_operator(text: &str) -> Option<String> {
         "^=" => Some("^".to_string()),
         "||=" => Some("||".to_string()),
         "&&=" => Some("&&".to_string()),
-        _ => None,
-    }
-}
-
-pub fn child_to_string(child: Option<&Child>) -> Option<String> {
-    match child {
-        Some(Child::String(value)) | Some(Child::Symbol(value)) => Some(value.clone()),
-        Some(Child::Integer(value)) => Some(value.to_string()),
         _ => None,
     }
 }

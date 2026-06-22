@@ -24,6 +24,48 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn public_api_does_not_export_ast_or_parser_internals() {
+    let lib_source = fs::read_to_string(crate_src().join("lib.rs")).expect("read lib.rs");
+    let syntax_source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
+    let forbidden = [
+        (&lib_source, "pub mod ast", "AST internals"),
+        (
+            &syntax_source,
+            "pub mod tree_sitter_adapter",
+            "tree-sitter adapter internals",
+        ),
+    ];
+
+    for (source, pattern, label) in forbidden {
+        assert!(
+            !source.contains(pattern),
+            "{} must not be public FactMine API",
+            label
+        );
+    }
+}
+
+#[test]
+fn document_public_api_does_not_expose_raw_syntax_internals() {
+    let source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
+    let forbidden = [
+        ("pub source: String", "raw source text"),
+        ("pub lines: Vec<String>", "raw source lines"),
+        ("pub root: RawNode", "raw syntax root"),
+        ("pub normalized_root: NormalizedNode", "normalized IR root"),
+        ("pub body: RawNode", "raw function body"),
+    ];
+
+    for (pattern, label) in forbidden {
+        assert!(
+            !source.contains(pattern),
+            "{} must stay internal to FactMine passes",
+            label
+        );
+    }
+}
+
+#[test]
 fn syntax_adapters_directory_does_not_exist() {
     let adapters = crate_src().join("syntax/adapters");
     assert!(

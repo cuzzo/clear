@@ -1,5 +1,4 @@
-use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, CloneCandidate, Document, Language, SimilarityFinding};
+use crate::decomplex::syntax::{self, CloneCandidate, Document, Language, SimilarityFinding, Span};
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;

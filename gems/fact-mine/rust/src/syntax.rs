@@ -22,12 +22,13 @@ pub mod redundant_nil_guard;
 pub(crate) mod ruby;
 pub(crate) mod rust;
 pub(crate) mod swift;
-pub mod tree_sitter_adapter;
+pub(crate) mod tree_sitter_adapter;
 pub(crate) mod typescript;
 pub(crate) mod visibility;
 pub(crate) mod zig;
 
-use crate::ast::{Node as NormalizedNode, RawNode, Span};
+use crate::ast::RawNode;
+pub use crate::ast::Span;
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -132,14 +133,6 @@ pub struct Document {
     pub file: String,
     pub language: Language,
     #[serde(default)]
-    pub source: String,
-    #[serde(default)]
-    pub lines: Vec<String>,
-    #[serde(default = "empty_raw_node")]
-    pub root: RawNode,
-    #[serde(default = "empty_normalized_node")]
-    pub normalized_root: NormalizedNode,
-    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
     #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
@@ -189,29 +182,6 @@ pub struct Document {
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
-fn empty_raw_node() -> RawNode {
-    RawNode {
-        kind: "program".to_string(),
-        text: String::new(),
-        span: [1, 0, 1, 0],
-        named: true,
-        field_name: None,
-        children: Vec::new(),
-    }
-}
-
-fn empty_normalized_node() -> NormalizedNode {
-    NormalizedNode {
-        r#type: "ROOT".to_string(),
-        children: Vec::new(),
-        first_lineno: 1,
-        first_column: 0,
-        last_lineno: 1,
-        last_column: 0,
-        text: String::new(),
-    }
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct FunctionDef {
     pub file: String,
@@ -219,7 +189,7 @@ pub struct FunctionDef {
     pub owner: String,
     pub line: usize,
     pub span: Span,
-    pub body: RawNode,
+    pub(crate) body: RawNode,
     pub visibility: Option<String>,
     pub params: Vec<String>,
 }

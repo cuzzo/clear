@@ -1,4 +1,4 @@
-pub use fact_mine_rust::{ast, parallel, syntax, syntax_oracle};
+pub use fact_mine_rust::{parallel, syntax, syntax_oracle};
 #[cfg(test)]
 mod architecture_test;
 pub mod convergence;

@@ -9,35 +9,14 @@ use std::time::{Duration, Instant};
 use tree_sitter::Parser;
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
-    parse_file_with_options(
-        file,
-        language,
-        ParseOptions {
-            normalized_root: true,
-        },
-    )
+    parse_file_with_options(file, language)
 }
 
 pub(crate) fn parse_file_for_report(file: PathBuf, language: Language) -> Result<Document> {
-    parse_file_with_options(
-        file,
-        language,
-        ParseOptions {
-            normalized_root: true,
-        },
-    )
+    parse_file_with_options(file, language)
 }
 
-#[derive(Clone, Copy)]
-struct ParseOptions {
-    normalized_root: bool,
-}
-
-fn parse_file_with_options(
-    file: PathBuf,
-    language: Language,
-    options: ParseOptions,
-) -> Result<Document> {
+fn parse_file_with_options(file: PathBuf, language: Language) -> Result<Document> {
     let profile = rust_profile_enabled();
     let total_started = Instant::now();
     let file_label = file.to_string_lossy().to_string();
@@ -49,20 +28,12 @@ fn parse_file_with_options(
         "read_tree_sitter",
         parsed_started.elapsed(),
     );
-    parse_normalized_file(
-        parsed,
-        language,
-        options,
-        profile,
-        &file_label,
-        total_started,
-    )
+    parse_normalized_file(parsed, language, profile, &file_label, total_started)
 }
 
 fn parse_normalized_file(
     parsed: ParsedDocument,
     language: Language,
-    options: ParseOptions,
     profile: bool,
     file_label: &str,
     total_started: Instant,
@@ -92,29 +63,12 @@ fn parse_normalized_file(
     .enrich(&mut facts);
     profile_parse_phase(profile, file_label, "normalized_facts", started.elapsed());
 
-    let started = Instant::now();
-    let root = super::normalized_extractor::raw_from_normalized(&normalized_root);
-    profile_parse_phase(
-        profile,
-        file_label,
-        "normalized_raw_root",
-        started.elapsed(),
-    );
-
     let mut path_condition_sites = facts.path_condition_sites;
     path_condition_sites.extend(metadata.path_condition_sites);
 
     let document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
-        source: String::new(),
-        lines,
-        root,
-        normalized_root: if options.normalized_root {
-            normalized_root
-        } else {
-            empty_normalized_root()
-        },
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,
@@ -147,18 +101,6 @@ fn parse_normalized_file(
         total_started.elapsed(),
     );
     Ok(document)
-}
-
-fn empty_normalized_root() -> crate::ast::Node {
-    crate::ast::Node {
-        r#type: "ROOT".to_string(),
-        children: Vec::new(),
-        first_lineno: 1,
-        first_column: 0,
-        last_lineno: 1,
-        last_column: 0,
-        text: String::new(),
-    }
 }
 
 fn rust_profile_enabled() -> bool {

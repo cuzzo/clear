@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod architecture_test;
-pub mod ast;
+mod ast;
 pub mod parallel;
 pub mod syntax;
 pub mod syntax_oracle;

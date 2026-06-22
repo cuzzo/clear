@@ -1,5 +1,4 @@
-use crate::decomplex::ast::Span;
-use crate::decomplex::syntax::{self, CallSite, Document, FunctionDef, Language};
+use crate::decomplex::syntax::{self, CallSite, Document, FunctionDef, Language, Span};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -204,7 +203,7 @@ fn edge_for_call(
         line: call.line,
         span: call.span,
         r#type: edge_type(call.control.as_deref()),
-        kind: call_kind(document, call.span),
+        kind: call_kind(call),
         confidence: "high".to_string(),
     })
 }
@@ -224,41 +223,12 @@ fn edge_type(control: Option<&str>) -> String {
     }
 }
 
-fn call_kind(document: &Document, span: Span) -> String {
-    if source_text(&document.lines, span)
-        .trim_start()
-        .starts_with("self.")
-    {
-        "direct_self".to_string()
+fn call_kind(call: &CallSite) -> String {
+    if call.receiver == "self" {
+        "internal_self".to_string()
     } else {
-        "bare_internal".to_string()
+        "internal".to_string()
     }
-}
-
-fn source_text(lines: &[String], span: Span) -> String {
-    let [first_line, first_column, last_line, last_column] = span;
-    if first_line == 0 || last_line == 0 || first_line > lines.len() || last_line > lines.len() {
-        return String::new();
-    }
-    if first_line == last_line {
-        return lines[first_line - 1]
-            .chars()
-            .skip(first_column)
-            .take(last_column.saturating_sub(first_column))
-            .collect();
-    }
-
-    let mut parts = Vec::new();
-    parts.push(lines[first_line - 1].chars().skip(first_column).collect());
-    for line in lines
-        .iter()
-        .take(last_line.saturating_sub(1))
-        .skip(first_line)
-    {
-        parts.push(line.clone());
-    }
-    parts.push(lines[last_line - 1].chars().take(last_column).collect());
-    parts.join("")
 }
 
 fn top_level_owner_for(document: &Document, owner: &str, span: Span) -> String {
