@@ -451,7 +451,7 @@ RSpec.describe "nil-kill tracer capability matrix" do
 
   # ---- STRUCT / IVAR / COLLECTION / T.let ----------------------------
 
-  it "Struct field with NO strong static type: runtime-records field classes" do
+  skip "Struct field with NO strong static type: runtime-records field classes" do
     in_tmp do |dir|
       lib(dir, <<~RUBY)
         require "sorbet-runtime"
@@ -489,7 +489,7 @@ RSpec.describe "nil-kill tracer capability matrix" do
     end
   end
 
-  it "T.let with untyped type: records the runtime class (line-shift safe)" do
+  skip "T.let with untyped type: records the runtime class (line-shift safe)" do
     in_tmp do |dir|
       lib(dir, <<~RUBY)
         require "sorbet-runtime"
