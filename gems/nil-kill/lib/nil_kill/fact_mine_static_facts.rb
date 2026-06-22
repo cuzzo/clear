@@ -2,12 +2,14 @@
 # frozen_string_literal: true
 
 begin
-  require "espalier/fact_mine_static_facts"
+  require "fact_mine/espalier_profile"
 rescue LoadError
-  $LOAD_PATH.unshift(File.expand_path("../../../espalier/lib", __dir__))
-  require "espalier/fact_mine_static_facts"
+  $LOAD_PATH.unshift(File.expand_path("../../../fact-mine/lib", __dir__))
+  require "fact_mine/espalier_profile"
 end
 
 module NilKill
-  FactMineStaticFacts = Espalier::FactMineStaticFacts
+  # Delegates to FactMine::EspalierProfile for all fact extraction.
+  # Retained for backward compatibility.
+  FactMineStaticFacts = FactMine::EspalierProfile
 end

@@ -3,35 +3,37 @@
 
 require "set"
 require "pathname"
-require_relative "static_helpers"
+require "fact_mine/syntax"
 
-begin
-  require "fact_mine/syntax"
-rescue LoadError
-  $LOAD_PATH.unshift(File.expand_path("../../../fact-mine/lib", __dir__))
-  require "fact_mine/syntax"
-end
-
-module Espalier
-  module FactMineStaticFacts
+module FactMine
+  # Produces enriched static facts from raw structural facts.
+  # Supports two profiles:
+  #   :espalier  - core facts needed by Espalier (methods, fields,
+  #                type definitions, hash shapes, state protocols, etc.)
+  #   :nil_kill  - all facts including nil-kill-specific inference
+  #                data (tlet_sites, dead_nil_checks, deterministic_guards,
+  #                return_origins, etc.)
+  module EspalierProfile
     module_function
 
-    def build(document, structural_facts, root: Espalier::ROOT)
-      Builder.new(document, structural_facts, root: root).build
+    def build(document, structural_facts, root: Dir.pwd, profile: :nil_kill)
+      Builder.new(document, structural_facts, root: root, profile: profile).build
     end
 
     class Builder
-      def initialize(document, structural_facts, root: Espalier::ROOT)
+      def initialize(document, structural_facts, root: Dir.pwd, profile: :nil_kill)
         @document = document
         @facts = structural_facts
         @language = document.language.to_s
         @root = root
+        @profile = profile
         @ts_node_cache = {}
       end
 
       def build
         state_declarations = normalized_state_declarations
         known_states = known_states_by_owner(state_declarations)
+        nil_kill = (@profile == :nil_kill)
 
         {
           methods: methods,
@@ -47,13 +49,13 @@ module Espalier
           type_definitions: type_definitions(state_declarations),
           hash_shapes: literal_shapes(:hash),
           array_shapes: literal_shapes(:array),
-          collection_index_lookups: collection_index_lookups,
+          collection_index_lookups: nil_kill ? collection_index_lookups : [],
           hash_record_blockers: [],
-          tlet_sites: tlet_sites,
-          dead_nil_checks: dead_nil_checks,
-          deterministic_guards: deterministic_guards,
-          return_origins: return_origins,
-          noreturn_methods: noreturn_methods,
+          tlet_sites: nil_kill ? tlet_sites : [],
+          dead_nil_checks: nil_kill ? dead_nil_checks : [],
+          deterministic_guards: nil_kill ? deterministic_guards : [],
+          return_origins: nil_kill ? return_origins : [],
+          noreturn_methods: nil_kill ? noreturn_methods : [],
         }
       end
 
@@ -520,7 +522,7 @@ module Espalier
             match = source.match(/\A(?:(@[A-Za-z_]\w*)|(?:self|this)\.([A-Za-z_]\w*))\s*=\s*T\.let\((.*)\)\z/m)
             next unless match
 
-            args = Espalier.split_top_level(match[3])
+            args = FactMine::Syntax.type_profile(:generic).split_top_level(match[3])
             type = args[1].to_s.strip
             next if type.empty?
 
@@ -828,7 +830,7 @@ module Espalier
           next unless owner
 
           if (match = stripped.match(/\A([A-Za-z_$]\w*)\??\s*\((.*)\)\s*:\s*([^;{]+)/))
-            params = Espalier.split_top_level(match[2]).filter_map do |entry|
+            params = FactMine::Syntax.type_profile(:generic).split_top_level(match[2]).filter_map do |entry|
               name, type = typescript_param_entry(entry)
               next unless name && type
 
@@ -1088,7 +1090,7 @@ module Espalier
           match = text.match(/\AT\.let\((.*)\)\z/m)
           next unless match
 
-          args = Espalier.split_top_level(match[1])
+          args = FactMine::Syntax.type_profile(:generic).split_top_level(match[1])
           sites << {
             "path" => rel(@document.file),
             "line" => node_line(node),
@@ -1243,7 +1245,7 @@ module Espalier
         match = source.match(/\A(?:async\s+)?def\s+\w+\s*\((.*)\)\s*(?:->\s*([^:]+))?:/)
         return { params: [], return_type: nil } unless match
 
-        params = Espalier.split_top_level(match[1]).filter_map do |entry|
+        params = FactMine::Syntax.type_profile(:generic).split_top_level(match[1]).filter_map do |entry|
           entry = entry.sub(/\A\*\*?/, "").strip
           name, rest = entry.split(/:\s*/, 2)
           next unless name && rest
@@ -1264,7 +1266,7 @@ module Espalier
         params_source, close_idx = extract_parenthesized(source)
         return { params: [], return_type: nil } unless params_source
 
-        params = Espalier.split_top_level(params_source).filter_map do |entry|
+        params = FactMine::Syntax.type_profile(:generic).split_top_level(params_source).filter_map do |entry|
           name, type = typescript_param_entry(entry)
           next unless name && type
 
@@ -1696,7 +1698,7 @@ module Espalier
 
               parent = lexical_owner_for_line(node_line(node)).to_s
               owner = qualified_owner(parent, match[1])
-              fields = Espalier.split_top_level(match[2]).filter_map do |arg|
+              fields = FactMine::Syntax.type_profile(:generic).split_top_level(match[2]).filter_map do |arg|
                 arg.strip[/\A:([A-Za-z_]\w*)\z/, 1]
               end
               next if fields.empty?
