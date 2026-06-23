@@ -7,7 +7,7 @@ require_relative "../lib/decomplex/detector_runner"
 
 class LocalFlowFactOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples/facts/local-flow", __dir__)
-  ENGINES = %w[ruby].freeze
+  ENGINES = %w[rust].freeze
 
   FIXTURE_PATHS = Dir[File.join(EXAMPLES_ROOT, "*.json")].sort.freeze
 

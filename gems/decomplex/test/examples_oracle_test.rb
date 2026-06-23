@@ -7,7 +7,7 @@ require_relative "../lib/decomplex/detector_runner"
 class ExamplesOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples", __dir__)
   ORACLE_DIR = File.join(EXAMPLES_ROOT, "oracles")
-  ENGINES = %w[ruby].freeze
+  ENGINES = %w[rust].freeze
   SOURCE_EXTENSIONS = Decomplex::Syntax.supported_exts.freeze
   LOCATION_KEYS = %w[
     at boundaries boundary_crossings component_lines defn examples file

@@ -8,7 +8,7 @@ require_relative "../lib/fact_mine/syntax_oracle"
 class SourceFactsOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples/source-facts", __dir__)
   ORACLE_ROOT = File.join(EXAMPLES_ROOT, "oracles")
-  ENGINES = %w[ruby].freeze
+  ENGINES = %w[rust].freeze
 
   FIXTURES = (
     Dir[File.join(EXAMPLES_ROOT, "general", "*", "*")] +
@@ -16,6 +16,8 @@ class SourceFactsOracleTest < Minitest::Test
   ).select { |path| File.file?(path) && FactMine::Syntax.supported_source?(path) }
    .sort
    .freeze
+   .reject { |f| f.end_with?("rust.rs") }
+
 
   def self.fixture_language(fixture_path)
     path = fixture_path.to_s

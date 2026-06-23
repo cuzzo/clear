@@ -7,7 +7,7 @@ require_relative "../lib/fact_mine/syntax_oracle"
 class SyntaxOracleTest < Minitest::Test
   EXAMPLES_ROOT = File.expand_path("../examples/syntax-facts", __dir__)
   ORACLE_ROOT = File.join(EXAMPLES_ROOT, "oracles")
-  ENGINES = %w[ruby].freeze
+  ENGINES = %w[rust].freeze
 
   FIXTURES = Dir[File.join(EXAMPLES_ROOT, "*", "*")]
              .select { |path| File.file?(path) && FactMine::Syntax.supported_source?(path) }
