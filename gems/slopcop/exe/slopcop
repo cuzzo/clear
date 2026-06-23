@@ -107,11 +107,13 @@ def run_report(args)
     when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
     when "--exclude"         then opts[:exclude] << args.shift.to_s
     when /\A--decomplex-facts=(.+)/ then opts[:decomplex_facts] = Regexp.last_match(1)
+    when /\A--boobytrap-churn=(.+)/ then opts[:boobytrap_churn] = Regexp.last_match(1)
     else usage
     end
   end
 
   ENV["DECOMPLEX_FACTS_FILE"] = opts[:decomplex_facts] if opts[:decomplex_facts]
+  ENV["BOOBYTRAP_CHURN_FILE"] = opts[:boobytrap_churn] if opts[:boobytrap_churn]
 
   opts[:files] = if opts[:files]
                    filter_files(opts[:files], opts[:repo], opts[:exclude])

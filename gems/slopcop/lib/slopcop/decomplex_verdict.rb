@@ -119,7 +119,7 @@ module SlopCop
           loc = item[:site]
           sp = item[:span]
           file, meth, = parse_loc(loc)
-          next unless file && !file.empty? && meth && !meth.empty?
+          next if file.to_s.empty? || meth.to_s.empty?
 
           key = [file, meth]
           m_all[key][title] = true

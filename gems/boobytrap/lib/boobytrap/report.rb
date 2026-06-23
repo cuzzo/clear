@@ -134,11 +134,9 @@ module Boobytrap
       end
       files
     rescue StandardError
-      exts = DecomplexRisk.supported_exts
       Dir.chdir(@repo) do
         Dir["**/*"].select do |rel|
-          in_scope?(rel) && ::File.file?(rel) &&
-            exts.include?(::File.extname(rel).downcase) && source_file?(rel)
+          in_scope?(rel) && source_file?(rel)
         end
       end
     end
