@@ -177,8 +177,10 @@ jobs:
             tree-sitter-kotlin@0.3.8 \
             tree-sitter-swift@0.7.1
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build fact-mine-rust binary
-        run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+      - name: Build Rust binaries
+        run: |
+          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+          cargo build --release --manifest-path gems/decomplex/Cargo.toml
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:

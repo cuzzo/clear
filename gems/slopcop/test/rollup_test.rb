@@ -29,6 +29,7 @@ class RollupTest < Minitest::Test
       system("git", "-C", dir, "init", "-q", out: File::NULL, err: File::NULL)
       system("git", "-C", dir, "config", "user.email", "t@t")
       system("git", "-C", dir, "config", "user.name", "t")
+      system("git", "-C", dir, "config", "commit.gpgsign", "false")
       system("git", "-C", dir, "add", "-A", out: File::NULL, err: File::NULL)
       system("git", "-C", dir, "commit", "-qm", "add", out: File::NULL, err: File::NULL)
 

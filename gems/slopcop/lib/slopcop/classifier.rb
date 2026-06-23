@@ -176,17 +176,26 @@ module SlopCop
       case ext
       when ".rb" then :ruby
       when ".py" then :python
-      when ".js", ".jsx" then :javascript
+      when ".js", ".jsx", ".mjs", ".cjs" then :javascript
+      when ".java" then :java
       when ".ts", ".tsx" then :typescript
+      when ".swift" then :swift
+      when ".kt", ".kts" then :kotlin
       when ".go" then :go
       when ".rs" then :rust
       when ".zig" then :zig
-      else :ruby
+      when ".lua" then :lua
+      when ".c", ".h" then :c
+      when ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx" then :cpp
+      when ".cs" then :csharp
+      when ".php" then :php
+      else nil
       end
     end
 
     def tree_sitter_source?(abspath)
-      [:ruby, :python, :javascript, :typescript, :go, :rust, :zig].include?(language_for(abspath))
+      lang = language_for(abspath)
+      lang && [:ruby, :python, :javascript, :typescript, :go, :rust, :zig, :c, :cpp, :csharp, :java, :kotlin, :swift, :php, :lua].include?(lang)
     end
 
     def tree_sitter_coverage_file?(abspath, file_coverage)
