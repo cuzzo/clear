@@ -1250,3 +1250,277 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         descendant(node, kinds)
     }
 }
+
+#[cfg(test)]
+mod dummy_arch_test {}
+
+pub(crate) mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    struct DummyAdapter;
+    impl AstNormalizationAdapter for DummyAdapter {}
+
+    struct MockAdapterForRescue;
+    impl AstNormalizationAdapter for MockAdapterForRescue {
+        fn rescue_body_target<'tree>(
+            &self,
+            node: TreeSitterNode<'tree>,
+            _source: &str,
+        ) -> Option<TreeSitterNode<'tree>> {
+            Some(node)
+        }
+    }
+
+    struct MockAdapterForEnsure;
+    impl AstNormalizationAdapter for MockAdapterForEnsure {
+        fn ensure_body_target<'tree>(
+            &self,
+            node: TreeSitterNode<'tree>,
+            _source: &str,
+        ) -> Option<TreeSitterNode<'tree>> {
+            Some(node)
+        }
+        fn ensure_clause_kind(&self, node: TreeSitterNode<'_>) -> bool {
+            node.kind() == "block"
+        }
+    }
+
+    struct MockAdapterWithKeyword;
+    impl AstNormalizationAdapter for MockAdapterWithKeyword {
+        fn leading_function_keyword(&self, _kind: &str) -> bool {
+            true
+        }
+    }
+
+    pub(crate) fn test_base_adapter_defaults_impl() {
+        let adapter = DummyAdapter;
+        // Test non-node methods
+        assert!(!adapter.tracks_dynamic_local_scope());
+        assert!(adapter.if_node_kind("if"));
+        assert!(adapter.if_node_kind("if_statement"));
+        assert!(!adapter.if_node_kind("unless"));
+        assert!(adapter.conditional_modifier_kind("if_modifier"));
+        assert!(!adapter.conditional_modifier_kind("if"));
+        assert_eq!(adapter.conditional_node_type("if"), Some("IF"));
+        assert_eq!(adapter.conditional_node_type("unless"), None);
+        assert_eq!(adapter.conditional_keyword_node_type("if"), Some("IF"));
+        assert_eq!(adapter.conditional_keyword_node_type("unless"), None);
+        assert_eq!(adapter.modifier_node_type("if"), Some("IF"));
+        assert_eq!(adapter.modifier_node_type("while"), Some("WHILE"));
+        assert_eq!(adapter.modifier_node_type("unless"), None);
+        assert!(adapter.conditional_branch_skip_kind("comment"));
+        assert!(!adapter.conditional_branch_skip_kind("if"));
+        assert!(adapter.branch_child_skip_kind("comment"));
+        assert!(!adapter.branch_child_skip_kind("if"));
+        assert!(adapter.conditional_consequence_kind("then"));
+        assert!(!adapter.conditional_consequence_kind("else"));
+        assert!(adapter.function_kind("method"));
+        assert!(!adapter.function_kind("not_func"));
+        assert!(!adapter.singleton_function_kind("not_func"));
+        assert!(!adapter.leading_function_keyword("def"));
+        assert!(!adapter.leading_function_target_kind("def"));
+        assert_eq!(adapter.leading_function_body_kind(), "body_statement");
+        assert!(!adapter.dynamic_constant_pattern_text(""));
+        assert!(!adapter.dynamic_exception_constant_text(""));
+        assert!(!adapter.dynamic_instance_variable_text(""));
+        assert!(!adapter.logical_operator_assignment("&&="));
+        assert!(!adapter.inline_def_receiver_text(""));
+        assert!(!adapter.inline_def_function_kind("def"));
+        assert!(!adapter.normalize_default_parameters());
+        assert!(!adapter.normalize_block_parameters());
+
+        // Parse a dummy node to test node-accepting methods
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
+        let tree = parser.parse("fn foo() { yield 1; }", None).unwrap();
+        let root = tree.root_node();
+        let fn_node = root.child(0).unwrap();
+
+        assert!(!adapter.rescue_clause(fn_node));
+        assert!(!adapter.yield_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.super_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.safe_navigation_call(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.begin_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.rescue_modifier_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.ensure_clause_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.ternary_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.ternary_parts(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.case_argument_list(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.case_arm(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.case_arm_body_nodes(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.case_arm_pattern_nodes(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.case_else_node(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.case_else_node_kind(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.case_else_arm(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.leading_function_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.leading_function_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.leading_owner_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.leading_owner_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.leading_if_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.leading_if_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.leading_case_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.leading_case_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.leading_loop_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.leading_loop_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.rescue_body_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.rescue_body_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.rescue_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter.rescue_clauses(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter.rescue_clause_exceptions(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter.rescue_clause_exceptions_source(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.rescue_clause_exception_variable_name(fn_node).is_none());
+        assert!(adapter.rescue_clause_exception_variable_source(fn_node).is_none());
+        assert!(adapter.rescue_clause_handler(fn_node).is_none());
+        assert!(!adapter.ensure_body_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.ensure_body_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(!adapter.ensure_clause_kind(fn_node));
+        assert!(adapter.ensure_clause(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.ensure_clause_body(fn_node).is_none());
+        assert!(!adapter.instance_variable(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.global_variable(fn_node, "fn foo() { yield 1; }"));
+        assert!(!adapter.literal_fragment_assignment_context(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.array_literal_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.array_literal_values(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(!adapter.element_reference_statement(fn_node, "fn foo() { yield 1; }"));
+        assert!(adapter.element_reference_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.element_reference_receiver(fn_node, "fn foo() { yield 1; }").is_some());
+        assert!(!adapter.element_reference_arguments(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(adapter.statement_wrapped_call_target(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.inline_def_wrapper_mid(""));
+        assert_eq!(adapter.inline_def_function_text_source(fn_node, "fn foo() { yield 1; }"), fn_node);
+        assert!(adapter.normalized_for_parts(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.normalized_with_parts(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.bare_const_call_function(fn_node));
+        assert!(adapter.function_parameter_nodes(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(!adapter.heredoc_content_node(fn_node));
+        assert!(!adapter.heredoc_call_for_body(fn_node, ""));
+        assert!(adapter.descendant(fn_node, &["nonexistent"]).is_none());
+
+        // Test MockAdapterForRescue / MockAdapterForEnsure / MockAdapterWithKeyword
+        let rescue_adapter = MockAdapterForRescue;
+        assert!(rescue_adapter.rescue_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+
+        let ensure_adapter = MockAdapterForEnsure;
+        assert!(!ensure_adapter.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+        assert!(ensure_adapter.ensure_clause(fn_node, "fn foo() { yield 1; }").is_some());
+
+        // JS loop tests
+        let mut js_parser = Parser::new();
+        js_parser.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
+        let js_loop_tree = js_parser.parse("while(true){}", None).unwrap();
+        let js_loop_stmt = js_loop_tree.root_node().child(0).unwrap(); // while_statement
+        let _js_body_stmt = js_loop_stmt.child(2).unwrap(); // statement
+
+        let mut ruby_parser = Parser::new();
+        ruby_parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
+        let ruby_tree_fn = ruby_parser.parse("def foo; x = 1; end", None).unwrap();
+        let ruby_method = ruby_tree_fn.root_node().child(0).unwrap(); // method
+        let ruby_body = (0..ruby_method.child_count())
+            .map(|i| ruby_method.child(i).unwrap())
+            .find(|c| c.kind() == "body_statement")
+            .unwrap_or(ruby_method);
+
+        let kw_adapter = MockAdapterWithKeyword;
+        assert!(kw_adapter.leading_function_target(ruby_body, "def foo; x = 1; end").is_some());
+
+        let ruby_loop_tree = ruby_parser.parse("def bar; while true; end; end", None).unwrap();
+        let ruby_loop_method = ruby_loop_tree.root_node().child(0).unwrap();
+        let ruby_loop_body = (0..ruby_loop_method.child_count())
+            .map(|i| ruby_loop_method.child(i).unwrap())
+            .find(|c| c.kind() == "body_statement")
+            .unwrap_or(ruby_loop_method);
+        assert!(adapter.leading_loop_target(ruby_loop_body, "def bar; while true; end; end").is_some());
+
+        // concatenated_string
+        let js_str_tree = js_parser.parse("\"foo\"", None).unwrap();
+        let js_str_node = js_str_tree.root_node().child(0).unwrap().child(0).unwrap();
+        assert!(adapter.concatenated_string_statement(ruby_body, "def foo; x = 1; end", &[js_str_node, js_str_node]));
+
+        // literal_fragment_assignment_context root (no parent) and Ruby grandparent interpolation
+        assert!(!adapter.literal_fragment_assignment_context(root, "fn foo() { yield 1; }"));
+
+        let mut ruby_parser = Parser::new();
+        ruby_parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
+        let ruby_tree = ruby_parser.parse("\"hello #{name}\"", None).unwrap();
+        let string_node = (0..ruby_tree.root_node().child_count())
+            .map(|i| ruby_tree.root_node().child(i).unwrap())
+            .find(|c| c.kind() == "string")
+            .unwrap();
+        let interpolation = (0..string_node.child_count())
+            .map(|i| string_node.child(i).unwrap())
+            .find(|c| c.kind() == "interpolation")
+            .unwrap();
+        assert!(adapter.literal_fragment_assignment_context(interpolation, "\"hello #{name}\""));
+
+        // Extra coverage cases for remaining missed lines in base.rs
+        // class_like_owner_name and class_like_owner_body (lines 867-873, 875-881)
+        assert!(adapter.class_like_owner_name(fn_node, "fn foo() { yield 1; }").is_none());
+        assert!(adapter.class_like_owner_body(fn_node, "fn foo() { yield 1; }").is_none());
+
+        // template string grandparent checks (line 948)
+        let js_tpl_tree = js_parser.parse("`hello ${x}`", None).unwrap();
+        let js_tpl_node = js_tpl_tree.root_node().child(0).unwrap().child(0).unwrap(); // template_string
+        let js_frag_node = js_tpl_node.child(1).unwrap(); // string_fragment
+        assert!(!adapter.literal_fragment_assignment_context(js_frag_node, "`hello ${x}`"));
+
+        // leading_loop_statement named children count (line 339) and leading_loop_target matching text (line 355)
+        let ruby_loop_tree2 = ruby_parser.parse("def bar;while true;x = 1;end end", None).unwrap();
+        let ruby_loop_method2 = ruby_loop_tree2.root_node().child(0).unwrap();
+        let ruby_loop_body2 = (0..ruby_loop_method2.child_count())
+            .map(|i| ruby_loop_method2.child(i).unwrap())
+            .find(|c| c.kind() == "body_statement")
+            .unwrap();
+        let loop_target = adapter.leading_loop_target(ruby_loop_body2, "def bar;while true;x = 1;end end").unwrap();
+        eprintln!("LOOP TARGET KIND: {}", loop_target.kind());
+        eprintln!("LOOP TARGET TEXT: {}", node_text(loop_target, "def bar;while true;x = 1;end end"));
+        for child in loop_target.children(&mut loop_target.walk()) {
+            eprintln!("  CHILD: {}, named: {}", child.kind(), child.is_named());
+        }
+        eprintln!("NAMED CHILDREN LEN: {}", named_children(loop_target).len());
+        assert!(adapter.leading_loop_statement(ruby_loop_body2, "def bar;while true;x = 1;end end"));
+
+        // ensure_body_nodes empty path when no clause is found (line 470)
+        struct MockEnsureMissingClause;
+        impl AstNormalizationAdapter for MockEnsureMissingClause {
+            fn ensure_body_target<'tree>(
+                &self,
+                node: TreeSitterNode<'tree>,
+                _source: &str,
+            ) -> Option<TreeSitterNode<'tree>> {
+                Some(node)
+            }
+        }
+        assert!(MockEnsureMissingClause.ensure_body_nodes(fn_node, "fn foo() { yield 1; }").is_empty());
+
+        // array_literal_target bracketed case (line 513)
+        let js_bracket_tree = js_parser.parse("[1, 2]", None).unwrap();
+        let js_bracket_node = js_bracket_tree.root_node().child(0).unwrap(); // expression_statement
+        assert!(adapter.array_literal_target(js_bracket_node, "[1, 2]").is_some());
+
+        // array_literal_target semicolon stripped child case (line 534)
+        let js_semi_tree = js_parser.parse("[1, 2];", None).unwrap();
+        let js_semi_node = js_semi_tree.root_node().child(0).unwrap(); // expression_statement
+        assert!(adapter.array_literal_target(js_semi_node, "[1, 2];").is_some());
+
+        // element_reference_target semicolon stripped child case (line 579)
+        let js_ref_semi_tree = js_parser.parse("a[i];", None).unwrap();
+        let js_ref_semi_node = js_ref_semi_tree.root_node().child(0).unwrap(); // expression_statement
+        assert!(adapter.element_reference_target(js_ref_semi_node, "a[i];").is_some());
+
+        // element_reference_target element_reference_shape fallback case (line 583)
+        let js_ref_shape_tree = js_parser.parse("a[i]", None).unwrap();
+        let js_ref_shape_node = js_ref_shape_tree.root_node().child(0).unwrap(); // expression_statement
+        assert!(adapter.element_reference_target(js_ref_shape_node, "a[i]").is_some());
+    }
+
+    #[test]
+    fn test_base_adapter_defaults() {
+        test_base_adapter_defaults_impl();
+    }
+}
+
+pub fn run_base_adapter_defaults_tests() {
+    tests::test_base_adapter_defaults_impl();
+}
