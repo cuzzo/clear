@@ -94,6 +94,47 @@ class StaticEvidenceTest < Minitest::Test
     end
   end
 
+  def test_project_modules_groups_by_owner
+    evidence = {
+      "methods" => [
+        {
+          "name" => "connect",
+          "signature" => "def connect(id)",
+          "params" => ["id"],
+          "owner" => "ConnectionManager",
+          "path" => "lib/conn.rb",
+          "line" => 20,
+          "span" => [20, 0, 25, 3],
+          "language" => "ruby"
+        }
+      ],
+      "fields" => [
+        {
+          "name" => "@active_connections",
+          "owner" => "ConnectionManager",
+          "path" => "lib/conn.rb",
+          "line" => 15,
+          "span" => [15, 0, 15, 20],
+          "language" => "ruby"
+        }
+      ],
+      "facts" => {
+        "call_graph_edges" => [],
+        "state_protocol_records" => [],
+        "state_param_origin_records" => []
+      }
+    }
+
+    modules = Espalier::StaticEvidence.project_modules(evidence)
+    assert_equal 1, modules.size
+    mod = modules.first
+    assert_equal "ConnectionManager", mod[:name]
+    assert_equal "lib/conn.rb", mod[:file]
+    assert_includes mod[:states], "@active_connections"
+    assert_equal 1, mod[:methods].size
+    assert_equal "connect", mod[:methods].first[:name]
+  end
+
   private
 
   def loaded_nil_kill_features

@@ -28,6 +28,115 @@ module Espalier
       new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
     end
 
+    def self.project_modules(evidence)
+      return [] unless evidence && evidence["methods"]
+
+      # Group methods by owner
+      methods_by_owner = Hash.new { |h, k| h[k] = [] }
+      Array(evidence["methods"]).each do |m|
+        meth = {
+          name: m["name"],
+          signature: m["signature"],
+          parameters: Array(m["params"]),
+          visibility: (m["visibility"] || :public).to_sym,
+          line: m["line"]&.to_i,
+          span: m["span"],
+          file: m["path"],
+          language: m["language"]&.to_sym,
+          effects: { reads: Set.new, writes: Set.new },
+          delegations: []
+        }
+        methods_by_owner[m["owner"]] << meth
+      end
+
+      # Group fields by owner
+      fields_by_owner = Hash.new { |h, k| h[k] = [] }
+      Array(evidence["fields"]).each do |f|
+        fields_by_owner[f["owner"]] << f["name"]
+      end
+
+      # Index call graph edges (internal calls)
+      internal_calls = Hash.new { |h, k| h[k] = [] }
+      Array(evidence.dig("facts", "call_graph_edges")).each do |edge|
+        next unless edge["kind"] == "internal_call"
+        if edge["source"] =~ /^fn:(.+)#(.+)$/
+          owner, func = $1, $2
+          if edge["target"] =~ /^fn:.+#(.+)$/
+            target_func = $1
+            internal_calls["#{owner}##{func}"] << {
+              receiver: "self",
+              message: target_func,
+              type: edge["conditional"] ? :conditional : :always
+            }
+          end
+        end
+      end
+
+      # Map state protocols and param origins to reads/writes and delegations
+      Array(evidence.dig("facts", "state_protocol_records")).each do |record|
+        owner = record["owner"]
+        func = record["function"]
+        field = record["field"]
+        proto = record["protocol"]
+
+        meths = methods_by_owner[owner] || []
+        meth = meths.find { |m| m[:name] == func }
+        if meth
+          meth[:effects][:reads].add(field)
+          meth[:delegations] << {
+            receiver: field,
+            message: proto,
+            type: :always
+          }
+        end
+      end
+
+      Array(evidence.dig("facts", "state_param_origin_records")).each do |record|
+        owner = record["owner"]
+        func = record["function"]
+        field = record["field"]
+
+        meths = methods_by_owner[owner] || []
+        meth = meths.find { |m| m[:name] == func }
+        if meth
+          meth[:effects][:writes].add(field)
+        end
+      end
+
+      # Add internal call delegations
+      methods_by_owner.each do |owner, meths|
+        meths.each do |meth|
+          key = "#{owner}##{meth[:name]}"
+          meth[:delegations].concat(internal_calls[key]) if internal_calls[key]
+          meth[:delegations].uniq!
+        end
+      end
+
+      # Construct modules array
+      all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
+      all_owners.map do |owner|
+        first_meth = methods_by_owner[owner]&.first
+        first_field = Array(evidence["fields"]).find { |f| f["owner"] == owner }
+
+        file = first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil)
+        language = first_meth ? first_meth[:language] : (first_field ? first_field["language"]&.to_sym : nil)
+
+        {
+          type: :class,
+          name: owner,
+          file: file,
+          line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
+          span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil),
+          language: language,
+          states: fields_by_owner[owner].to_set,
+          ivar_types: {},
+          ivar_properties: {},
+          methods: methods_by_owner[owner]
+        }
+      end
+    end
+
+
     def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
       @targets = Array(targets).compact
       @root = root

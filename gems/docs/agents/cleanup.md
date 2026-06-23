@@ -40,3 +40,16 @@
 ## 8. Post-Espalier Architecture Sweep
 - [x] **Action**: Once Espalier is working, review all gems from the beginning and create tasks or epics to clean up any major issues/tech-debt uncovered during the migration.
 
+## 9. Nil-Kill Spec TODOs & Investigation items
+- [ ] **Action**: Investigate unused return void type promotion sig fix at [nil_kill_spec.rb:L2294](file:///home/yahn/cheat/gems/nil-kill/spec/nil_kill_spec.rb#L2294).
+- [ ] **Action**: Investigate always-raising untyped returns signature promotion to verifiable T.noreturn (currently void) at [nil_kill_spec.rb:L2327](file:///home/yahn/cheat/gems/nil-kill/spec/nil_kill_spec.rb#L2327).
+- [ ] **Action**: Fix commented out assertion for using indexed hash-record escape facts when available at [nil_kill_spec.rb:L2651](file:///home/yahn/cheat/gems/nil-kill/spec/nil_kill_spec.rb#L2651).
+- [ ] **Action**: Investigate why unused_wrapper returns `"source_kind" => "unknown source"` instead of the actual source at [nil_kill_spec.rb:L3453](file:///home/yahn/cheat/gems/nil-kill/spec/nil_kill_spec.rb#L3453).
+
+## 10. Decomplex and Espalier Audit Task List
+- [x] **Action**: Run Decomplex on Decomplex and Fact-Mine repositories, verifying correct execution and expected execution times (~0.3s and ~1.0s).
+- [x] **Action**: Run Espalier on Decomplex and Fact-Mine repositories, verifying successful compilation and output.
+- [x] **Action**: Compile file LoC and branch coverage lists for Decomplex and Fact-Mine.
+- [x] **Action**: Spot-check Decomplex findings and document sloppy implementation/tech debt.
+
+
