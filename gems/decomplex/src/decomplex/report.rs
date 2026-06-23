@@ -138,7 +138,7 @@ impl Report {
     }
 
     pub fn to_sarif(&self) -> String {
-        serde_json::to_string_pretty(&self.to_sarif_value(true, true, None)).unwrap()
+        serde_json::to_string_pretty(&self.to_sarif_value(false, false, None)).unwrap()
     }
 
     pub fn convergence_value(&self) -> Value {

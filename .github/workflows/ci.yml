@@ -210,11 +210,23 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       - name: Run zig-mutants coverage
         working-directory: gems/zig-mutants
         run: zig build coverage -Dcoverage
@@ -532,11 +544,23 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       # Ruby coverage records compile/lowering/emission. ZIG_COVERAGE=1 also
       # runs the generated all-tests.zig bundle under kcov so this suite
       # contributes runtime/lib Zig coverage without spawning per-file clear
@@ -617,11 +641,24 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+          use-cache: false
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       - uses: actions/cache@v4
         with:
           path: |
@@ -682,11 +719,24 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+          use-cache: false
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       - uses: actions/cache@v4
         with:
           path: |
@@ -1172,11 +1222,23 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
           use-cache: false
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       - working-directory: zig
         run: zig build test -Dcoverage -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
       - uses: actions/upload-artifact@v4
@@ -1213,11 +1275,23 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
           use-cache: false
+      - name: Cache kcov
+        id: cache-kcov
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/kcov-bin
+          key: kcov-v43-${{ runner.os }}
       - name: Install kcov
+        if: steps.cache-kcov.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y kcov
-          kcov --version
+          sudo apt-get install -y libdw-dev binutils-dev libiberty-dev libelf-dev
+          git clone --depth=1 --branch v43 https://github.com/SimonKagstrom/kcov.git
+          cd kcov && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/kcov-bin ..
+          make -j$(nproc) && make install
+      - name: Add kcov to PATH
+        run: echo "${{ github.workspace }}/kcov-bin/bin" >> $GITHUB_PATH
       - working-directory: zig
         run: zig build coverage-${{ matrix.suite }} -Dcoverage-${{ matrix.suite }} -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
       - uses: actions/upload-artifact@v4
