@@ -8,19 +8,16 @@ require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
 DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS", "1000"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/decomplex/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/boobytrap/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
 
-require "decomplex/report"
-require "decomplex/source_filter"
-require "decomplex/sarif"
 require "boobytrap"
 require "slopcop"
 require "espalier"
 require "nil_kill"
+require "nil_kill/sarif"
 
 options = {
   repo: ".",
@@ -86,7 +83,7 @@ end
 
 def empty_sarif(tool_name, format)
   JSON.pretty_generate(
-    Decomplex::Sarif.document(
+    NilKill::Sarif.document(
       tool_name: tool_name,
       information_uri: "https://github.com/codeforreno/litedb",
       rules: [],
@@ -120,9 +117,11 @@ def run_decomplex_rust(binary, files, out_dir, repo)
 end
 
 def build_espalier_manifest(files)
-  modules = files.flat_map { |file| Espalier::AstExtractor.new(file).extract }
+  evidence = Espalier::StaticEvidence.build(files, root: ROOT)
+  modules = Espalier::StaticEvidence.project_modules(evidence)
   Espalier::Aggregator.new.aggregate(modules)
 end
+
 
 def build_nil_kill_evidence(files, repo)
   static = NilKill::StaticEvidence.build(files, root: repo)

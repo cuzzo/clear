@@ -154,7 +154,7 @@ module SlopCop
     end
 
     def get_branch_arms(abspath)
-      bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
+      bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/target/release/decomplex-rust", __dir__))
       unless ::File.executable?(bin)
         warn "SlopCop::Classifier cannot find executable decomplex-rust at #{bin}"
         return []

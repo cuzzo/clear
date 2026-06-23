@@ -112,7 +112,7 @@ module SlopCop
           tmp = Tempfile.new(["decomplex-facts", ".json"])
           tmp.close
           
-          bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
+          bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/target/release/decomplex-rust", __dir__))
           unless ::File.executable?(bin)
             return { status: :absent }
           end

@@ -8,8 +8,8 @@ require "optparse"
 require "set"
 
 ROOT = File.expand_path("..", __dir__)
-$LOAD_PATH.unshift(File.join(ROOT, "gems/decomplex/lib"))
-require "decomplex/sarif"
+$LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
+require "nil_kill/sarif"
 
 options = {
   repo: ".",
@@ -92,7 +92,7 @@ end
 def sarif_document(tool_name, results)
   rules = results.map do |result|
     rule_id = result.fetch("ruleId")
-    Decomplex::Sarif.rule(
+    NilKill::Sarif.rule(
       id: rule_id,
       name: rule_id,
       short_description: result.dig("message", "text").to_s.split("\n").first,
@@ -105,7 +105,7 @@ def sarif_document(tool_name, results)
   end
 
   JSON.pretty_generate(
-    Decomplex::Sarif.document(
+    NilKill::Sarif.document(
       tool_name: tool_name,
       information_uri: "https://github.com/cuzzo/clear",
       rules: rules,
@@ -120,7 +120,7 @@ end
 
 def lint_result(rule_id:, message:, path:, line:, start_column: nil, end_line: nil,
                 end_column: nil, level: "warning", tool:, extra: {})
-  Decomplex::Sarif.result(
+  NilKill::Sarif.result(
     rule_id: rule_id,
     message: message,
     path: path,
