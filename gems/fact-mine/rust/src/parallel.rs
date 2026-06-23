@@ -108,4 +108,30 @@ mod tests {
     fn rejects_zero_jobs_override() {
         assert!(set_jobs_for_process(Some(0)).is_err());
     }
+
+    #[test]
+    fn test_set_jobs_none() {
+        assert!(set_jobs_for_process(None).is_ok());
+    }
+
+    #[test]
+    fn test_parse_jobs() {
+        assert_eq!(parse_jobs(""), None);
+        assert_eq!(parse_jobs("   "), None);
+        assert_eq!(parse_jobs("abc"), None);
+        assert_eq!(parse_jobs("0"), None);
+        assert_eq!(parse_jobs("4"), Some(4));
+    }
+
+    #[test]
+    fn test_env_jobs() {
+        std::env::set_var("DECOMPLEX_RUST_JOBS", "5");
+        assert_eq!(env_jobs(), Some(5));
+        std::env::remove_var("DECOMPLEX_RUST_JOBS");
+
+        std::env::set_var("DECOMPLEX_JOBS", "6");
+        assert_eq!(env_jobs(), Some(6));
+        std::env::remove_var("DECOMPLEX_JOBS");
+    }
 }
+

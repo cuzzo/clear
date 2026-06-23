@@ -508,4 +508,24 @@ mod tests {
             assert_eq!(function.owner, "Billing");
         }
     }
+
+    #[test]
+    fn test_syntax_edge_cases() {
+        assert_eq!(Language::parse("php").unwrap(), Language::Php);
+        assert!(Language::parse("invalid").is_err());
+        assert!(Language::for_extension("invalid").is_none());
+
+        // Enable profile variable to cover profiling path
+        std::env::set_var("DECOMPLEX_RUST_PROFILE", "1");
+
+        let mut file = NamedTempFile::new().expect("tempfile");
+        file.write_all(b"def foo\nend").expect("write");
+        let doc = parse_file_for_report(file.path().to_path_buf(), Language::Ruby).unwrap();
+        assert_eq!(doc.file, file.path().to_string_lossy());
+
+        std::env::remove_var("DECOMPLEX_RUST_PROFILE");
+
+        let core_owners = core_owner_names(&doc);
+        assert!(core_owners.is_empty() || core_owners.contains(&"Object") || core_owners.contains(&""));
+    }
 }

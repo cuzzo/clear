@@ -345,3 +345,128 @@ fn comparison_operator(source: &str) -> &str {
     }
     ""
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logical_file() {
+        assert_eq!(logical_file("gems/fact-mine/examples/foo.rb"), "gems/fact-mine/examples/foo.rb");
+        assert_eq!(logical_file("foo.rb"), "foo.rb");
+    }
+
+    #[test]
+    fn test_comparison_operator() {
+        assert_eq!(comparison_operator("a == b"), "==");
+        assert_eq!(comparison_operator("a + b"), "");
+    }
+
+    #[test]
+    fn test_project_document() {
+        let doc = Document {
+            file: "gems/fact-mine/examples/test.rb".to_string(),
+            language: Language::Ruby,
+            function_defs: Vec::new(),
+            owner_defs: Vec::new(),
+            call_sites: Vec::new(),
+            state_declarations: Vec::new(),
+            state_reads: Vec::new(),
+            state_writes: Vec::new(),
+            decision_sites: Vec::new(),
+            branch_decisions: Vec::new(),
+            branch_arms: Vec::new(),
+            dispatch_sites: Vec::new(),
+            semantic_effect_sites: Vec::new(),
+            local_complexity_scores: BTreeMap::new(),
+            local_methods: Vec::new(),
+            predicate_aliases: Vec::new(),
+            comparison_uses: Vec::new(),
+            path_condition_sites: Vec::new(),
+            protocol_method_effects: Vec::new(),
+            protocol_call_paths: Vec::new(),
+            clone_candidates: Vec::new(),
+            redundant_nil_guards: Vec::new(),
+            immutable_struct_readers: BTreeMap::new(),
+            immutable_struct_reader_types: BTreeMap::new(),
+            type_aliases: BTreeMap::new(),
+            method_param_types: BTreeMap::new(),
+            state_param_origins: Vec::new(),
+        };
+        let projected = project_document(&doc);
+        assert_eq!(projected["file"], "gems/fact-mine/examples/test.rb");
+    }
+
+    #[test]
+    fn test_immutable_state_ref() {
+        let mut doc = Document {
+            file: "foo.rb".to_string(),
+            language: Language::Ruby,
+            function_defs: Vec::new(),
+            owner_defs: Vec::new(),
+            call_sites: Vec::new(),
+            state_declarations: Vec::new(),
+            state_reads: Vec::new(),
+            state_writes: Vec::new(),
+            decision_sites: Vec::new(),
+            branch_decisions: Vec::new(),
+            branch_arms: Vec::new(),
+            dispatch_sites: Vec::new(),
+            semantic_effect_sites: Vec::new(),
+            local_complexity_scores: BTreeMap::new(),
+            local_methods: Vec::new(),
+            predicate_aliases: Vec::new(),
+            comparison_uses: Vec::new(),
+            path_condition_sites: Vec::new(),
+            protocol_method_effects: Vec::new(),
+            protocol_call_paths: Vec::new(),
+            clone_candidates: Vec::new(),
+            redundant_nil_guards: Vec::new(),
+            immutable_struct_readers: vec![
+                ("OtherType".to_string(), vec!["b".to_string()]),
+            ].into_iter().collect(),
+            immutable_struct_reader_types: vec![
+                ("MyType".to_string(), vec![("a".to_string(), "OtherType".to_string())].into_iter().collect()),
+            ].into_iter().collect(),
+            type_aliases: vec![
+                ("AliasType".to_string(), "MyType".to_string()),
+                // loop alias to test resolve_type_alias safety loop
+                ("Loop1".to_string(), "Loop2".to_string()),
+                ("Loop2".to_string(), "Loop1".to_string()),
+            ].into_iter().collect(),
+            method_param_types: vec![
+                ("foo".to_string(), vec![("obj".to_string(), "AliasType".to_string())].into_iter().collect()),
+            ].into_iter().collect(),
+            state_param_origins: Vec::new(),
+        };
+
+        let metadata = SyntaxFactMetadata::from_documents(&[doc.clone()]);
+
+        // len < 2
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj"));
+
+        // param not found
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "missing.field"));
+
+        // valid simple path
+        // obj has type AliasType -> resolved to MyType
+        // MyType has reader field `a`? No, `a` has type OtherType
+        // OtherType has reader field `b`
+        assert!(metadata.immutable_state_ref(&doc, "foo", "obj.a.b"));
+
+        // middle field doesn't have reader type
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj.unknown.b"));
+
+        // last field not a reader
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj.a.unknown"));
+
+        // test type alias resolution loop
+        doc.method_param_types.insert(
+            "loop_fn".to_string(),
+            vec![("obj".to_string(), "Loop1".to_string())].into_iter().collect(),
+        );
+        let metadata_loop = SyntaxFactMetadata::from_documents(&[doc.clone()]);
+        assert!(!metadata_loop.immutable_state_ref(&doc, "loop_fn", "obj.a"));
+    }
+}
+
