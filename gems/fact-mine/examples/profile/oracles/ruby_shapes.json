@@ -1,0 +1,63 @@
+{
+  "array_shapes": [
+    {
+      "code": "[1, \"two\", :three, true, nil, CustomClass]",
+      "line": 14,
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "size": 0,
+      "tuple_types": [
+        "Integer",
+        "String",
+        "Symbol",
+        "T::Boolean",
+        "NilClass",
+        "CustomClass"
+      ]
+    }
+  ],
+  "fields": [],
+  "hash_shapes": [
+    {
+      "code": "MY_CONST = {     :sym => :symbol,     \"str\" => \"string\",     123 => 1.5,     true => false,     nil => nil,     CustomClass => nil   }",
+      "keys": [
+        "sym",
+        "str"
+      ],
+      "line": 4,
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "value_types": [
+        "Symbol",
+        "String"
+      ]
+    }
+  ],
+  "methods": [
+    {
+      "key": [
+        "RubyShapes",
+        "initialize",
+        "class"
+      ],
+      "kind": "class",
+      "language": "ruby",
+      "line": 13,
+      "name": "initialize",
+      "owner": "RubyShapes",
+      "params": [],
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "signature": "",
+      "source": {},
+      "span": [
+        13,
+        2,
+        15,
+        5
+      ]
+    }
+  ],
+  "signatures": {},
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": []
+}

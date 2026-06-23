@@ -1,0 +1,216 @@
+{
+  "array_shapes": [],
+  "fields": [
+    {
+      "declared_type": "port",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000field\u0000public",
+      "language": "typescript",
+      "line": 4,
+      "name": "public",
+      "owner": "Database",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "span": [
+        4,
+        4,
+        4,
+        30
+      ],
+      "static_origin": "state_declaration"
+    },
+    {
+      "declared_type": "_db",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000field\u0000private",
+      "language": "typescript",
+      "line": 8,
+      "name": "private",
+      "owner": "Greeter",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "span": [
+        8,
+        4,
+        8,
+        25
+      ],
+      "static_origin": "state_declaration"
+    },
+    {
+      "declared_type": null,
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000field\u0000_db",
+      "language": "typescript",
+      "line": 10,
+      "name": "_db",
+      "owner": "Greeter",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "span": [
+        10,
+        8,
+        10,
+        21
+      ],
+      "static_origin": "state_write"
+    }
+  ],
+  "hash_shapes": [],
+  "methods": [
+    {
+      "key": [
+        "Greeter",
+        "constructor",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "typescript",
+      "line": 9,
+      "name": "constructor",
+      "owner": "Greeter",
+      "params": [
+        "db"
+      ],
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "constructor(db: Database) {",
+      "source": {
+        "signature": "constructor(db: Database) {",
+        "type_system": "typescript"
+      },
+      "span": [
+        9,
+        4,
+        11,
+        5
+      ]
+    },
+    {
+      "key": [
+        "Greeter",
+        "hello",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "typescript",
+      "line": 13,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        "name"
+      ],
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "public hello(name: string): string {",
+      "source": {
+        "signature": "public hello(name: string): string {",
+        "type_system": "typescript"
+      },
+      "span": [
+        13,
+        4,
+        15,
+        5
+      ]
+    }
+  ],
+  "signatures": {
+    "Greeter\u0000constructor": "constructor(db: Database) {",
+    "Greeter\u0000hello": "public hello(name: string): string {"
+  },
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_type_records": [
+    {
+      "declared_type": "port",
+      "field": "public",
+      "key": "Database\u0000public",
+      "language": "typescript",
+      "line": 4,
+      "owner": "Database",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "span": [
+        4,
+        4,
+        4,
+        30
+      ]
+    },
+    {
+      "declared_type": "_db",
+      "field": "private",
+      "key": "Greeter\u0000private",
+      "language": "typescript",
+      "line": 8,
+      "owner": "Greeter",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "span": [
+        8,
+        4,
+        8,
+        25
+      ]
+    }
+  ],
+  "state_types": {
+    "Database\u0000public": "port",
+    "Greeter\u0000private": "_db"
+  },
+  "type_definitions": [
+    {
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000constructor\u00009\u0000typescript",
+      "kind": "method_signature",
+      "language": "typescript",
+      "line": 9,
+      "name": "constructor",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "db",
+          "type": "Database"
+        }
+      ],
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "signature": "constructor(db: Database) {",
+      "type_system": "typescript"
+    },
+    {
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000method_signature\u0000hello\u000013\u0000typescript",
+      "kind": "method_signature",
+      "language": "typescript",
+      "line": 13,
+      "name": "hello",
+      "owner": "Greeter",
+      "params": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "return_type": "string {",
+      "signature": "public hello(name: string): string {",
+      "type_system": "typescript"
+    },
+    {
+      "declared_type": "port",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Database\u0000state_field\u0000public\u00004\u0000typescript",
+      "kind": "state_field",
+      "language": "typescript",
+      "line": 4,
+      "name": "public",
+      "owner": "Database",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "type_system": "typescript"
+    },
+    {
+      "declared_type": "_db",
+      "id": "typescript\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts\u0000Greeter\u0000state_field\u0000private\u00008\u0000typescript",
+      "kind": "state_field",
+      "language": "typescript",
+      "line": 8,
+      "name": "private",
+      "owner": "Greeter",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/typescript_sample.ts",
+      "source": "syntax",
+      "type_system": "typescript"
+    }
+  ]
+}

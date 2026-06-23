@@ -9,25 +9,25 @@
   "state_types": {},
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
+      "id": "ruby\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 0,
       "name": "RawBody",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T::Array[AST::Node]",
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
+      "id": "ruby\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 0,
       "name": "ScopeType",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "type_system": "sorbet"

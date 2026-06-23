@@ -65,33 +65,45 @@ where
         let mut stats = EngineStats::default();
         let mut file_units: HashMap<String, Vec<LogicalUnit>> = HashMap::new();
         let mut prev_commit_hash: Option<String> = None;
-
-        for commit in commits {
-            self.storage.insert_metadata(&commit)?;
-            let mut current = HashMap::new();
-            let mut claimed_moves = HashSet::new();
+        let mut commits_changes = Vec::new();
+        for commit in &commits {
             let path_filter = |path: &str| self.extractor.supports_path(path);
-
             let changes = self.provider.changes_at_commit(
                 prev_commit_hash.as_deref(),
                 &commit.hash,
                 &path_filter,
             )?;
+            prev_commit_hash = Some(commit.hash.clone());
+            commits_changes.push(changes);
+        }
 
-            let parsed_units: Vec<(String, Vec<LogicalUnit>)> = changes.added_or_modified
-                .into_par_iter()
-                .map(|file| {
-                    let units = self.extractor.extract_units(&file);
-                    (file.path, units)
-                })
-                .collect();
+        let extractor = &self.extractor;
+        let parsed_commits_units: Vec<Vec<Vec<LogicalUnit>>> = commits_changes
+            .par_iter()
+            .map(|changes| {
+                changes
+                    .added_or_modified
+                    .iter()
+                    .map(|file| extractor.extract_units(file))
+                    .collect()
+            })
+            .collect();
 
-            for (path, units) in parsed_units {
-                file_units.insert(path, units);
+        for (commit_idx, commit) in commits.into_iter().enumerate() {
+            self.storage.insert_metadata(&commit)?;
+            let mut current = HashMap::new();
+            let mut claimed_moves = HashSet::new();
+
+            let changes = &commits_changes[commit_idx];
+            let commit_parsed_units = &parsed_commits_units[commit_idx];
+
+            for (file_idx, file) in changes.added_or_modified.iter().enumerate() {
+                let units = commit_parsed_units[file_idx].clone();
+                file_units.insert(file.path.clone(), units);
             }
 
-            for path in changes.deleted {
-                file_units.remove(&path);
+            for path in &changes.deleted {
+                file_units.remove(path);
             }
 
             let extracted_units = file_units
@@ -197,7 +209,6 @@ where
                 current.insert(unit.id.clone(), unit);
             }
             previous = current;
-            prev_commit_hash = Some(commit.hash.clone());
             stats.commits += 1;
         }
 
