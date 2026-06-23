@@ -3,6 +3,7 @@ use crate::model::{Event, EventType, LogicalUnit};
 use crate::storage::Storage;
 use crate::vcs::VcsProvider;
 use anyhow::Result;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 const MOVE_SIMILARITY_THRESHOLD: f64 = 0.72;
@@ -27,7 +28,7 @@ pub struct LineageEngine<P, E> {
 impl<P, E> LineageEngine<P, E>
 where
     P: VcsProvider,
-    E: BoundaryExtractor,
+    E: BoundaryExtractor + Sync,
 {
     pub fn new(provider: P, extractor: E, storage: Storage) -> Self {
         Self {
@@ -71,7 +72,7 @@ where
             let extracted_units = self
                 .provider
                 .files_at_commit(&commit.hash, &path_filter)?
-                .into_iter()
+                .into_par_iter()
                 .flat_map(|file| self.extractor.extract_units(&file))
                 .collect::<Vec<_>>();
             let observed_current_ids = extracted_units
