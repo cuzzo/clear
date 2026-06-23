@@ -33,10 +33,10 @@
 - [x] **Action**: Verify >95% line coverage for Rust code execution across the tools, leaning heavily on integration tests rather than unit tests.
 
 ## 7. Post-Migration Decomplex Audit & Tech Debt Epic
-- [ ] **Action**: Once Decomplex is working in Rust, passing all tests, and has adequate coverage for Fact-Mine and Decomplex in general (specifically for Ruby), run Decomplex on each repository.
-- [ ] **Action**: Add a new task (or epic) to clean up obvious, major tech debt uncovered by this run.
-- [ ] **Constraint**: Do NOT change the architecture of Decomplex or Fact-Mine.
+- [x] **Action**: Once Decomplex is working in Rust, passing all tests, and has adequate coverage for Fact-Mine and Decomplex in general (specifically for Ruby), run Decomplex on each repository.
+- [x] **Action**: Add a new task (or epic) to clean up obvious, major tech debt uncovered by this run.
+- [x] **Constraint**: Do NOT change the architecture of Decomplex or Fact-Mine.
 
 ## 8. Post-Espalier Architecture Sweep
-- [ ] **Action**: Once Espalier is working, review all gems from the beginning and create tasks or epics to clean up any major issues/tech-debt uncovered during the migration.
+- [x] **Action**: Once Espalier is working, review all gems from the beginning and create tasks or epics to clean up any major issues/tech-debt uncovered during the migration.
 

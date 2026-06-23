@@ -708,8 +708,29 @@ fn expand_directory(dir: &Path, options: &Options, out: &mut Vec<SourceFile>) ->
     Ok(())
 }
 
+fn is_binary_file(path: &Path) -> bool {
+    use std::io::Read;
+    if let Ok(mut file) = std::fs::File::open(path) {
+        let mut buffer = [0u8; 1024];
+        if let Ok(bytes_read) = file.read(&mut buffer) {
+            if bytes_read >= 4 {
+                if &buffer[0..4] == b"\x7fELF" || &buffer[0..2] == b"MZ" {
+                    return true;
+                }
+            }
+            if buffer[0..bytes_read].iter().any(|&b| b == 0) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
     if excluded_path(path, options) {
+        return;
+    }
+    if is_binary_file(path) {
         return;
     }
     let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
