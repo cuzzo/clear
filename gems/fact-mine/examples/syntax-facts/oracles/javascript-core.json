@@ -1,99 +1,34 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/javascript/core.js",
-      "language": "javascript",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 10,
-          "name": "process",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 15,
+          "predicate": "(user.role)",
           "span": [
-            10,
-            2,
-            39,
-            3
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 4,
-          "name": "constructor",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "params": [
-            "status",
-            "sink"
-          ],
-          "span": [
+            15,
             4,
-            2,
-            8,
-            3
+            25,
+            5
           ],
-          "visibility": "public"
+          "state_refs": [
+            "user.role"
+          ]
         },
         {
-          "line": 41,
-          "name": "#audit",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
+          "function": "process",
+          "line": 27,
+          "predicate": "(this.#status === \"idle\" && user.ready)",
           "span": [
-            41,
-            2,
-            45,
-            3
+            27,
+            4,
+            32,
+            5
           ],
-          "visibility": "private"
-        },
-        {
-          "line": 47,
-          "name": "ready",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            47,
-            2,
-            49,
-            3
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 52,
-          "name": "normalizeValue",
-          "owner": "core",
-          "params": [
-            "input"
-          ],
-          "span": [
-            52,
-            7,
-            54,
-            1
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 1,
-          "name": "JavaScriptSyntaxFactsCore",
-          "span": [
-            1,
-            7,
-            50,
-            1
+          "state_refs": [
+            "this.#status",
+            "user.ready"
           ]
         }
       ],
@@ -277,6 +212,199 @@
             8,
             24,
             30
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            15,
+            4,
+            25,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 15,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.role",
+          "span": [
+            15,
+            4,
+            25,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            27,
+            4,
+            32,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 27,
+          "members": [
+            "this.#status === \"idle\"",
+            "user.ready"
+          ],
+          "predicate": "this.#status === \"idle\" && user.ready",
+          "span": [
+            27,
+            8,
+            27,
+            45
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/javascript/core.js",
+      "functions": [
+        {
+          "line": 10,
+          "name": "process",
+          "owner": "JavaScriptSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            10,
+            2,
+            39,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 4,
+          "name": "constructor",
+          "owner": "JavaScriptSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            4,
+            2,
+            8,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 41,
+          "name": "#audit",
+          "owner": "JavaScriptSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            41,
+            2,
+            45,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 47,
+          "name": "ready",
+          "owner": "JavaScriptSyntaxFactsCore",
+          "params": [],
+          "span": [
+            47,
+            2,
+            49,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 52,
+          "name": "normalizeValue",
+          "owner": "core",
+          "params": [
+            "input"
+          ],
+          "span": [
+            52,
+            7,
+            54,
+            1
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "javascript",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 1,
+          "name": "JavaScriptSyntaxFactsCore",
+          "span": [
+            1,
+            7,
+            50,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [
+        {
+          "body": "input ?? null",
+          "line": 52,
+          "name": "normalizeValue",
+          "owner": "core",
+          "span": [
+            52,
+            7,
+            54,
+            1
+          ]
+        },
+        {
+          "body": "name ?? null",
+          "line": 10,
+          "name": "process",
+          "owner": "JavaScriptSyntaxFactsCore",
+          "span": [
+            10,
+            2,
+            39,
+            3
+          ]
+        }
+      ],
+      "semantic_effects": [
+        {
+          "detail": "console.log",
+          "function": "#audit",
+          "kind": "hidden_io",
+          "line": 42,
+          "span": [
+            42,
+            4,
+            42,
+            21
+          ]
+        },
+        {
+          "detail": "console.warn",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 31,
+          "span": [
+            31,
+            6,
+            31,
+            31
           ]
         }
       ],
@@ -556,140 +684,8 @@
             20
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            15,
-            4,
-            25,
-            5
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 15,
-          "members": [
-            "\"admin\"",
-            "\"guest\"",
-            "\"owner\""
-          ],
-          "predicate": "user.role",
-          "span": [
-            15,
-            4,
-            25,
-            5
-          ]
-        },
-        {
-          "enclosing_span": [
-            27,
-            4,
-            32,
-            5
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 27,
-          "members": [
-            "this.#status === \"idle\"",
-            "user.ready"
-          ],
-          "predicate": "this.#status === \"idle\" && user.ready",
-          "span": [
-            27,
-            8,
-            27,
-            45
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 15,
-          "predicate": "(user.role)",
-          "span": [
-            15,
-            4,
-            25,
-            5
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "process",
-          "line": 27,
-          "predicate": "(this.#status === \"idle\" && user.ready)",
-          "span": [
-            27,
-            4,
-            32,
-            5
-          ],
-          "state_refs": [
-            "this.#status",
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "console.log",
-          "function": "#audit",
-          "kind": "hidden_io",
-          "line": 42,
-          "span": [
-            42,
-            4,
-            42,
-            21
-          ]
-        },
-        {
-          "detail": "console.warn",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 31,
-          "span": [
-            31,
-            6,
-            31,
-            31
-          ]
-        }
-      ],
-      "predicate_bodies": [
-        {
-          "body": "input ?? null",
-          "line": 52,
-          "name": "normalizeValue",
-          "owner": "core",
-          "span": [
-            52,
-            7,
-            54,
-            1
-          ]
-        },
-        {
-          "body": "name ?? null",
-          "line": 10,
-          "name": "process",
-          "owner": "JavaScriptSyntaxFactsCore",
-          "span": [
-            10,
-            2,
-            39,
-            3
-          ]
-        }
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

@@ -1,16 +1,15 @@
 {
   "detector": "state-mesh",
-  "options": {
-  },
   "expected": {
-    "state_mesh": {
-      "total_fields": 1,
-      "total_writes": 3,
-      "total_reads": 2,
-      "total_re_derivations": 0
-    },
     "field_names": [
       "a"
-    ]
-  }
+    ],
+    "state_mesh": {
+      "total_fields": 1,
+      "total_re_derivations": 0,
+      "total_reads": 2,
+      "total_writes": 3
+    }
+  },
+  "options": {}
 }

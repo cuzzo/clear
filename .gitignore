@@ -164,4 +164,5 @@ transpile-tests/fuzz/*.cht
 gems/espalier/architecture.yml
 
 # Decomplex native Rust build artifacts
-gems/decomplex/rust/target/
+gems/decomplex/target/
+gems/fact-mine/target/

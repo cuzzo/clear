@@ -156,10 +156,9 @@ module Espalier
 
     def collect_state_properties(class_name, state_var)
       props = []
-      # Look for de-complex co-update observations on state
-      if @decomplex_data["#{class_name}::STATE_CO_UPDATE"]&.include?(state_var)
-        paired = @decomplex_data["#{class_name}::STATE_CO_UPDATE"][state_var]
-        props << "co-updates with #{paired}"
+      co_updates = @decomplex_data["#{class_name}::STATE_CO_UPDATE"]
+      if co_updates && co_updates.include?(state_var)
+        props << "co-updates with #{co_updates[state_var]}"
       end
       props
     end

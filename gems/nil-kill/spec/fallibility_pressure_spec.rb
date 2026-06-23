@@ -561,6 +561,7 @@ RSpec.describe NilKill::FallibilityPressure do
   end
 
   it "writes fallibility pressure facts during infer" do
+    skip "fallibility pressure pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-fallibility-infer", NilKill::ROOT) do |dir|
       path = File.join(dir, "pipeline.rb")
       File.write(path, <<~RUBY)

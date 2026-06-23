@@ -136,6 +136,7 @@ Usage:
   bundle exec auto-type guarded-autocorrect [--max-iterations N]
 
 Config:
+  FACT_MINE_FACTS_FILE=facts.json   path to pre-computed fact-mine JSON, bypassing fact-mine-rust runs
   NIL_KILL_TARGETS=src[:other_dir]   target Ruby source roots
   NIL_KILL_EXCLUDE_TARGETS=src/tools  exclude Ruby source roots
   NIL_KILL_MIN_CALLS=20              runtime confidence threshold

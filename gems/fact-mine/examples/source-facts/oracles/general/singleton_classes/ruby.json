@@ -1,0 +1,236 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_five",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_five",
+        "line": 2,
+        "message": "obj",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "sclass(id body(method(id)))",
+          "sclass(id body(method(id)))"
+        ],
+        "child_masses": [
+          4,
+          4
+        ],
+        "fingerprint": "body_statement(sclass(id body(method(id))) sclass(id body(method(id))))",
+        "line": 2,
+        "mass": 9,
+        "method_name": "method_five",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(sclass(id body(method(id))) sclass(id body(method(id))))))",
+        "line": 1,
+        "mass": 11,
+        "method_name": "method_five",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 3,
+        "mass": 1,
+        "method_name": "singleton_method",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 7,
+        "mass": 1,
+        "method_name": "self_singleton_method",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_five",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 3,
+        "name": "singleton_method",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 7,
+        "name": "self_singleton_method",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_five",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_five",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_five",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "class << obj def singleton_method end end",
+            "span": [
+              2,
+              2,
+              5,
+              5
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 1,
+            "line": 6,
+            "reads": [],
+            "source": "class << self def self_singleton_method end end",
+            "span": [
+              6,
+              2,
+              9,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 3,
+        "name": "singleton_method",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 7,
+        "name": "self_singleton_method",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 2,
+            "mid": "obj",
+            "span": [
+              2,
+              11,
+              2,
+              14
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_five",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_five",
+        "owner": "ruby",
+        "reads": [
+          "obj"
+        ],
+        "writes": []
+      },
+      {
+        "line": 3,
+        "name": "singleton_method",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 7,
+        "name": "self_singleton_method",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "class << obj",
+        "function": "method_five",
+        "kind": "metaprogramming",
+        "line": 2
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

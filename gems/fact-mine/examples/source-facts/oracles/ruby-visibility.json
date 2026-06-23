@@ -1,95 +1,373 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "public_step",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "prepare",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "ready"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
     "calls": [
       {
-        "receiver": "self",
-        "message": "private",
-        "function": "(top-level)",
-        "line": 18,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           ":inline_guard"
-        ]
-      },
-      {
-        "receiver": "self",
-        "message": "protected",
-        "function": "(top-level)",
-        "line": 14,
+        ],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
+        "function": "(top-level)",
+        "line": 18,
+        "message": "private",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
         "arguments": [
           "inline_guard",
           "true"
-        ]
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 14,
+        "message": "protected",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "self",
-        "message": "private",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "(top-level)",
         "line": 8,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "message": "private",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "self",
-        "message": "prepare",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "public_step",
         "line": 5,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "message": "prepare",
+        "receiver": "self",
+        "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<private>(id argument_list(lit))",
+        "line": 18,
+        "mass": 3,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(method(id body(bool)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call<protected>(id argument_list(method(id body(bool))))",
+        "line": 14,
+        "mass": 5,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(bool))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "argument_list(method(id body(bool)))",
+        "line": 14,
+        "mass": 4,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(id))",
+          "id",
+          "method(id body(assignment(id bool)))",
+          "call<protected>(id argument_list(method(id body(bool))))",
+          "call<private>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          3,
+          1,
+          4,
+          5,
+          3
+        ],
+        "fingerprint": "body_statement(method(id body(id)) id method(id body(assignment(id bool))) call<protected>(id argument_list(method(id body(bool)))) call<private>(id argument_list(lit)))",
+        "line": 4,
+        "mass": 17,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment(id bool)))",
+        "line": 10,
+        "mass": 4,
+        "method_name": "prepare",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(bool))",
+        "line": 14,
+        "mass": 3,
+        "method_name": "inline_guard",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(id))",
+        "line": 4,
+        "mass": 3,
+        "method_name": "public_step",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
+        "line": 10,
         "name": "prepare",
         "owner": "SourceFactVisibility",
-        "line": 10,
-        "visibility": "private",
-        "params": [
-
-        ]
+        "params": [],
+        "visibility": "private"
       },
       {
+        "line": 14,
         "name": "inline_guard",
         "owner": "SourceFactVisibility",
-        "line": 14,
-        "visibility": "private",
-        "params": [
-
+        "params": [],
+        "visibility": "private"
+      },
+      {
+        "line": 4,
+        "name": "public_step",
+        "owner": "SourceFactVisibility",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactVisibility#prepare",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactVisibility#public_step",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactVisibility#prepare",
+        "line": 10,
+        "local_contract_assignments": {
+          "ready": "true"
+        },
+        "name": "prepare",
+        "owner": "SourceFactVisibility",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 11,
+            "index": 0,
+            "line": 11,
+            "reads": [],
+            "source": "@ready = true",
+            "span": [
+              11,
+              4,
+              11,
+              17
+            ],
+            "writes": [
+              "ready"
+            ]
+          }
         ]
       },
       {
+        "boundaries": [],
+        "id": "SourceFactVisibility#public_step",
+        "line": 4,
+        "local_contract_assignments": {},
         "name": "public_step",
         "owner": "SourceFactVisibility",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "prepare",
+            "span": [
+              5,
+              4,
+              5,
+              11
+            ],
+            "writes": []
+          }
         ]
       }
     ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactVisibility"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "true",
+        "line": 14,
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 10,
+        "name": "prepare",
+        "owner": "SourceFactVisibility"
+      },
+      {
+        "calls": [],
+        "line": 14,
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "prepare",
+            "span": [
+              5,
+              4,
+              5,
+              11
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "public_step",
+        "owner": "SourceFactVisibility"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 10,
+        "name": "prepare",
+        "owner": "SourceFactVisibility",
+        "reads": [],
+        "writes": [
+          "ready"
+        ]
+      },
+      {
+        "line": 14,
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "public_step",
+        "owner": "SourceFactVisibility",
+        "reads": [
+          "prepare"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
     "state_writes": [
       {
-        "receiver": "self",
-        "field": "@ready",
+        "field": "ready",
         "function": "prepare",
-        "line": 11
+        "line": 11,
+        "receiver": "self"
       }
     ]
   }

@@ -1,18 +1,22 @@
 {
   "detector": "local-flow",
-  "options": {
-  },
   "expected": [
     {
+      "boundaries": [
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        }
+      ],
       "method": "mixed",
       "statements": [
         {
-          "reads": [
-            "price",
-            "tax"
-          ],
-          "writes": [
-            "subtotal"
+          "co_uses": [
+            [
+              "price",
+              "tax"
+            ]
           ],
           "dependencies": [
             [
@@ -24,91 +28,75 @@
               "tax"
             ]
           ],
-          "co_uses": [
-            [
-              "price",
-              "tax"
-            ]
+          "reads": [
+            "price",
+            "tax"
+          ],
+          "writes": [
+            "subtotal"
           ]
         },
         {
-          "reads": [
-            "subtotal"
-          ],
-          "writes": [
-            "total"
-          ],
+          "co_uses": [],
           "dependencies": [
             [
               "total",
               "subtotal"
             ]
           ],
-          "co_uses": [
-          ]
-        },
-        {
           "reads": [
+            "subtotal"
           ],
           "writes": [
-            "timestamp"
-          ],
-          "dependencies": [
-          ],
-          "co_uses": [
+            "total"
           ]
         },
         {
-          "reads": [
-          ],
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "timestamp"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
           "writes": [
             "buffer"
-          ],
-          "dependencies": [
-          ],
-          "co_uses": [
           ]
         },
         {
-          "reads": [
-            "buffer",
-            "timestamp"
-          ],
-          "writes": [
-          ],
-          "dependencies": [
-          ],
           "co_uses": [
             [
               "buffer",
               "timestamp"
             ]
-          ]
-        },
-        {
+          ],
+          "dependencies": [],
           "reads": [
             "buffer",
-            "total"
+            "timestamp"
           ],
-          "writes": [
-          ],
-          "dependencies": [
-          ],
+          "writes": []
+        },
+        {
           "co_uses": [
             [
               "buffer",
               "total"
             ]
-          ]
-        }
-      ],
-      "boundaries": [
-        {
-          "before_index": 1,
-          "after_index": 2,
-          "kind": "blank"
+          ],
+          "dependencies": [],
+          "reads": [
+            "buffer",
+            "total"
+          ],
+          "writes": []
         }
       ]
     }
-  ]
+  ],
+  "options": {}
 }

@@ -1,0 +1,36 @@
+{
+  "array_shapes": [],
+  "fields": [],
+  "hash_shapes": [],
+  "methods": [],
+  "signatures": {},
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": [
+    {
+      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
+      "kind": "type_alias",
+      "language": "ruby",
+      "line": 0,
+      "name": "RawBody",
+      "owner": "Demo",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "source": "syntax",
+      "target": "T::Array[AST::Node]",
+      "type_system": "sorbet"
+    },
+    {
+      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
+      "kind": "type_alias",
+      "language": "ruby",
+      "line": 0,
+      "name": "ScopeType",
+      "owner": "Demo",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "source": "syntax",
+      "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
+      "type_system": "sorbet"
+    }
+  ]
+}

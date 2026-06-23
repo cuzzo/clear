@@ -1,154 +1,697 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "open",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "opened"
+          ]
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "close",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "opened"
+          ]
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "run",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "item"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        }
+      ],
+      "method": "guard",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_eq_nil",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_ne_nil",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_negated",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_both_terminate",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_else_terminate",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_safe_nav_cond",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "clone_left",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "data",
+              "user"
+            ]
+          ],
+          "reads": [
+            "user"
+          ],
+          "writes": [
+            "data"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "clone_right",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "data",
+              "account"
+            ]
+          ],
+          "reads": [
+            "account"
+          ],
+          "writes": [
+            "data"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "close",
+        "decision_line": 14,
+        "function": "run",
+        "kind": "if",
+        "line": 14,
+        "member": "then",
+        "predicate": "item.ready?"
+      },
+      {
+        "body": "raise \"nil!\"",
+        "decision_line": 44,
+        "function": "guard_both_terminate",
+        "kind": "if",
+        "line": 45,
+        "member": "then",
+        "predicate": "value.nil?"
+      },
+      {
+        "body": "raise \"nil!\"",
+        "decision_line": 52,
+        "function": "guard_else_terminate",
+        "kind": "if",
+        "line": 55,
+        "member": "else",
+        "predicate": "!value.nil?"
+      },
+      {
+        "body": "raise \"not nil!\"",
+        "decision_line": 44,
+        "function": "guard_both_terminate",
+        "kind": "if",
+        "line": 47,
+        "member": "else",
+        "predicate": "value.nil?"
+      },
+      {
+        "body": "return",
+        "decision_line": 18,
+        "function": "guard",
+        "kind": "if",
+        "line": 18,
+        "member": "then",
+        "predicate": "value"
+      },
+      {
+        "body": "return",
+        "decision_line": 24,
+        "function": "guard_eq_nil",
+        "kind": "if",
+        "line": 25,
+        "member": "then",
+        "predicate": "value == nil"
+      },
+      {
+        "body": "return",
+        "decision_line": 37,
+        "function": "guard_negated",
+        "kind": "if",
+        "line": 38,
+        "member": "then",
+        "predicate": "!value"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 31,
+        "function": "guard_ne_nil",
+        "kind": "if",
+        "line": 32,
+        "member": "then",
+        "predicate": "value != nil"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 52,
+        "function": "guard_else_terminate",
+        "kind": "if",
+        "line": 53,
+        "member": "then",
+        "predicate": "!value.nil?"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 60,
+        "function": "guard_safe_nav_cond",
+        "kind": "if",
+        "line": 61,
+        "member": "then",
+        "predicate": "value&.name"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "guard_both_terminate",
+        "line": 44,
+        "predicate": "value.nil?",
+        "state_refs": [
+          "value.nil?"
+        ]
+      },
+      {
+        "function": "guard_else_terminate",
+        "line": 52,
+        "predicate": "!value.nil?",
+        "state_refs": [
+          "value.nil?"
+        ]
+      },
+      {
+        "function": "guard_safe_nav_cond",
+        "line": 60,
+        "predicate": "value&.name",
+        "state_refs": [
+          "value.name"
+        ]
+      },
+      {
+        "function": "run",
+        "line": 14,
+        "predicate": "item.ready?",
+        "state_refs": [
+          "item.ready?"
+        ]
+      }
+    ],
     "calls": [
       {
+        "arguments": [
+          "\"nil!\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_both_terminate",
+        "line": 45,
+        "message": "raise",
         "receiver": "self",
-        "message": "audit",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"nil!\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_else_terminate",
+        "line": 55,
+        "message": "raise",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"not nil!\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_both_terminate",
+        "line": 47,
+        "message": "raise",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "data"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "clone_left",
-        "line": 25,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "data"
-        ]
-      },
-      {
-        "receiver": "self",
+        "line": 67,
         "message": "audit",
-        "function": "clone_right",
-        "line": 31,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "data"
-        ]
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
+        "arguments": [
+          "data"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "clone_right",
+        "line": 73,
+        "message": "audit",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "clone_left",
+        "line": 66,
+        "message": "name",
         "receiver": "user.profile",
-        "message": "name",
-        "function": "clone_left",
-        "line": 24,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "safe_navigation": false
       },
       {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "clone_left",
+        "line": 66,
+        "message": "profile",
         "receiver": "user",
-        "message": "profile",
-        "function": "clone_left",
-        "line": 24,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "safe_navigation": false
       },
       {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "clone_right",
+        "line": 72,
+        "message": "name",
         "receiver": "account.profile",
-        "message": "name",
-        "function": "clone_right",
-        "line": 30,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "safe_navigation": false
       },
       {
-        "receiver": "account",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "clone_right",
+        "line": 72,
         "message": "profile",
-        "function": "clone_right",
-        "line": 30,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "receiver": "account",
+        "safe_navigation": false
       },
       {
-        "receiver": "value",
-        "message": "name",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "guard",
         "line": 20,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": true,
-        "block": false,
-        "arguments": []
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": true
       },
       {
-        "receiver": "self",
-        "message": "open",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "guard_eq_nil",
+        "line": 27,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "guard_negated",
+        "line": 40,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "run",
         "line": 13,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
+        "message": "open",
         "receiver": "self",
-        "message": "close",
-        "function": "run",
-        "line": 14,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "safe_navigation": false
       },
       {
-        "receiver": "item",
-        "message": "ready?",
-        "function": "run",
-        "line": 14,
+        "arguments": [],
+        "block": false,
         "conditional": true,
         "control": "conditional",
-        "safe_navigation": false,
+        "function": "guard_both_terminate",
+        "line": 44,
+        "message": "nil?",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
         "block": false,
-        "arguments": []
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_else_terminate",
+        "line": 52,
+        "message": "nil?",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_else_terminate",
+        "line": 53,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_ne_nil",
+        "line": 32,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_safe_nav_cond",
+        "line": 60,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": true
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "guard_safe_nav_cond",
+        "line": 61,
+        "message": "name",
+        "receiver": "value",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "run",
+        "line": 14,
+        "message": "close",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "run",
+        "line": 14,
+        "message": "ready?",
+        "receiver": "item",
+        "safe_navigation": false
       }
     ],
     "clone_candidates": [
       {
-        "method_name": "clone_left",
-        "node_name": "call",
-        "line": 25,
-        "mass": 3,
-        "fingerprint": "call<audit>(id argument_list(id))",
         "child_fingerprints": [
           "argument_list(id)"
         ],
         "child_masses": [
           2
-        ]
+        ],
+        "fingerprint": "call<audit>(id argument_list(id))",
+        "line": 67,
+        "mass": 3,
+        "method_name": "clone_left",
+        "node_name": "call"
       },
       {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<audit>(id argument_list(id))",
+        "line": 73,
+        "mass": 3,
         "method_name": "clone_right",
-        "node_name": "call",
-        "line": 31,
-        "mass": 3,
-        "fingerprint": "call<audit>(id argument_list(id))",
+        "node_name": "call"
+      },
+      {
         "child_fingerprints": [
-          "argument_list(id)"
+          "argument_list(lit)"
         ],
         "child_masses": [
           2
-        ]
+        ],
+        "fingerprint": "call<raise>(id argument_list(lit))",
+        "line": 45,
+        "mass": 3,
+        "method_name": "guard_both_terminate",
+        "node_name": "call"
       },
       {
-        "method_name": "clone_left",
-        "node_name": "body_statement",
-        "line": 24,
-        "mass": 9,
-        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<raise>(id argument_list(lit))",
+        "line": 47,
+        "mass": 3,
+        "method_name": "guard_both_terminate",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<raise>(id argument_list(lit))",
+        "line": 55,
+        "mass": 3,
+        "method_name": "guard_else_terminate",
+        "node_name": "call"
+      },
+      {
         "child_fingerprints": [
           "assignment(id call(id call(id id)))",
           "call<audit>(id argument_list(id))",
@@ -158,14 +701,14 @@
           4,
           3,
           1
-        ]
+        ],
+        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
+        "line": 66,
+        "mass": 9,
+        "method_name": "clone_left",
+        "node_name": "body_statement"
       },
       {
-        "method_name": "clone_right",
-        "node_name": "body_statement",
-        "line": 30,
-        "mass": 9,
-        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
         "child_fingerprints": [
           "assignment(id call(id call(id id)))",
           "call<audit>(id argument_list(id))",
@@ -175,14 +718,46 @@
           4,
           3,
           1
-        ]
+        ],
+        "fingerprint": "body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)",
+        "line": 72,
+        "mass": 9,
+        "method_name": "clone_right",
+        "node_name": "body_statement"
       },
       {
-        "method_name": "run",
-        "node_name": "if",
-        "line": 14,
-        "mass": 4,
-        "fingerprint": "if(call(id id) id)",
+        "child_fingerprints": [
+          "call(id id)",
+          "call(id id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "if(call(id id) call(id id))",
+        "line": 60,
+        "mass": 5,
+        "method_name": "guard_safe_nav_cond",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call<raise>(id argument_list(lit))",
+          "call<raise>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          2,
+          3,
+          3
+        ],
+        "fingerprint": "if(call(id id) call<raise>(id argument_list(lit)) call<raise>(id argument_list(lit)))",
+        "line": 44,
+        "mass": 9,
+        "method_name": "guard_both_terminate",
+        "node_name": "if"
+      },
+      {
         "child_fingerprints": [
           "call(id id)",
           "id"
@@ -190,40 +765,141 @@
         "child_masses": [
           2,
           1
-        ]
-      },
-      {
-        "method_name": "clone_left",
-        "node_name": "call",
-        "line": 24,
-        "mass": 3,
-        "fingerprint": "call(id call(id id))",
-        "child_fingerprints": [
-          "call(id id)"
         ],
-        "child_masses": [
-          2
-        ]
-      },
-      {
-        "method_name": "clone_right",
-        "node_name": "call",
-        "line": 30,
-        "mass": 3,
-        "fingerprint": "call(id call(id id))",
-        "child_fingerprints": [
-          "call(id id)"
-        ],
-        "child_masses": [
-          2
-        ]
-      },
-      {
+        "fingerprint": "if(call(id id) id)",
+        "line": 14,
+        "mass": 4,
         "method_name": "run",
-        "node_name": "body_statement",
-        "line": 13,
-        "mass": 6,
-        "fingerprint": "body_statement(id if(call(id id) id))",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id call(id id))",
+        "line": 66,
+        "mass": 3,
+        "method_name": "clone_left",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id call(id id))",
+        "line": 72,
+        "mass": 3,
+        "method_name": "clone_right",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(lit call(id id))",
+        "line": 52,
+        "mass": 3,
+        "method_name": "guard_else_terminate",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(id id))",
+          "call(id id)",
+          "call<raise>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          3,
+          2,
+          3
+        ],
+        "fingerprint": "if(call(lit call(id id)) call(id id) call<raise>(id argument_list(lit)))",
+        "line": 52,
+        "mass": 9,
+        "method_name": "guard_else_terminate",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(nil))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          4,
+          2
+        ],
+        "fingerprint": "if(call(lit id argument_list(nil)) call(id id))",
+        "line": 31,
+        "mass": 7,
+        "method_name": "guard_ne_nil",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(nil))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "if(call(lit id argument_list(nil)))",
+        "line": 24,
+        "mass": 5,
+        "method_name": "guard_eq_nil",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "if(call(lit id))",
+        "line": 37,
+        "mass": 3,
+        "method_name": "guard_negated",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(nil)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(nil))",
+        "line": 24,
+        "mass": 4,
+        "method_name": "guard_eq_nil",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(nil)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(nil))",
+        "line": 31,
+        "mass": 4,
+        "method_name": "guard_ne_nil",
+        "node_name": "call"
+      },
+      {
         "child_fingerprints": [
           "id",
           "if(call(id id) id)"
@@ -231,110 +907,302 @@
         "child_masses": [
           1,
           4
-        ]
-      },
-      {
-        "method_name": "clone_left",
-        "node_name": "argument_list",
-        "line": 25,
-        "mass": 2,
-        "fingerprint": "argument_list(id)",
-        "child_fingerprints": [
-          "id"
         ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
-        "method_name": "clone_right",
-        "node_name": "argument_list",
-        "line": 31,
-        "mass": 2,
-        "fingerprint": "argument_list(id)",
-        "child_fingerprints": [
-          "id"
-        ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
+        "fingerprint": "body_statement(id if(call(id id) id))",
+        "line": 13,
+        "mass": 6,
         "method_name": "run",
-        "node_name": "call",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 67,
+        "mass": 2,
+        "method_name": "clone_left",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 73,
+        "mass": 2,
+        "method_name": "clone_right",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
         "line": 14,
         "mass": 2,
-        "fingerprint": "call(id id)",
+        "method_name": "run",
+        "node_name": "call"
+      },
+      {
         "child_fingerprints": [
           "id"
         ],
         "child_masses": [
           1
-        ]
-      },
-      {
-        "method_name": "guard",
-        "node_name": "call",
+        ],
+        "fingerprint": "call(id id)",
         "line": 20,
         "mass": 2,
-        "fingerprint": "call(id id)",
-        "child_fingerprints": [
-          "id"
-        ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
-        "method_name": "clone_left",
-        "node_name": "call",
-        "line": 24,
-        "mass": 2,
-        "fingerprint": "call(id id)",
-        "child_fingerprints": [
-          "id"
-        ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
-        "method_name": "clone_right",
-        "node_name": "call",
-        "line": 30,
-        "mass": 2,
-        "fingerprint": "call(id id)",
-        "child_fingerprints": [
-          "id"
-        ],
-        "child_masses": [
-          1
-        ]
-      },
-      {
         "method_name": "guard",
-        "node_name": "unless",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 27,
+        "mass": 2,
+        "method_name": "guard_eq_nil",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 32,
+        "mass": 2,
+        "method_name": "guard_ne_nil",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 40,
+        "mass": 2,
+        "method_name": "guard_negated",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 44,
+        "mass": 2,
+        "method_name": "guard_both_terminate",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 52,
+        "mass": 2,
+        "method_name": "guard_else_terminate",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 53,
+        "mass": 2,
+        "method_name": "guard_else_terminate",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 60,
+        "mass": 2,
+        "method_name": "guard_safe_nav_cond",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 61,
+        "mass": 2,
+        "method_name": "guard_safe_nav_cond",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 66,
+        "mass": 2,
+        "method_name": "clone_left",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 72,
+        "mass": 2,
+        "method_name": "clone_right",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(lit id)",
+        "line": 37,
+        "mass": 2,
+        "method_name": "guard_negated",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "unless(id)",
         "line": 18,
         "mass": 2,
-        "fingerprint": "unless(id)",
+        "method_name": "guard",
+        "node_name": "unless"
+      },
+      {
         "child_fingerprints": [
-          "id"
+          "if(call(lit id argument_list(nil)))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          5,
+          2
+        ],
+        "fingerprint": "body_statement(if(call(lit id argument_list(nil))) call(id id))",
+        "line": 24,
+        "mass": 8,
+        "method_name": "guard_eq_nil",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "if(call(lit id))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          3,
+          2
+        ],
+        "fingerprint": "body_statement(if(call(lit id)) call(id id))",
+        "line": 37,
+        "mass": 6,
+        "method_name": "guard_negated",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
         ],
         "child_masses": [
           1
-        ]
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 45,
+        "mass": 2,
+        "method_name": "guard_both_terminate",
+        "node_name": "argument_list"
       },
       {
-        "method_name": "(top-level)",
-        "node_name": "body_statement",
-        "line": 4,
-        "mass": 54,
-        "fingerprint": "body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(id) body_statement(id if(call(id id) id)))) method(id body(parameters(id) body_statement(unless(id) call(id id)))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))))",
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 47,
+        "mass": 2,
+        "method_name": "guard_both_terminate",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 55,
+        "mass": 2,
+        "method_name": "guard_else_terminate",
+        "node_name": "argument_list"
+      },
+      {
         "child_fingerprints": [
           "method(id body(assignment(id bool)))",
           "method(id body(assignment(id bool)))",
           "method(id body(parameters(id) body_statement(id if(call(id id) id))))",
           "method(id body(parameters(id) body_statement(unless(id) call(id id))))",
+          "method(id body(parameters(id) body_statement(if(call(lit id argument_list(nil))) call(id id))))",
+          "method(id body(parameters(id) if(call(lit id argument_list(nil)) call(id id))))",
+          "method(id body(parameters(id) body_statement(if(call(lit id)) call(id id))))",
+          "method(id body(parameters(id) if(call(id id) call<raise>(id argument_list(lit)) call<raise>(id argument_list(lit)))))",
+          "method(id body(parameters(id) if(call(lit call(id id)) call(id id) call<raise>(id argument_list(lit)))))",
+          "method(id body(parameters(id) if(call(id id) call(id id))))",
           "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
           "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))"
         ],
@@ -343,16 +1211,48 @@
           4,
           10,
           9,
+          12,
+          11,
+          10,
+          13,
+          13,
+          9,
           13,
           13
-        ]
+        ],
+        "fingerprint": "body_statement(method(id body(assignment(id bool))) method(id body(assignment(id bool))) method(id body(parameters(id) body_statement(id if(call(id id) id)))) method(id body(parameters(id) body_statement(unless(id) call(id id)))) method(id body(parameters(id) body_statement(if(call(lit id argument_list(nil))) call(id id)))) method(id body(parameters(id) if(call(lit id argument_list(nil)) call(id id)))) method(id body(parameters(id) body_statement(if(call(lit id)) call(id id)))) method(id body(parameters(id) if(call(id id) call<raise>(id argument_list(lit)) call<raise>(id argument_list(lit))))) method(id body(parameters(id) if(call(lit call(id id)) call(id id) call<raise>(id argument_list(lit))))) method(id body(parameters(id) if(call(id id) call(id id)))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))) method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id))))",
+        "line": 4,
+        "mass": 122,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
       },
       {
-        "method_name": "guard",
-        "node_name": "body_statement",
-        "line": 18,
-        "mass": 5,
-        "fingerprint": "body_statement(unless(id) call(id id))",
+        "child_fingerprints": [
+          "nil"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(nil)",
+        "line": 24,
+        "mass": 2,
+        "method_name": "guard_eq_nil",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "nil"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(nil)",
+        "line": 31,
+        "mass": 2,
+        "method_name": "guard_ne_nil",
+        "node_name": "argument_list"
+      },
+      {
         "child_fingerprints": [
           "unless(id)",
           "call(id id)"
@@ -360,144 +1260,958 @@
         "child_masses": [
           2,
           2
-        ]
+        ],
+        "fingerprint": "body_statement(unless(id) call(id id))",
+        "line": 18,
+        "mass": 5,
+        "method_name": "guard",
+        "node_name": "body_statement"
       },
       {
-        "method_name": "open",
-        "node_name": "defn",
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment(id bool)))",
         "line": 4,
         "mass": 4,
-        "fingerprint": "method(id body(assignment(id bool)))",
-        "child_fingerprints": [],
-        "child_masses": []
+        "method_name": "open",
+        "node_name": "defn"
       },
       {
-        "method_name": "close",
-        "node_name": "defn",
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment(id bool)))",
         "line": 8,
         "mass": 4,
-        "fingerprint": "method(id body(assignment(id bool)))",
-        "child_fingerprints": [],
-        "child_masses": []
+        "method_name": "close",
+        "node_name": "defn"
       },
       {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
+        "line": 65,
+        "mass": 13,
         "method_name": "clone_left",
-        "node_name": "defn",
-        "line": 23,
-        "mass": 13,
-        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
-        "child_fingerprints": [],
-        "child_masses": []
+        "node_name": "defn"
       },
       {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
+        "line": 71,
+        "mass": 13,
         "method_name": "clone_right",
-        "node_name": "defn",
-        "line": 29,
-        "mass": 13,
-        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id call(id call(id id))) call<audit>(id argument_list(id)) id)))",
-        "child_fingerprints": [],
-        "child_masses": []
+        "node_name": "defn"
       },
       {
-        "method_name": "run",
-        "node_name": "defn",
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(id if(call(id id) id))))",
         "line": 12,
         "mass": 10,
-        "fingerprint": "method(id body(parameters(id) body_statement(id if(call(id id) id))))",
-        "child_fingerprints": [],
-        "child_masses": []
+        "method_name": "run",
+        "node_name": "defn"
       },
       {
-        "method_name": "guard",
-        "node_name": "defn",
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(if(call(lit id argument_list(nil))) call(id id))))",
+        "line": 23,
+        "mass": 12,
+        "method_name": "guard_eq_nil",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(if(call(lit id)) call(id id))))",
+        "line": 36,
+        "mass": 10,
+        "method_name": "guard_negated",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(unless(id) call(id id))))",
         "line": 17,
         "mass": 9,
-        "fingerprint": "method(id body(parameters(id) body_statement(unless(id) call(id id))))",
+        "method_name": "guard",
+        "node_name": "defn"
+      },
+      {
         "child_fingerprints": [],
-        "child_masses": []
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) if(call(id id) call(id id))))",
+        "line": 59,
+        "mass": 9,
+        "method_name": "guard_safe_nav_cond",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) if(call(id id) call<raise>(id argument_list(lit)) call<raise>(id argument_list(lit)))))",
+        "line": 43,
+        "mass": 13,
+        "method_name": "guard_both_terminate",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) if(call(lit call(id id)) call(id id) call<raise>(id argument_list(lit)))))",
+        "line": 51,
+        "mass": 13,
+        "method_name": "guard_else_terminate",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) if(call(lit id argument_list(nil)) call(id id))))",
+        "line": 30,
+        "mass": 11,
+        "method_name": "guard_ne_nil",
+        "node_name": "defn"
       }
     ],
+    "comparisons": [
+      {
+        "canon_source": "value != nil",
+        "function": "guard_ne_nil",
+        "line": 31,
+        "operator": "!=",
+        "raw": "value != nil",
+        "source": "value != nil"
+      },
+      {
+        "canon_source": "value == nil",
+        "function": "guard_eq_nil",
+        "line": 24,
+        "operator": "==",
+        "raw": "value == nil",
+        "source": "value == nil"
+      }
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
+        "line": 12,
         "name": "run",
         "owner": "SourceFactProtocolsNilClone",
-        "line": 12,
-        "visibility": "public",
         "params": [
           "item"
-        ]
+        ],
+        "visibility": "public"
       },
       {
+        "line": 17,
         "name": "guard",
         "owner": "SourceFactProtocolsNilClone",
-        "line": 17,
-        "visibility": "public",
         "params": [
           "value"
-        ]
+        ],
+        "visibility": "public"
       },
       {
-        "name": "clone_left",
-        "owner": "SourceFactProtocolsNilClone",
         "line": 23,
-        "visibility": "public",
-        "params": [
-          "user"
-        ]
-      },
-      {
-        "name": "clone_right",
+        "name": "guard_eq_nil",
         "owner": "SourceFactProtocolsNilClone",
-        "line": 29,
-        "visibility": "public",
         "params": [
-          "account"
-        ]
+          "value"
+        ],
+        "visibility": "public"
       },
       {
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "value"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 36,
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "value"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
         "name": "open",
         "owner": "SourceFactProtocolsNilClone",
-        "line": 4,
-        "visibility": "public",
-        "params": []
+        "params": [],
+        "visibility": "public"
       },
       {
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "value"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "value"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 59,
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "value"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 65,
+        "name": "clone_left",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "user"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 71,
+        "name": "clone_right",
+        "owner": "SourceFactProtocolsNilClone",
+        "params": [
+          "account"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
         "name": "close",
         "owner": "SourceFactProtocolsNilClone",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactProtocolsNilClone#clone_left",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#clone_right",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#close",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_both_terminate",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_else_terminate",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_eq_nil",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_ne_nil",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_negated",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_safe_nav_cond",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#open",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#run",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#clone_left",
+        "line": 65,
+        "local_contract_assignments": {
+          "data": "user.profile.name"
+        },
+        "name": "clone_left",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "data",
+                "user"
+              ]
+            ],
+            "end_line": 66,
+            "index": 0,
+            "line": 66,
+            "reads": [
+              "user"
+            ],
+            "source": "data = user.profile.name",
+            "span": [
+              66,
+              4,
+              66,
+              28
+            ],
+            "writes": [
+              "data"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 67,
+            "index": 1,
+            "line": 67,
+            "reads": [
+              "data"
+            ],
+            "source": "audit(data)",
+            "span": [
+              67,
+              4,
+              67,
+              15
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 68,
+            "index": 2,
+            "line": 68,
+            "reads": [
+              "data"
+            ],
+            "source": "data",
+            "span": [
+              68,
+              4,
+              68,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#clone_right",
+        "line": 71,
+        "local_contract_assignments": {
+          "data": "account.profile.name"
+        },
+        "name": "clone_right",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "data",
+                "account"
+              ]
+            ],
+            "end_line": 72,
+            "index": 0,
+            "line": 72,
+            "reads": [
+              "account"
+            ],
+            "source": "data = account.profile.name",
+            "span": [
+              72,
+              4,
+              72,
+              31
+            ],
+            "writes": [
+              "data"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 73,
+            "index": 1,
+            "line": 73,
+            "reads": [
+              "data"
+            ],
+            "source": "audit(data)",
+            "span": [
+              73,
+              4,
+              73,
+              15
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 74,
+            "index": 2,
+            "line": 74,
+            "reads": [
+              "data"
+            ],
+            "source": "data",
+            "span": [
+              74,
+              4,
+              74,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#close",
         "line": 8,
-        "visibility": "public",
-        "params": []
+        "local_contract_assignments": {
+          "opened": "false"
+        },
+        "name": "close",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 9,
+            "reads": [],
+            "source": "@opened = false",
+            "span": [
+              9,
+              4,
+              9,
+              19
+            ],
+            "writes": [
+              "opened"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_both_terminate",
+        "line": 43,
+        "local_contract_assignments": {},
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 48,
+            "index": 0,
+            "line": 44,
+            "reads": [
+              "value"
+            ],
+            "source": "if value.nil? raise \"nil!\" else raise \"not nil!\" end",
+            "span": [
+              44,
+              4,
+              48,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_else_terminate",
+        "line": 51,
+        "local_contract_assignments": {},
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 56,
+            "index": 0,
+            "line": 52,
+            "reads": [
+              "value"
+            ],
+            "source": "if !value.nil? value.name else raise \"nil!\" end",
+            "span": [
+              52,
+              4,
+              56,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_eq_nil",
+        "line": 23,
+        "local_contract_assignments": {},
+        "name": "guard_eq_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 26,
+            "index": 0,
+            "line": 24,
+            "reads": [
+              "value"
+            ],
+            "source": "if value == nil return end",
+            "span": [
+              24,
+              4,
+              26,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 27,
+            "index": 1,
+            "line": 27,
+            "reads": [
+              "value"
+            ],
+            "source": "value.name",
+            "span": [
+              27,
+              4,
+              27,
+              14
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_ne_nil",
+        "line": 30,
+        "local_contract_assignments": {},
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 33,
+            "index": 0,
+            "line": 31,
+            "reads": [
+              "value"
+            ],
+            "source": "if value != nil value.name end",
+            "span": [
+              31,
+              4,
+              33,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_negated",
+        "line": 36,
+        "local_contract_assignments": {},
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 39,
+            "index": 0,
+            "line": 37,
+            "reads": [
+              "value"
+            ],
+            "source": "if !value return end",
+            "span": [
+              37,
+              4,
+              39,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 40,
+            "index": 1,
+            "line": 40,
+            "reads": [
+              "value"
+            ],
+            "source": "value.name",
+            "span": [
+              40,
+              4,
+              40,
+              14
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_safe_nav_cond",
+        "line": 59,
+        "local_contract_assignments": {},
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 62,
+            "index": 0,
+            "line": 60,
+            "reads": [
+              "value"
+            ],
+            "source": "if value&.name value.name end",
+            "span": [
+              60,
+              4,
+              62,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#open",
+        "line": 4,
+        "local_contract_assignments": {
+          "opened": "true"
+        },
+        "name": "open",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "@opened = true",
+            "span": [
+              5,
+              4,
+              5,
+              18
+            ],
+            "writes": [
+              "opened"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#run",
+        "line": 12,
+        "local_contract_assignments": {},
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 13,
+            "index": 0,
+            "line": 13,
+            "reads": [],
+            "source": "open",
+            "span": [
+              13,
+              4,
+              13,
+              8
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 1,
+            "line": 14,
+            "reads": [
+              "item"
+            ],
+            "source": "close if item.ready?",
+            "span": [
+              14,
+              4,
+              14,
+              24
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 19,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactProtocolsNilClone#guard",
+        "line": 17,
+        "local_contract_assignments": {},
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 18,
+            "index": 0,
+            "line": 18,
+            "reads": [
+              "value"
+            ],
+            "source": "return unless value",
+            "span": [
+              18,
+              4,
+              18,
+              23
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 1,
+            "line": 20,
+            "reads": [
+              "value"
+            ],
+            "source": "value&.name",
+            "span": [
+              20,
+              4,
+              20,
+              15
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactProtocolsNilClone"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "if !value.nil? value.name else raise \"nil!\" end",
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "body": "if value != nil value.name end",
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "body": "if value.nil? raise \"nil!\" else raise \"not nil!\" end",
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone"
       }
     ],
     "protocol_call_paths": [
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "guard",
+        "calls": [],
         "line": 17,
-        "calls": []
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "guard",
+        "calls": [],
         "line": 17,
-        "calls": []
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "open",
+        "calls": [],
+        "line": 23,
+        "name": "guard_eq_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 23,
+        "name": "guard_eq_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 36,
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 36,
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
         "line": 4,
-        "calls": []
+        "name": "open",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "close",
+        "calls": [],
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 59,
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
+        "line": 59,
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [],
         "line": 8,
-        "calls": []
+        "name": "close",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "run",
-        "line": 12,
         "calls": [
           {
             "line": 13,
@@ -519,12 +2233,12 @@
               9
             ]
           }
-        ]
+        ],
+        "line": 12,
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "run",
-        "line": 12,
         "calls": [
           {
             "line": 13,
@@ -536,48 +2250,102 @@
               8
             ]
           }
-        ]
+        ],
+        "line": 12,
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
+        "calls": [
+          {
+            "line": 45,
+            "mid": "raise",
+            "span": [
+              45,
+              6,
+              45,
+              18
+            ]
+          }
+        ],
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [
+          {
+            "line": 47,
+            "mid": "raise",
+            "span": [
+              47,
+              6,
+              47,
+              22
+            ]
+          }
+        ],
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [
+          {
+            "line": 55,
+            "mid": "raise",
+            "span": [
+              55,
+              6,
+              55,
+              18
+            ]
+          }
+        ],
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "calls": [
+          {
+            "line": 67,
+            "mid": "audit",
+            "span": [
+              67,
+              4,
+              67,
+              15
+            ]
+          }
+        ],
+        "line": 65,
         "name": "clone_left",
-        "line": 23,
-        "calls": [
-          {
-            "line": 25,
-            "mid": "audit",
-            "span": [
-              25,
-              4,
-              25,
-              15
-            ]
-          }
-        ]
+        "owner": "SourceFactProtocolsNilClone"
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "clone_right",
-        "line": 29,
         "calls": [
           {
-            "line": 31,
+            "line": 73,
             "mid": "audit",
             "span": [
-              31,
+              73,
               4,
-              31,
+              73,
               15
             ]
           }
-        ]
+        ],
+        "line": 71,
+        "name": "clone_right",
+        "owner": "SourceFactProtocolsNilClone"
       }
     ],
     "protocol_method_effects": [
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "run",
         "line": 12,
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone",
         "reads": [
           "close",
           "item.ready",
@@ -586,18 +2354,84 @@
         "writes": []
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "guard",
         "line": 17,
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone",
         "reads": [
           "value.name"
         ],
         "writes": []
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "clone_left",
         "line": 23,
+        "name": "guard_eq_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "value.name"
+        ],
+        "writes": []
+      },
+      {
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "value.name"
+        ],
+        "writes": []
+      },
+      {
+        "line": 36,
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "value.name"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "open",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [],
+        "writes": [
+          "opened"
+        ]
+      },
+      {
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "raise",
+          "value.nil"
+        ],
+        "writes": []
+      },
+      {
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "raise",
+          "value.name",
+          "value.nil"
+        ],
+        "writes": []
+      },
+      {
+        "line": 59,
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone",
+        "reads": [
+          "value.name"
+        ],
+        "writes": []
+      },
+      {
+        "line": 65,
+        "name": "clone_left",
+        "owner": "SourceFactProtocolsNilClone",
         "reads": [
           "audit",
           "user.profile",
@@ -606,9 +2440,9 @@
         "writes": []
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
+        "line": 71,
         "name": "clone_right",
-        "line": 29,
+        "owner": "SourceFactProtocolsNilClone",
         "reads": [
           "account.profile",
           "account.profile.name",
@@ -617,18 +2451,9 @@
         "writes": []
       },
       {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "open",
-        "line": 4,
-        "reads": [],
-        "writes": [
-          "opened"
-        ]
-      },
-      {
-        "owner": "SourceFactProtocolsNilClone",
-        "name": "close",
         "line": 8,
+        "name": "close",
+        "owner": "SourceFactProtocolsNilClone",
         "reads": [],
         "writes": [
           "opened"
@@ -638,9 +2463,9 @@
     "redundant_nil_guards": [
       {
         "defn": "guard",
+        "guard": "value&.name",
         "line": 20,
         "local": "value",
-        "guard": "value&.name",
         "proof": "value is already proven non-nil on this path"
       }
     ],
@@ -650,58 +2475,126 @@
         "function": "guard",
         "kind": "eliminable_guard",
         "line": 20
+      },
+      {
+        "detail": "value",
+        "function": "guard_both_terminate",
+        "kind": "eliminable_guard",
+        "line": 44
+      },
+      {
+        "detail": "value",
+        "function": "guard_else_terminate",
+        "kind": "eliminable_guard",
+        "line": 52
+      },
+      {
+        "detail": "value",
+        "function": "guard_safe_nav_cond",
+        "kind": "eliminable_guard",
+        "line": 60
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
-        "receiver": "user.profile",
         "field": "name",
         "function": "clone_left",
-        "line": 24
+        "line": 66,
+        "receiver": "user.profile"
       },
       {
-        "receiver": "account.profile",
         "field": "name",
         "function": "clone_right",
-        "line": 30
+        "line": 72,
+        "receiver": "account.profile"
       },
       {
-        "receiver": "value",
         "field": "name",
         "function": "guard",
-        "line": 20
+        "line": 20,
+        "receiver": "value"
       },
       {
-        "receiver": "user",
+        "field": "name",
+        "function": "guard_else_terminate",
+        "line": 53,
+        "receiver": "value"
+      },
+      {
+        "field": "name",
+        "function": "guard_eq_nil",
+        "line": 27,
+        "receiver": "value"
+      },
+      {
+        "field": "name",
+        "function": "guard_ne_nil",
+        "line": 32,
+        "receiver": "value"
+      },
+      {
+        "field": "name",
+        "function": "guard_negated",
+        "line": 40,
+        "receiver": "value"
+      },
+      {
+        "field": "name",
+        "function": "guard_safe_nav_cond",
+        "line": 60,
+        "receiver": "value"
+      },
+      {
+        "field": "name",
+        "function": "guard_safe_nav_cond",
+        "line": 61,
+        "receiver": "value"
+      },
+      {
+        "field": "nil?",
+        "function": "guard_both_terminate",
+        "line": 44,
+        "receiver": "value"
+      },
+      {
+        "field": "nil?",
+        "function": "guard_else_terminate",
+        "line": 52,
+        "receiver": "value"
+      },
+      {
         "field": "profile",
         "function": "clone_left",
-        "line": 24
+        "line": 66,
+        "receiver": "user"
       },
       {
-        "receiver": "account",
         "field": "profile",
         "function": "clone_right",
-        "line": 30
+        "line": 72,
+        "receiver": "account"
       },
       {
-        "receiver": "item",
         "field": "ready?",
         "function": "run",
-        "line": 14
+        "line": 14,
+        "receiver": "item"
       }
     ],
     "state_writes": [
       {
-        "receiver": "self",
-        "field": "@opened",
+        "field": "opened",
         "function": "close",
-        "line": 9
+        "line": 9,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
-        "field": "@opened",
+        "field": "opened",
         "function": "open",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       }
     ]
   }

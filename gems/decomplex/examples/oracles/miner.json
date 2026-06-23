@@ -1,7 +1,5 @@
 {
   "detector": "miner",
-  "options": {
-  },
   "expected": {
     "missing_abstractions": [
       {
@@ -11,20 +9,21 @@
           "b",
           "c"
         ],
-        "support": 3,
-        "scatter": 3
+        "scatter": 3,
+        "support": 3
       }
     ],
     "neglected_conditions": [
       {
+        "missing": "c",
         "pattern": [
           "a",
           "b",
           "c"
         ],
-        "support": 3,
-        "missing": "c"
+        "support": 3
       }
     ]
-  }
+  },
+  "options": {}
 }

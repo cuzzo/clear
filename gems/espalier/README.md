@@ -118,6 +118,7 @@ combining structural facts with sibling-gem evidence:
 - `--decomplex FILE`: function-level complexity and protocol pressure.
 - `--risk FILE`: Boobytrap/SlopCop churn, coverage, and risk evidence.
 - `--manifest FILE`: a previously generated Espalier YAML manifest.
+- `--fact-mine FILE`: a previously generated `fact-mine.json` static facts file (also honors `ENV["FACT_MINE_FACTS_FILE"]` environment variable to bypass fact extraction runs).
 
 Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed

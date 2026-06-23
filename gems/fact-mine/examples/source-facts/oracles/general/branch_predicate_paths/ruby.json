@@ -1,4 +1,50 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "ready?",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        }
+      ],
+      "method": "route",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "user"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "user"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [
       {
@@ -146,6 +192,375 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(call(lit id argument_list(lit)) call(id id))",
+          "call<publish>(id argument_list(lit))",
+          "call<warn>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          7,
+          3,
+          3
+        ],
+        "fingerprint": "if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit)))",
+        "line": 9,
+        "mass": 14,
+        "method_name": "route",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<audit>(id argument_list(id))",
+        "line": 17,
+        "mass": 3,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<default>(id argument_list(id))",
+        "line": 21,
+        "mass": 3,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<fallback>(id argument_list(id))",
+        "line": 19,
+        "mass": 3,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "call<audit>(id argument_list(id))",
+          "when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          2,
+          3,
+          9
+        ],
+        "fingerprint": "when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id))))",
+        "line": 16,
+        "mass": 15,
+        "method_name": "route",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "call<fallback>(id argument_list(id))",
+          "call<default>(id argument_list(id))"
+        ],
+        "child_masses": [
+          2,
+          3,
+          3
+        ],
+        "fingerprint": "when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id)))",
+        "line": 18,
+        "mass": 9,
+        "method_name": "route",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<publish>(id argument_list(lit))",
+        "line": 10,
+        "mass": 3,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<warn>(id argument_list(lit))",
+        "line": 12,
+        "mass": 3,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id))))"
+        ],
+        "child_masses": [
+          2,
+          15
+        ],
+        "fingerprint": "case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id)))))",
+        "line": 15,
+        "mass": 18,
+        "method_name": "route",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          4,
+          2
+        ],
+        "fingerprint": "and(call(lit id argument_list(lit)) call(id id))",
+        "line": 9,
+        "mass": 7,
+        "method_name": "route",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "ready?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 9,
+        "mass": 4,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 17,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 19,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 21,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 15,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit)))",
+          "case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id)))))"
+        ],
+        "child_masses": [
+          14,
+          18
+        ],
+        "fingerprint": "body_statement(if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit))) case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id))))))",
+        "line": 9,
+        "mass": 33,
+        "method_name": "route",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 16,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "ready?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "route",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(call(lit id argument_list(lit))))",
+          "method(id body(parameters(id) body_statement(if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit))) case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id))))))))"
+        ],
+        "child_masses": [
+          6,
+          37
+        ],
+        "fingerprint": "body_statement(method(id body(call(lit id argument_list(lit)))) method(id body(parameters(id) body_statement(if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit))) case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id)))))))))",
+        "line": 4,
+        "mass": 44,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(call(lit id argument_list(lit))))",
+        "line": 4,
+        "mass": 6,
+        "method_name": "ready?",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(if(and(call(lit id argument_list(lit)) call(id id)) call<publish>(id argument_list(lit)) call<warn>(id argument_list(lit))) case(call(id id) when(argument_list(lit) call<audit>(id argument_list(id)) when(argument_list(lit) call<fallback>(id argument_list(id)) call<default>(id argument_list(id))))))))",
+        "line": 8,
+        "mass": 37,
+        "method_name": "route",
+        "node_name": "defn"
+      }
+    ],
     "comparisons": [
       {
         "canon_source": "status == :ready",
@@ -217,6 +632,111 @@
         "visibility": "public"
       }
     ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactBranchPredicatePaths#ready?",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactBranchPredicatePaths#route",
+        "score": 3.4,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 1,
+          "cases": 3
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactBranchPredicatePaths#ready?",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "ready?",
+        "owner": "SourceFactBranchPredicatePaths",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "@status == :ready",
+            "span": [
+              5,
+              4,
+              5,
+              21
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 14,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactBranchPredicatePaths#route",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 13,
+            "index": 0,
+            "line": 9,
+            "reads": [
+              "user"
+            ],
+            "source": "if @status == :ready && user.active? publish(:ready) else warn(\"not ready\") end",
+            "span": [
+              9,
+              4,
+              13,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 22,
+            "index": 1,
+            "line": 15,
+            "reads": [
+              "user"
+            ],
+            "source": "case user.role when \"admin\" audit(user) when \"guest\" fallback(user) else default(user) end",
+            "span": [
+              15,
+              4,
+              22,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactBranchPredicatePaths"
+      }
+    ],
     "path_conditions": [
       {
         "action": "publish(:ready)",
@@ -245,6 +765,115 @@
         "owner": "SourceFactBranchPredicatePaths"
       }
     ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "ready",
+        "owner": "SourceFactBranchPredicatePaths"
+      },
+      {
+        "calls": [],
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths"
+      },
+      {
+        "calls": [
+          {
+            "line": 10,
+            "mid": "publish",
+            "span": [
+              10,
+              6,
+              10,
+              21
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths"
+      },
+      {
+        "calls": [
+          {
+            "line": 17,
+            "mid": "audit",
+            "span": [
+              17,
+              6,
+              17,
+              17
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths"
+      },
+      {
+        "calls": [
+          {
+            "line": 19,
+            "mid": "fallback",
+            "span": [
+              19,
+              6,
+              19,
+              20
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths"
+      },
+      {
+        "calls": [
+          {
+            "line": 21,
+            "mid": "default",
+            "span": [
+              21,
+              6,
+              21,
+              19
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "ready",
+        "owner": "SourceFactBranchPredicatePaths",
+        "reads": [
+          "status"
+        ],
+        "writes": []
+      },
+      {
+        "line": 8,
+        "name": "route",
+        "owner": "SourceFactBranchPredicatePaths",
+        "reads": [
+          "audit",
+          "default",
+          "fallback",
+          "publish",
+          "status",
+          "user.active",
+          "user.role"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "warn",
@@ -253,19 +882,9 @@
         "line": 12
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
-      {
-        "field": "@status",
-        "function": "ready?",
-        "line": 5,
-        "receiver": "self"
-      },
-      {
-        "field": "@status",
-        "function": "route",
-        "line": 9,
-        "receiver": "self"
-      },
       {
         "field": "active?",
         "function": "route",
@@ -277,7 +896,20 @@
         "function": "route",
         "line": 15,
         "receiver": "user"
+      },
+      {
+        "field": "status",
+        "function": "ready?",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "status",
+        "function": "route",
+        "line": 9,
+        "receiver": "self"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

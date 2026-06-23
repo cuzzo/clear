@@ -1,91 +1,82 @@
 {
   "detector": "implicit-control-flow",
-  "options": {
-  },
   "expected": {
-    "ordered_protocols": [
+    "order_drift": [
       {
-        "protocol": [
-          "prepare",
-          "validate"
-        ],
         "dependency": [
           "write_read"
         ],
-        "support": 4,
+        "missing": [],
         "observed": [
+          "validate",
+          "prepare"
+        ],
+        "protocol": [
           "prepare",
           "validate"
-        ],
-        "missing": [
-
         ],
         "states": [
           "status"
-        ]
-      },
-      {
-        "protocol": [
-          "validate",
-          "commit"
         ],
+        "support": 4
+      }
+    ],
+    "ordered_protocols": [
+      {
         "dependency": [
           "write_read"
         ],
-        "support": 4,
+        "missing": [],
+        "observed": [
+          "prepare",
+          "validate"
+        ],
+        "protocol": [
+          "prepare",
+          "validate"
+        ],
+        "states": [
+          "status"
+        ],
+        "support": 4
+      },
+      {
+        "dependency": [
+          "write_read"
+        ],
+        "missing": [],
         "observed": [
           "validate",
           "commit"
         ],
-        "missing": [
-
+        "protocol": [
+          "validate",
+          "commit"
         ],
         "states": [
           "valid"
-        ]
+        ],
+        "support": 4
       },
       {
-        "protocol": [
-          "validate",
-          "prepare"
-        ],
         "dependency": [
           "read_write"
         ],
-        "support": 1,
+        "missing": [],
         "observed": [
           "validate",
           "prepare"
         ],
-        "missing": [
-
-        ],
-        "states": [
-          "status"
-        ]
-      }
-    ],
-    "order_drift": [
-      {
         "protocol": [
-          "prepare",
-          "validate"
-        ],
-        "dependency": [
-          "write_read"
-        ],
-        "support": 4,
-        "observed": [
           "validate",
           "prepare"
         ],
-        "missing": [
-
-        ],
         "states": [
           "status"
-        ]
+        ],
+        "support": 1
       }
     ]
-  }
+  },
+  "options": {}
 }

@@ -1,81 +1,12 @@
 {
   "detector": "state-mesh",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/state_mesh.rb",
-        "language": "ruby",
-        "state_writes": [
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh.rb",
-            "function": "first",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              1,
-              11
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh.rb",
-            "function": "second",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              11
-            ],
-            "owner": "Fixture"
-          }
-        ],
-        "state_reads": [
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh.rb",
-            "function": "check",
-            "line": 4,
-            "span": [
-              4,
-              0,
-              4,
-              10
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh.rb",
-            "function": "report",
-            "line": 5,
-            "span": [
-              5,
-              0,
-              5,
-              10
-            ],
-            "owner": "Fixture"
-          }
-        ]
-      }
-    ]
-  },
   "expected": {
     "fields": {
       "ready": {
         "messiness": 16.0,
         "metrics": {
           "fix_churn": 1.0,
-          "percentiles": {
-          },
+          "percentiles": {},
           "pressure": 2,
           "re_derivations": 0,
           "read_scatter": 2,
@@ -86,9 +17,7 @@
           "writes": 2
         },
         "rank": 1,
-        "re_derivations": [
-
-        ],
+        "re_derivations": [],
         "readers": [
           {
             "defn": "check",
@@ -153,9 +82,7 @@
                   "read": [
                     "ready"
                   ],
-                  "written": [
-
-                  ]
+                  "written": []
                 },
                 "name": "check",
                 "readers": 1,
@@ -163,9 +90,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "ready"
                   ]
@@ -179,9 +104,7 @@
                   "read": [
                     "ready"
                   ],
-                  "written": [
-
-                  ]
+                  "written": []
                 },
                 "name": "report",
                 "readers": 1,
@@ -189,9 +112,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "ready"
                   ]
@@ -219,5 +140,73 @@
       "total_reads": 2,
       "total_writes": 2
     }
+  },
+  "input": {
+    "documents": [
+      {
+        "file": "facts/state_mesh.rb",
+        "language": "ruby",
+        "state_reads": [
+          {
+            "field": "ready",
+            "file": "facts/state_mesh.rb",
+            "function": "check",
+            "line": 4,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              4,
+              0,
+              4,
+              10
+            ]
+          },
+          {
+            "field": "ready",
+            "file": "facts/state_mesh.rb",
+            "function": "report",
+            "line": 5,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              5,
+              0,
+              5,
+              10
+            ]
+          }
+        ],
+        "state_writes": [
+          {
+            "field": "ready",
+            "file": "facts/state_mesh.rb",
+            "function": "first",
+            "line": 1,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              1,
+              0,
+              1,
+              11
+            ]
+          },
+          {
+            "field": "ready",
+            "file": "facts/state_mesh.rb",
+            "function": "second",
+            "line": 2,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              2,
+              0,
+              2,
+              11
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

@@ -38,11 +38,15 @@ module SlopCop
     def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [],
             mutation: nil, exclude: [])
       repo = File.realpath(repo)
-      churn = begin
-        Boobytrap::Bugspots.from_git(repo)
-      rescue StandardError
-        {}
-      end
+      churn = if ENV["BOOBYTRAP_CHURN_FILE"] && File.file?(ENV["BOOBYTRAP_CHURN_FILE"])
+                JSON.parse(File.read(ENV["BOOBYTRAP_CHURN_FILE"]))
+              else
+                begin
+                  Boobytrap::Bugspots.from_git(repo)
+                rescue StandardError
+                  {}
+                end
+              end
       coverage = if resultset
                    Classifier.coverage_dataset(resultset, root: repo)
                  end

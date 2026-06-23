@@ -1,138 +1,5 @@
 {
   "detector": "derived-state",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/derived.rb",
-        "language": "ruby",
-        "local_methods": [
-          {
-            "id": "Fixture#refresh",
-            "owner": "Fixture",
-            "name": "refresh",
-            "file": "facts/derived.rb",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              20,
-              3
-            ],
-            "statements": [
-              {
-                "index": 0,
-                "line": 1,
-                "end_line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  13
-                ],
-                "source": "source = load",
-                "reads": [
-                  "load"
-                ],
-                "writes": [
-                  "source"
-                ],
-                "dependencies": [
-                  [
-                    "source",
-                    "load"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 1,
-                "line": 2,
-                "end_line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  16
-                ],
-                "source": "derived = source",
-                "reads": [
-                  "source"
-                ],
-                "writes": [
-                  "derived"
-                ],
-                "dependencies": [
-                  [
-                    "derived",
-                    "source"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 2,
-                "line": 7,
-                "end_line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  15
-                ],
-                "source": "source = reload",
-                "reads": [
-                  "reload"
-                ],
-                "writes": [
-                  "source"
-                ],
-                "dependencies": [
-                  [
-                    "source",
-                    "reload"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 3,
-                "line": 9,
-                "end_line": 9,
-                "span": [
-                  9,
-                  0,
-                  9,
-                  12
-                ],
-                "source": "use(derived)",
-                "reads": [
-                  "derived"
-                ],
-                "writes": [
-
-                ],
-                "dependencies": [
-
-                ],
-                "co_uses": [
-
-                ]
-              }
-            ],
-            "boundaries": [
-
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": [
     {
       "at": "facts/derived.rb:refresh:2",
@@ -152,5 +19,124 @@
         ]
       }
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "file": "facts/derived.rb",
+        "language": "ruby",
+        "local_methods": [
+          {
+            "boundaries": [],
+            "file": "facts/derived.rb",
+            "id": "Fixture#refresh",
+            "line": 1,
+            "name": "refresh",
+            "owner": "Fixture",
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "source",
+                    "load"
+                  ]
+                ],
+                "end_line": 1,
+                "index": 0,
+                "line": 1,
+                "reads": [
+                  "load"
+                ],
+                "source": "source = load",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  13
+                ],
+                "writes": [
+                  "source"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "derived",
+                    "source"
+                  ]
+                ],
+                "end_line": 2,
+                "index": 1,
+                "line": 2,
+                "reads": [
+                  "source"
+                ],
+                "source": "derived = source",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  16
+                ],
+                "writes": [
+                  "derived"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "source",
+                    "reload"
+                  ]
+                ],
+                "end_line": 7,
+                "index": 2,
+                "line": 7,
+                "reads": [
+                  "reload"
+                ],
+                "source": "source = reload",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  15
+                ],
+                "writes": [
+                  "source"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [],
+                "end_line": 9,
+                "index": 3,
+                "line": 9,
+                "reads": [
+                  "derived"
+                ],
+                "source": "use(derived)",
+                "span": [
+                  9,
+                  0,
+                  9,
+                  12
+                ],
+                "writes": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

@@ -1,71 +1,34 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/c/core.c",
-      "language": "c",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 12,
-          "name": "CSyntaxFactsCore_process",
-          "owner": "CSyntaxFactsCore",
-          "params": [
-            "self",
-            "user",
-            "items",
-            "item_count",
-            "callback"
-          ],
+          "function": "CSyntaxFactsCore_process",
+          "line": 17,
+          "predicate": "(user->role)",
           "span": [
-            12,
-            0,
-            40,
-            1
+            17,
+            2,
+            28,
+            3
           ],
-          "visibility": "public"
+          "state_refs": [
+            "user.role"
+          ]
         },
         {
-          "line": 42,
-          "name": "CSyntaxFactsCore_audit",
-          "owner": "CSyntaxFactsCore",
-          "params": [
-            "self",
-            "name"
-          ],
+          "function": "CSyntaxFactsCore_process",
+          "line": 30,
+          "predicate": "(self->status == STATUS_IDLE && user->ready)",
           "span": [
-            42,
-            0,
-            46,
-            1
+            30,
+            2,
+            35,
+            3
           ],
-          "visibility": "private"
-        },
-        {
-          "line": 48,
-          "name": "CSyntaxFactsCore_ready",
-          "owner": "CSyntaxFactsCore",
-          "params": [
-            "self"
-          ],
-          "span": [
-            48,
-            0,
-            50,
-            1
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "struct",
-          "line": 6,
-          "name": "CSyntaxFactsCore",
-          "span": [
-            6,
-            8,
-            10,
-            1
+          "state_refs": [
+            "status",
+            "user.ready"
           ]
         }
       ],
@@ -278,6 +241,170 @@
           ]
         }
       ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            17,
+            2,
+            28,
+            3
+          ],
+          "function": "CSyntaxFactsCore_process",
+          "kind": "case_dispatch",
+          "line": 17,
+          "members": [
+            "ROLE_ADMIN",
+            "ROLE_GUEST",
+            "ROLE_OWNER"
+          ],
+          "predicate": "user->role",
+          "span": [
+            17,
+            2,
+            28,
+            3
+          ]
+        },
+        {
+          "enclosing_span": [
+            30,
+            2,
+            35,
+            3
+          ],
+          "function": "CSyntaxFactsCore_process",
+          "kind": "conjunction",
+          "line": 30,
+          "members": [
+            "self->status == STATUS_IDLE",
+            "user->ready"
+          ],
+          "predicate": "self->status == STATUS_IDLE && user->ready",
+          "span": [
+            30,
+            6,
+            30,
+            48
+          ]
+        }
+      ],
+      "dispatch_sites": [
+        {
+          "arm_members": {
+            "ROLE_ADMIN": [],
+            "ROLE_GUEST": [],
+            "ROLE_OWNER": []
+          },
+          "function": "CSyntaxFactsCore_process",
+          "line": 17,
+          "outside": [],
+          "span": [
+            17,
+            2,
+            28,
+            3
+          ],
+          "variant_set": [
+            "ROLE_ADMIN",
+            "ROLE_GUEST",
+            "ROLE_OWNER"
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/c/core.c",
+      "functions": [
+        {
+          "line": 12,
+          "name": "CSyntaxFactsCore_process",
+          "owner": "CSyntaxFactsCore",
+          "params": [
+            "self",
+            "user",
+            "items",
+            "item_count",
+            "callback"
+          ],
+          "span": [
+            12,
+            0,
+            40,
+            1
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 42,
+          "name": "CSyntaxFactsCore_audit",
+          "owner": "CSyntaxFactsCore",
+          "params": [
+            "self",
+            "name"
+          ],
+          "span": [
+            42,
+            0,
+            46,
+            1
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 48,
+          "name": "CSyntaxFactsCore_ready",
+          "owner": "CSyntaxFactsCore",
+          "params": [
+            "self"
+          ],
+          "span": [
+            48,
+            0,
+            50,
+            1
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "c",
+      "owners": [
+        {
+          "kind": "struct",
+          "line": 6,
+          "name": "CSyntaxFactsCore",
+          "span": [
+            6,
+            8,
+            10,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "callback",
+          "function": "CSyntaxFactsCore_process",
+          "kind": "callback_inversion",
+          "line": 15,
+          "span": [
+            15,
+            2,
+            15,
+            20
+          ]
+        },
+        {
+          "detail": "puts",
+          "function": "CSyntaxFactsCore_audit",
+          "kind": "hidden_io",
+          "line": 43,
+          "span": [
+            43,
+            2,
+            43,
+            12
+          ]
+        }
+      ],
       "state_reads": [
         {
           "field": "active",
@@ -411,145 +538,8 @@
             20
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            17,
-            2,
-            28,
-            3
-          ],
-          "function": "CSyntaxFactsCore_process",
-          "kind": "case_dispatch",
-          "line": 17,
-          "members": [
-            "ROLE_ADMIN",
-            "ROLE_GUEST",
-            "ROLE_OWNER"
-          ],
-          "predicate": "user->role",
-          "span": [
-            17,
-            2,
-            28,
-            3
-          ]
-        },
-        {
-          "enclosing_span": [
-            30,
-            2,
-            35,
-            3
-          ],
-          "function": "CSyntaxFactsCore_process",
-          "kind": "conjunction",
-          "line": 30,
-          "members": [
-            "self->status == STATUS_IDLE",
-            "user->ready"
-          ],
-          "predicate": "self->status == STATUS_IDLE && user->ready",
-          "span": [
-            30,
-            6,
-            30,
-            48
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "CSyntaxFactsCore_process",
-          "line": 17,
-          "predicate": "(user->role)",
-          "span": [
-            17,
-            2,
-            28,
-            3
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "CSyntaxFactsCore_process",
-          "line": 30,
-          "predicate": "(self->status == STATUS_IDLE && user->ready)",
-          "span": [
-            30,
-            2,
-            35,
-            3
-          ],
-          "state_refs": [
-            "status",
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-        {
-          "arm_members": {
-            "ROLE_ADMIN": [
-
-            ],
-            "ROLE_GUEST": [
-
-            ],
-            "ROLE_OWNER": [
-
-            ]
-          },
-          "function": "CSyntaxFactsCore_process",
-          "line": 17,
-          "outside": [
-
-          ],
-          "span": [
-            17,
-            2,
-            28,
-            3
-          ],
-          "variant_set": [
-            "ROLE_ADMIN",
-            "ROLE_GUEST",
-            "ROLE_OWNER"
-          ]
-        }
-      ],
-      "semantic_effects": [
-        {
-          "detail": "callback",
-          "function": "CSyntaxFactsCore_process",
-          "kind": "callback_inversion",
-          "line": 15,
-          "span": [
-            15,
-            2,
-            15,
-            20
-          ]
-        },
-        {
-          "detail": "puts",
-          "function": "CSyntaxFactsCore_audit",
-          "kind": "hidden_io",
-          "line": 43,
-          "span": [
-            43,
-            2,
-            43,
-            12
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

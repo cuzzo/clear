@@ -21,3 +21,14 @@ class SourceFactSemanticEffects
     [schema, buckets, totals]
   end
 end
+
+class MyMutator
+  def initialize
+    @items = []
+  end
+
+  def add_item(item)
+    @items << item
+  end
+end
+

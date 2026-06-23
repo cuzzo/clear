@@ -1,68 +1,34 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/csharp/core.cs",
-      "language": "csharp",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 17,
-          "name": "Process",
-          "owner": "CSharpSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "Process",
+          "line": 23,
+          "predicate": "user.Role",
           "span": [
-            17,
-            4,
-            53,
-            5
+            23,
+            8,
+            35,
+            9
           ],
-          "visibility": "public"
+          "state_refs": [
+            "user.Role"
+          ]
         },
         {
-          "line": 55,
-          "name": "Audit",
-          "owner": "CSharpSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
+          "function": "Process",
+          "line": 37,
+          "predicate": "this.status == Status.Idle && user.Ready",
           "span": [
-            55,
-            4,
-            60,
-            5
+            37,
+            8,
+            45,
+            9
           ],
-          "visibility": "private"
-        },
-        {
-          "line": 62,
-          "name": "Ready",
-          "owner": "CSharpSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            62,
-            4,
-            65,
-            5
-          ],
-          "visibility": "private"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 4,
-          "name": "CSharpSyntaxFactsCore",
-          "span": [
-            4,
-            0,
-            66,
-            1
+          "state_refs": [
+            "this.status",
+            "user.Ready"
           ]
         }
       ],
@@ -229,9 +195,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -246,6 +210,143 @@
             12,
             49,
             27
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            23,
+            8,
+            35,
+            9
+          ],
+          "function": "Process",
+          "kind": "case_dispatch",
+          "line": 23,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.Role",
+          "span": [
+            23,
+            8,
+            35,
+            9
+          ]
+        },
+        {
+          "enclosing_span": [
+            37,
+            8,
+            45,
+            9
+          ],
+          "function": "Process",
+          "kind": "conjunction",
+          "line": 37,
+          "members": [
+            "this.status == Status.Idle",
+            "user.Ready"
+          ],
+          "predicate": "this.status == Status.Idle && user.Ready",
+          "span": [
+            37,
+            12,
+            37,
+            52
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/csharp/core.cs",
+      "functions": [
+        {
+          "line": 17,
+          "name": "Process",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            17,
+            4,
+            53,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 55,
+          "name": "Audit",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            55,
+            4,
+            60,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 62,
+          "name": "Ready",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [],
+          "span": [
+            62,
+            4,
+            65,
+            5
+          ],
+          "visibility": "private"
+        }
+      ],
+      "language": "csharp",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 4,
+          "name": "CSharpSyntaxFactsCore",
+          "span": [
+            4,
+            0,
+            66,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "Console.WriteLine",
+          "function": "Audit",
+          "kind": "hidden_io",
+          "line": 57,
+          "span": [
+            57,
+            8,
+            57,
+            31
+          ]
+        },
+        {
+          "detail": "Console.WriteLine",
+          "function": "Process",
+          "kind": "hidden_io",
+          "line": 44,
+          "span": [
+            44,
+            12,
+            44,
+            42
           ]
         }
       ],
@@ -447,117 +548,8 @@
             28
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            23,
-            8,
-            35,
-            9
-          ],
-          "function": "Process",
-          "kind": "case_dispatch",
-          "line": 23,
-          "members": [
-            "\"admin\"",
-            "\"guest\"",
-            "\"owner\""
-          ],
-          "predicate": "user.Role",
-          "span": [
-            23,
-            8,
-            35,
-            9
-          ]
-        },
-        {
-          "enclosing_span": [
-            37,
-            8,
-            45,
-            9
-          ],
-          "function": "Process",
-          "kind": "conjunction",
-          "line": 37,
-          "members": [
-            "this.status == Status.Idle",
-            "user.Ready"
-          ],
-          "predicate": "this.status == Status.Idle && user.Ready",
-          "span": [
-            37,
-            12,
-            37,
-            52
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "Process",
-          "line": 23,
-          "predicate": "user.Role",
-          "span": [
-            23,
-            8,
-            35,
-            9
-          ],
-          "state_refs": [
-            "user.Role"
-          ]
-        },
-        {
-          "function": "Process",
-          "line": 37,
-          "predicate": "this.status == Status.Idle && user.Ready",
-          "span": [
-            37,
-            8,
-            45,
-            9
-          ],
-          "state_refs": [
-            "this.status",
-            "user.Ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "Console.WriteLine",
-          "function": "Audit",
-          "kind": "hidden_io",
-          "line": 57,
-          "span": [
-            57,
-            8,
-            57,
-            31
-          ]
-        },
-        {
-          "detail": "Console.WriteLine",
-          "function": "Process",
-          "kind": "hidden_io",
-          "line": 44,
-          "span": [
-            44,
-            12,
-            44,
-            42
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

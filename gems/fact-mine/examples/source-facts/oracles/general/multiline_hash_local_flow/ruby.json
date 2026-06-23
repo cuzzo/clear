@@ -1,30 +1,294 @@
 {
   "local_flow": [
     {
+      "boundaries": [],
       "method": "summary",
       "statements": [
         {
+          "co_uses": [],
+          "dependencies": [],
           "reads": [
             "label"
           ],
-          "writes": [],
-          "dependencies": [],
-          "co_uses": []
+          "writes": []
         },
         {
-          "reads": [],
-          "writes": [],
+          "co_uses": [],
           "dependencies": [],
-          "co_uses": []
+          "reads": [],
+          "writes": []
         },
         {
-          "reads": [],
-          "writes": [],
+          "co_uses": [],
           "dependencies": [],
-          "co_uses": []
+          "reads": [],
+          "writes": []
         }
-      ],
-      "boundaries": []
+      ]
     }
-  ]
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "summary",
+        "line": 7,
+        "message": "size",
+        "receiver": "items",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "hash(lit id)",
+          "hash(lit call(id id))",
+          "hash(lit if(id lit lit))"
+        ],
+        "child_masses": [
+          3,
+          4,
+          6
+        ],
+        "fingerprint": "hash(hash(lit id) hash(lit call(id id)) hash(lit if(id lit lit)))",
+        "line": 5,
+        "mass": 14,
+        "method_name": "summary",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1,
+          1
+        ],
+        "fingerprint": "if(id lit lit)",
+        "line": 8,
+        "mass": 4,
+        "method_name": "summary",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "call(id id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "hash(lit call(id id))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "summary",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 6,
+        "mass": 3,
+        "method_name": "summary",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "if(id lit lit)"
+        ],
+        "child_masses": [
+          1,
+          4
+        ],
+        "fingerprint": "hash(lit if(id lit lit))",
+        "line": 8,
+        "mass": 6,
+        "method_name": "summary",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) hash(hash(lit id) hash(lit call(id id)) hash(lit if(id lit lit)))))",
+        "line": 4,
+        "mass": 18,
+        "method_name": "summary",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 4,
+        "name": "summary",
+        "owner": "SourceFactMultilineHashLocalFlow",
+        "params": [
+          "label"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactMultilineHashLocalFlow#summary",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactMultilineHashLocalFlow#summary",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "summary",
+        "owner": "SourceFactMultilineHashLocalFlow",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 6,
+            "reads": [
+              "label"
+            ],
+            "source": "\"name\" => label",
+            "span": [
+              6,
+              6,
+              6,
+              21
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 1,
+            "line": 7,
+            "reads": [],
+            "source": "\"count\" => @items.size",
+            "span": [
+              7,
+              6,
+              7,
+              28
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 8,
+            "index": 2,
+            "line": 8,
+            "reads": [],
+            "source": "\"active\" => @active ? \"yes\" : \"no\"",
+            "span": [
+              8,
+              6,
+              8,
+              40
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactMultilineHashLocalFlow"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "summary",
+        "owner": "SourceFactMultilineHashLocalFlow"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "summary",
+        "owner": "SourceFactMultilineHashLocalFlow"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "summary",
+        "owner": "SourceFactMultilineHashLocalFlow",
+        "reads": [
+          "active",
+          "items"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "active",
+        "function": "summary",
+        "line": 8,
+        "receiver": "self"
+      },
+      {
+        "field": "items",
+        "function": "summary",
+        "line": 7,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
 }

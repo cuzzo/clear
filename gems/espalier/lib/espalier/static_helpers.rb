@@ -4,15 +4,10 @@
 require "pathname"
 require "set"
 
-begin
-  require "fact_mine/syntax"
-rescue LoadError
-  $LOAD_PATH.unshift(File.expand_path("../../../fact-mine/lib", __dir__))
-  require "fact_mine/syntax"
-end
+require_relative "type_profile"
 
 module Espalier
-  ROOT = File.expand_path("../../../..", __dir__) unless const_defined?(:ROOT)
+  ROOT = File.expand_path("../../../..", __dir__)
 
   HIGH = "high"
   REVIEW = "review"

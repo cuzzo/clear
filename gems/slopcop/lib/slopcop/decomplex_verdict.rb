@@ -35,67 +35,167 @@ module SlopCop
 
     module_function
 
+    DETECTOR_MAP = {
+      "missing_abstractions" => ["Missing Abstractions", 1],
+      "reification_misses" => ["Reification Misses", 1],
+      "alias_clusters" => ["Exact Predicate Aliases", 1], # We'll disambiguate exact vs semantic later
+      "decision_pressure" => ["Decision Pressure", 1],
+      "neglected_updates" => ["Neglected Updates", 2],
+      "neglected_conditions" => ["Neglected Conditions", 2],
+      "derived_state" => ["Derived-State Staleness", 2],
+      "inconsistent_rename_clone" => ["Inconsistent Rename Clones", 2],
+      "flay_similarity" => ["Structural Similarity (Type-2/3)", 2],
+      "neglected" => ["Neglected Path Conditions", 3], # from path_condition
+      "broken_protocol" => ["Broken Protocols", 3],
+      "false_simplicity" => ["False Simplicity", 3]
+    }.freeze
+    
     def blank(status)
       { spans: {}, m_all: {}, m_spur: {}, m_devw: {}, status: status }
     end
 
-    # abs_files: absolute paths -- the SAME strings SlopCop classifies,
-    # so decomplex finding locations join on (file, method) and the
-    # finding SPANS join on the arm's line. Builds, per file, the list
-    # of flagged decision spans (precise), AND a (file, method)
-    # aggregate (fallback for findings/locations lacking a span).
+    def flatten_detectors(detectors, prefix = nil)
+      flat = {}
+      detectors.each do |k, v|
+        if nested_detector_group?(v)
+          v.each do |sub_k, sub_v|
+            flat[mapped_detector_key(k, sub_k)] = sub_v
+          end
+        else
+          flat[k] = v
+        end
+      end
+      flat
+    end
+
+    def nested_detector_group?(v)
+      v.is_a?(Hash) && !v.key?("sites") && !v.key?("spans") && !v.empty?
+    end
+
+    def mapped_detector_key(k, sub_k)
+      if k == "semantic_alias" && sub_k == "alias_clusters"
+        "semantic_predicate_aliases"
+      elsif k == "predicate_alias" && sub_k == "alias_clusters"
+        "exact_predicate_aliases"
+      else
+        sub_k
+      end
+    end
+
     def index(abs_files)
-      return blank(:absent) unless defined?(Decomplex::Report)
       return blank(:absent) if abs_files.empty?
 
-      sections = with_tree_sitter do
-        Decomplex::Report.new(abs_files).sections_data
-      end
+      data = load_decomplex_facts(abs_files)
+      return blank(data[:status]) if data[:status] != :ok
+
+      detectors = flatten_detectors(data[:detectors] || {})
+      
       span_recs = Hash.new { |h, k| h[k] = [] }      # file => [rec...]
       m_all  = Hash.new { |h, k| h[k] = {} }         # [f,m] => {title=>1}
       m_spur = Hash.new(false)                       # [f,m] => Bool
       m_devw = Hash.new { |h, k| h[k] = {} }         # [f,m] => {title=>w}
 
-      sections.each do |title, tier, findings|
-        next unless findings
-
-        w = Decomplex::Convergence::TIER_WEIGHT.fetch(tier, 1)
-        spur = SPURIOUS.include?(title)
-        dev  = DEVIANCE.include?(title)
-        findings.each do |f|
-          sp = f[:spans]
-          Decomplex::Convergence.locations(f).each do |loc|
-            file, meth, = Decomplex::Convergence.parse_loc(loc)
-            next unless file && !file.empty? && meth && !meth.empty?
-
-            key = [file, meth]
-            m_all[key][title] = true
-            m_spur[key] ||= spur
-            m_devw[key][title] = w if dev
-            s = sp && sp[loc]
-            next unless s
-
-            span_recs[file] << { fl: s[0], ll: s[2], title: title,
-                                 spurious: spur, devw: (dev ? w : 0) }
-          end
-        end
-      end
-
-      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw,
-        status: :ok }
-    rescue SyntaxError, StandardError
-      # decomplex IS present but its run errored (e.g. the span
-      # contract assertion fired). Distinct from :absent so the report
-      # can say "errored", not just "not installed".
+      process_detectors(detectors, span_recs, m_all, m_spur, m_devw)
+      
+      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw, status: :ok }
+    rescue StandardError => e
+      warn "SlopCop::DecomplexVerdict error: #{e.message}"
       blank(:error)
     end
 
-    def with_tree_sitter
-      previous = ENV["DECOMPLEX_PARSER"]
-      ENV["DECOMPLEX_PARSER"] = "tree_sitter"
-      yield
-    ensure
-      previous.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous
+    def load_decomplex_facts(abs_files)
+      if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
+        { detectors: JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))["detectors"], status: :ok }
+      else
+        begin
+          require "tempfile"
+          tmp = Tempfile.new(["decomplex-facts", ".json"])
+          tmp.close
+          
+          bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/target/release/decomplex-rust", __dir__))
+          unless ::File.executable?(bin)
+            return { status: :absent }
+          end
+          
+          ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
+          return { status: :error } unless ok
+          
+          { detectors: JSON.parse(File.read(tmp.path))["detectors"], status: :ok }
+        ensure
+          tmp&.unlink if tmp
+        end
+      end
+    end
+
+    def process_detectors(detectors, span_recs, m_all, m_spur, m_devw)
+      detectors.each do |detector, items|
+        title, tier = detector_title_and_tier(detector)
+        w = [1, 4 - tier].max # simple tier weight: 1=>3, 2=>2, 3=>1
+        spur = SPURIOUS.include?(title)
+        dev  = DEVIANCE.include?(title)
+        
+        extract_sites(items).each do |item|
+          loc = item[:site]
+          sp = item[:span]
+          file, meth, = parse_loc(loc)
+          next if file.to_s.empty? || meth.to_s.empty?
+
+          key = [file, meth]
+          m_all[key][title] = true
+          m_spur[key] ||= spur
+          m_devw[key][title] = w if dev
+          next unless sp
+          
+          span_recs[file] << { fl: sp[0], ll: sp[2], title: title,
+                               spurious: spur, devw: (dev ? w : 0) }
+        end
+      end
+    end
+
+    def detector_title_and_tier(detector)
+      case detector
+      when "semantic_predicate_aliases"
+        ["Semantic Predicate Aliases", 1]
+      when "exact_predicate_aliases"
+        ["Exact Predicate Aliases", 1]
+      else
+        DETECTOR_MAP.fetch(detector, [detector.to_s, 3])
+      end
+    end
+
+    def extract_sites(payload)
+      sites = []
+      if payload.is_a?(Array)
+        payload.each do |item|
+          if item.is_a?(Hash) && item["sites"]
+            item["sites"].each do |site|
+              span = item["spans"] ? item["spans"][site] : nil
+              sites << { site: site, span: span }
+            end
+          end
+        end
+      elsif payload.is_a?(Hash)
+        if payload["sites"]
+          payload["sites"].each do |site|
+            span = payload["spans"] ? payload["spans"][site] : nil
+            sites << { site: site, span: span }
+          end
+        else
+          payload.each_value do |v|
+            sites.concat(extract_sites(v)) if v.is_a?(Array) || v.is_a?(Hash)
+          end
+        end
+      end
+      sites
+    end
+
+    def parse_loc(loc)
+      parts = loc.split(":")
+      return [] if parts.size < 3
+      line = parts.pop
+      method_name = parts.pop
+      file_path = parts.join(":")
+      [file_path, method_name, line]
     end
 
     # Span-containment FIRST (precise: the arm's line is INSIDE a

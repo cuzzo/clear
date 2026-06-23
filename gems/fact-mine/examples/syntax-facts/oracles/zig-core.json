@@ -1,96 +1,35 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/zig/core.zig",
-      "language": "zig",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 11,
-          "name": "process",
-          "owner": "ZigSyntaxFactsCore",
-          "params": [
-            "self",
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 17,
+          "predicate": "user.role",
           "span": [
-            11,
-            4,
-            36,
-            5
+            17,
+            8,
+            21,
+            9
           ],
-          "visibility": "public"
-        },
-        {
-          "line": 38,
-          "name": "audit",
-          "owner": "ZigSyntaxFactsCore",
-          "params": [
-            "self",
-            "name"
-          ],
-          "span": [
-            38,
-            4,
-            41,
-            5
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 43,
-          "name": "ready",
-          "owner": "ZigSyntaxFactsCore",
-          "params": [
-            "self"
-          ],
-          "span": [
-            43,
-            4,
-            45,
-            5
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 7,
-          "name": "init",
-          "owner": "ZigSyntaxFactsCore",
-          "params": [
-            "status"
-          ],
-          "span": [
-            7,
-            4,
-            9,
-            5
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "struct",
-          "line": 3,
-          "name": "ZigSyntaxFactsCore",
-          "span": [
-            3,
-            31,
-            46,
-            1
+          "state_refs": [
+            "user.role"
           ]
         },
         {
-          "kind": "struct",
-          "line": 53,
-          "name": "Item",
+          "function": "process",
+          "line": 23,
+          "predicate": "self.status == .idle and user.ready",
           "span": [
-            53,
-            13,
-            55,
-            1
+            23,
+            8,
+            28,
+            9
+          ],
+          "state_refs": [
+            ".literal.idle",
+            "status",
+            "user.ready"
           ]
         }
       ],
@@ -196,9 +135,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -216,6 +153,147 @@
           ]
         }
       ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            17,
+            8,
+            21,
+            9
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 17,
+          "members": [
+            ".guest",
+            ".owner"
+          ],
+          "predicate": "user.role",
+          "span": [
+            17,
+            8,
+            21,
+            9
+          ]
+        },
+        {
+          "enclosing_span": [
+            23,
+            8,
+            28,
+            9
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 23,
+          "members": [
+            "self.status == .idle",
+            "user.ready"
+          ],
+          "predicate": "self.status == .idle and user.ready",
+          "span": [
+            23,
+            12,
+            23,
+            47
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/zig/core.zig",
+      "functions": [
+        {
+          "line": 11,
+          "name": "process",
+          "owner": "ZigSyntaxFactsCore",
+          "params": [
+            "self",
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            11,
+            4,
+            36,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 38,
+          "name": "audit",
+          "owner": "ZigSyntaxFactsCore",
+          "params": [
+            "self",
+            "name"
+          ],
+          "span": [
+            38,
+            4,
+            41,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 43,
+          "name": "ready",
+          "owner": "ZigSyntaxFactsCore",
+          "params": [
+            "self"
+          ],
+          "span": [
+            43,
+            4,
+            45,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 7,
+          "name": "init",
+          "owner": "ZigSyntaxFactsCore",
+          "params": [
+            "status"
+          ],
+          "span": [
+            7,
+            4,
+            9,
+            5
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "zig",
+      "owners": [
+        {
+          "kind": "struct",
+          "line": 3,
+          "name": "ZigSyntaxFactsCore",
+          "span": [
+            3,
+            31,
+            46,
+            1
+          ]
+        },
+        {
+          "kind": "struct",
+          "line": 53,
+          "name": "Item",
+          "span": [
+            53,
+            13,
+            55,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [],
       "state_reads": [
         {
           "field": "admin",
@@ -479,94 +557,8 @@
             51
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            17,
-            8,
-            21,
-            9
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 17,
-          "members": [
-            ".guest",
-            ".owner"
-          ],
-          "predicate": "user.role",
-          "span": [
-            17,
-            8,
-            21,
-            9
-          ]
-        },
-        {
-          "enclosing_span": [
-            23,
-            8,
-            28,
-            9
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 23,
-          "members": [
-            "self.status == .idle",
-            "user.ready"
-          ],
-          "predicate": "self.status == .idle and user.ready",
-          "span": [
-            23,
-            12,
-            23,
-            47
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 17,
-          "predicate": "user.role",
-          "span": [
-            17,
-            8,
-            21,
-            9
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "process",
-          "line": 23,
-          "predicate": "self.status == .idle and user.ready",
-          "span": [
-            23,
-            8,
-            28,
-            9
-          ],
-          "state_refs": [
-            ".literal.idle",
-            "status",
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

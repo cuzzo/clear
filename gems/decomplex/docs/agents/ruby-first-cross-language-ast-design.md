@@ -111,7 +111,7 @@ to be." The correct end state is:
 - Shared cross-language normalization.
 - Source span reconstruction.
 
-`gems/decomplex/rust/src/decomplex/ast.rs` is 8,642 lines and mirrors the same
+`gems/decomplex/src/decomplex/ast.rs` is 8,642 lines and mirrors the same
 architectural mistake. Rust currently has `syntax/tree_sitter_adapter.rs` with
 a `LanguageProfile` trait, but AST normalization itself is still a single
 large enum-driven file.
@@ -147,18 +147,18 @@ contain language-specific grammar tables or semantic rewrites.
 Rust should mirror Ruby after the Ruby boundary is correct:
 
 ```text
-gems/decomplex/rust/src/decomplex/ast/mod.rs
-gems/decomplex/rust/src/decomplex/ast/node.rs
-gems/decomplex/rust/src/decomplex/ast/span.rs
-gems/decomplex/rust/src/decomplex/ast/source_map.rs
-gems/decomplex/rust/src/decomplex/ast/semantic_node.rs
-gems/decomplex/rust/src/decomplex/ast/semantic_normalizer.rs
-gems/decomplex/rust/src/decomplex/ast/ruby_compat.rs
-gems/decomplex/rust/src/decomplex/ast/adapters/mod.rs
-gems/decomplex/rust/src/decomplex/ast/adapters/ruby.rs
-gems/decomplex/rust/src/decomplex/ast/adapters/python.rs
-gems/decomplex/rust/src/decomplex/ast/adapters/lua.rs
-gems/decomplex/rust/src/decomplex/ast/adapters/typescript.rs
+gems/decomplex/src/decomplex/ast/mod.rs
+gems/decomplex/src/decomplex/ast/node.rs
+gems/decomplex/src/decomplex/ast/span.rs
+gems/decomplex/src/decomplex/ast/source_map.rs
+gems/decomplex/src/decomplex/ast/semantic_node.rs
+gems/decomplex/src/decomplex/ast/semantic_normalizer.rs
+gems/decomplex/src/decomplex/ast/ruby_compat.rs
+gems/decomplex/src/decomplex/ast/adapters/mod.rs
+gems/decomplex/src/decomplex/ast/adapters/ruby.rs
+gems/decomplex/src/decomplex/ast/adapters/python.rs
+gems/decomplex/src/decomplex/ast/adapters/lua.rs
+gems/decomplex/src/decomplex/ast/adapters/typescript.rs
 ```
 
 Rust should not receive a large redesign before Ruby is stabilized. The Rust

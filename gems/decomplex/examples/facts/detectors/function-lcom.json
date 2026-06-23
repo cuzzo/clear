@@ -1,195 +1,5 @@
 {
   "detector": "function-lcom",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/lcom.rb",
-        "language": "ruby",
-        "local_methods": [
-          {
-            "id": "Fixture#mixed",
-            "owner": "Fixture",
-            "name": "mixed",
-            "file": "facts/lcom.rb",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              20,
-              3
-            ],
-            "statements": [
-              {
-                "index": 0,
-                "line": 1,
-                "end_line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  11
-                ],
-                "source": "a = input_a",
-                "reads": [
-                  "input_a"
-                ],
-                "writes": [
-                  "a"
-                ],
-                "dependencies": [
-                  [
-                    "a",
-                    "input_a"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 1,
-                "line": 2,
-                "end_line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  16
-                ],
-                "source": "b = normalize(a)",
-                "reads": [
-                  "a"
-                ],
-                "writes": [
-                  "b"
-                ],
-                "dependencies": [
-                  [
-                    "b",
-                    "a"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 2,
-                "line": 3,
-                "end_line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  11
-                ],
-                "source": "c = input_c",
-                "reads": [
-                  "input_c"
-                ],
-                "writes": [
-                  "c"
-                ],
-                "dependencies": [
-                  [
-                    "c",
-                    "input_c"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 3,
-                "line": 4,
-                "end_line": 4,
-                "span": [
-                  4,
-                  0,
-                  4,
-                  16
-                ],
-                "source": "d = normalize(c)",
-                "reads": [
-                  "c"
-                ],
-                "writes": [
-                  "d"
-                ],
-                "dependencies": [
-                  [
-                    "d",
-                    "c"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 4,
-                "line": 5,
-                "end_line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  11
-                ],
-                "source": "e = input_e",
-                "reads": [
-                  "input_e"
-                ],
-                "writes": [
-                  "e"
-                ],
-                "dependencies": [
-                  [
-                    "e",
-                    "input_e"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 5,
-                "line": 6,
-                "end_line": 6,
-                "span": [
-                  6,
-                  0,
-                  6,
-                  16
-                ],
-                "source": "f = normalize(e)",
-                "reads": [
-                  "e"
-                ],
-                "writes": [
-                  "f"
-                ],
-                "dependencies": [
-                  [
-                    "f",
-                    "e"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              }
-            ],
-            "boundaries": [
-
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": [
     {
       "at": "facts/lcom.rb:mixed:1",
@@ -244,5 +54,181 @@
       "statements": 6,
       "terminal_join": false
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "file": "facts/lcom.rb",
+        "language": "ruby",
+        "local_methods": [
+          {
+            "boundaries": [],
+            "file": "facts/lcom.rb",
+            "id": "Fixture#mixed",
+            "line": 1,
+            "name": "mixed",
+            "owner": "Fixture",
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "a",
+                    "input_a"
+                  ]
+                ],
+                "end_line": 1,
+                "index": 0,
+                "line": 1,
+                "reads": [
+                  "input_a"
+                ],
+                "source": "a = input_a",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  11
+                ],
+                "writes": [
+                  "a"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "b",
+                    "a"
+                  ]
+                ],
+                "end_line": 2,
+                "index": 1,
+                "line": 2,
+                "reads": [
+                  "a"
+                ],
+                "source": "b = normalize(a)",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  16
+                ],
+                "writes": [
+                  "b"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "c",
+                    "input_c"
+                  ]
+                ],
+                "end_line": 3,
+                "index": 2,
+                "line": 3,
+                "reads": [
+                  "input_c"
+                ],
+                "source": "c = input_c",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  11
+                ],
+                "writes": [
+                  "c"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "d",
+                    "c"
+                  ]
+                ],
+                "end_line": 4,
+                "index": 3,
+                "line": 4,
+                "reads": [
+                  "c"
+                ],
+                "source": "d = normalize(c)",
+                "span": [
+                  4,
+                  0,
+                  4,
+                  16
+                ],
+                "writes": [
+                  "d"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "e",
+                    "input_e"
+                  ]
+                ],
+                "end_line": 5,
+                "index": 4,
+                "line": 5,
+                "reads": [
+                  "input_e"
+                ],
+                "source": "e = input_e",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  11
+                ],
+                "writes": [
+                  "e"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "f",
+                    "e"
+                  ]
+                ],
+                "end_line": 6,
+                "index": 5,
+                "line": 6,
+                "reads": [
+                  "e"
+                ],
+                "source": "f = normalize(e)",
+                "span": [
+                  6,
+                  0,
+                  6,
+                  16
+                ],
+                "writes": [
+                  "f"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

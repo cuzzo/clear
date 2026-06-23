@@ -1,0 +1,76 @@
+{
+  "array_shapes": [],
+  "fields": [
+    {
+      "declared_type": null,
+      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000total",
+      "language": "ruby",
+      "line": 5,
+      "name": "total",
+      "owner": "Calculator",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "source": "syntax",
+      "span": [
+        5,
+        4,
+        5,
+        34
+      ],
+      "static_origin": "state_write"
+    }
+  ],
+  "hash_shapes": [],
+  "methods": [
+    {
+      "key": [
+        "Calculator",
+        "add",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 4,
+      "name": "add",
+      "owner": "Calculator",
+      "params": [
+        "value"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "signature": "",
+      "source": {},
+      "span": [
+        4,
+        2,
+        6,
+        5
+      ]
+    },
+    {
+      "key": [
+        "Calculator",
+        "result",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 8,
+      "name": "result",
+      "owner": "Calculator",
+      "params": [],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "signature": "",
+      "source": {},
+      "span": [
+        8,
+        2,
+        10,
+        5
+      ]
+    }
+  ],
+  "signatures": {},
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": []
+}

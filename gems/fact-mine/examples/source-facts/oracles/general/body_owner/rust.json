@@ -1,0 +1,234 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "MyFunc",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "OtherFunc",
+      "statements": []
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "struct_item(id)",
+          "class(id body(method(id)))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "body_statement(struct_item(id) class(id body(method(id))))",
+        "line": 1,
+        "mass": 7,
+        "method_name": "MyFunc",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(struct_item(id) class(id body(method(id))))))",
+        "line": 1,
+        "mass": 9,
+        "method_name": "MyFunc",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 4,
+        "mass": 1,
+        "method_name": "method",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 8,
+        "mass": 1,
+        "method_name": "OtherFunc",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      },
+      {
+        "line": 4,
+        "name": "method",
+        "owner": "Local",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
+        "name": "OtherFunc",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#MyFunc",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#OtherFunc",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#MyFunc",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "MyFunc",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "struct Local;",
+            "span": [
+              2,
+              4,
+              2,
+              17
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 1,
+            "line": 3,
+            "reads": [],
+            "source": "impl Local { pub fn method() {} }",
+            "span": [
+              3,
+              4,
+              5,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#OtherFunc",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "OtherFunc",
+        "owner": "(top-level)",
+        "statements": []
+      }
+    ],
+    "owners": [
+      {
+        "kind": "impl",
+        "line": 3,
+        "name": "Local"
+      },
+      {
+        "kind": "struct",
+        "line": 2,
+        "name": "Local"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "rust"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "method",
+        "owner": "Local"
+      },
+      {
+        "calls": [],
+        "line": 8,
+        "name": "OtherFunc",
+        "owner": "rust"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "rust",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "method",
+        "owner": "Local",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 8,
+        "name": "OtherFunc",
+        "owner": "rust",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

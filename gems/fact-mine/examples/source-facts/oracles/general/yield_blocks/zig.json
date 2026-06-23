@@ -1,0 +1,313 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_three",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "f"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_with_empty_block",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "arr"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "arr"
+          ],
+          "writes": [
+            "arr"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "1"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_three",
+        "line": 2,
+        "message": "f",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<f>(id argument_list(lit))",
+        "line": 2,
+        "mass": 3,
+        "method_name": "method_three",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "for(id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "method_with_empty_block",
+        "node_name": "for"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_three",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "variable_declaration(assignment(id struct_initializer(array_type(id) initializer_list(lit))))",
+          "labeled_statement(for(id))"
+        ],
+        "child_masses": [
+          7,
+          3
+        ],
+        "fingerprint": "body_statement(variable_declaration(assignment(id struct_initializer(array_type(id) initializer_list(lit)))) labeled_statement(for(id)))",
+        "line": 5,
+        "mass": 11,
+        "method_name": "method_with_empty_block",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(variable_declaration(assignment(id struct_initializer(array_type(id) initializer_list(lit)))) labeled_statement(for(id)))))",
+        "line": 5,
+        "mass": 13,
+        "method_name": "method_with_empty_block",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(call<f>(id argument_list(lit))))",
+        "line": 1,
+        "mass": 5,
+        "method_name": "method_three",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "anytype",
+        "params": [
+          "f"
+        ],
+        "visibility": "private"
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "zig",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_with_empty_block",
+        "score": 1.1,
+        "signals": {
+          "loops": 1
+        }
+      },
+      {
+        "id": "anytype#method_three",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_with_empty_block",
+        "line": 5,
+        "local_contract_assignments": {
+          "arr": "[_]i32{1}"
+        },
+        "name": "method_with_empty_block",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 6,
+            "reads": [],
+            "source": "const arr = [_]i32{1};",
+            "span": [
+              6,
+              4,
+              6,
+              26
+            ],
+            "writes": [
+              "arr"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 1,
+            "line": 7,
+            "reads": [
+              "arr"
+            ],
+            "source": "for (arr) |_| {}",
+            "span": [
+              7,
+              4,
+              7,
+              20
+            ],
+            "writes": [
+              "arr"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "anytype#method_three",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_three",
+        "owner": "anytype",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "f"
+            ],
+            "source": "f(1)",
+            "span": [
+              2,
+              4,
+              2,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "zig"
+      },
+      {
+        "calls": [
+          {
+            "line": 2,
+            "mid": "f",
+            "span": [
+              2,
+              4,
+              2,
+              8
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_three",
+        "owner": "anytype"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "anytype",
+        "reads": [
+          "f"
+        ],
+        "writes": []
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "zig",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "f",
+        "function": "method_three",
+        "line": 2,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
+}

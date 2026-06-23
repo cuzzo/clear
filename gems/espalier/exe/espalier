@@ -3,12 +3,7 @@
 
 require "optparse"
 require_relative "../lib/espalier"
-sibling_source_filter = File.expand_path("../../decomplex/lib/decomplex/source_filter", __dir__)
-if File.file?("#{sibling_source_filter}.rb")
-  require sibling_source_filter
-else
-  require "decomplex/source_filter"
-end
+require_relative "../lib/espalier/type_profile"
 
 options = {
   format: :markdown,
@@ -17,7 +12,8 @@ options = {
   nil_kill: nil,
   risk: nil,
   manifest: nil,
-  exclude: []
+  exclude: [],
+  fact_mine: nil
 }
 
 def report_link_base(output)
@@ -54,7 +50,13 @@ OptionParser.new do |opts|
   opts.on("--exclude PATTERN", "Exclude a path/glob from directory scans. May be repeated.") do |pattern|
     options[:exclude] << pattern
   end
+
+  opts.on("--fact-mine FILE", "Use previously mined fact file") do |f|
+    options[:fact_mine] = f
+  end
 end.parse!
+
+ENV["FACT_MINE_FACTS_FILE"] = options[:fact_mine] if options[:fact_mine]
 
 if options[:manifest]
   unless File.exist?(options[:manifest])
@@ -62,7 +64,7 @@ if options[:manifest]
     exit 1
   end
 
-  manifest = YAML.load_file(options[:manifest])
+  manifest = YAML.respond_to?(:unsafe_load_file) ? YAML.unsafe_load_file(options[:manifest]) : YAML.load_file(options[:manifest])
   output_contents = if options[:format] == :report
                       Espalier::Reporter.new(
                         manifest,
@@ -129,11 +131,10 @@ if options[:risk] && File.exist?(options[:risk])
 end
 
 # Extract Static Skeletons
-modules = []
-targets.each do |file|
-  extractor = Espalier::AstExtractor.new(file)
-  modules.concat(extractor.extract)
-end
+evidence = Espalier::StaticEvidence.build(targets, root: Dir.pwd)
+
+# Group flat evidence into module structures expected by aggregator/analyzers
+modules = Espalier::StaticEvidence.project_modules(evidence)
 
 # Synthesize Aggregated Architecture
 aggregator = Espalier::Aggregator.new(

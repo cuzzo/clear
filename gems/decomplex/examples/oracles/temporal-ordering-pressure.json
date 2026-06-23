@@ -1,22 +1,21 @@
 {
   "detector": "temporal-ordering-pressure",
-  "options": {
-  },
   "expected": [
     {
+      "orderings": "4!",
       "owner": "TemporalOrderExample",
       "public_methods": 4,
-      "state_methods": 4,
-      "writers": 3,
-      "orderings": "4!",
+      "shared_fields": [
+        "a",
+        "b"
+      ],
       "state_fields": [
         "a",
         "b"
       ],
-      "shared_fields": [
-        "a",
-        "b"
-      ]
+      "state_methods": 4,
+      "writers": 3
     }
-  ]
+  ],
+  "options": {}
 }

@@ -1,11 +1,10 @@
 {
   "detector": "derived-state",
-  "options": {
-  },
   "expected": [
     {
       "derived": "cached",
       "source": "input"
     }
-  ]
+  ],
+  "options": {}
 }

@@ -8,7 +8,7 @@ sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir
 if File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
 else
-  require "decomplex/sarif"
+  require_relative "sarif"
 end
 
 module SlopCop
@@ -60,7 +60,6 @@ module SlopCop
 
     def to_markdown
       gaps = @r[:top_gaps]
-      g = @r[:grand]
       o = +"# SlopCop Report\n\n"
       o << "> Top true coverage gaps, ranked by fix-churn x structural\n" \
            "> deviance. Every dark arm is categorized; only GENUINE\n" \
@@ -123,14 +122,15 @@ module SlopCop
         end
       end
 
+      g = @r[:grand]
       o << "## Category Summary\n"
       o << "_#{g} dark arms; only #{gaps.size} are genuine gaps. " \
            "The rest are not test targets:_\n\n"
       o << "| category | arms | % | what it means |\n|---|---|---|---|\n"
       Rollup::CATS.each do |c|
-        n = @r[:totals][c].to_i
-        pct = g.zero? ? 0 : (100.0 * n / g).round(1)
-        o << "| #{c} | #{n} | #{pct}% | #{Rollup::ACTION[c]} |\n"
+        cat_total = @r[:totals][c].to_i
+        pct = g.zero? ? 0 : (100.0 * cat_total / g).round(1)
+        o << "| #{c} | #{cat_total} | #{pct}% | #{Rollup::ACTION[c]} |\n"
       end
 
       o << "\n## Run Summary\n"
@@ -190,7 +190,7 @@ module SlopCop
     end
 
     def to_sarif_hash
-      Decomplex::Sarif.document(
+      SlopCop::Sarif.document(
         tool_name: "SlopCop",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules,
@@ -202,21 +202,17 @@ module SlopCop
       )
     end
 
-    def to_sarif
-      Sarif.render(self)
-    end
-
     private
 
     def sarif_rules
       [
-        Decomplex::Sarif.rule(
+        SlopCop::Sarif.rule(
           id: "slopcop.genuine-gap",
           name: "Genuine Coverage Gap",
           short_description: Rollup::ACTION[:genuine]
         )
       ] + Rollup::ACTION.map do |category, description|
-        Decomplex::Sarif.rule(
+        SlopCop::Sarif.rule(
           id: "slopcop.dark-arm.#{category}",
           name: "Dark Arm: #{category}",
           short_description: description,
@@ -232,12 +228,15 @@ module SlopCop
 
     def top_gap_results
       @r[:top_gaps].map do |gap|
-        Decomplex::Sarif.result(
+        SlopCop::Sarif.result(
           rule_id: "slopcop.genuine-gap",
           level: "warning",
           message: "genuine gap: #{gap[:file]}:#{gap[:line]} #{gap[:method]}",
           path: gap[:file],
           line: gap[:line],
+          partial_fingerprints: {
+            "slopcopGenuineGap" => "#{gap[:file]}:#{gap[:line]}:#{gap[:method]}"
+          },
           properties: stringify_keys(gap).merge(
             "dark_arm" => true,
             "category" => "genuine",
@@ -250,7 +249,7 @@ module SlopCop
     def dark_arm_results
       @r[:dark_arms].map do |arm|
         category = arm[:category].to_s
-        Decomplex::Sarif.result(
+        SlopCop::Sarif.result(
           rule_id: "slopcop.dark-arm.#{category}",
           level: category == "genuine" ? "warning" : "note",
           message: arm[:message] || "dark arm: #{category}",

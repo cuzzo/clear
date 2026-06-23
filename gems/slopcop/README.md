@@ -185,6 +185,13 @@ Project-specific external/boundary methods and diagnostic helpers are
 caller-supplied through `--ffi` and `--diagnostic`; SlopCop does not
 ship a CLEAR-specific lexicon.
 
+## Precomputed Inputs
+
+SlopCop can use pre-computed churn and complexity facts to speed up runs:
+
+- `--boobytrap-churn FILE`: path to a pre-computed Boobytrap churn JSON file (also honors `ENV["BOOBYTRAP_CHURN_FILE"]`).
+- `--decomplex-facts FILE`: path to a pre-computed Decomplex facts JSON file (also honors `ENV["DECOMPLEX_FACTS_FILE"]`).
+
 ## Supported Languages Roadmap
 
 SlopCop relies on [Boobytrap](../boobytrap/README.md) for branch-arm

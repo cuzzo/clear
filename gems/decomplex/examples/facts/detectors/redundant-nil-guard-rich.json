@@ -1,9 +1,1274 @@
 {
   "detector": "redundant-nil-guard",
+  "expected": [
+    {
+      "at": "facts/nil_guard_rich.rb:rich:3",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "x.nil?",
+      "line": 3,
+      "local": "x",
+      "proof": "x is already proven non-nil on this path",
+      "span": [
+        3,
+        4,
+        3,
+        10
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:3": [
+          3,
+          4,
+          3,
+          10
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:4",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "y.present?",
+      "line": 4,
+      "local": "y",
+      "proof": "y is already proven non-nil on this path",
+      "span": [
+        4,
+        4,
+        4,
+        14
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:4": [
+          4,
+          4,
+          4,
+          14
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:5",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "x&.foo",
+      "line": 5,
+      "local": "x",
+      "proof": "x is already proven non-nil on this path",
+      "span": [
+        5,
+        4,
+        5,
+        10
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:5": [
+          5,
+          4,
+          5,
+          10
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:10",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "z.nil?",
+      "line": 10,
+      "local": "z",
+      "proof": "z is already proven non-nil on this path",
+      "span": [
+        10,
+        4,
+        10,
+        10
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:10": [
+          10,
+          4,
+          10,
+          10
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:13",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "w.nil?",
+      "line": 13,
+      "local": "w",
+      "proof": "w is already proven non-nil on this path",
+      "span": [
+        13,
+        4,
+        13,
+        10
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:13": [
+          13,
+          4,
+          13,
+          10
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:16",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "obj&.name",
+      "line": 16,
+      "local": "obj",
+      "proof": "obj is already proven non-nil on this path",
+      "span": [
+        16,
+        4,
+        16,
+        13
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:16": [
+          16,
+          4,
+          16,
+          13
+        ]
+      }
+    },
+    {
+      "at": "facts/nil_guard_rich.rb:rich:19",
+      "defn": "rich",
+      "file": "facts/nil_guard_rich.rb",
+      "guard": "b.nil?",
+      "line": 19,
+      "local": "b",
+      "proof": "b is already proven non-nil on this path",
+      "span": [
+        19,
+        4,
+        19,
+        10
+      ],
+      "spans": {
+        "facts/nil_guard_rich.rb:rich:19": [
+          19,
+          4,
+          19,
+          10
+        ]
+      }
+    }
+  ],
   "input": {
     "documents": [
       {
         "file": "facts/nil_guard_rich.rb",
+        "function_defs": [
+          {
+            "body": {
+              "children": [
+                {
+                  "children": [],
+                  "field_name": null,
+                  "kind": "identifier",
+                  "named": true,
+                  "span": [
+                    1,
+                    4,
+                    1,
+                    8
+                  ],
+                  "text": "rich"
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    2,
+                                    5,
+                                    2,
+                                    6
+                                  ],
+                                  "text": "x"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "!=",
+                                  "named": false,
+                                  "span": [
+                                    2,
+                                    7,
+                                    2,
+                                    9
+                                  ],
+                                  "text": "!="
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "nil",
+                                  "named": true,
+                                  "span": [
+                                    2,
+                                    10,
+                                    2,
+                                    13
+                                  ],
+                                  "text": "nil"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "binary",
+                              "named": true,
+                              "span": [
+                                2,
+                                5,
+                                2,
+                                14
+                              ],
+                              "text": "x != nil"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "&&",
+                              "named": false,
+                              "span": [
+                                2,
+                                14,
+                                2,
+                                16
+                              ],
+                              "text": "&&"
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    2,
+                                    17,
+                                    2,
+                                    18
+                                  ],
+                                  "text": "y"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    2,
+                                    18,
+                                    2,
+                                    19
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    2,
+                                    19,
+                                    2,
+                                    27
+                                  ],
+                                  "text": "present?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                2,
+                                17,
+                                2,
+                                27
+                              ],
+                              "text": "y.present?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "binary",
+                          "named": true,
+                          "span": [
+                            2,
+                            5,
+                            2,
+                            27
+                          ],
+                          "text": "x != nil && y.present?"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    3,
+                                    4,
+                                    3,
+                                    5
+                                  ],
+                                  "text": "x"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    3,
+                                    5,
+                                    3,
+                                    6
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    3,
+                                    6,
+                                    3,
+                                    10
+                                  ],
+                                  "text": "nil?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                3,
+                                4,
+                                3,
+                                10
+                              ],
+                              "text": "x.nil?"
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    4,
+                                    4,
+                                    4,
+                                    5
+                                  ],
+                                  "text": "y"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    4,
+                                    5,
+                                    4,
+                                    6
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    4,
+                                    6,
+                                    4,
+                                    14
+                                  ],
+                                  "text": "present?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                4,
+                                4,
+                                4,
+                                14
+                              ],
+                              "text": "y.present?"
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    5,
+                                    4,
+                                    5,
+                                    5
+                                  ],
+                                  "text": "x"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "&.",
+                                  "named": false,
+                                  "span": [
+                                    5,
+                                    5,
+                                    5,
+                                    7
+                                  ],
+                                  "text": "&."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    5,
+                                    7,
+                                    5,
+                                    10
+                                  ],
+                                  "text": "foo"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                5,
+                                4,
+                                5,
+                                10
+                              ],
+                              "text": "x&.foo"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            3,
+                            4,
+                            5,
+                            10
+                          ],
+                          "text": "x.nil?\ny.present?\nx&.foo"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "if",
+                      "named": true,
+                      "span": [
+                        2,
+                        2,
+                        6,
+                        5
+                      ],
+                      "text": ""
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                7,
+                                5,
+                                7,
+                                6
+                              ],
+                              "text": "z"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": ".",
+                              "named": false,
+                              "span": [
+                                7,
+                                6,
+                                7,
+                                7
+                              ],
+                              "text": "."
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                7,
+                                7,
+                                7,
+                                11
+                              ],
+                              "text": "nil?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "call",
+                          "named": true,
+                          "span": [
+                            7,
+                            5,
+                            7,
+                            11
+                          ],
+                          "text": "z.nil?"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "return",
+                              "named": true,
+                              "span": [
+                                8,
+                                4,
+                                8,
+                                10
+                              ],
+                              "text": "return"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            8,
+                            4,
+                            8,
+                            10
+                          ],
+                          "text": "return"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    10,
+                                    4,
+                                    10,
+                                    5
+                                  ],
+                                  "text": "z"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    10,
+                                    5,
+                                    10,
+                                    6
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    10,
+                                    6,
+                                    10,
+                                    10
+                                  ],
+                                  "text": "nil?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                10,
+                                4,
+                                10,
+                                10
+                              ],
+                              "text": "z.nil?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "else",
+                          "named": true,
+                          "span": [
+                            10,
+                            4,
+                            10,
+                            10
+                          ],
+                          "text": "z.nil?"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "if",
+                      "named": true,
+                      "span": [
+                        7,
+                        2,
+                        11,
+                        5
+                      ],
+                      "text": ""
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                12,
+                                9,
+                                12,
+                                10
+                              ],
+                              "text": "w"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": ".",
+                              "named": false,
+                              "span": [
+                                12,
+                                10,
+                                12,
+                                11
+                              ],
+                              "text": "."
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                12,
+                                11,
+                                12,
+                                15
+                              ],
+                              "text": "nil?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "call",
+                          "named": true,
+                          "span": [
+                            12,
+                            9,
+                            12,
+                            15
+                          ],
+                          "text": "w.nil?"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    13,
+                                    4,
+                                    13,
+                                    5
+                                  ],
+                                  "text": "w"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    13,
+                                    5,
+                                    13,
+                                    6
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    13,
+                                    6,
+                                    13,
+                                    10
+                                  ],
+                                  "text": "nil?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                13,
+                                4,
+                                13,
+                                10
+                              ],
+                              "text": "w.nil?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            13,
+                            4,
+                            13,
+                            10
+                          ],
+                          "text": "w.nil?"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "unless",
+                      "named": true,
+                      "span": [
+                        12,
+                        2,
+                        14,
+                        5
+                      ],
+                      "text": ""
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                15,
+                                5,
+                                15,
+                                8
+                              ],
+                              "text": "obj"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "&.",
+                              "named": false,
+                              "span": [
+                                15,
+                                8,
+                                15,
+                                10
+                              ],
+                              "text": "&."
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                15,
+                                10,
+                                15,
+                                15
+                              ],
+                              "text": "ready"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "call",
+                          "named": true,
+                          "span": [
+                            15,
+                            5,
+                            15,
+                            15
+                          ],
+                          "text": "obj&.ready"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    16,
+                                    4,
+                                    16,
+                                    7
+                                  ],
+                                  "text": "obj"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "&.",
+                                  "named": false,
+                                  "span": [
+                                    16,
+                                    7,
+                                    16,
+                                    9
+                                  ],
+                                  "text": "&."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    16,
+                                    9,
+                                    16,
+                                    13
+                                  ],
+                                  "text": "name"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                16,
+                                4,
+                                16,
+                                13
+                              ],
+                              "text": "obj&.name"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            16,
+                            4,
+                            16,
+                            13
+                          ],
+                          "text": "obj&.name"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "if",
+                      "named": true,
+                      "span": [
+                        15,
+                        2,
+                        17,
+                        5
+                      ],
+                      "text": ""
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                18,
+                                5,
+                                18,
+                                6
+                              ],
+                              "text": "b"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "!=",
+                              "named": false,
+                              "span": [
+                                18,
+                                7,
+                                18,
+                                9
+                              ],
+                              "text": "!="
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "nil",
+                              "named": true,
+                              "span": [
+                                18,
+                                10,
+                                18,
+                                13
+                              ],
+                              "text": "nil"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "binary",
+                          "named": true,
+                          "span": [
+                            18,
+                            5,
+                            18,
+                            14
+                          ],
+                          "text": "b != nil"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    19,
+                                    4,
+                                    19,
+                                    5
+                                  ],
+                                  "text": "b"
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": ".",
+                                  "named": false,
+                                  "span": [
+                                    19,
+                                    5,
+                                    19,
+                                    6
+                                  ],
+                                  "text": "."
+                                },
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    19,
+                                    6,
+                                    19,
+                                    10
+                                  ],
+                                  "text": "nil?"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                19,
+                                4,
+                                19,
+                                10
+                              ],
+                              "text": "b.nil?"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            19,
+                            4,
+                            19,
+                            10
+                          ],
+                          "text": "b.nil?"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "return",
+                              "named": true,
+                              "span": [
+                                21,
+                                4,
+                                21,
+                                10
+                              ],
+                              "text": "return"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "else",
+                          "named": true,
+                          "span": [
+                            21,
+                            4,
+                            21,
+                            10
+                          ],
+                          "text": "return"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "if",
+                      "named": true,
+                      "span": [
+                        18,
+                        2,
+                        22,
+                        5
+                      ],
+                      "text": ""
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "identifier",
+                              "named": true,
+                              "span": [
+                                23,
+                                5,
+                                23,
+                                6
+                              ],
+                              "text": "a"
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "!=",
+                              "named": false,
+                              "span": [
+                                23,
+                                7,
+                                23,
+                                9
+                              ],
+                              "text": "!="
+                            },
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "nil",
+                              "named": true,
+                              "span": [
+                                23,
+                                10,
+                                23,
+                                13
+                              ],
+                              "text": "nil"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "binary",
+                          "named": true,
+                          "span": [
+                            23,
+                            5,
+                            23,
+                            14
+                          ],
+                          "text": "a != nil"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "field_name": null,
+                              "kind": "return",
+                              "named": true,
+                              "span": [
+                                24,
+                                4,
+                                24,
+                                10
+                              ],
+                              "text": "return"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "then",
+                          "named": true,
+                          "span": [
+                            24,
+                            4,
+                            24,
+                            10
+                          ],
+                          "text": "return"
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "field_name": null,
+                                  "kind": "identifier",
+                                  "named": true,
+                                  "span": [
+                                    26,
+                                    4,
+                                    26,
+                                    9
+                                  ],
+                                  "text": "abort"
+                                }
+                              ],
+                              "field_name": null,
+                              "kind": "call",
+                              "named": true,
+                              "span": [
+                                26,
+                                4,
+                                26,
+                                9
+                              ],
+                              "text": "abort"
+                            }
+                          ],
+                          "field_name": null,
+                          "kind": "else",
+                          "named": true,
+                          "span": [
+                            26,
+                            4,
+                            26,
+                            9
+                          ],
+                          "text": "abort"
+                        }
+                      ],
+                      "field_name": null,
+                      "kind": "if",
+                      "named": true,
+                      "span": [
+                        23,
+                        2,
+                        27,
+                        5
+                      ],
+                      "text": ""
+                    }
+                  ],
+                  "field_name": "body",
+                  "kind": "body_statement",
+                  "named": true,
+                  "span": [
+                    2,
+                    2,
+                    27,
+                    5
+                  ],
+                  "text": ""
+                }
+              ],
+              "field_name": null,
+              "kind": "method",
+              "named": true,
+              "span": [
+                1,
+                0,
+                28,
+                3
+              ],
+              "text": "def rich"
+            },
+            "file": "facts/nil_guard_rich.rb",
+            "line": 1,
+            "name": "rich",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              1,
+              0,
+              28,
+              3
+            ],
+            "visibility": "public"
+          }
+        ],
         "language": "ruby",
         "lines": [
           "def rich",
@@ -35,1219 +1300,16 @@
           "  end",
           "end"
         ],
-        "function_defs": [
-          {
-            "file": "facts/nil_guard_rich.rb",
-            "name": "rich",
-            "owner": "Fixture",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              28,
-              3
-            ],
-            "body": {
-              "kind": "method",
-              "text": "def rich",
-              "span": [
-                1,
-                0,
-                28,
-                3
-              ],
-              "named": true,
-              "field_name": null,
-              "children": [
-                {
-                  "kind": "identifier",
-                  "text": "rich",
-                  "span": [
-                    1,
-                    4,
-                    1,
-                    8
-                  ],
-                  "named": true,
-                  "field_name": null,
-                  "children": [
-
-                  ]
-                },
-                {
-                  "kind": "body_statement",
-                  "text": "",
-                  "span": [
-                    2,
-                    2,
-                    27,
-                    5
-                  ],
-                  "named": true,
-                  "field_name": "body",
-                  "children": [
-                    {
-                      "kind": "if",
-                      "text": "",
-                      "span": [
-                        2,
-                        2,
-                        6,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "binary",
-                          "text": "x != nil && y.present?",
-                          "span": [
-                            2,
-                            5,
-                            2,
-                            27
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "binary",
-                              "text": "x != nil",
-                              "span": [
-                                2,
-                                5,
-                                2,
-                                14
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "x",
-                                  "span": [
-                                    2,
-                                    5,
-                                    2,
-                                    6
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "!=",
-                                  "text": "!=",
-                                  "span": [
-                                    2,
-                                    7,
-                                    2,
-                                    9
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "nil",
-                                  "text": "nil",
-                                  "span": [
-                                    2,
-                                    10,
-                                    2,
-                                    13
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            },
-                            {
-                              "kind": "&&",
-                              "text": "&&",
-                              "span": [
-                                2,
-                                14,
-                                2,
-                                16
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "call",
-                              "text": "y.present?",
-                              "span": [
-                                2,
-                                17,
-                                2,
-                                27
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "y",
-                                  "span": [
-                                    2,
-                                    17,
-                                    2,
-                                    18
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    2,
-                                    18,
-                                    2,
-                                    19
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "present?",
-                                  "span": [
-                                    2,
-                                    19,
-                                    2,
-                                    27
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "x.nil?\ny.present?\nx&.foo",
-                          "span": [
-                            3,
-                            4,
-                            5,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "x.nil?",
-                              "span": [
-                                3,
-                                4,
-                                3,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "x",
-                                  "span": [
-                                    3,
-                                    4,
-                                    3,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    3,
-                                    5,
-                                    3,
-                                    6
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "nil?",
-                                  "span": [
-                                    3,
-                                    6,
-                                    3,
-                                    10
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            },
-                            {
-                              "kind": "call",
-                              "text": "y.present?",
-                              "span": [
-                                4,
-                                4,
-                                4,
-                                14
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "y",
-                                  "span": [
-                                    4,
-                                    4,
-                                    4,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    4,
-                                    5,
-                                    4,
-                                    6
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "present?",
-                                  "span": [
-                                    4,
-                                    6,
-                                    4,
-                                    14
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            },
-                            {
-                              "kind": "call",
-                              "text": "x&.foo",
-                              "span": [
-                                5,
-                                4,
-                                5,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "x",
-                                  "span": [
-                                    5,
-                                    4,
-                                    5,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "&.",
-                                  "text": "&.",
-                                  "span": [
-                                    5,
-                                    5,
-                                    5,
-                                    7
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "foo",
-                                  "span": [
-                                    5,
-                                    7,
-                                    5,
-                                    10
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "if",
-                      "text": "",
-                      "span": [
-                        7,
-                        2,
-                        11,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "call",
-                          "text": "z.nil?",
-                          "span": [
-                            7,
-                            5,
-                            7,
-                            11
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "identifier",
-                              "text": "z",
-                              "span": [
-                                7,
-                                5,
-                                7,
-                                6
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": ".",
-                              "text": ".",
-                              "span": [
-                                7,
-                                6,
-                                7,
-                                7
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "identifier",
-                              "text": "nil?",
-                              "span": [
-                                7,
-                                7,
-                                7,
-                                11
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "return",
-                          "span": [
-                            8,
-                            4,
-                            8,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "return",
-                              "text": "return",
-                              "span": [
-                                8,
-                                4,
-                                8,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "else",
-                          "text": "z.nil?",
-                          "span": [
-                            10,
-                            4,
-                            10,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "z.nil?",
-                              "span": [
-                                10,
-                                4,
-                                10,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "z",
-                                  "span": [
-                                    10,
-                                    4,
-                                    10,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    10,
-                                    5,
-                                    10,
-                                    6
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "nil?",
-                                  "span": [
-                                    10,
-                                    6,
-                                    10,
-                                    10
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "unless",
-                      "text": "",
-                      "span": [
-                        12,
-                        2,
-                        14,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "call",
-                          "text": "w.nil?",
-                          "span": [
-                            12,
-                            9,
-                            12,
-                            15
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "identifier",
-                              "text": "w",
-                              "span": [
-                                12,
-                                9,
-                                12,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": ".",
-                              "text": ".",
-                              "span": [
-                                12,
-                                10,
-                                12,
-                                11
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "identifier",
-                              "text": "nil?",
-                              "span": [
-                                12,
-                                11,
-                                12,
-                                15
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "w.nil?",
-                          "span": [
-                            13,
-                            4,
-                            13,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "w.nil?",
-                              "span": [
-                                13,
-                                4,
-                                13,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "w",
-                                  "span": [
-                                    13,
-                                    4,
-                                    13,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    13,
-                                    5,
-                                    13,
-                                    6
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "nil?",
-                                  "span": [
-                                    13,
-                                    6,
-                                    13,
-                                    10
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "if",
-                      "text": "",
-                      "span": [
-                        15,
-                        2,
-                        17,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "call",
-                          "text": "obj&.ready",
-                          "span": [
-                            15,
-                            5,
-                            15,
-                            15
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "identifier",
-                              "text": "obj",
-                              "span": [
-                                15,
-                                5,
-                                15,
-                                8
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "&.",
-                              "text": "&.",
-                              "span": [
-                                15,
-                                8,
-                                15,
-                                10
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "identifier",
-                              "text": "ready",
-                              "span": [
-                                15,
-                                10,
-                                15,
-                                15
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "obj&.name",
-                          "span": [
-                            16,
-                            4,
-                            16,
-                            13
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "obj&.name",
-                              "span": [
-                                16,
-                                4,
-                                16,
-                                13
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "obj",
-                                  "span": [
-                                    16,
-                                    4,
-                                    16,
-                                    7
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "&.",
-                                  "text": "&.",
-                                  "span": [
-                                    16,
-                                    7,
-                                    16,
-                                    9
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "name",
-                                  "span": [
-                                    16,
-                                    9,
-                                    16,
-                                    13
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "if",
-                      "text": "",
-                      "span": [
-                        18,
-                        2,
-                        22,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "binary",
-                          "text": "b != nil",
-                          "span": [
-                            18,
-                            5,
-                            18,
-                            14
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "identifier",
-                              "text": "b",
-                              "span": [
-                                18,
-                                5,
-                                18,
-                                6
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "!=",
-                              "text": "!=",
-                              "span": [
-                                18,
-                                7,
-                                18,
-                                9
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "nil",
-                              "text": "nil",
-                              "span": [
-                                18,
-                                10,
-                                18,
-                                13
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "b.nil?",
-                          "span": [
-                            19,
-                            4,
-                            19,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "b.nil?",
-                              "span": [
-                                19,
-                                4,
-                                19,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "b",
-                                  "span": [
-                                    19,
-                                    4,
-                                    19,
-                                    5
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": ".",
-                                  "text": ".",
-                                  "span": [
-                                    19,
-                                    5,
-                                    19,
-                                    6
-                                  ],
-                                  "named": false,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                },
-                                {
-                                  "kind": "identifier",
-                                  "text": "nil?",
-                                  "span": [
-                                    19,
-                                    6,
-                                    19,
-                                    10
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "else",
-                          "text": "return",
-                          "span": [
-                            21,
-                            4,
-                            21,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "return",
-                              "text": "return",
-                              "span": [
-                                21,
-                                4,
-                                21,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "kind": "if",
-                      "text": "",
-                      "span": [
-                        23,
-                        2,
-                        27,
-                        5
-                      ],
-                      "named": true,
-                      "field_name": null,
-                      "children": [
-                        {
-                          "kind": "binary",
-                          "text": "a != nil",
-                          "span": [
-                            23,
-                            5,
-                            23,
-                            14
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "identifier",
-                              "text": "a",
-                              "span": [
-                                23,
-                                5,
-                                23,
-                                6
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "!=",
-                              "text": "!=",
-                              "span": [
-                                23,
-                                7,
-                                23,
-                                9
-                              ],
-                              "named": false,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            },
-                            {
-                              "kind": "nil",
-                              "text": "nil",
-                              "span": [
-                                23,
-                                10,
-                                23,
-                                13
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "then",
-                          "text": "return",
-                          "span": [
-                            24,
-                            4,
-                            24,
-                            10
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "return",
-                              "text": "return",
-                              "span": [
-                                24,
-                                4,
-                                24,
-                                10
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "kind": "else",
-                          "text": "abort",
-                          "span": [
-                            26,
-                            4,
-                            26,
-                            9
-                          ],
-                          "named": true,
-                          "field_name": null,
-                          "children": [
-                            {
-                              "kind": "call",
-                              "text": "abort",
-                              "span": [
-                                26,
-                                4,
-                                26,
-                                9
-                              ],
-                              "named": true,
-                              "field_name": null,
-                              "children": [
-                                {
-                                  "kind": "identifier",
-                                  "text": "abort",
-                                  "span": [
-                                    26,
-                                    4,
-                                    26,
-                                    9
-                                  ],
-                                  "named": true,
-                                  "field_name": null,
-                                  "children": [
-
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            "visibility": "public",
-            "params": [
-
-            ]
-          }
-        ],
         "normalized_root": {
-          "type": "ROOT",
           "children": [
             {
               "Node": {
-                "type": "DEFN",
                 "children": [
                   {
                     "Symbol": "rich"
                   },
                   {
                     "Node": {
-                      "type": "SCOPE",
                       "children": [
                         {
                           "Nil": null
@@ -1257,33 +1319,29 @@
                         },
                         {
                           "Node": {
-                            "type": "BLOCK",
                             "children": [
                               {
                                 "Node": {
-                                  "type": "IF",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "AND",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "OPCALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "x"
                                                       }
                                                     ],
-                                                    "first_lineno": 2,
                                                     "first_column": 5,
-                                                    "last_lineno": 2,
+                                                    "first_lineno": 2,
                                                     "last_column": 6,
-                                                    "text": "x"
+                                                    "last_lineno": 2,
+                                                    "text": "x",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
@@ -1291,492 +1349,489 @@
                                                 },
                                                 {
                                                   "Node": {
-                                                    "type": "LIST",
                                                     "children": [
                                                       {
                                                         "Node": {
-                                                          "type": "NIL",
-                                                          "children": [
-
-                                                          ],
-                                                          "first_lineno": 2,
+                                                          "children": [],
                                                           "first_column": 10,
-                                                          "last_lineno": 2,
+                                                          "first_lineno": 2,
                                                           "last_column": 13,
-                                                          "text": "nil"
+                                                          "last_lineno": 2,
+                                                          "text": "nil",
+                                                          "type": "NIL"
                                                         }
                                                       }
                                                     ],
-                                                    "first_lineno": 2,
                                                     "first_column": 10,
-                                                    "last_lineno": 2,
+                                                    "first_lineno": 2,
                                                     "last_column": 13,
-                                                    "text": "nil"
+                                                    "last_lineno": 2,
+                                                    "text": "nil",
+                                                    "type": "LIST"
                                                   }
                                                 }
                                               ],
-                                              "first_lineno": 2,
                                               "first_column": 5,
-                                              "last_lineno": 2,
+                                              "first_lineno": 2,
                                               "last_column": 14,
-                                              "text": "x != nil"
+                                              "last_lineno": 2,
+                                              "text": "x != nil",
+                                              "type": "OPCALL"
                                             }
                                           },
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "y"
                                                       }
                                                     ],
-                                                    "first_lineno": 2,
                                                     "first_column": 17,
-                                                    "last_lineno": 2,
+                                                    "first_lineno": 2,
                                                     "last_column": 18,
-                                                    "text": "y"
+                                                    "last_lineno": 2,
+                                                    "text": "y",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "present?"
                                                 }
                                               ],
-                                              "first_lineno": 2,
                                               "first_column": 17,
-                                              "last_lineno": 2,
+                                              "first_lineno": 2,
                                               "last_column": 27,
-                                              "text": "y.present?"
+                                              "last_lineno": 2,
+                                              "text": "y.present?",
+                                              "type": "CALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 2,
                                         "first_column": 5,
-                                        "last_lineno": 2,
+                                        "first_lineno": 2,
                                         "last_column": 27,
-                                        "text": "x != nil && y.present?"
+                                        "last_lineno": 2,
+                                        "text": "x != nil && y.present?",
+                                        "type": "AND"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "x"
                                                       }
                                                     ],
-                                                    "first_lineno": 3,
                                                     "first_column": 4,
-                                                    "last_lineno": 3,
+                                                    "first_lineno": 3,
                                                     "last_column": 5,
-                                                    "text": "x"
+                                                    "last_lineno": 3,
+                                                    "text": "x",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "nil?"
                                                 }
                                               ],
-                                              "first_lineno": 3,
                                               "first_column": 4,
-                                              "last_lineno": 3,
+                                              "first_lineno": 3,
                                               "last_column": 10,
-                                              "text": "x.nil?"
+                                              "last_lineno": 3,
+                                              "text": "x.nil?",
+                                              "type": "CALL"
                                             }
                                           },
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "y"
                                                       }
                                                     ],
-                                                    "first_lineno": 4,
                                                     "first_column": 4,
-                                                    "last_lineno": 4,
+                                                    "first_lineno": 4,
                                                     "last_column": 5,
-                                                    "text": "y"
+                                                    "last_lineno": 4,
+                                                    "text": "y",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "present?"
                                                 }
                                               ],
-                                              "first_lineno": 4,
                                               "first_column": 4,
-                                              "last_lineno": 4,
+                                              "first_lineno": 4,
                                               "last_column": 14,
-                                              "text": "y.present?"
+                                              "last_lineno": 4,
+                                              "text": "y.present?",
+                                              "type": "CALL"
                                             }
                                           },
                                           {
                                             "Node": {
-                                              "type": "QCALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "x"
                                                       }
                                                     ],
-                                                    "first_lineno": 5,
                                                     "first_column": 4,
-                                                    "last_lineno": 5,
+                                                    "first_lineno": 5,
                                                     "last_column": 5,
-                                                    "text": "x"
+                                                    "last_lineno": 5,
+                                                    "text": "x",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "foo"
                                                 }
                                               ],
-                                              "first_lineno": 5,
                                               "first_column": 4,
-                                              "last_lineno": 5,
+                                              "first_lineno": 5,
                                               "last_column": 10,
-                                              "text": "x&.foo"
+                                              "last_lineno": 5,
+                                              "text": "x&.foo",
+                                              "type": "QCALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 3,
                                         "first_column": 4,
-                                        "last_lineno": 5,
+                                        "first_lineno": 3,
                                         "last_column": 10,
-                                        "text": "x.nil?\ny.present?\nx&.foo"
+                                        "last_lineno": 5,
+                                        "text": "x.nil?\ny.present?\nx&.foo",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Nil": null
                                     }
                                   ],
-                                  "first_lineno": 2,
                                   "first_column": 2,
-                                  "last_lineno": 6,
+                                  "first_lineno": 2,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 6,
+                                  "text": "",
+                                  "type": "IF"
                                 }
                               },
                               {
                                 "Node": {
-                                  "type": "IF",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "CALL",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "LVAR",
                                               "children": [
                                                 {
                                                   "String": "z"
                                                 }
                                               ],
-                                              "first_lineno": 7,
                                               "first_column": 5,
-                                              "last_lineno": 7,
+                                              "first_lineno": 7,
                                               "last_column": 6,
-                                              "text": "z"
+                                              "last_lineno": 7,
+                                              "text": "z",
+                                              "type": "LVAR"
                                             }
                                           },
                                           {
                                             "Symbol": "nil?"
                                           }
                                         ],
-                                        "first_lineno": 7,
                                         "first_column": 5,
-                                        "last_lineno": 7,
+                                        "first_lineno": 7,
                                         "last_column": 11,
-                                        "text": "z.nil?"
+                                        "last_lineno": 7,
+                                        "text": "z.nil?",
+                                        "type": "CALL"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "RETURN",
-                                              "children": [
-
-                                              ],
-                                              "first_lineno": 8,
+                                              "children": [],
                                               "first_column": 4,
-                                              "last_lineno": 8,
+                                              "first_lineno": 8,
                                               "last_column": 10,
-                                              "text": "return"
+                                              "last_lineno": 8,
+                                              "text": "return",
+                                              "type": "RETURN"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 8,
                                         "first_column": 4,
-                                        "last_lineno": 8,
+                                        "first_lineno": 8,
                                         "last_column": 10,
-                                        "text": "return"
+                                        "last_lineno": 8,
+                                        "text": "return",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "z"
                                                       }
                                                     ],
-                                                    "first_lineno": 10,
                                                     "first_column": 4,
-                                                    "last_lineno": 10,
+                                                    "first_lineno": 10,
                                                     "last_column": 5,
-                                                    "text": "z"
+                                                    "last_lineno": 10,
+                                                    "text": "z",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "nil?"
                                                 }
                                               ],
-                                              "first_lineno": 10,
                                               "first_column": 4,
-                                              "last_lineno": 10,
+                                              "first_lineno": 10,
                                               "last_column": 10,
-                                              "text": "z.nil?"
+                                              "last_lineno": 10,
+                                              "text": "z.nil?",
+                                              "type": "CALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 10,
                                         "first_column": 4,
-                                        "last_lineno": 10,
+                                        "first_lineno": 10,
                                         "last_column": 10,
-                                        "text": "z.nil?"
+                                        "last_lineno": 10,
+                                        "text": "z.nil?",
+                                        "type": "BLOCK"
                                       }
                                     }
                                   ],
-                                  "first_lineno": 7,
                                   "first_column": 2,
-                                  "last_lineno": 11,
+                                  "first_lineno": 7,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 11,
+                                  "text": "",
+                                  "type": "IF"
                                 }
                               },
                               {
                                 "Node": {
-                                  "type": "UNLESS",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "CALL",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "LVAR",
                                               "children": [
                                                 {
                                                   "String": "w"
                                                 }
                                               ],
-                                              "first_lineno": 12,
                                               "first_column": 9,
-                                              "last_lineno": 12,
+                                              "first_lineno": 12,
                                               "last_column": 10,
-                                              "text": "w"
+                                              "last_lineno": 12,
+                                              "text": "w",
+                                              "type": "LVAR"
                                             }
                                           },
                                           {
                                             "Symbol": "nil?"
                                           }
                                         ],
-                                        "first_lineno": 12,
                                         "first_column": 9,
-                                        "last_lineno": 12,
+                                        "first_lineno": 12,
                                         "last_column": 15,
-                                        "text": "w.nil?"
+                                        "last_lineno": 12,
+                                        "text": "w.nil?",
+                                        "type": "CALL"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "w"
                                                       }
                                                     ],
-                                                    "first_lineno": 13,
                                                     "first_column": 4,
-                                                    "last_lineno": 13,
+                                                    "first_lineno": 13,
                                                     "last_column": 5,
-                                                    "text": "w"
+                                                    "last_lineno": 13,
+                                                    "text": "w",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "nil?"
                                                 }
                                               ],
-                                              "first_lineno": 13,
                                               "first_column": 4,
-                                              "last_lineno": 13,
+                                              "first_lineno": 13,
                                               "last_column": 10,
-                                              "text": "w.nil?"
+                                              "last_lineno": 13,
+                                              "text": "w.nil?",
+                                              "type": "CALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 13,
                                         "first_column": 4,
-                                        "last_lineno": 13,
+                                        "first_lineno": 13,
                                         "last_column": 10,
-                                        "text": "w.nil?"
+                                        "last_lineno": 13,
+                                        "text": "w.nil?",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Nil": null
                                     }
                                   ],
-                                  "first_lineno": 12,
                                   "first_column": 2,
-                                  "last_lineno": 14,
+                                  "first_lineno": 12,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 14,
+                                  "text": "",
+                                  "type": "UNLESS"
                                 }
                               },
                               {
                                 "Node": {
-                                  "type": "IF",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "QCALL",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "LVAR",
                                               "children": [
                                                 {
                                                   "String": "obj"
                                                 }
                                               ],
-                                              "first_lineno": 15,
                                               "first_column": 5,
-                                              "last_lineno": 15,
+                                              "first_lineno": 15,
                                               "last_column": 8,
-                                              "text": "obj"
+                                              "last_lineno": 15,
+                                              "text": "obj",
+                                              "type": "LVAR"
                                             }
                                           },
                                           {
                                             "Symbol": "ready"
                                           }
                                         ],
-                                        "first_lineno": 15,
                                         "first_column": 5,
-                                        "last_lineno": 15,
+                                        "first_lineno": 15,
                                         "last_column": 15,
-                                        "text": "obj&.ready"
+                                        "last_lineno": 15,
+                                        "text": "obj&.ready",
+                                        "type": "QCALL"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "QCALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "obj"
                                                       }
                                                     ],
-                                                    "first_lineno": 16,
                                                     "first_column": 4,
-                                                    "last_lineno": 16,
+                                                    "first_lineno": 16,
                                                     "last_column": 7,
-                                                    "text": "obj"
+                                                    "last_lineno": 16,
+                                                    "text": "obj",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "name"
                                                 }
                                               ],
-                                              "first_lineno": 16,
                                               "first_column": 4,
-                                              "last_lineno": 16,
+                                              "first_lineno": 16,
                                               "last_column": 13,
-                                              "text": "obj&.name"
+                                              "last_lineno": 16,
+                                              "text": "obj&.name",
+                                              "type": "QCALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 16,
                                         "first_column": 4,
-                                        "last_lineno": 16,
+                                        "first_lineno": 16,
                                         "last_column": 13,
-                                        "text": "obj&.name"
+                                        "last_lineno": 16,
+                                        "text": "obj&.name",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Nil": null
                                     }
                                   ],
-                                  "first_lineno": 15,
                                   "first_column": 2,
-                                  "last_lineno": 17,
+                                  "first_lineno": 15,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 17,
+                                  "text": "",
+                                  "type": "IF"
                                 }
                               },
                               {
                                 "Node": {
-                                  "type": "IF",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "OPCALL",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "LVAR",
                                               "children": [
                                                 {
                                                   "String": "b"
                                                 }
                                               ],
-                                              "first_lineno": 18,
                                               "first_column": 5,
-                                              "last_lineno": 18,
+                                              "first_lineno": 18,
                                               "last_column": 6,
-                                              "text": "b"
+                                              "last_lineno": 18,
+                                              "text": "b",
+                                              "type": "LVAR"
                                             }
                                           },
                                           {
@@ -1784,133 +1839,129 @@
                                           },
                                           {
                                             "Node": {
-                                              "type": "LIST",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "NIL",
-                                                    "children": [
-
-                                                    ],
-                                                    "first_lineno": 18,
+                                                    "children": [],
                                                     "first_column": 10,
-                                                    "last_lineno": 18,
+                                                    "first_lineno": 18,
                                                     "last_column": 13,
-                                                    "text": "nil"
+                                                    "last_lineno": 18,
+                                                    "text": "nil",
+                                                    "type": "NIL"
                                                   }
                                                 }
                                               ],
-                                              "first_lineno": 18,
                                               "first_column": 10,
-                                              "last_lineno": 18,
+                                              "first_lineno": 18,
                                               "last_column": 13,
-                                              "text": "nil"
+                                              "last_lineno": 18,
+                                              "text": "nil",
+                                              "type": "LIST"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 18,
                                         "first_column": 5,
-                                        "last_lineno": 18,
+                                        "first_lineno": 18,
                                         "last_column": 14,
-                                        "text": "b != nil"
+                                        "last_lineno": 18,
+                                        "text": "b != nil",
+                                        "type": "OPCALL"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "CALL",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "LVAR",
                                                     "children": [
                                                       {
                                                         "String": "b"
                                                       }
                                                     ],
-                                                    "first_lineno": 19,
                                                     "first_column": 4,
-                                                    "last_lineno": 19,
+                                                    "first_lineno": 19,
                                                     "last_column": 5,
-                                                    "text": "b"
+                                                    "last_lineno": 19,
+                                                    "text": "b",
+                                                    "type": "LVAR"
                                                   }
                                                 },
                                                 {
                                                   "Symbol": "nil?"
                                                 }
                                               ],
-                                              "first_lineno": 19,
                                               "first_column": 4,
-                                              "last_lineno": 19,
+                                              "first_lineno": 19,
                                               "last_column": 10,
-                                              "text": "b.nil?"
+                                              "last_lineno": 19,
+                                              "text": "b.nil?",
+                                              "type": "CALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 19,
                                         "first_column": 4,
-                                        "last_lineno": 19,
+                                        "first_lineno": 19,
                                         "last_column": 10,
-                                        "text": "b.nil?"
+                                        "last_lineno": 19,
+                                        "text": "b.nil?",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "RETURN",
-                                              "children": [
-
-                                              ],
-                                              "first_lineno": 21,
+                                              "children": [],
                                               "first_column": 4,
-                                              "last_lineno": 21,
+                                              "first_lineno": 21,
                                               "last_column": 10,
-                                              "text": "return"
+                                              "last_lineno": 21,
+                                              "text": "return",
+                                              "type": "RETURN"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 21,
                                         "first_column": 4,
-                                        "last_lineno": 21,
+                                        "first_lineno": 21,
                                         "last_column": 10,
-                                        "text": "return"
+                                        "last_lineno": 21,
+                                        "text": "return",
+                                        "type": "BLOCK"
                                       }
                                     }
                                   ],
-                                  "first_lineno": 18,
                                   "first_column": 2,
-                                  "last_lineno": 22,
+                                  "first_lineno": 18,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 22,
+                                  "text": "",
+                                  "type": "IF"
                                 }
                               },
                               {
                                 "Node": {
-                                  "type": "IF",
                                   "children": [
                                     {
                                       "Node": {
-                                        "type": "OPCALL",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "LVAR",
                                               "children": [
                                                 {
                                                   "String": "a"
                                                 }
                                               ],
-                                              "first_lineno": 23,
                                               "first_column": 5,
-                                              "last_lineno": 23,
+                                              "first_lineno": 23,
                                               "last_column": 6,
-                                              "text": "a"
+                                              "last_lineno": 23,
+                                              "text": "a",
+                                              "type": "LVAR"
                                             }
                                           },
                                           {
@@ -1918,127 +1969,129 @@
                                           },
                                           {
                                             "Node": {
-                                              "type": "LIST",
                                               "children": [
                                                 {
                                                   "Node": {
-                                                    "type": "NIL",
-                                                    "children": [
-
-                                                    ],
-                                                    "first_lineno": 23,
+                                                    "children": [],
                                                     "first_column": 10,
-                                                    "last_lineno": 23,
+                                                    "first_lineno": 23,
                                                     "last_column": 13,
-                                                    "text": "nil"
+                                                    "last_lineno": 23,
+                                                    "text": "nil",
+                                                    "type": "NIL"
                                                   }
                                                 }
                                               ],
-                                              "first_lineno": 23,
                                               "first_column": 10,
-                                              "last_lineno": 23,
+                                              "first_lineno": 23,
                                               "last_column": 13,
-                                              "text": "nil"
+                                              "last_lineno": 23,
+                                              "text": "nil",
+                                              "type": "LIST"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 23,
                                         "first_column": 5,
-                                        "last_lineno": 23,
+                                        "first_lineno": 23,
                                         "last_column": 14,
-                                        "text": "a != nil"
+                                        "last_lineno": 23,
+                                        "text": "a != nil",
+                                        "type": "OPCALL"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "RETURN",
-                                              "children": [
-
-                                              ],
-                                              "first_lineno": 24,
+                                              "children": [],
                                               "first_column": 4,
-                                              "last_lineno": 24,
+                                              "first_lineno": 24,
                                               "last_column": 10,
-                                              "text": "return"
+                                              "last_lineno": 24,
+                                              "text": "return",
+                                              "type": "RETURN"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 24,
                                         "first_column": 4,
-                                        "last_lineno": 24,
+                                        "first_lineno": 24,
                                         "last_column": 10,
-                                        "text": "return"
+                                        "last_lineno": 24,
+                                        "text": "return",
+                                        "type": "BLOCK"
                                       }
                                     },
                                     {
                                       "Node": {
-                                        "type": "BLOCK",
                                         "children": [
                                           {
                                             "Node": {
-                                              "type": "VCALL",
                                               "children": [
                                                 {
                                                   "Symbol": "abort"
                                                 }
                                               ],
-                                              "first_lineno": 26,
                                               "first_column": 4,
-                                              "last_lineno": 26,
+                                              "first_lineno": 26,
                                               "last_column": 9,
-                                              "text": "abort"
+                                              "last_lineno": 26,
+                                              "text": "abort",
+                                              "type": "VCALL"
                                             }
                                           }
                                         ],
-                                        "first_lineno": 26,
                                         "first_column": 4,
-                                        "last_lineno": 26,
+                                        "first_lineno": 26,
                                         "last_column": 9,
-                                        "text": "abort"
+                                        "last_lineno": 26,
+                                        "text": "abort",
+                                        "type": "BLOCK"
                                       }
                                     }
                                   ],
-                                  "first_lineno": 23,
                                   "first_column": 2,
-                                  "last_lineno": 27,
+                                  "first_lineno": 23,
                                   "last_column": 5,
-                                  "text": ""
+                                  "last_lineno": 27,
+                                  "text": "",
+                                  "type": "IF"
                                 }
                               }
                             ],
-                            "first_lineno": 2,
                             "first_column": 4,
-                            "last_lineno": 27,
+                            "first_lineno": 2,
                             "last_column": 5,
-                            "text": "\n\n\n\n\n"
+                            "last_lineno": 27,
+                            "text": "\n\n\n\n\n",
+                            "type": "BLOCK"
                           }
                         }
                       ],
-                      "first_lineno": 1,
                       "first_column": 0,
-                      "last_lineno": 28,
+                      "first_lineno": 1,
                       "last_column": 3,
-                      "text": "def rich"
+                      "last_lineno": 28,
+                      "text": "def rich",
+                      "type": "SCOPE"
                     }
                   }
                 ],
-                "first_lineno": 1,
                 "first_column": 0,
-                "last_lineno": 28,
+                "first_lineno": 1,
                 "last_column": 3,
-                "text": "def rich"
+                "last_lineno": 28,
+                "text": "def rich",
+                "type": "DEFN"
               }
             }
           ],
-          "first_lineno": 1,
           "first_column": 0,
-          "last_lineno": 28,
+          "first_lineno": 1,
           "last_column": 3,
-          "text": "def rich"
+          "last_lineno": 28,
+          "text": "def rich",
+          "type": "ROOT"
         },
         "redundant_nil_guards": [
           {
@@ -2205,168 +2258,5 @@
         ]
       }
     ]
-  },
-  "expected": [
-    {
-      "at": "facts/nil_guard_rich.rb:rich:3",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "x.nil?",
-      "line": 3,
-      "local": "x",
-      "proof": "x is already proven non-nil on this path",
-      "span": [
-        3,
-        4,
-        3,
-        10
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:3": [
-          3,
-          4,
-          3,
-          10
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:4",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "y.present?",
-      "line": 4,
-      "local": "y",
-      "proof": "y is already proven non-nil on this path",
-      "span": [
-        4,
-        4,
-        4,
-        14
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:4": [
-          4,
-          4,
-          4,
-          14
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:5",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "x&.foo",
-      "line": 5,
-      "local": "x",
-      "proof": "x is already proven non-nil on this path",
-      "span": [
-        5,
-        4,
-        5,
-        10
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:5": [
-          5,
-          4,
-          5,
-          10
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:10",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "z.nil?",
-      "line": 10,
-      "local": "z",
-      "proof": "z is already proven non-nil on this path",
-      "span": [
-        10,
-        4,
-        10,
-        10
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:10": [
-          10,
-          4,
-          10,
-          10
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:13",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "w.nil?",
-      "line": 13,
-      "local": "w",
-      "proof": "w is already proven non-nil on this path",
-      "span": [
-        13,
-        4,
-        13,
-        10
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:13": [
-          13,
-          4,
-          13,
-          10
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:16",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "obj&.name",
-      "line": 16,
-      "local": "obj",
-      "proof": "obj is already proven non-nil on this path",
-      "span": [
-        16,
-        4,
-        16,
-        13
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:16": [
-          16,
-          4,
-          16,
-          13
-        ]
-      }
-    },
-    {
-      "at": "facts/nil_guard_rich.rb:rich:19",
-      "defn": "rich",
-      "file": "facts/nil_guard_rich.rb",
-      "guard": "b.nil?",
-      "line": 19,
-      "local": "b",
-      "proof": "b is already proven non-nil on this path",
-      "span": [
-        19,
-        4,
-        19,
-        10
-      ],
-      "spans": {
-        "facts/nil_guard_rich.rb:rich:19": [
-          19,
-          4,
-          19,
-          10
-        ]
-      }
-    }
-  ]
+  }
 }

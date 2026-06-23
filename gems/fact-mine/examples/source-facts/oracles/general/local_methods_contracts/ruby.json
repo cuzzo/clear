@@ -58,7 +58,49 @@
       ]
     }
   ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "names << item.name",
+        "decision_line": 8,
+        "function": "process",
+        "kind": "if",
+        "line": 9,
+        "member": "then",
+        "predicate": "item.ready?"
+      },
+      {
+        "body": "profile.name",
+        "decision_line": 12,
+        "function": "process",
+        "kind": "if",
+        "line": 12,
+        "member": "then",
+        "predicate": "names.any?"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "process",
+        "line": 12,
+        "predicate": "names.any?",
+        "state_refs": [
+          "names.any?"
+        ]
+      },
+      {
+        "function": "process",
+        "line": 8,
+        "predicate": "item.ready?",
+        "state_refs": [
+          "item.ready?"
+        ]
+      }
+    ],
     "calls": [
       {
         "arguments": [],
@@ -127,6 +169,188 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "assignment(id call(id id))",
+          "assignment(id)",
+          "block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id))))))",
+          "if(call(id id) call(id id))"
+        ],
+        "child_masses": [
+          3,
+          1,
+          12,
+          5
+        ],
+        "fingerprint": "body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))",
+        "line": 5,
+        "mass": 22,
+        "method_name": "process",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(id id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "if(call(id id) call(id id))",
+        "line": 12,
+        "mass": 5,
+        "method_name": "process",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(lit id argument_list(call(id id)))"
+        ],
+        "child_masses": [
+          2,
+          5
+        ],
+        "fingerprint": "if(call(id id) call(lit id argument_list(call(id id))))",
+        "line": 8,
+        "mass": 8,
+        "method_name": "process",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(call(id id))",
+        "line": 9,
+        "mass": 3,
+        "method_name": "process",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id))))))",
+        "line": 7,
+        "mass": 12,
+        "method_name": "process",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(call(id id))"
+        ],
+        "child_masses": [
+          1,
+          3
+        ],
+        "fingerprint": "call(lit id argument_list(call(id id)))",
+        "line": 9,
+        "mass": 5,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "process",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) body_statement(assignment(id call(id id)) assignment(id) block(call(id id) body(if(call(id id) call(lit id argument_list(call(id id)))))) if(call(id id) call(id id)))))",
+        "line": 4,
+        "mass": 27,
+        "method_name": "process",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 4,
@@ -256,6 +480,46 @@
         ]
       }
     ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactLocalMethodsContracts"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "process",
+        "owner": "SourceFactLocalMethodsContracts",
+        "reads": [
+          "item.name",
+          "item.ready",
+          "items.each",
+          "names.any",
+          "profile.name",
+          "user.profile"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "<<",
@@ -264,6 +528,8 @@
         "line": 9
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "any?",

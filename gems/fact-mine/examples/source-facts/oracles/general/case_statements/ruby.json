@@ -1,0 +1,677 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_eight",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_case_no_val",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_case_one_pattern",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "action_one",
+        "decision_line": 2,
+        "function": "method_eight",
+        "kind": "case",
+        "line": 3,
+        "member": "1",
+        "predicate": "x"
+      },
+      {
+        "body": "action_one",
+        "decision_line": 2,
+        "function": "method_eight",
+        "kind": "case",
+        "line": 3,
+        "member": "2",
+        "predicate": "x"
+      },
+      {
+        "body": "action_one",
+        "decision_line": 20,
+        "function": "method_case_one_pattern",
+        "kind": "case",
+        "line": 21,
+        "member": "1",
+        "predicate": "x"
+      },
+      {
+        "body": "action_two",
+        "decision_line": 2,
+        "function": "method_eight",
+        "kind": "case",
+        "line": 5,
+        "member": "3",
+        "predicate": "x"
+      }
+    ],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_case_no_val",
+        "line": 15,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_case_one_pattern",
+        "line": 22,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 4,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 6,
+        "message": "action_two",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 8,
+        "message": "action_three",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(call(lit id argument_list(lit)))",
+          "id"
+        ],
+        "child_masses": [
+          5,
+          1
+        ],
+        "fingerprint": "when(argument_list(call(lit id argument_list(lit))) id)",
+        "line": 14,
+        "mass": 7,
+        "method_name": "method_case_no_val",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit lit)",
+          "id",
+          "when(argument_list(lit) id id)"
+        ],
+        "child_masses": [
+          3,
+          1,
+          5
+        ],
+        "fingerprint": "when(argument_list(lit lit) id when(argument_list(lit) id id))",
+        "line": 3,
+        "mass": 10,
+        "method_name": "method_eight",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "when(argument_list(lit) id id)",
+        "line": 5,
+        "mass": 5,
+        "method_name": "method_eight",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "id"
+        ],
+        "child_masses": [
+          2,
+          1
+        ],
+        "fingerprint": "when(argument_list(lit) id)",
+        "line": 21,
+        "mass": 4,
+        "method_name": "method_case_one_pattern",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "argument_list(call(lit id argument_list(lit)))",
+        "line": 14,
+        "mass": 5,
+        "method_name": "method_case_no_val",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 14,
+        "mass": 4,
+        "method_name": "method_case_no_val",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(lit lit) id when(argument_list(lit) id id))"
+        ],
+        "child_masses": [
+          1,
+          10
+        ],
+        "fingerprint": "case(id when(argument_list(lit lit) id when(argument_list(lit) id id)))",
+        "line": 2,
+        "mass": 12,
+        "method_name": "method_eight",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(lit) id)"
+        ],
+        "child_masses": [
+          1,
+          4
+        ],
+        "fingerprint": "case(id when(argument_list(lit) id))",
+        "line": 20,
+        "mass": 6,
+        "method_name": "method_case_one_pattern",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit)",
+        "line": 3,
+        "mass": 3,
+        "method_name": "method_eight",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 14,
+        "mass": 2,
+        "method_name": "method_case_no_val",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 21,
+        "mass": 2,
+        "method_name": "method_case_one_pattern",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "method_eight",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "when(argument_list(call(lit id argument_list(lit))) id)"
+        ],
+        "child_masses": [
+          7
+        ],
+        "fingerprint": "case(when(argument_list(call(lit id argument_list(lit))) id))",
+        "line": 13,
+        "mass": 8,
+        "method_name": "method_case_no_val",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) case(id when(argument_list(lit lit) id when(argument_list(lit) id id)))))",
+        "line": 1,
+        "mass": 16,
+        "method_name": "method_eight",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) case(id when(argument_list(lit) id))))",
+        "line": 19,
+        "mass": 10,
+        "method_name": "method_case_one_pattern",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) case(when(argument_list(call(lit id argument_list(lit))) id))))",
+        "line": 12,
+        "mass": 12,
+        "method_name": "method_case_no_val",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          2,
+          2,
+          9,
+          5
+        ],
+        "function": "method_eight",
+        "kind": "case_dispatch",
+        "line": 2,
+        "members": [
+          "1",
+          "2",
+          "3"
+        ],
+        "predicate": "x"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby",
+        "params": [
+          "x"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 12,
+        "name": "method_case_no_val",
+        "owner": "ruby",
+        "params": [
+          "x"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 19,
+        "name": "method_case_one_pattern",
+        "owner": "ruby",
+        "params": [
+          "x"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_case_no_val",
+        "score": 1.0,
+        "signals": {
+          "cases": 2
+        }
+      },
+      {
+        "id": "(top-level)#method_case_one_pattern",
+        "score": 1.0,
+        "signals": {
+          "cases": 2
+        }
+      },
+      {
+        "id": "(top-level)#method_eight",
+        "score": 1.5,
+        "signals": {
+          "cases": 3
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_case_no_val",
+        "line": 12,
+        "local_contract_assignments": {},
+        "name": "method_case_no_val",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 16,
+            "index": 0,
+            "line": 13,
+            "reads": [
+              "x"
+            ],
+            "source": "case when x == 1 action_one end",
+            "span": [
+              13,
+              2,
+              16,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_case_one_pattern",
+        "line": 19,
+        "local_contract_assignments": {},
+        "name": "method_case_one_pattern",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 23,
+            "index": 0,
+            "line": 20,
+            "reads": [
+              "x"
+            ],
+            "source": "case x when 1 action_one end",
+            "span": [
+              20,
+              2,
+              23,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_eight",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_eight",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "x"
+            ],
+            "source": "case x when 1, 2 action_one when 3 action_two else action_three end",
+            "span": [
+              2,
+              2,
+              9,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "case when x == 1 action_one end",
+        "line": 12,
+        "name": "method_case_no_val",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 12,
+        "name": "method_case_no_val",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 19,
+        "name": "method_case_one_pattern",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 15,
+            "mid": "action_one",
+            "span": [
+              15,
+              4,
+              15,
+              14
+            ]
+          }
+        ],
+        "line": 12,
+        "name": "method_case_no_val",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 22,
+            "mid": "action_one",
+            "span": [
+              22,
+              4,
+              22,
+              14
+            ]
+          }
+        ],
+        "line": 19,
+        "name": "method_case_one_pattern",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 4,
+            "mid": "action_one",
+            "span": [
+              4,
+              4,
+              4,
+              14
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 6,
+            "mid": "action_two",
+            "span": [
+              6,
+              4,
+              6,
+              14
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby"
+      },
+      {
+        "calls": [
+          {
+            "line": 8,
+            "mid": "action_three",
+            "span": [
+              8,
+              4,
+              8,
+              16
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_eight",
+        "owner": "ruby",
+        "reads": [
+          "action_one",
+          "action_three",
+          "action_two"
+        ],
+        "writes": []
+      },
+      {
+        "line": 12,
+        "name": "method_case_no_val",
+        "owner": "ruby",
+        "reads": [
+          "action_one"
+        ],
+        "writes": []
+      },
+      {
+        "line": 19,
+        "name": "method_case_one_pattern",
+        "owner": "ruby",
+        "reads": [
+          "action_one"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

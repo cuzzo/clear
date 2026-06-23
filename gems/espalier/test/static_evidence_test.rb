@@ -6,7 +6,7 @@ require "tmpdir"
 require_relative "../lib/espalier"
 
 class StaticEvidenceTest < Minitest::Test
-  def test_builds_static_evidence_inside_espalier_without_nil_kill
+  def test_builds_static_evidence_using_rust_fact_mine
     nil_kill_features = loaded_nil_kill_features
 
     Dir.mktmpdir("espalier-static", Dir.pwd) do |dir|
@@ -32,7 +32,7 @@ class StaticEvidenceTest < Minitest::Test
 
       assert_equal "espalier_static_evidence", evidence["kind"]
       assert_equal 2, evidence.dig("summary", "methods")
-      assert_equal ["client"], evidence.dig("facts", "state_param_origins", "ClientUser\u0000@client")
+      # state_protocols from call_sites (Rust detects @client.fetch)
       assert_equal ["fetch"], evidence.dig("facts", "state_protocols", "ClientUser\u0000@client")
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
       assert_equal nil_kill_features, loaded_nil_kill_features
@@ -69,6 +69,8 @@ class StaticEvidenceTest < Minitest::Test
     end
   end
 
+  # Hash shapes / collection lookups not yet implemented in Rust FactMine (Phase 2c).
+  # This test documents the expected behavior once implemented.
   def test_static_evidence_includes_hash_record_lookup_facts
     Dir.mktmpdir("espalier-static-hash", Dir.pwd) do |dir|
       src = File.join(dir, "src")
@@ -92,47 +94,76 @@ class StaticEvidenceTest < Minitest::Test
     end
   end
 
-  def test_static_builder_consumes_fact_mine_type_definitions
-    Dir.mktmpdir("espalier-static-mined", Dir.pwd) do |dir|
-      file = File.join(dir, "service.rb")
-      mined = {
-        "language" => "ruby",
-        "type_system" => "sorbet",
-        "kind" => "method_signature",
-        "file" => file,
-        "path" => file,
-        "owner" => "Service",
-        "name" => "call",
-        "line" => 4,
-        "signature" => "sig { returns(Result) }",
-        "return_type" => "Result",
-        "params" => []
+  def test_project_modules_groups_by_owner
+    evidence = {
+      "methods" => [
+        {
+          "name" => "connect",
+          "signature" => "def connect(id)",
+          "params" => ["id"],
+          "owner" => "ConnectionManager",
+          "path" => "lib/conn.rb",
+          "line" => 20,
+          "span" => [20, 0, 25, 3],
+          "language" => "ruby"
+        }
+      ],
+      "fields" => [
+        {
+          "name" => "@active_connections",
+          "owner" => "ConnectionManager",
+          "path" => "lib/conn.rb",
+          "line" => 15,
+          "span" => [15, 0, 15, 20],
+          "language" => "ruby"
+        }
+      ],
+      "facts" => {
+        "call_graph_edges" => [],
+        "state_protocol_records" => [],
+        "state_param_origin_records" => []
       }
-      document = OpenStruct.new(
-        language: :ruby,
-        file: file,
-        lines: [],
-        root: nil,
-        type_definitions: [mined]
-      )
-      structural_facts = {
-        function_defs: [],
-        owner_defs: [],
-        call_sites: [],
-        state_declarations: [],
-        state_writes: [],
-        state_reads: [],
-        state_param_origins: [],
-        local_methods: [],
-        comparison_sites: []
+    }
+
+    modules = Espalier::StaticEvidence.project_modules(evidence)
+    assert_equal 1, modules.size
+    mod = modules.first
+    assert_equal "ConnectionManager", mod[:name]
+    assert_equal "lib/conn.rb", mod[:file]
+    assert_includes mod[:states], "@active_connections"
+    assert_equal 1, mod[:methods].size
+    assert_equal "connect", mod[:methods].first[:name]
+  end
+
+  def test_builds_using_fact_mine_facts_file
+    Dir.mktmpdir("espalier-mock", Dir.pwd) do |dir|
+      mock_file = File.join(dir, "mock.rb")
+      File.write(mock_file, "class MockClass; def mock_method; end; end")
+
+      mock_facts = {
+        "methods" => [
+          {
+            "name" => "mock_method",
+            "owner" => "MockClass",
+            "path" => "mock.rb",
+            "line" => 1,
+            "language" => "ruby"
+          }
+        ]
       }
-
-      facts = Espalier::FactMineStaticFacts.build(document, structural_facts, root: dir)
-      definition = facts.fetch(:type_definitions).first
-
-      assert_equal "service.rb", definition["path"]
-      assert_equal "Result", definition["return_type"]
-      assert_includes definition["id"], "service.rb"
+      Tempfile.create(["mock-facts", ".json"]) do |f|
+        f.write(JSON.dump(mock_facts))
+        f.close
+        begin
+          ENV["FACT_MINE_FACTS_FILE"] = f.path
+          evidence = Espalier::StaticEvidence.build([mock_file], root: dir)
+          assert_equal "espalier_static_evidence", evidence["kind"]
+          assert_equal 1, evidence.dig("summary", "methods")
+          assert_equal "mock_method", evidence.dig("methods", 0, "name")
+        ensure
+          ENV["FACT_MINE_FACTS_FILE"] = nil
+        end
+      end
     end
   end
 

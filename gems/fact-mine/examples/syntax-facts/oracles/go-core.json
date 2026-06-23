@@ -1,127 +1,34 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/go/core.go",
-      "language": "go",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 32,
-          "name": "NewGoSyntaxFactsCore",
-          "owner": "core",
-          "params": [
-            "status"
-          ],
+          "function": "Process",
+          "line": 45,
+          "predicate": "user.Role",
           "span": [
-            32,
-            0,
-            34,
-            1
+            45,
+            1,
+            52,
+            2
           ],
-          "visibility": "public"
-        },
-        {
-          "line": 36,
-          "name": "Process",
-          "owner": "GoSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
-          "span": [
-            36,
-            0,
-            70,
-            1
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 72,
-          "name": "audit",
-          "owner": "GoSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
-          "span": [
-            72,
-            0,
-            76,
-            1
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 78,
-          "name": "Ready",
-          "owner": "GoSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            78,
-            0,
-            80,
-            1
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "owner",
-          "line": 10,
-          "name": "Profile",
-          "span": [
-            10,
-            5,
-            12,
-            1
+          "state_refs": [
+            "user.Role"
           ]
         },
         {
-          "kind": "owner",
-          "line": 14,
-          "name": "User",
+          "function": "Process",
+          "line": 54,
+          "predicate": "c.status == Idle && user.Ready",
           "span": [
-            14,
-            5,
-            19,
-            1
-          ]
-        },
-        {
-          "kind": "owner",
-          "line": 21,
-          "name": "Account",
-          "span": [
-            21,
-            5,
-            24,
-            1
-          ]
-        },
-        {
-          "kind": "owner",
-          "line": 26,
-          "name": "GoSyntaxFactsCore",
-          "span": [
-            26,
-            5,
-            30,
-            1
-          ]
-        },
-        {
-          "kind": "owner",
-          "line": 3,
-          "name": "Status",
-          "span": [
-            3,
-            5,
-            3,
-            15
+            54,
+            1,
+            59,
+            2
+          ],
+          "state_refs": [
+            "c.status",
+            "user.Ready"
           ]
         }
       ],
@@ -345,6 +252,189 @@
             2,
             51,
             21
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            45,
+            1,
+            52,
+            2
+          ],
+          "function": "Process",
+          "kind": "case_dispatch",
+          "line": 45,
+          "members": [
+            "\"guest\"",
+            "\"owner\", \"admin\""
+          ],
+          "predicate": "user.Role",
+          "span": [
+            45,
+            1,
+            52,
+            2
+          ]
+        },
+        {
+          "enclosing_span": [
+            54,
+            1,
+            59,
+            2
+          ],
+          "function": "Process",
+          "kind": "conjunction",
+          "line": 54,
+          "members": [
+            "c.status == Idle",
+            "user.Ready"
+          ],
+          "predicate": "c.status == Idle && user.Ready",
+          "span": [
+            54,
+            4,
+            54,
+            34
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/go/core.go",
+      "functions": [
+        {
+          "line": 32,
+          "name": "NewGoSyntaxFactsCore",
+          "owner": "core",
+          "params": [
+            "status"
+          ],
+          "span": [
+            32,
+            0,
+            34,
+            1
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 36,
+          "name": "Process",
+          "owner": "GoSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            36,
+            0,
+            70,
+            1
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 72,
+          "name": "audit",
+          "owner": "GoSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            72,
+            0,
+            76,
+            1
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 78,
+          "name": "Ready",
+          "owner": "GoSyntaxFactsCore",
+          "params": [],
+          "span": [
+            78,
+            0,
+            80,
+            1
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "go",
+      "owners": [
+        {
+          "kind": "owner",
+          "line": 10,
+          "name": "Profile",
+          "span": [
+            10,
+            5,
+            12,
+            1
+          ]
+        },
+        {
+          "kind": "owner",
+          "line": 14,
+          "name": "User",
+          "span": [
+            14,
+            5,
+            19,
+            1
+          ]
+        },
+        {
+          "kind": "owner",
+          "line": 21,
+          "name": "Account",
+          "span": [
+            21,
+            5,
+            24,
+            1
+          ]
+        },
+        {
+          "kind": "owner",
+          "line": 26,
+          "name": "GoSyntaxFactsCore",
+          "span": [
+            26,
+            5,
+            30,
+            1
+          ]
+        },
+        {
+          "kind": "owner",
+          "line": 3,
+          "name": "Status",
+          "span": [
+            3,
+            5,
+            3,
+            15
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "println",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 73,
+          "span": [
+            73,
+            1,
+            73,
+            14
           ]
         }
       ],
@@ -624,104 +714,8 @@
             25
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            45,
-            1,
-            52,
-            2
-          ],
-          "function": "Process",
-          "kind": "case_dispatch",
-          "line": 45,
-          "members": [
-            "\"guest\"",
-            "\"owner\", \"admin\""
-          ],
-          "predicate": "user.Role",
-          "span": [
-            45,
-            1,
-            52,
-            2
-          ]
-        },
-        {
-          "enclosing_span": [
-            54,
-            1,
-            59,
-            2
-          ],
-          "function": "Process",
-          "kind": "conjunction",
-          "line": 54,
-          "members": [
-            "c.status == Idle",
-            "user.Ready"
-          ],
-          "predicate": "c.status == Idle && user.Ready",
-          "span": [
-            54,
-            4,
-            54,
-            34
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "Process",
-          "line": 45,
-          "predicate": "user.Role",
-          "span": [
-            45,
-            1,
-            52,
-            2
-          ],
-          "state_refs": [
-            "user.Role"
-          ]
-        },
-        {
-          "function": "Process",
-          "line": 54,
-          "predicate": "c.status == Idle && user.Ready",
-          "span": [
-            54,
-            1,
-            59,
-            2
-          ],
-          "state_refs": [
-            "c.status",
-            "user.Ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "println",
-          "function": "audit",
-          "kind": "hidden_io",
-          "line": 73,
-          "span": [
-            73,
-            1,
-            73,
-            14
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

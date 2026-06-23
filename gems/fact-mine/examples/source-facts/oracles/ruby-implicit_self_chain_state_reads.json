@@ -1,5 +1,85 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "self.build",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "manifest"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "filtered",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "items"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "owner_nodes",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "component_list",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "adjacency"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "nodes",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
     "calls": [
       {
         "arguments": [
@@ -151,6 +231,392 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Array>(id argument_list(id))",
+        "line": 10,
+        "mass": 3,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<new>(id argument_list(id))",
+        "line": 5,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
+          "block(call(id call<Array>(id argument_list(id))) body(call(id id)))"
+        ],
+        "child_masses": [
+          9,
+          8
+        ],
+        "fingerprint": "body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))",
+        "line": 9,
+        "mass": 18,
+        "method_name": "filtered",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<Array>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(call(id id)))",
+        "line": 10,
+        "mass": 8,
+        "method_name": "filtered",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(lit))",
+        "line": 14,
+        "mass": 5,
+        "method_name": "owner_nodes",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(lit))",
+        "line": 9,
+        "mass": 5,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
+        "line": 14,
+        "mass": 9,
+        "method_name": "owner_nodes",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(lit call(id id) argument_list(lit))))",
+        "line": 9,
+        "mass": 9,
+        "method_name": "filtered",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call<Array>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<Array>(id argument_list(id)))",
+        "line": 10,
+        "mass": 4,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<new>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<new>(id argument_list(id)))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<new>(id id argument_list(id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<new>(id id argument_list(id)))",
+        "line": 18,
+        "mass": 5,
+        "method_name": "component_list",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<new>(id id argument_list(id))",
+        "line": 18,
+        "mass": 4,
+        "method_name": "component_list",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "filtered",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "component_list",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 14,
+        "mass": 2,
+        "method_name": "owner_nodes",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 14,
+        "mass": 2,
+        "method_name": "owner_nodes",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "filtered",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "method(id id body(parameters(id) call(id call<new>(id argument_list(id)))))",
+        "line": 4,
+        "mass": 9,
+        "method_name": "build",
+        "node_name": "defs"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 14,
+        "mass": 2,
+        "method_name": "owner_nodes",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "filtered",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id id body(parameters(id) call(id call<new>(id argument_list(id)))))",
+          "method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))))",
+          "method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit))))))",
+          "method(id body(parameters(id) call(id call<new>(id id argument_list(id)))))",
+          "method(id body(id))"
+        ],
+        "child_masses": [
+          9,
+          22,
+          11,
+          9,
+          3
+        ],
+        "fingerprint": "body_statement(method(id id body(parameters(id) call(id call<new>(id argument_list(id))))) method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id)))))) method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit)))))) method(id body(parameters(id) call(id call<new>(id id argument_list(id))))) method(id body(id)))",
+        "line": 4,
+        "mass": 55,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(block(call(id id) body(call(lit call(id id) argument_list(lit))))))",
+        "line": 13,
+        "mass": 11,
+        "method_name": "owner_nodes",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(id))",
+        "line": 21,
+        "mass": 3,
+        "method_name": "nodes",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(block(call(id id) body(call(lit call(id id) argument_list(lit)))) block(call(id call<Array>(id argument_list(id))) body(call(id id))))))",
+        "line": 8,
+        "mass": 22,
+        "method_name": "filtered",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) call(id call<new>(id id argument_list(id)))))",
+        "line": 17,
+        "mass": 9,
+        "method_name": "component_list",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "kind == :owner",
+        "function": "filtered",
+        "line": 9,
+        "operator": "==",
+        "raw": "node.kind == :owner",
+        "source": "node.kind == :owner"
+      },
+      {
+        "canon_source": "kind == :owner",
+        "function": "owner_nodes",
+        "line": 14,
+        "operator": "==",
+        "raw": "node.kind == :owner",
+        "source": "node.kind == :owner"
+      }
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 13,
@@ -194,13 +660,339 @@
         "visibility": "public"
       }
     ],
-    "state_reads": [
+    "local_complexity_scores": [
       {
-        "field": "@nodes",
-        "function": "nodes",
-        "line": 22,
-        "receiver": "self"
+        "id": "SourceFactImplicitSelfChainStateReads#component_list",
+        "score": 0.0,
+        "signals": {}
       },
+      {
+        "id": "SourceFactImplicitSelfChainStateReads#filtered",
+        "score": 0.0,
+        "signals": {
+          "loops": 2
+        }
+      },
+      {
+        "id": "SourceFactImplicitSelfChainStateReads#nodes",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactImplicitSelfChainStateReads#owner_nodes",
+        "score": 0.0,
+        "signals": {
+          "loops": 1
+        }
+      },
+      {
+        "id": "SourceFactImplicitSelfChainStateReads#self.build",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactImplicitSelfChainStateReads#component_list",
+        "line": 17,
+        "local_contract_assignments": {},
+        "name": "component_list",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 18,
+            "index": 0,
+            "line": 18,
+            "reads": [
+              "adjacency"
+            ],
+            "source": "Tarjan.new(adjacency).components",
+            "span": [
+              18,
+              4,
+              18,
+              36
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactImplicitSelfChainStateReads#filtered",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "filtered",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 9,
+            "reads": [],
+            "source": "nodes.select { |node| node.kind == :owner }",
+            "span": [
+              9,
+              4,
+              9,
+              47
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 10,
+            "index": 1,
+            "line": 10,
+            "reads": [
+              "items"
+            ],
+            "source": "Array(items).select { |item| item.ready? }",
+            "span": [
+              10,
+              4,
+              10,
+              46
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactImplicitSelfChainStateReads#nodes",
+        "line": 21,
+        "local_contract_assignments": {},
+        "name": "nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 22,
+            "index": 0,
+            "line": 22,
+            "reads": [],
+            "source": "@nodes",
+            "span": [
+              22,
+              4,
+              22,
+              10
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactImplicitSelfChainStateReads#owner_nodes",
+        "line": 13,
+        "local_contract_assignments": {},
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 0,
+            "line": 14,
+            "reads": [],
+            "source": "nodes.select { |node| node.kind == :owner }",
+            "span": [
+              14,
+              4,
+              14,
+              47
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactImplicitSelfChainStateReads#self.build",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "self.build",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "manifest"
+            ],
+            "source": "new(manifest).items",
+            "span": [
+              5,
+              4,
+              5,
+              23
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactImplicitSelfChainStateReads"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "nodes.select { |node| node.kind == :owner }",
+        "line": 13,
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 17,
+        "name": "component_list",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      },
+      {
+        "calls": [],
+        "line": 21,
+        "name": "nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      },
+      {
+        "calls": [
+          {
+            "line": 14,
+            "mid": "nodes",
+            "span": [
+              14,
+              4,
+              14,
+              9
+            ]
+          }
+        ],
+        "line": 13,
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "new",
+            "span": [
+              5,
+              4,
+              5,
+              17
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      },
+      {
+        "calls": [
+          {
+            "line": 9,
+            "mid": "nodes",
+            "span": [
+              9,
+              4,
+              9,
+              9
+            ]
+          },
+          {
+            "line": 10,
+            "mid": "Array",
+            "span": [
+              10,
+              4,
+              10,
+              16
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "filtered",
+        "owner": "SourceFactImplicitSelfChainStateReads"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 13,
+        "name": "owner_nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "reads": [
+          "node.kind",
+          "nodes",
+          "nodes.select"
+        ],
+        "writes": []
+      },
+      {
+        "line": 17,
+        "name": "component_list",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 21,
+        "name": "nodes",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "reads": [
+          "nodes"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "reads": [
+          "new",
+          "new(manifest).items"
+        ],
+        "writes": []
+      },
+      {
+        "line": 8,
+        "name": "filtered",
+        "owner": "SourceFactImplicitSelfChainStateReads",
+        "reads": [
+          "Array",
+          "item.ready",
+          "node.kind",
+          "nodes",
+          "nodes.select"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
       {
         "field": "items",
         "function": "self.build",
@@ -220,6 +1012,12 @@
         "receiver": "node"
       },
       {
+        "field": "nodes",
+        "function": "nodes",
+        "line": 22,
+        "receiver": "self"
+      },
+      {
         "field": "ready?",
         "function": "filtered",
         "line": 10,
@@ -237,6 +1035,7 @@
         "line": 14,
         "receiver": "nodes"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

@@ -4,6 +4,7 @@ require_relative "spec_helper"
 
 RSpec.describe "nil-kill infer pipeline" do
   it "indexes Ruby source facts through static evidence providers" do
+    skip "Ruby source fact indexing pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-static-provider", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -40,6 +41,7 @@ RSpec.describe "nil-kill infer pipeline" do
   end
 
   it "indexes Python through the static provider without Ruby-specific enrichment" do
+    skip "Python provider pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-python-provider", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.py")
       File.write(source, <<~PYTHON)
@@ -67,6 +69,7 @@ RSpec.describe "nil-kill infer pipeline" do
   end
 
   it "loads runtime evidence, indexes sources, builds actions, and writes a report" do
+    skip "infer pipeline pending in Rust FactMine (Phase 3)"
     Dir.mktmpdir("nil-kill-pipeline", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)

@@ -1,9 +1,464 @@
 {
   "detector": "weighted-inlined-complexity",
+  "expected": [
+    {
+      "at": "facts/weighted_edges.rb:entry:2",
+      "call_chain": [
+        "entry",
+        "shared"
+      ],
+      "depth": 2,
+      "hidden": 34.6,
+      "inlined": 36.6,
+      "local": 2.0,
+      "method": "entry",
+      "owner": "Fixture",
+      "reason": "1 single-caller helper(s) add 34.6 weighted cognitive points",
+      "signals": {
+        "branches": 1
+      },
+      "single_caller_callees": [
+        "helper"
+      ],
+      "spans": {
+        "facts/weighted_edges.rb:entry:2": [
+          2,
+          2,
+          7,
+          5
+        ]
+      }
+    },
+    {
+      "at": "facts/weighted_edges.rb:helper:8",
+      "call_chain": [
+        "helper",
+        "leaf"
+      ],
+      "depth": 2,
+      "hidden": 17.5,
+      "inlined": 27.5,
+      "local": 10.0,
+      "method": "helper",
+      "owner": "Fixture",
+      "reason": "1 single-caller helper(s) add 17.5 weighted cognitive points",
+      "signals": {
+        "branches": 3
+      },
+      "single_caller_callees": [
+        "leaf"
+      ],
+      "spans": {
+        "facts/weighted_edges.rb:helper:8": [
+          8,
+          2,
+          10,
+          5
+        ]
+      }
+    },
+    {
+      "at": "facts/weighted_edges.rb:hub:18",
+      "call_chain": [
+        "hub",
+        "shared"
+      ],
+      "depth": 1,
+      "hidden": 16.8,
+      "inlined": 17.8,
+      "local": 1.0,
+      "method": "hub",
+      "owner": "Fixture",
+      "reason": "same-owner call chain adds 16.8 weighted cognitive points",
+      "signals": {
+        "branches": 1
+      },
+      "single_caller_callees": [],
+      "spans": {
+        "facts/weighted_edges.rb:hub:18": [
+          18,
+          2,
+          20,
+          5
+        ]
+      }
+    },
+    {
+      "at": "facts/weighted_edges.rb:other:21",
+      "call_chain": [
+        "other",
+        "shared"
+      ],
+      "depth": 1,
+      "hidden": 16.8,
+      "inlined": 17.8,
+      "local": 1.0,
+      "method": "other",
+      "owner": "Fixture",
+      "reason": "same-owner call chain adds 16.8 weighted cognitive points",
+      "signals": {
+        "branches": 1
+      },
+      "single_caller_callees": [],
+      "spans": {
+        "facts/weighted_edges.rb:other:21": [
+          21,
+          2,
+          23,
+          5
+        ]
+      }
+    }
+  ],
   "input": {
     "documents": [
       {
+        "call_sites": [
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": "conditional",
+            "file": "facts/weighted_edges.rb",
+            "function": "entry",
+            "line": 3,
+            "message": "helper",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              3,
+              4,
+              3,
+              15
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": "iterates",
+            "file": "facts/weighted_edges.rb",
+            "function": "entry",
+            "line": 4,
+            "message": "helper",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              4,
+              4,
+              4,
+              15
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/weighted_edges.rb",
+            "function": "entry",
+            "line": 5,
+            "message": "shared",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              5,
+              4,
+              5,
+              15
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/weighted_edges.rb",
+            "function": "entry",
+            "line": 6,
+            "message": "missing",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              6,
+              4,
+              6,
+              16
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": "iterates",
+            "file": "facts/weighted_edges.rb",
+            "function": "helper",
+            "line": 9,
+            "message": "leaf",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              9,
+              4,
+              9,
+              13
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/weighted_edges.rb",
+            "function": "leaf",
+            "line": 12,
+            "message": "deep",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              12,
+              4,
+              12,
+              13
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/weighted_edges.rb",
+            "function": "hub",
+            "line": 19,
+            "message": "shared",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              19,
+              4,
+              19,
+              15
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/weighted_edges.rb",
+            "function": "other",
+            "line": 22,
+            "message": "shared",
+            "owner": "Fixture",
+            "receiver": "self",
+            "safe_navigation": false,
+            "span": [
+              22,
+              4,
+              22,
+              15
+            ]
+          }
+        ],
         "file": "facts/weighted_edges.rb",
+        "function_defs": [
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                2,
+                2,
+                7,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 2,
+            "name": "entry",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              2,
+              2,
+              7,
+              5
+            ],
+            "visibility": "public"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                8,
+                2,
+                10,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 8,
+            "name": "helper",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              8,
+              2,
+              10,
+              5
+            ],
+            "visibility": "private"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                11,
+                2,
+                13,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 11,
+            "name": "leaf",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              11,
+              2,
+              13,
+              5
+            ],
+            "visibility": "private"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                14,
+                2,
+                15,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 14,
+            "name": "deep",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              14,
+              2,
+              15,
+              5
+            ],
+            "visibility": "private"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                16,
+                2,
+                17,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 16,
+            "name": "shared",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              16,
+              2,
+              17,
+              5
+            ],
+            "visibility": "public"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                18,
+                2,
+                20,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 18,
+            "name": "hub",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              18,
+              2,
+              20,
+              5
+            ],
+            "visibility": "public"
+          },
+          {
+            "body": {
+              "children": [],
+              "field_name": null,
+              "kind": "body_statement",
+              "named": true,
+              "span": [
+                21,
+                2,
+                23,
+                5
+              ],
+              "text": ""
+            },
+            "file": "facts/weighted_edges.rb",
+            "line": 21,
+            "name": "other",
+            "owner": "Fixture",
+            "params": [],
+            "span": [
+              21,
+              2,
+              23,
+              5
+            ],
+            "visibility": "public"
+          }
+        ],
         "language": "ruby",
         "lines": [
           "class Fixture",
@@ -31,137 +486,172 @@
           "  end",
           "end"
         ],
-        "function_defs": [
-          {"file": "facts/weighted_edges.rb", "name": "entry", "owner": "Fixture", "line": 2, "span": [2, 2, 7, 5], "body": {"kind": "body_statement", "text": "", "span": [2, 2, 7, 5], "named": true, "field_name": null, "children": []}, "visibility": "public", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "helper", "owner": "Fixture", "line": 8, "span": [8, 2, 10, 5], "body": {"kind": "body_statement", "text": "", "span": [8, 2, 10, 5], "named": true, "field_name": null, "children": []}, "visibility": "private", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "leaf", "owner": "Fixture", "line": 11, "span": [11, 2, 13, 5], "body": {"kind": "body_statement", "text": "", "span": [11, 2, 13, 5], "named": true, "field_name": null, "children": []}, "visibility": "private", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "deep", "owner": "Fixture", "line": 14, "span": [14, 2, 15, 5], "body": {"kind": "body_statement", "text": "", "span": [14, 2, 15, 5], "named": true, "field_name": null, "children": []}, "visibility": "private", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "shared", "owner": "Fixture", "line": 16, "span": [16, 2, 17, 5], "body": {"kind": "body_statement", "text": "", "span": [16, 2, 17, 5], "named": true, "field_name": null, "children": []}, "visibility": "public", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "hub", "owner": "Fixture", "line": 18, "span": [18, 2, 20, 5], "body": {"kind": "body_statement", "text": "", "span": [18, 2, 20, 5], "named": true, "field_name": null, "children": []}, "visibility": "public", "params": []},
-          {"file": "facts/weighted_edges.rb", "name": "other", "owner": "Fixture", "line": 21, "span": [21, 2, 23, 5], "body": {"kind": "body_statement", "text": "", "span": [21, 2, 23, 5], "named": true, "field_name": null, "children": []}, "visibility": "public", "params": []}
+        "local_complexity_scores": {
+          "Fixture#deep": {
+            "score": 12.0,
+            "signals": {
+              "branches": 2
+            }
+          },
+          "Fixture#entry": {
+            "score": 2.0,
+            "signals": {
+              "branches": 1
+            }
+          },
+          "Fixture#helper": {
+            "score": 10.0,
+            "signals": {
+              "branches": 3
+            }
+          },
+          "Fixture#hub": {
+            "score": 1.0,
+            "signals": {
+              "branches": 1
+            }
+          },
+          "Fixture#leaf": {
+            "score": 8.0,
+            "signals": {
+              "branches": 2
+            }
+          },
+          "Fixture#other": {
+            "score": 1.0,
+            "signals": {
+              "branches": 1
+            }
+          },
+          "Fixture#shared": {
+            "score": 80.0,
+            "signals": {
+              "branches": 4
+            }
+          }
+        },
+        "local_methods": [
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#entry",
+            "line": 2,
+            "name": "entry",
+            "owner": "Fixture",
+            "span": [
+              2,
+              2,
+              7,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#helper",
+            "line": 8,
+            "name": "helper",
+            "owner": "Fixture",
+            "span": [
+              8,
+              2,
+              10,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#leaf",
+            "line": 11,
+            "name": "leaf",
+            "owner": "Fixture",
+            "span": [
+              11,
+              2,
+              13,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#deep",
+            "line": 14,
+            "name": "deep",
+            "owner": "Fixture",
+            "span": [
+              14,
+              2,
+              15,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#shared",
+            "line": 16,
+            "name": "shared",
+            "owner": "Fixture",
+            "span": [
+              16,
+              2,
+              17,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#hub",
+            "line": 18,
+            "name": "hub",
+            "owner": "Fixture",
+            "span": [
+              18,
+              2,
+              20,
+              5
+            ],
+            "statements": []
+          },
+          {
+            "boundaries": [],
+            "file": "facts/weighted_edges.rb",
+            "id": "Fixture#other",
+            "line": 21,
+            "name": "other",
+            "owner": "Fixture",
+            "span": [
+              21,
+              2,
+              23,
+              5
+            ],
+            "statements": []
+          }
         ],
         "owner_defs": [
-          {"file": "facts/weighted_edges.rb", "name": "Fixture", "kind": "class", "line": 1, "span": [1, 0, 24, 3]}
-        ],
-        "call_sites": [
-          {"receiver": "self", "message": "helper", "file": "facts/weighted_edges.rb", "function": "entry", "owner": "Fixture", "line": 3, "span": [3, 4, 3, 15], "conditional": false, "arguments": [], "control": "conditional", "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "helper", "file": "facts/weighted_edges.rb", "function": "entry", "owner": "Fixture", "line": 4, "span": [4, 4, 4, 15], "conditional": false, "arguments": [], "control": "iterates", "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "shared", "file": "facts/weighted_edges.rb", "function": "entry", "owner": "Fixture", "line": 5, "span": [5, 4, 5, 15], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "missing", "file": "facts/weighted_edges.rb", "function": "entry", "owner": "Fixture", "line": 6, "span": [6, 4, 6, 16], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "leaf", "file": "facts/weighted_edges.rb", "function": "helper", "owner": "Fixture", "line": 9, "span": [9, 4, 9, 13], "conditional": false, "arguments": [], "control": "iterates", "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "deep", "file": "facts/weighted_edges.rb", "function": "leaf", "owner": "Fixture", "line": 12, "span": [12, 4, 12, 13], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "shared", "file": "facts/weighted_edges.rb", "function": "hub", "owner": "Fixture", "line": 19, "span": [19, 4, 19, 15], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false},
-          {"receiver": "self", "message": "shared", "file": "facts/weighted_edges.rb", "function": "other", "owner": "Fixture", "line": 22, "span": [22, 4, 22, 15], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false}
-        ],
-        "local_methods": [
-          {"id": "Fixture#entry", "owner": "Fixture", "name": "entry", "file": "facts/weighted_edges.rb", "line": 2, "span": [2, 2, 7, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#helper", "owner": "Fixture", "name": "helper", "file": "facts/weighted_edges.rb", "line": 8, "span": [8, 2, 10, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#leaf", "owner": "Fixture", "name": "leaf", "file": "facts/weighted_edges.rb", "line": 11, "span": [11, 2, 13, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#deep", "owner": "Fixture", "name": "deep", "file": "facts/weighted_edges.rb", "line": 14, "span": [14, 2, 15, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#shared", "owner": "Fixture", "name": "shared", "file": "facts/weighted_edges.rb", "line": 16, "span": [16, 2, 17, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#hub", "owner": "Fixture", "name": "hub", "file": "facts/weighted_edges.rb", "line": 18, "span": [18, 2, 20, 5], "statements": [], "boundaries": []},
-          {"id": "Fixture#other", "owner": "Fixture", "name": "other", "file": "facts/weighted_edges.rb", "line": 21, "span": [21, 2, 23, 5], "statements": [], "boundaries": []}
-        ],
-        "local_complexity_scores": {
-          "Fixture#entry": {"score": 2.0, "signals": {"branches": 1}},
-          "Fixture#helper": {"score": 10.0, "signals": {"branches": 3}},
-          "Fixture#leaf": {"score": 8.0, "signals": {"branches": 2}},
-          "Fixture#deep": {"score": 12.0, "signals": {"branches": 2}},
-          "Fixture#shared": {"score": 80.0, "signals": {"branches": 4}},
-          "Fixture#hub": {"score": 1.0, "signals": {"branches": 1}},
-          "Fixture#other": {"score": 1.0, "signals": {"branches": 1}}
-        }
+          {
+            "file": "facts/weighted_edges.rb",
+            "kind": "class",
+            "line": 1,
+            "name": "Fixture",
+            "span": [
+              1,
+              0,
+              24,
+              3
+            ]
+          }
+        ]
       }
     ]
-  },
-  "expected": [
-    {
-      "at": "facts/weighted_edges.rb:entry:2",
-      "call_chain": [
-        "entry",
-        "shared"
-      ],
-      "depth": 2,
-      "hidden": 34.6,
-      "inlined": 36.6,
-      "local": 2.0,
-      "method": "entry",
-      "owner": "Fixture",
-      "reason": "1 single-caller helper(s) add 34.6 weighted cognitive points",
-      "signals": {
-        "branches": 1
-      },
-      "single_caller_callees": [
-        "helper"
-      ],
-      "spans": {
-        "facts/weighted_edges.rb:entry:2": [2, 2, 7, 5]
-      }
-    },
-    {
-      "at": "facts/weighted_edges.rb:helper:8",
-      "call_chain": [
-        "helper",
-        "leaf"
-      ],
-      "depth": 2,
-      "hidden": 17.5,
-      "inlined": 27.5,
-      "local": 10.0,
-      "method": "helper",
-      "owner": "Fixture",
-      "reason": "1 single-caller helper(s) add 17.5 weighted cognitive points",
-      "signals": {
-        "branches": 3
-      },
-      "single_caller_callees": [
-        "leaf"
-      ],
-      "spans": {
-        "facts/weighted_edges.rb:helper:8": [8, 2, 10, 5]
-      }
-    },
-    {
-      "at": "facts/weighted_edges.rb:hub:18",
-      "call_chain": [
-        "hub",
-        "shared"
-      ],
-      "depth": 1,
-      "hidden": 16.8,
-      "inlined": 17.8,
-      "local": 1.0,
-      "method": "hub",
-      "owner": "Fixture",
-      "reason": "same-owner call chain adds 16.8 weighted cognitive points",
-      "signals": {
-        "branches": 1
-      },
-      "single_caller_callees": [],
-      "spans": {
-        "facts/weighted_edges.rb:hub:18": [18, 2, 20, 5]
-      }
-    },
-    {
-      "at": "facts/weighted_edges.rb:other:21",
-      "call_chain": [
-        "other",
-        "shared"
-      ],
-      "depth": 1,
-      "hidden": 16.8,
-      "inlined": 17.8,
-      "local": 1.0,
-      "method": "other",
-      "owner": "Fixture",
-      "reason": "same-owner call chain adds 16.8 weighted cognitive points",
-      "signals": {
-        "branches": 1
-      },
-      "single_caller_callees": [],
-      "spans": {
-        "facts/weighted_edges.rb:other:21": [21, 2, 23, 5]
-      }
-    }
-  ]
+  }
 }

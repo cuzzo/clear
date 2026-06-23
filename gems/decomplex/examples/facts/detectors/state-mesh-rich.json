@@ -1,165 +1,5 @@
 {
   "detector": "state-mesh",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/state_mesh_rich.rb",
-        "language": "ruby",
-        "state_writes": [
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "first",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              1,
-              11
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "second",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              11
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "stale",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "third",
-            "line": 3,
-            "span": [
-              3,
-              0,
-              3,
-              11
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "stale",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "fourth",
-            "line": 4,
-            "span": [
-              4,
-              0,
-              4,
-              11
-            ],
-            "owner": "Fixture"
-          }
-        ],
-        "state_reads": [
-          {
-            "field": "ready",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "check",
-            "line": 5,
-            "span": [
-              5,
-              0,
-              5,
-              10
-            ],
-            "owner": "Fixture"
-          },
-          {
-            "field": "stale",
-            "receiver": "self",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "report",
-            "line": 6,
-            "span": [
-              6,
-              0,
-              6,
-              10
-            ],
-            "owner": "Fixture"
-          }
-        ],
-        "predicate_defs": [
-          {
-            "name": "ready?",
-            "body": "ready == true",
-            "file": "facts/state_mesh_rich.rb",
-            "line": 7,
-            "span": [
-              7,
-              0,
-              7,
-              20
-            ]
-          }
-        ],
-        "comparison_sites": [
-          {
-            "source": "ready == true",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "inline",
-            "line": 8,
-            "span": [
-              8,
-              0,
-              8,
-              13
-            ]
-          }
-        ],
-        "predicate_aliases": [
-          {
-            "name": "ready?",
-            "body": "ready == true",
-            "file": "facts/state_mesh_rich.rb",
-            "defn": "ready?",
-            "line": 7,
-            "span": [
-              7,
-              0,
-              7,
-              20
-            ]
-          }
-        ],
-        "comparison_uses": [
-          {
-            "canon_source": "ready == true",
-            "raw": "ready == true",
-            "file": "facts/state_mesh_rich.rb",
-            "function": "inline",
-            "line": 8,
-            "span": [
-              8,
-              0,
-              8,
-              13
-            ],
-            "enclosing_span": [
-              8,
-              0,
-              8,
-              13
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": {
     "fields": {
       "ready": {
@@ -257,9 +97,7 @@
           "writes": 2
         },
         "rank": 2,
-        "re_derivations": [
-
-        ],
+        "re_derivations": [],
         "readers": [
           {
             "defn": "report",
@@ -312,9 +150,7 @@
                   "read": [
                     "ready"
                   ],
-                  "written": [
-
-                  ]
+                  "written": []
                 },
                 "name": "check",
                 "readers": 1,
@@ -322,9 +158,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "ready"
                   ]
@@ -335,9 +169,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "stale"
                   ]
@@ -351,9 +183,7 @@
                   "read": [
                     "stale"
                   ],
-                  "written": [
-
-                  ]
+                  "written": []
                 },
                 "name": "report",
                 "readers": 1,
@@ -361,9 +191,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "ready"
                   ]
@@ -374,9 +202,7 @@
               },
               {
                 "fields": {
-                  "read": [
-
-                  ],
+                  "read": [],
                   "written": [
                     "stale"
                   ]
@@ -404,5 +230,165 @@
       "total_reads": 2,
       "total_writes": 4
     }
+  },
+  "input": {
+    "documents": [
+      {
+        "comparison_sites": [
+          {
+            "file": "facts/state_mesh_rich.rb",
+            "function": "inline",
+            "line": 8,
+            "source": "ready == true",
+            "span": [
+              8,
+              0,
+              8,
+              13
+            ]
+          }
+        ],
+        "comparison_uses": [
+          {
+            "canon_source": "ready == true",
+            "enclosing_span": [
+              8,
+              0,
+              8,
+              13
+            ],
+            "file": "facts/state_mesh_rich.rb",
+            "function": "inline",
+            "line": 8,
+            "raw": "ready == true",
+            "span": [
+              8,
+              0,
+              8,
+              13
+            ]
+          }
+        ],
+        "file": "facts/state_mesh_rich.rb",
+        "language": "ruby",
+        "predicate_aliases": [
+          {
+            "body": "ready == true",
+            "defn": "ready?",
+            "file": "facts/state_mesh_rich.rb",
+            "line": 7,
+            "name": "ready?",
+            "span": [
+              7,
+              0,
+              7,
+              20
+            ]
+          }
+        ],
+        "predicate_defs": [
+          {
+            "body": "ready == true",
+            "file": "facts/state_mesh_rich.rb",
+            "line": 7,
+            "name": "ready?",
+            "span": [
+              7,
+              0,
+              7,
+              20
+            ]
+          }
+        ],
+        "state_reads": [
+          {
+            "field": "ready",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "check",
+            "line": 5,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              5,
+              0,
+              5,
+              10
+            ]
+          },
+          {
+            "field": "stale",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "report",
+            "line": 6,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              6,
+              0,
+              6,
+              10
+            ]
+          }
+        ],
+        "state_writes": [
+          {
+            "field": "ready",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "first",
+            "line": 1,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              1,
+              0,
+              1,
+              11
+            ]
+          },
+          {
+            "field": "ready",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "second",
+            "line": 2,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              2,
+              0,
+              2,
+              11
+            ]
+          },
+          {
+            "field": "stale",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "third",
+            "line": 3,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              3,
+              0,
+              3,
+              11
+            ]
+          },
+          {
+            "field": "stale",
+            "file": "facts/state_mesh_rich.rb",
+            "function": "fourth",
+            "line": 4,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              4,
+              0,
+              4,
+              11
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

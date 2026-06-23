@@ -1,104 +1,20 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/python/core.py",
-      "language": "python",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 12,
-          "name": "process",
-          "owner": "PythonSyntaxFactsCore",
-          "params": [
-            "self",
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 28,
+          "predicate": "user.ready and item.startswith(\"x\")",
           "span": [
+            28,
             12,
-            4,
-            52,
-            41
+            29,
+            30
           ],
-          "visibility": "public"
-        },
-        {
-          "line": 54,
-          "name": "_normalize",
-          "owner": "PythonSyntaxFactsCore",
-          "params": [
-            "self",
-            "value"
-          ],
-          "span": [
-            54,
-            4,
-            56,
-            22
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 58,
-          "name": "generator",
-          "owner": "PythonSyntaxFactsCore",
-          "params": [
-            "self",
-            "values"
-          ],
-          "span": [
-            58,
-            4,
-            60,
-            23
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 62,
-          "name": "simple_with",
-          "owner": "PythonSyntaxFactsCore",
-          "params": [
-            "self",
-            "resource"
-          ],
-          "span": [
-            62,
-            4,
-            64,
-            16
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 7,
-          "name": "__init__",
-          "owner": "PythonSyntaxFactsCore",
-          "params": [
-            "self",
-            "lock",
-            "resource"
-          ],
-          "span": [
-            7,
-            4,
-            10,
-            22
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 6,
-          "name": "PythonSyntaxFactsCore",
-          "span": [
-            6,
-            0,
-            64,
-            16
+          "state_refs": [
+            "item.startswith",
+            "user.ready"
           ]
         }
       ],
@@ -264,9 +180,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -284,9 +198,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -301,6 +213,146 @@
             19,
             22,
             32
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            28,
+            12,
+            29,
+            30
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 28,
+          "members": [
+            "item.startswith(\"x\")",
+            "user.ready"
+          ],
+          "predicate": "user.ready and item.startswith(\"x\")",
+          "span": [
+            28,
+            15,
+            28,
+            50
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/python/core.py",
+      "functions": [
+        {
+          "line": 12,
+          "name": "process",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            12,
+            4,
+            52,
+            41
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 54,
+          "name": "_normalize",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "value"
+          ],
+          "span": [
+            54,
+            4,
+            56,
+            22
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 58,
+          "name": "generator",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "values"
+          ],
+          "span": [
+            58,
+            4,
+            60,
+            23
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 62,
+          "name": "simple_with",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "resource"
+          ],
+          "span": [
+            62,
+            4,
+            64,
+            16
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 7,
+          "name": "__init__",
+          "owner": "PythonSyntaxFactsCore",
+          "params": [
+            "self",
+            "lock",
+            "resource"
+          ],
+          "span": [
+            7,
+            4,
+            10,
+            22
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "python",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 6,
+          "name": "PythonSyntaxFactsCore",
+          "span": [
+            6,
+            0,
+            64,
+            16
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "open",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 21,
+          "span": [
+            21,
+            13,
+            21,
+            28
           ]
         }
       ],
@@ -502,68 +554,8 @@
             32
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            28,
-            12,
-            29,
-            30
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 28,
-          "members": [
-            "item.startswith(\"x\")",
-            "user.ready"
-          ],
-          "predicate": "user.ready and item.startswith(\"x\")",
-          "span": [
-            28,
-            15,
-            28,
-            50
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 28,
-          "predicate": "user.ready and item.startswith(\"x\")",
-          "span": [
-            28,
-            12,
-            29,
-            30
-          ],
-          "state_refs": [
-            "item.startswith",
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "open",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 21,
-          "span": [
-            21,
-            13,
-            21,
-            28
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

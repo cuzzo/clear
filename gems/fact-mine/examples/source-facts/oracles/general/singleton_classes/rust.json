@@ -1,0 +1,188 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_five",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "struct_item(id)",
+          "class(id body(method(id)))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "body_statement(struct_item(id) class(id body(method(id))))",
+        "line": 1,
+        "mass": 7,
+        "method_name": "method_five",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(struct_item(id) class(id body(method(id))))))",
+        "line": 1,
+        "mass": 9,
+        "method_name": "method_five",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 4,
+        "mass": 1,
+        "method_name": "singleton_method",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_five",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      },
+      {
+        "line": 4,
+        "name": "singleton_method",
+        "owner": "Obj",
+        "params": [
+          "&self"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_five",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_five",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_five",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "struct Obj;",
+            "span": [
+              2,
+              4,
+              2,
+              15
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 1,
+            "line": 3,
+            "reads": [],
+            "source": "impl Obj { fn singleton_method(&self) {} }",
+            "span": [
+              3,
+              4,
+              5,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "impl",
+        "line": 3,
+        "name": "Obj"
+      },
+      {
+        "kind": "struct",
+        "line": 2,
+        "name": "Obj"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_five",
+        "owner": "rust"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "singleton_method",
+        "owner": "Obj"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_five",
+        "owner": "rust",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "singleton_method",
+        "owner": "Obj",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

@@ -8,19 +8,16 @@ require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
 DECOMPLEX_SARIF_MAX_RESULTS = Integer(ENV.fetch("DECOMPLEX_CI_SARIF_MAX_RESULTS", "1000"))
-$LOAD_PATH.unshift(File.join(ROOT, "gems/decomplex/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/boobytrap/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/slopcop/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/espalier/lib"))
 $LOAD_PATH.unshift(File.join(ROOT, "gems/nil-kill/lib"))
 
-require "decomplex/report"
-require "decomplex/source_filter"
-require "decomplex/sarif"
 require "boobytrap"
 require "slopcop"
 require "espalier"
 require "nil_kill"
+require "nil_kill/sarif"
 
 options = {
   repo: ".",
@@ -28,7 +25,8 @@ options = {
   out_dir: "tmp/generalized-gems-sarif",
   coverage: [],
   exclude: [],
-  top: 50
+  top: 50,
+  decomplex_binary: nil
 }
 
 OptionParser.new do |parser|
@@ -40,6 +38,7 @@ OptionParser.new do |parser|
   parser.on("--out-dir=PATH") { |value| options[:out_dir] = value }
   parser.on("--top=N", Integer) { |value| options[:top] = value }
   parser.on("--exclude=GLOB") { |value| options[:exclude] << value }
+  parser.on("--decomplex-binary=PATH") { |value| options[:decomplex_binary] = value }
 end.parse!
 
 abort "--base is required" unless options[:base]
@@ -84,7 +83,7 @@ end
 
 def empty_sarif(tool_name, format)
   JSON.pretty_generate(
-    Decomplex::Sarif.document(
+    NilKill::Sarif.document(
       tool_name: tool_name,
       information_uri: "https://github.com/codeforreno/litedb",
       rules: [],
@@ -101,10 +100,28 @@ def empty_markdown(tool_name)
   "# #{tool_name} Report\n\n_No changed Tree-sitter-supported source files in this PR._\n"
 end
 
+def run_decomplex_rust(binary, files, out_dir, repo)
+  abs_files = files.map { |f| File.join(repo, f) }
+
+  sarif_out = File.join(out_dir, "decomplex.sarif")
+  md_out = File.join(out_dir, "decomplex.md")
+
+  ok = system(binary, "report", "--format", "sarif", "--output", sarif_out, *abs_files)
+  abort "decomplex-rust report --format sarif failed" unless ok
+
+  ok = system(binary, "report", "--format", "markdown", "--output", md_out, *abs_files)
+  abort "decomplex-rust report --format markdown failed" unless ok
+
+  warn "wrote #{sarif_out}"
+  warn "wrote #{md_out}"
+end
+
 def build_espalier_manifest(files)
-  modules = files.flat_map { |file| Espalier::AstExtractor.new(file).extract }
+  evidence = Espalier::StaticEvidence.build(files, root: ROOT)
+  modules = Espalier::StaticEvidence.project_modules(evidence)
   Espalier::Aggregator.new.aggregate(modules)
 end
+
 
 def build_nil_kill_evidence(files, repo)
   static = NilKill::StaticEvidence.build(files, root: repo)
@@ -150,18 +167,41 @@ end
 previous_parser = ENV["DECOMPLEX_PARSER"]
 ENV["DECOMPLEX_PARSER"] = "tree_sitter"
 
+fact_mine_temp = nil
+churn_temp = nil
+
 begin
-  Dir.chdir(repo) do
-    decomplex = Decomplex::Report.new(rel_files)
-    write(
-      File.join(out_dir, "decomplex.sarif"),
-      decomplex.to_sarif(
-        include_snapshot: false,
-        include_finding_payload: false,
-        max_results: DECOMPLEX_SARIF_MAX_RESULTS
+  if !ENV["FACT_MINE_FACTS_FILE"] || ENV["FACT_MINE_FACTS_FILE"].empty?
+    fact_mine_bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("gems/fact-mine/target/release/fact-mine-rust", ROOT))
+    if File.executable?(fact_mine_bin)
+      require "tempfile"
+      fact_mine_temp = Tempfile.new(["fact-mine-facts", ".json"])
+      fact_mine_temp.close
+      warn "Pre-computing fact-mine static facts..."
+      ok = system(fact_mine_bin, "profile", "nil-kill", "--output", fact_mine_temp.path, *rel_files)
+      if ok
+        ENV["FACT_MINE_FACTS_FILE"] = fact_mine_temp.path
+      else
+        warn "Pre-computing fact-mine-rust facts failed"
+      end
+    end
+  end
+
+  if options[:decomplex_binary]
+    run_decomplex_rust(options[:decomplex_binary], rel_files, out_dir, repo)
+  else
+    Dir.chdir(repo) do
+      decomplex = Decomplex::Report.new(rel_files)
+      write(
+        File.join(out_dir, "decomplex.sarif"),
+        decomplex.to_sarif(
+          include_snapshot: false,
+          include_finding_payload: false,
+          max_results: DECOMPLEX_SARIF_MAX_RESULTS
+        )
       )
-    )
-    write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+      write(File.join(out_dir, "decomplex.md"), decomplex.to_markdown)
+    end
   end
 
   boobytrap = Boobytrap::Report.new(
@@ -173,6 +213,13 @@ begin
   )
   write(File.join(out_dir, "boobytrap.sarif"), boobytrap.to_sarif)
   write(File.join(out_dir, "boobytrap.md"), boobytrap.to_markdown)
+
+  # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
+  require "tempfile"
+  churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
+  churn_temp.write(JSON.generate(boobytrap.fix_scores))
+  churn_temp.close
+  ENV["BOOBYTRAP_CHURN_FILE"] = churn_temp.path
 
   slopcop = SlopCop::Report.new(
     files: rel_files,
@@ -203,4 +250,12 @@ begin
   end
 ensure
   previous_parser.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous_parser
+  if fact_mine_temp
+    ENV.delete("FACT_MINE_FACTS_FILE")
+    fact_mine_temp.unlink
+  end
+  if churn_temp
+    ENV.delete("BOOBYTRAP_CHURN_FILE")
+    churn_temp.unlink
+  end
 end

@@ -1,5 +1,49 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "resolve",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "direct",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
     "calls": [
       {
         "arguments": [
@@ -89,6 +133,392 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "assignment(id call(id string_array(bare_string(lit) bare_string(lit))))",
+          "method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))))",
+          "method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id)))))"
+        ],
+        "child_masses": [
+          7,
+          22,
+          16
+        ],
+        "fingerprint": "body_statement(assignment(id call(id string_array(bare_string(lit) bare_string(lit)))) method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id)))))) method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id))))))",
+        "line": 4,
+        "mass": 46,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))"
+        ],
+        "child_masses": [
+          10
+        ],
+        "fingerprint": "call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id)))))",
+        "line": 7,
+        "mass": 11,
+        "method_name": "resolve",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id)))))"
+        ],
+        "child_masses": [
+          11
+        ],
+        "fingerprint": "block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))",
+        "line": 7,
+        "mass": 18,
+        "method_name": "resolve",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))",
+        "line": 7,
+        "mass": 10,
+        "method_name": "resolve",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call<join>(id colon2(id id) argument_list(id lit))",
+          "call<file?>(id colon2(id id) argument_list(id))"
+        ],
+        "child_masses": [
+          6,
+          5
+        ],
+        "fingerprint": "body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id)))",
+        "line": 12,
+        "mass": 12,
+        "method_name": "direct",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id id)"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "call<join>(id colon2(id id) argument_list(id id))",
+        "line": 7,
+        "mass": 6,
+        "method_name": "resolve",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id lit)"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "call<join>(id colon2(id id) argument_list(id lit))",
+        "line": 12,
+        "mass": 6,
+        "method_name": "direct",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<file?>(id colon2(id id) argument_list(id))",
+        "line": 13,
+        "mass": 5,
+        "method_name": "direct",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<file?>(id colon2(id id) argument_list(id))",
+        "line": 8,
+        "mass": 5,
+        "method_name": "resolve",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 7,
+        "mass": 3,
+        "method_name": "resolve",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id lit)",
+        "line": 12,
+        "mass": 3,
+        "method_name": "direct",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "direct",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "resolve",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "resolve",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "string_array(bare_string(lit) bare_string(lit))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id string_array(bare_string(lit) bare_string(lit)))",
+        "line": 4,
+        "mass": 6,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) block(call(id block(call(id id) body(call<join>(id colon2(id id) argument_list(id id))))) body(call<file?>(id colon2(id id) argument_list(id))))))",
+        "line": 6,
+        "mass": 22,
+        "method_name": "resolve",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(call<join>(id colon2(id id) argument_list(id lit)) call<file?>(id colon2(id id) argument_list(id)))))",
+        "line": 11,
+        "mass": 16,
+        "method_name": "direct",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 11,
+        "name": "direct",
+        "owner": "SourceFactBlockConstantEffects",
+        "params": [
+          "path"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 6,
+        "name": "resolve",
+        "owner": "SourceFactBlockConstantEffects",
+        "params": [
+          "path"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactBlockConstantEffects#direct",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactBlockConstantEffects#resolve",
+        "score": 0.0,
+        "signals": {
+          "loops": 2
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactBlockConstantEffects#direct",
+        "line": 11,
+        "local_contract_assignments": {},
+        "name": "direct",
+        "owner": "SourceFactBlockConstantEffects",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 0,
+            "line": 12,
+            "reads": [
+              "path"
+            ],
+            "source": "::File.join(path, \"x\")",
+            "span": [
+              12,
+              4,
+              12,
+              26
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 13,
+            "index": 1,
+            "line": 13,
+            "reads": [
+              "path"
+            ],
+            "source": "::File.file?(path)",
+            "span": [
+              13,
+              4,
+              13,
+              22
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactBlockConstantEffects#resolve",
+        "line": 6,
+        "local_contract_assignments": {},
+        "name": "resolve",
+        "owner": "SourceFactBlockConstantEffects",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 8,
+            "index": 0,
+            "line": 7,
+            "reads": [
+              "path"
+            ],
+            "source": "CANDIDATES.map { |rel| ::File.join(path, rel) } .find { |candidate| ::File.file?(candidate) }",
+            "span": [
+              7,
+              4,
+              8,
+              59
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactBlockConstantEffects"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 11,
+        "name": "direct",
+        "owner": "SourceFactBlockConstantEffects"
+      },
+      {
+        "calls": [],
+        "line": 6,
+        "name": "resolve",
+        "owner": "SourceFactBlockConstantEffects"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 11,
+        "name": "direct",
+        "owner": "SourceFactBlockConstantEffects",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 6,
+        "name": "resolve",
+        "owner": "SourceFactBlockConstantEffects",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "File.file?",
@@ -115,6 +545,9 @@
         "line": 7
       }
     ],
-    "state_reads": []
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
   }
 }

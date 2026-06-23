@@ -1,0 +1,43 @@
+{
+  "local_flow": [],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [],
+    "local_complexity_scores": [],
+    "local_methods": [],
+    "owners": [
+      {
+        "kind": "struct",
+        "line": 1,
+        "name": "MyClass"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [],
+    "protocol_method_effects": [],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [
+      {
+        "field": "my_field",
+        "line": 2,
+        "owner": "MyClass",
+        "type": "i32"
+      }
+    ],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

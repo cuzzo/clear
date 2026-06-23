@@ -314,4 +314,28 @@ class DecomplexVerdictTest < Minitest::Test
       assert_includes md, "redundant/cloned decision (decomplex)" # spurious row
     end
   end
+
+  def test_decomplex_verdict_uses_decomplex_facts_file
+    mock_data = {
+      "detectors" => {
+        "false_simplicity" => {
+          "sites" => ["src/m.rb:foo:10"],
+          "spans" => { "src/m.rb:foo:10" => [10, 0, 12, 5] }
+        }
+      }
+    }
+    Tempfile.create(["mock-decomplex", ".json"]) do |f|
+      f.write(JSON.dump(mock_data))
+      f.close
+      begin
+        ENV["DECOMPLEX_FACTS_FILE"] = f.path
+        verdict = SlopCop::DecomplexVerdict.index(["src/m.rb"])
+        assert_equal :ok, verdict[:status]
+        res = SlopCop::DecomplexVerdict.lookup(verdict, "src/m.rb", "foo", 11)
+        assert_equal ["False Simplicity"], res[:detectors]
+      ensure
+        ENV["DECOMPLEX_FACTS_FILE"] = nil
+      end
+    end
+  end
 end

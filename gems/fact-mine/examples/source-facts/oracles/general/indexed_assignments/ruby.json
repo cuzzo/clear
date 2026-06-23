@@ -1,0 +1,464 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_six",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "key",
+              "obj"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "key",
+            "obj"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "index"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "index"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 3,
+        "message": "[]",
+        "receiver": "self.cache",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "key"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 2,
+        "message": "[]",
+        "receiver": "obj",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 2,
+        "message": "cache",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 3,
+        "message": "cache",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 4,
+        "message": "clear",
+        "receiver": "cache",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "assignment<status=>(id call(id id) argument_list(call<[]>(lit id argument_list(id))))",
+          "assignment<status=>(id call<[]>(lit call(id id) argument_list(id)) argument_list(lit))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          8,
+          8,
+          2
+        ],
+        "fingerprint": "body_statement(assignment<status=>(id call(id id) argument_list(call<[]>(lit id argument_list(id)))) assignment<status=>(id call<[]>(lit call(id id) argument_list(id)) argument_list(lit)) call(id id))",
+        "line": 2,
+        "mass": 19,
+        "method_name": "method_six",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(call<[]>(lit id argument_list(id)))"
+        ],
+        "child_masses": [
+          2,
+          5
+        ],
+        "fingerprint": "assignment<status=>(id call(id id) argument_list(call<[]>(lit id argument_list(id))))",
+        "line": 2,
+        "mass": 8,
+        "method_name": "method_six",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<[]>(lit call(id id) argument_list(id))",
+        "line": 3,
+        "mass": 5,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit call(id id) argument_list(id))",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          5,
+          2
+        ],
+        "fingerprint": "assignment<status=>(id call<[]>(lit call(id id) argument_list(id)) argument_list(lit))",
+        "line": 3,
+        "mass": 8,
+        "method_name": "method_six",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "argument_list(call<[]>(lit id argument_list(id)))",
+        "line": 2,
+        "mass": 5,
+        "method_name": "method_six",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(id))",
+        "line": 2,
+        "mass": 4,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 4,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id) body_statement(assignment<status=>(id call(id id) argument_list(call<[]>(lit id argument_list(id)))) assignment<status=>(id call<[]>(lit call(id id) argument_list(id)) argument_list(lit)) call(id id))))",
+        "line": 1,
+        "mass": 25,
+        "method_name": "method_six",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_six",
+        "owner": "ruby",
+        "params": [
+          "obj",
+          "index",
+          "key"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_six",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_six",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_six",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "key",
+                "obj"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "key",
+              "obj"
+            ],
+            "source": "self.cache.status = obj[key]",
+            "span": [
+              2,
+              2,
+              2,
+              30
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 3,
+            "index": 1,
+            "line": 3,
+            "reads": [
+              "index"
+            ],
+            "source": "self.cache[index].status = 1",
+            "span": [
+              3,
+              2,
+              3,
+              30
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 2,
+            "line": 4,
+            "reads": [],
+            "source": "@cache.clear",
+            "span": [
+              4,
+              2,
+              4,
+              14
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [
+          {
+            "line": 2,
+            "mid": "cache",
+            "span": [
+              2,
+              2,
+              2,
+              12
+            ]
+          },
+          {
+            "line": 3,
+            "mid": "cache",
+            "span": [
+              3,
+              2,
+              3,
+              12
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_six",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_six",
+        "owner": "ruby",
+        "reads": [
+          "cache"
+        ],
+        "writes": [
+          "cache",
+          "self.cache[index].status"
+        ]
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "[]=",
+        "function": "method_six",
+        "kind": "hidden_mutation",
+        "line": 2
+      },
+      {
+        "detail": "status=",
+        "function": "method_six",
+        "kind": "hidden_mutation",
+        "line": 3
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 4,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": [
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 2,
+        "receiver": "self"
+      },
+      {
+        "field": "status",
+        "function": "method_six",
+        "line": 3,
+        "receiver": "self.cache[index]"
+      }
+    ]
+  }
+}

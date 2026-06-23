@@ -1,79 +1,34 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/swift/core.swift",
-      "language": "swift",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 16,
-          "name": "process",
-          "owner": "SwiftSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 21,
+          "predicate": "user.role",
           "span": [
-            16,
-            2,
-            42,
-            3
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 44,
-          "name": "audit",
-          "owner": "SwiftSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
-          "span": [
-            44,
-            2,
-            48,
-            3
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 50,
-          "name": "ready",
-          "owner": "SwiftSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            50,
-            2,
-            52,
-            3
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 1,
-          "name": "Status",
-          "span": [
-            1,
-            0,
+            21,
             4,
-            1
+            28,
+            5
+          ],
+          "state_refs": [
+            "user.role"
           ]
         },
         {
-          "kind": "class",
-          "line": 6,
-          "name": "SwiftSyntaxFactsCore",
+          "function": "process",
+          "line": 30,
+          "predicate": "self.status == .idle && user.ready",
           "span": [
-            6,
-            0,
-            53,
-            1
+            30,
+            4,
+            35,
+            5
+          ],
+          "state_refs": [
+            "status",
+            "user.ready"
           ]
         }
       ],
@@ -261,9 +216,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -278,6 +231,154 @@
             6,
             38,
             21
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            21,
+            4,
+            28,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 21,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.role",
+          "span": [
+            21,
+            4,
+            28,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            30,
+            4,
+            35,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 30,
+          "members": [
+            ".idle",
+            "user.ready"
+          ],
+          "predicate": ".idle && user.ready",
+          "span": [
+            30,
+            22,
+            30,
+            41
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/swift/core.swift",
+      "functions": [
+        {
+          "line": 16,
+          "name": "process",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            16,
+            2,
+            42,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 44,
+          "name": "audit",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            44,
+            2,
+            48,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 50,
+          "name": "ready",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [],
+          "span": [
+            50,
+            2,
+            52,
+            3
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "swift",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 1,
+          "name": "Status",
+          "span": [
+            1,
+            0,
+            4,
+            1
+          ]
+        },
+        {
+          "kind": "class",
+          "line": 6,
+          "name": "SwiftSyntaxFactsCore",
+          "span": [
+            6,
+            0,
+            53,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "print",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 45,
+          "span": [
+            45,
+            4,
+            45,
+            15
+          ]
+        },
+        {
+          "detail": "print",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 34,
+          "span": [
+            34,
+            6,
+            34,
+            24
           ]
         }
       ],
@@ -439,157 +540,8 @@
           ]
         }
       ],
-      "state_writes": [
-        {
-          "field": "count",
-          "function": "process",
-          "line": 31,
-          "owner": "SwiftSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            31,
-            6,
-            31,
-            21
-          ]
-        },
-        {
-          "field": "sink",
-          "function": "(top-level)",
-          "line": 13,
-          "owner": "SwiftSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            13,
-            4,
-            13,
-            20
-          ]
-        },
-        {
-          "field": "status",
-          "function": "(top-level)",
-          "line": 12,
-          "owner": "SwiftSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            12,
-            4,
-            12,
-            24
-          ]
-        }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            21,
-            4,
-            28,
-            5
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 21,
-          "members": [
-            "\"admin\"",
-            "\"guest\"",
-            "\"owner\""
-          ],
-          "predicate": "user.role",
-          "span": [
-            21,
-            4,
-            28,
-            5
-          ]
-        },
-        {
-          "enclosing_span": [
-            30,
-            4,
-            35,
-            5
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 30,
-          "members": [
-            ".idle",
-            "user.ready"
-          ],
-          "predicate": ".idle && user.ready",
-          "span": [
-            30,
-            22,
-            30,
-            41
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 21,
-          "predicate": "user.role",
-          "span": [
-            21,
-            4,
-            28,
-            5
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "process",
-          "line": 30,
-          "predicate": "self.status == .idle && user.ready",
-          "span": [
-            30,
-            4,
-            35,
-            5
-          ],
-          "state_refs": [
-            "status",
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "print",
-          "function": "audit",
-          "kind": "hidden_io",
-          "line": 45,
-          "span": [
-            45,
-            4,
-            45,
-            15
-          ]
-        },
-        {
-          "detail": "print",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 34,
-          "span": [
-            34,
-            6,
-            34,
-            24
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
-      ]
+      "state_writes": []
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

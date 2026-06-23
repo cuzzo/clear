@@ -1,7 +1,5 @@
 {
   "detector": "semantic-alias",
-  "options": {
-  },
   "expected": {
     "alias_clusters": [
       {
@@ -10,5 +8,6 @@
       }
     ],
     "reification_miss_count": 1
-  }
+  },
+  "options": {}
 }

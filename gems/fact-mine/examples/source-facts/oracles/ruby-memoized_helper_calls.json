@@ -1,5 +1,37 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "owner_edges",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "build_owner_edges",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
     "calls": [
       {
         "arguments": [
@@ -11,7 +43,7 @@
         "function": "owner_edges",
         "line": 5,
         "message": "||",
-        "receiver": "@owner_edges",
+        "receiver": "owner_edges",
         "safe_navigation": false
       },
       {
@@ -26,6 +58,72 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<||>(lit id argument_list(id))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "owner_edges",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "owner_edges",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(assignment(id call<||>(lit id argument_list(id)))))",
+          "method(id)"
+        ],
+        "child_masses": [
+          7,
+          1
+        ],
+        "fingerprint": "body_statement(method(id body(assignment(id call<||>(lit id argument_list(id))))) method(id))",
+        "line": 4,
+        "mass": 9,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment(id call<||>(lit id argument_list(id)))))",
+        "line": 4,
+        "mass": 7,
+        "method_name": "owner_edges",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 8,
+        "mass": 1,
+        "method_name": "build_owner_edges",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 4,
@@ -42,9 +140,142 @@
         "visibility": "public"
       }
     ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactMemoizedHelperCalls#build_owner_edges",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactMemoizedHelperCalls#owner_edges",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactMemoizedHelperCalls#build_owner_edges",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "build_owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 9,
+            "reads": [],
+            "source": "[]",
+            "span": [
+              9,
+              4,
+              9,
+              6
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactMemoizedHelperCalls#owner_edges",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "@owner_edges ||= build_owner_edges",
+            "span": [
+              5,
+              4,
+              5,
+              38
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactMemoizedHelperCalls"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 8,
+        "name": "build_owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "build_owner_edges",
+            "span": [
+              5,
+              21,
+              5,
+              38
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "reads": [
+          "build_owner_edges",
+          "owner_edges"
+        ],
+        "writes": [
+          "owner_edges"
+        ]
+      },
+      {
+        "line": 8,
+        "name": "build_owner_edges",
+        "owner": "SourceFactMemoizedHelperCalls",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "owner_edges",
+        "function": "owner_edges",
+        "line": 5,
+        "receiver": "self"
+      }
+    ],
     "state_writes": [
       {
-        "field": "@owner_edges",
+        "field": "owner_edges",
         "function": "owner_edges",
         "line": 5,
         "receiver": "self"

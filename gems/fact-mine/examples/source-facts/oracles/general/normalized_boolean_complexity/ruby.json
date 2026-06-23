@@ -1,5 +1,289 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "eligible?",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "cart",
+              "user"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "cart",
+            "user"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "cart.total > 0 || cart.free?",
+        "decision_line": 5,
+        "function": "eligible?",
+        "kind": "if",
+        "line": 6,
+        "member": "then",
+        "predicate": "user.active? && !user.suspended?"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "eligible?",
+        "line": 5,
+        "predicate": "user.active? && !user.suspended?",
+        "state_refs": [
+          "user.active?",
+          "user.suspended?"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "eligible?",
+        "line": 5,
+        "message": "active?",
+        "receiver": "user",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "eligible?",
+        "line": 5,
+        "message": "suspended?",
+        "receiver": "user",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "eligible?",
+        "line": 6,
+        "message": "free?",
+        "receiver": "cart",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "eligible?",
+        "line": 6,
+        "message": "total",
+        "receiver": "cart",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(call(id id) call(lit call(id id)))",
+          "or(call(lit call(id id) argument_list(lit)) call(id id))"
+        ],
+        "child_masses": [
+          6,
+          8
+        ],
+        "fingerprint": "if(and(call(id id) call(lit call(id id))) or(call(lit call(id id) argument_list(lit)) call(id id)))",
+        "line": 5,
+        "mass": 15,
+        "method_name": "eligible?",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(lit))",
+        "line": 6,
+        "mass": 5,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(lit call(id id))"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "and(call(id id) call(lit call(id id)))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "eligible?",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(lit call(id id))",
+        "line": 5,
+        "mass": 3,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(id id) argument_list(lit))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          5,
+          2
+        ],
+        "fingerprint": "or(call(lit call(id id) argument_list(lit)) call(id id))",
+        "line": 6,
+        "mass": 8,
+        "method_name": "eligible?",
+        "node_name": "or"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "eligible?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "eligible?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) if(and(call(id id) call(lit call(id id))) or(call(lit call(id id) argument_list(lit)) call(id id)))))",
+        "line": 4,
+        "mass": 20,
+        "method_name": "eligible?",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "cart.total > 0",
+        "function": "eligible?",
+        "line": 6,
+        "operator": ">",
+        "raw": "cart.total > 0",
+        "source": "cart.total > 0"
+      }
+    ],
+    "decisions": [
+      {
+        "enclosing_span": [
+          5,
+          7,
+          5,
+          39
+        ],
+        "function": "eligible?",
+        "kind": "conjunction",
+        "line": 5,
+        "members": [
+          "user.active?",
+          "!user.suspended?"
+        ],
+        "predicate": "user.active? && !user.suspended?"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 4,
+        "name": "eligible?",
+        "owner": "SourceFactNormalizedBooleanComplexity",
+        "params": [
+          "user",
+          "cart"
+        ],
+        "visibility": "public"
+      }
+    ],
     "local_complexity_scores": [
       {
         "id": "SourceFactNormalizedBooleanComplexity#eligible?",
@@ -9,6 +293,145 @@
           "branches": 1
         }
       }
-    ]
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactNormalizedBooleanComplexity#eligible?",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "eligible?",
+        "owner": "SourceFactNormalizedBooleanComplexity",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "cart",
+                "user"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "cart",
+              "user"
+            ],
+            "source": "if user.active? && !user.suspended? cart.total > 0 || cart.free? end",
+            "span": [
+              5,
+              4,
+              7,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactNormalizedBooleanComplexity"
+      }
+    ],
+    "path_conditions": [
+      {
+        "action": "cart.free?",
+        "function": "eligible?",
+        "guards": [
+          "!user.suspended?",
+          "user.active?"
+        ],
+        "line": 6
+      },
+      {
+        "action": "cart.total > 0",
+        "function": "eligible?",
+        "guards": [
+          "!user.suspended?",
+          "user.active?"
+        ],
+        "line": 6
+      },
+      {
+        "action": "cart.total",
+        "function": "eligible?",
+        "guards": [
+          "!user.suspended?",
+          "user.active?"
+        ],
+        "line": 6
+      }
+    ],
+    "predicate_bodies": [
+      {
+        "body": "if user.active? && !user.suspended? cart.total > 0 || cart.free? end",
+        "line": 4,
+        "name": "eligible?",
+        "owner": "SourceFactNormalizedBooleanComplexity"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "eligible",
+        "owner": "SourceFactNormalizedBooleanComplexity"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "eligible",
+        "owner": "SourceFactNormalizedBooleanComplexity"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "eligible",
+        "owner": "SourceFactNormalizedBooleanComplexity",
+        "reads": [
+          "cart.free",
+          "cart.total",
+          "user.active",
+          "user.suspended"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "active?",
+        "function": "eligible?",
+        "line": 5,
+        "receiver": "user"
+      },
+      {
+        "field": "free?",
+        "function": "eligible?",
+        "line": 6,
+        "receiver": "cart"
+      },
+      {
+        "field": "suspended?",
+        "function": "eligible?",
+        "line": 5,
+        "receiver": "user"
+      },
+      {
+        "field": "total",
+        "function": "eligible?",
+        "line": 6,
+        "receiver": "cart"
+      }
+    ],
+    "state_writes": []
   }
 }

@@ -1,12 +1,11 @@
 {
   "detector": "flay-similarity",
-  "options": {
-  },
   "expected": [
     {
       "clone_type": "type2",
       "node": "defn",
       "site_count": 2
     }
-  ]
+  ],
+  "options": {}
 }

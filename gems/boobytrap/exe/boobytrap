@@ -8,7 +8,6 @@ def usage
     boobytrap -- defect-risk hotspots (bugspots fix-churn x branch gap)
 
       boobytrap report [--repo=.] [--coverage=coverage/.resultset.json] \\
-                       [--output=report.md] [--sarif=report.sarif] [--json=report.sarif] \\
                        [--top=40] [--only=PATH ...] [--files=a.rb,b.rb] \\
                        [--mutation=mutant-facts.json] \\
                        [--test-exposure=test-exposure.json] \\
@@ -55,7 +54,6 @@ until args.empty?
   when /\A--repo=(.+)/      then opts[:repo] = Regexp.last_match(1)
   when /\A--coverage=(.+)/  then opts[:coverage] = Regexp.last_match(1)
   when /\A--output=(.+)/    then opts[:output] = Regexp.last_match(1)
-  when /\A--sarif=(.+)/     then opts[:sarif] = Regexp.last_match(1)
   when /\A--json=(.+)/      then opts[:json] = Regexp.last_match(1)
   when /\A--top=(\d+)/      then opts[:top] = Regexp.last_match(1).to_i
   when /\A--only=(.+)/      then opts[:only] << Regexp.last_match(1)
@@ -84,7 +82,6 @@ report = Boobytrap::Report.new(
 )
 
 if opts[:sarif]
-  File.write(opts[:sarif], report.to_sarif)
   warn "wrote #{opts[:sarif]}"
 end
 

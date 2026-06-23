@@ -1,18 +1,6 @@
 {
   "local_flow": [
     {
-      "boundaries": [],
-      "method": "none_ready",
-      "statements": [
-        {
-          "co_uses": [],
-          "dependencies": [],
-          "reads": [],
-          "writes": []
-        }
-      ]
-    },
-    {
       "boundaries": [
         {
           "after_index": 2,
@@ -56,9 +44,15 @@
           ]
         },
         {
-          "co_uses": [],
+          "co_uses": [
+            [
+              "input",
+              "local"
+            ]
+          ],
           "dependencies": [],
           "reads": [
+            "input",
             "local"
           ],
           "writes": []
@@ -103,9 +97,63 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "none_ready",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
     }
   ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "panic!(\"missing input\")",
+        "decision_line": 11,
+        "function": "update",
+        "kind": "if",
+        "line": 12,
+        "member": "then",
+        "predicate": "local.is_none()"
+      },
+      {
+        "body": "{ self.value = local; self.callback(); std::fs::read_to_string(\"config\").ok(); println!(\"{}\", result); }",
+        "decision_line": 15,
+        "function": "update",
+        "kind": "if",
+        "line": 15,
+        "member": "then",
+        "predicate": "local.is_some() && enabled"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "update",
+        "line": 11,
+        "predicate": "local.is_none()",
+        "state_refs": [
+          "local.is_none"
+        ]
+      },
+      {
+        "function": "update",
+        "line": 15,
+        "predicate": "local.is_some() && enabled",
+        "state_refs": [
+          "local.is_some"
+        ]
+      }
+    ],
     "calls": [
       {
         "arguments": [
@@ -202,6 +250,353 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Some>(id argument_list(id))",
+        "line": 23,
+        "mass": 3,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "assignment<value=>(id id argument_list(id))",
+          "call(id id)",
+          "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+          "macro_invocation(id token_tree(lit id))"
+        ],
+        "child_masses": [
+          4,
+          2,
+          9,
+          5
+        ],
+        "fingerprint": "body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))",
+        "line": 15,
+        "mass": 21,
+        "method_name": "update",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "assignment<value=>(id id argument_list(id))",
+          "call(id id)",
+          "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+          "macro_invocation(id token_tree(lit id))"
+        ],
+        "child_masses": [
+          4,
+          2,
+          9,
+          5
+        ],
+        "fingerprint": "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
+        "line": 15,
+        "mass": 26,
+        "method_name": "update",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "id"
+        ],
+        "child_masses": [
+          2,
+          1
+        ],
+        "fingerprint": "and(call(id id) id)",
+        "line": 15,
+        "mass": 4,
+        "method_name": "update",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "macro_invocation(id token_tree(lit))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "if(call(id id) macro_invocation(id token_tree(lit)))",
+        "line": 11,
+        "mass": 7,
+        "method_name": "update",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id call(id id))",
+        "line": 27,
+        "mass": 3,
+        "method_name": "none_ready",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))"
+        ],
+        "child_masses": [
+          8
+        ],
+        "fingerprint": "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+        "line": 18,
+        "mass": 9,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "assignment<value=>(id id argument_list(id))",
+        "line": 16,
+        "mass": 4,
+        "method_name": "update",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<push_str>(id id argument_list(lit))",
+        "line": 22,
+        "mass": 4,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 16,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 23,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 15,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 17,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 27,
+        "mass": 2,
+        "method_name": "none_ready",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "let_declaration(assignment(id call(id scoped_identifier(id id))))",
+          "let_declaration(assignment(id id))",
+          "if(call(id id) macro_invocation(id token_tree(lit)))",
+          "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
+          "call<push_str>(id id argument_list(lit))",
+          "call<Some>(id argument_list(id))"
+        ],
+        "child_masses": [
+          6,
+          3,
+          7,
+          26,
+          4,
+          3
+        ],
+        "fingerprint": "body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))",
+        "line": 7,
+        "mass": 50,
+        "method_name": "update",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 22,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+          "method(id body(call(id call(id id))))"
+        ],
+        "child_masses": [
+          52,
+          5
+        ],
+        "fingerprint": "body_statement(method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id))))) method(id body(call(id call(id id)))))",
+        "line": 6,
+        "mass": 58,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "scoped_identifier(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id scoped_identifier(id id))",
+        "line": 8,
+        "mass": 4,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "scoped_identifier(scoped_identifier(id id) id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          5,
+          2
+        ],
+        "fingerprint": "call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))",
+        "line": 18,
+        "mass": 8,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+        "line": 7,
+        "mass": 52,
+        "method_name": "update",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(call(id call(id id))))",
+        "line": 26,
+        "mass": 5,
+        "method_name": "none_ready",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          15,
+          8,
+          20,
+          9
+        ],
+        "function": "update",
+        "kind": "conjunction",
+        "line": 15,
+        "members": [
+          "local.is_some()",
+          "enabled"
+        ],
+        "predicate": "local.is_some() && enabled"
+      }
+    ],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 26,
@@ -224,6 +619,219 @@
         "visibility": "public"
       }
     ],
+    "local_complexity_scores": [
+      {
+        "id": "RustSourceFactBehavior#none_ready",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "RustSourceFactBehavior#update",
+        "score": 3.0,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 2
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "RustSourceFactBehavior#none_ready",
+        "line": 26,
+        "local_contract_assignments": {},
+        "name": "none_ready",
+        "owner": "RustSourceFactBehavior",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 27,
+            "index": 0,
+            "line": 27,
+            "reads": [],
+            "source": "self.value.is_none()",
+            "span": [
+              27,
+              8,
+              27,
+              28
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 2,
+            "before_index": 1,
+            "kind": "blank",
+            "line": 10,
+            "text": ""
+          },
+          {
+            "after_index": 3,
+            "before_index": 2,
+            "kind": "blank",
+            "line": 14,
+            "text": ""
+          },
+          {
+            "after_index": 4,
+            "before_index": 3,
+            "kind": "blank",
+            "line": 21,
+            "text": ""
+          }
+        ],
+        "id": "RustSourceFactBehavior#update",
+        "line": 7,
+        "local_contract_assignments": {
+          "local": "input"
+        },
+        "name": "update",
+        "owner": "RustSourceFactBehavior",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 8,
+            "index": 0,
+            "line": 8,
+            "reads": [],
+            "source": "let mut result = String::new();",
+            "span": [
+              8,
+              8,
+              8,
+              39
+            ],
+            "writes": [
+              "result"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "local",
+                "input"
+              ]
+            ],
+            "end_line": 9,
+            "index": 1,
+            "line": 9,
+            "reads": [
+              "input"
+            ],
+            "source": "let mut local = input;",
+            "span": [
+              9,
+              8,
+              9,
+              30
+            ],
+            "writes": [
+              "local"
+            ]
+          },
+          {
+            "co_uses": [
+              [
+                "input",
+                "local"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 13,
+            "index": 2,
+            "line": 11,
+            "reads": [
+              "input",
+              "local"
+            ],
+            "source": "if local.is_none() { panic!(\"missing input\"); }",
+            "span": [
+              11,
+              8,
+              13,
+              9
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "enabled",
+                "local"
+              ],
+              [
+                "enabled",
+                "result"
+              ],
+              [
+                "local",
+                "result"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 3,
+            "line": 15,
+            "reads": [
+              "enabled",
+              "local",
+              "result"
+            ],
+            "source": "if local.is_some() && enabled { self.value = local; self.callback(); std::fs::read_to_string(\"config\").ok(); println!(\"{}\", result); }",
+            "span": [
+              15,
+              8,
+              20,
+              9
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 22,
+            "index": 4,
+            "line": 22,
+            "reads": [
+              "result"
+            ],
+            "source": "result.push_str(\"done\")",
+            "span": [
+              22,
+              8,
+              22,
+              31
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 23,
+            "index": 5,
+            "line": 23,
+            "reads": [
+              "result"
+            ],
+            "source": "Some(result)",
+            "span": [
+              23,
+              8,
+              23,
+              20
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "impl",
@@ -236,6 +844,44 @@
         "name": "RustSourceFactBehavior"
       }
     ],
+    "path_conditions": [
+      {
+        "action": "self.callback()",
+        "function": "update",
+        "guards": [
+          "enabled",
+          "local.is_some()"
+        ],
+        "line": 17
+      },
+      {
+        "action": "self.value = local",
+        "function": "update",
+        "guards": [
+          "enabled",
+          "local.is_some()"
+        ],
+        "line": 16
+      },
+      {
+        "action": "std::fs::read_to_string(\"config\")",
+        "function": "update",
+        "guards": [
+          "enabled",
+          "local.is_some()"
+        ],
+        "line": 18
+      },
+      {
+        "action": "std::fs::read_to_string(\"config\").ok()",
+        "function": "update",
+        "guards": [
+          "enabled",
+          "local.is_some()"
+        ],
+        "line": 18
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "self.value.is_none()",
@@ -244,8 +890,88 @@
         "owner": "RustSourceFactBehavior"
       }
     ],
-    "redundant_nil_guards": []
-    ,
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 26,
+        "name": "none_ready",
+        "owner": "RustSourceFactBehavior"
+      },
+      {
+        "calls": [
+          {
+            "line": 17,
+            "mid": "callback",
+            "span": [
+              17,
+              12,
+              17,
+              27
+            ]
+          },
+          {
+            "line": 23,
+            "mid": "Some",
+            "span": [
+              23,
+              8,
+              23,
+              20
+            ]
+          }
+        ],
+        "line": 7,
+        "name": "update",
+        "owner": "RustSourceFactBehavior"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "Some",
+            "span": [
+              23,
+              8,
+              23,
+              20
+            ]
+          }
+        ],
+        "line": 7,
+        "name": "update",
+        "owner": "RustSourceFactBehavior"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 26,
+        "name": "none_ready",
+        "owner": "RustSourceFactBehavior",
+        "reads": [
+          "self.value.is_none",
+          "value"
+        ],
+        "writes": []
+      },
+      {
+        "line": 7,
+        "name": "update",
+        "owner": "RustSourceFactBehavior",
+        "reads": [
+          "Some",
+          "callback",
+          "local.is_none",
+          "local.is_some",
+          "result.push_str",
+          "std::fs.read_to_string",
+          "std::fs::read_to_string.call(\"config\").ok"
+        ],
+        "writes": [
+          "value"
+        ]
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "local",
@@ -278,6 +1004,21 @@
         "line": 18
       }
     ],
+    "state_declarations": [
+      {
+        "field": "callback",
+        "line": 3,
+        "owner": "RustSourceFactBehavior",
+        "type": "Callback"
+      },
+      {
+        "field": "value",
+        "line": 2,
+        "owner": "RustSourceFactBehavior",
+        "type": "Option<String>"
+      }
+    ],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "is_none",

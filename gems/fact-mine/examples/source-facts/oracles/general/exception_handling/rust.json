@@ -1,0 +1,444 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_two",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "result"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "result"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "log(e)",
+        "decision_line": 5,
+        "function": "method_two",
+        "kind": "case",
+        "line": 6,
+        "member": "Err(e)",
+        "predicate": "result"
+      }
+    ],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "Error"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_two",
+        "line": 3,
+        "message": "Err",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "e"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_two",
+        "line": 6,
+        "message": "log",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_two",
+        "line": 2,
+        "message": "call",
+        "receiver": "|| -> Result<(), Error> { return Err(Error); }",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_two",
+        "line": 9,
+        "message": "cleanup",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Err>(id argument_list(id))",
+        "line": 3,
+        "mass": 3,
+        "method_name": "method_two",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<log>(id argument_list(id))",
+        "line": 6,
+        "mass": 3,
+        "method_name": "method_two",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(tuple_struct_pattern(id id))",
+          "call<log>(id argument_list(id))"
+        ],
+        "child_masses": [
+          4,
+          3
+        ],
+        "fingerprint": "when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))",
+        "line": 6,
+        "mass": 8,
+        "method_name": "method_two",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))"
+        ],
+        "child_masses": [
+          10
+        ],
+        "fingerprint": "call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id))))))",
+        "line": 2,
+        "mass": 11,
+        "method_name": "method_two",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          1,
+          8
+        ],
+        "fingerprint": "case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id))))",
+        "line": 5,
+        "mass": 10,
+        "method_name": "method_two",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "method_two",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "method_two",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id))))))))",
+          "case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id))))",
+          "id"
+        ],
+        "child_masses": [
+          13,
+          10,
+          1
+        ],
+        "fingerprint": "body_statement(let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)",
+        "line": 1,
+        "mass": 25,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "return(call<Err>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "body_statement(return(call<Err>(id argument_list(id))))",
+        "line": 2,
+        "mass": 5,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "tuple_struct_pattern(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "argument_list(tuple_struct_pattern(id id))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "method_two",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)))",
+        "line": 1,
+        "mass": 27,
+        "method_name": "method_two",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_two",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_two",
+        "score": 1.5,
+        "signals": {
+          "cases": 3
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_two",
+        "line": 1,
+        "local_contract_assignments": {
+          "result": "(|| -> Result<(), Error> { return Err(Error); })()"
+        },
+        "name": "method_two",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "let result = (|| -> Result<(), Error> { return Err(Error); })();",
+            "span": [
+              2,
+              4,
+              4,
+              9
+            ],
+            "writes": [
+              "result"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 8,
+            "index": 1,
+            "line": 5,
+            "reads": [
+              "result"
+            ],
+            "source": "match result { Err(e) => log(e), _ => {} }",
+            "span": [
+              5,
+              4,
+              8,
+              5
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 2,
+            "line": 9,
+            "reads": [],
+            "source": "cleanup()",
+            "span": [
+              9,
+              4,
+              9,
+              13
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [
+          {
+            "line": 3,
+            "mid": "Err",
+            "span": [
+              3,
+              15,
+              3,
+              25
+            ]
+          },
+          {
+            "line": 6,
+            "mid": "log",
+            "span": [
+              6,
+              18,
+              6,
+              24
+            ]
+          },
+          {
+            "line": 9,
+            "mid": "cleanup",
+            "span": [
+              9,
+              4,
+              9,
+              13
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_two",
+        "owner": "rust"
+      },
+      {
+        "calls": [
+          {
+            "line": 3,
+            "mid": "Err",
+            "span": [
+              3,
+              15,
+              3,
+              25
+            ]
+          },
+          {
+            "line": 9,
+            "mid": "cleanup",
+            "span": [
+              9,
+              4,
+              9,
+              13
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_two",
+        "owner": "rust"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_two",
+        "owner": "rust",
+        "reads": [
+          "Err",
+          "cleanup",
+          "log"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "call",
+        "function": "method_two",
+        "kind": "dynamic_dispatch",
+        "line": 2
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "cleanup",
+        "function": "method_two",
+        "line": 9,
+        "receiver": "self"
+      },
+      {
+        "field": "log",
+        "function": "method_two",
+        "line": 6,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
+}

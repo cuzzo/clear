@@ -189,7 +189,754 @@
       ]
     }
   ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "next",
+        "decision_line": 13,
+        "function": "build",
+        "kind": "if",
+        "line": 13,
+        "member": "then",
+        "predicate": "file && !file.empty? && meth && !meth.empty?"
+      },
+      {
+        "body": "next",
+        "decision_line": 9,
+        "function": "build",
+        "kind": "if",
+        "line": 9,
+        "member": "then",
+        "predicate": "findings"
+      },
+      {
+        "body": "skip \"missing grammar\"",
+        "decision_line": 6,
+        "function": "build",
+        "kind": "if",
+        "line": 6,
+        "member": "then",
+        "predicate": "grammar && File.file?(grammar)"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "build",
+        "line": 13,
+        "predicate": "file && !file.empty? && meth && !meth.empty?",
+        "state_refs": [
+          "file.empty?",
+          "meth.empty?"
+        ]
+      },
+      {
+        "function": "build",
+        "line": 6,
+        "predicate": "grammar && File.file?(grammar)",
+        "state_refs": [
+          "File.file?"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [
+          "\":\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 16,
+        "message": "join",
+        "receiver": "key",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"missing grammar\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "build",
+        "line": 6,
+        "message": "skip",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "audit.findings"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "build",
+        "line": 20,
+        "message": "assert_empty",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "finding.loc"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 12,
+        "message": "parse_loc",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "grammar"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "build",
+        "line": 6,
+        "message": "file?",
+        "receiver": "File",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "build",
+        "line": 20,
+        "message": "findings",
+        "receiver": "audit",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "build",
+        "line": 13,
+        "message": "empty?",
+        "receiver": "file",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "build",
+        "line": 13,
+        "message": "empty?",
+        "receiver": "meth",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 12,
+        "message": "loc",
+        "receiver": "finding",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 16,
+        "message": "findings",
+        "receiver": "audit",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 16,
+        "message": "size",
+        "receiver": "audit.findings",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "build",
+        "line": 8,
+        "message": "each",
+        "receiver": "sections",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 11,
+        "message": "each",
+        "receiver": "findings",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(id call(lit call(id id)) id call(lit call(id id)))"
+        ],
+        "child_masses": [
+          9
+        ],
+        "fingerprint": "unless(and(id call(lit call(id id)) id call(lit call(id id))))",
+        "line": 13,
+        "mass": 10,
+        "method_name": "build",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "and(id call<file?>(id id argument_list(id)))",
+          "call<skip>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          6,
+          3
+        ],
+        "fingerprint": "unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit)))",
+        "line": 6,
+        "mass": 10,
+        "method_name": "build",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(call(id id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<assert_empty>(id argument_list(call(id id)))",
+        "line": 20,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(call(id id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<parse_loc>(id argument_list(call(id id)))",
+        "line": 12,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<skip>(id argument_list(lit))",
+        "line": 6,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id))",
+          "unless(and(id call(lit call(id id)) id call(lit call(id id))))",
+          "assignment(id argument_list(id id))",
+          "call(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          8,
+          10,
+          4,
+          4
+        ],
+        "fingerprint": "body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))",
+        "line": 12,
+        "mass": 27,
+        "method_name": "build",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id)",
+          "unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit)))",
+          "block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
+          "call<assert_empty>(id argument_list(call(id id)))",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          10,
+          38,
+          4,
+          1
+        ],
+        "fingerprint": "body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)",
+        "line": 5,
+        "mass": 55,
+        "method_name": "build",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(call(id id))",
+        "line": 12,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(call(id id))",
+        "line": 20,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))",
+        "line": 11,
+        "mass": 31,
+        "method_name": "build",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))))",
+        "line": 8,
+        "mass": 38,
+        "method_name": "build",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id call(id id))",
+        "line": 16,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(lit call(id id))",
+        "line": 13,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(lit call(id id))",
+        "line": 13,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<file?>(id id argument_list(id))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 16,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<join>(id id argument_list(lit))",
+        "line": 16,
+        "mass": 4,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "call(lit call(id id))",
+          "id",
+          "call(lit call(id id))"
+        ],
+        "child_masses": [
+          1,
+          3,
+          1,
+          3
+        ],
+        "fingerprint": "and(id call(lit call(id id)) id call(lit call(id id)))",
+        "line": 13,
+        "mass": 9,
+        "method_name": "build",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "call<file?>(id id argument_list(id))"
+        ],
+        "child_masses": [
+          1,
+          4
+        ],
+        "fingerprint": "and(id call<file?>(id id argument_list(id)))",
+        "line": 6,
+        "mass": 6,
+        "method_name": "build",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 12,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 15,
+        "mass": 3,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 16,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 20,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "unless(id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 16,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 16,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "build",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "unless(id)",
+          "block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))"
+        ],
+        "child_masses": [
+          2,
+          31
+        ],
+        "fingerprint": "body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit))))))",
+        "line": 9,
+        "mass": 34,
+        "method_name": "build",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id) body_statement(assignment(id) unless(and(id call<file?>(id id argument_list(id))) call<skip>(id argument_list(lit))) block(call(id id) body(body_statement(unless(id) block(call(id id) body(body_statement(assignment(call<parse_loc>(id argument_list(call(id id))) argument_list(id id)) unless(and(id call(lit call(id id)) id call(lit call(id id)))) assignment(id argument_list(id id)) call(lit id argument_list(lit)))))))) call<assert_empty>(id argument_list(call(id id))) id)))",
+        "line": 4,
+        "mass": 61,
+        "method_name": "build",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          13,
+          20,
+          13,
+          64
+        ],
+        "function": "build",
+        "kind": "conjunction",
+        "line": 13,
+        "members": [
+          "file",
+          "!file.empty?",
+          "meth",
+          "!meth.empty?"
+        ],
+        "predicate": "file && !file.empty? && meth && !meth.empty?"
+      },
+      {
+        "enclosing_span": [
+          6,
+          34,
+          6,
+          64
+        ],
+        "function": "build",
+        "kind": "conjunction",
+        "line": 6,
+        "members": [
+          "grammar",
+          "File.file?(grammar)"
+        ],
+        "predicate": "grammar && File.file?(grammar)"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges",
+        "params": [
+          "sections",
+          "audit",
+          "grammar"
+        ],
+        "visibility": "public"
+      }
+    ],
     "local_complexity_scores": [
       {
         "id": "SourceFactLocalFlowEdges#build",
@@ -199,6 +946,263 @@
           "branches": 3,
           "loops": 2
         }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [
+          {
+            "after_index": 2,
+            "before_index": 1,
+            "kind": "blank",
+            "line": 7,
+            "text": ""
+          },
+          {
+            "after_index": 3,
+            "before_index": 2,
+            "kind": "blank",
+            "line": 19,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactLocalFlowEdges#build",
+        "line": 4,
+        "local_contract_assignments": {
+          "rows": "[]"
+        },
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "rows = []",
+            "span": [
+              5,
+              4,
+              5,
+              13
+            ],
+            "writes": [
+              "rows"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [
+              "grammar"
+            ],
+            "source": "skip \"missing grammar\" unless grammar && File.file?(grammar)",
+            "span": [
+              6,
+              4,
+              6,
+              64
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "audit",
+                "file"
+              ],
+              [
+                "audit",
+                "key"
+              ],
+              [
+                "audit",
+                "meth"
+              ],
+              [
+                "audit",
+                "rows"
+              ],
+              [
+                "audit",
+                "sections"
+              ],
+              [
+                "file",
+                "key"
+              ],
+              [
+                "file",
+                "meth"
+              ],
+              [
+                "file",
+                "rows"
+              ],
+              [
+                "file",
+                "sections"
+              ],
+              [
+                "key",
+                "meth"
+              ],
+              [
+                "key",
+                "rows"
+              ],
+              [
+                "key",
+                "sections"
+              ],
+              [
+                "meth",
+                "rows"
+              ],
+              [
+                "meth",
+                "sections"
+              ],
+              [
+                "rows",
+                "sections"
+              ]
+            ],
+            "dependencies": [
+              [
+                "file",
+                "audit"
+              ],
+              [
+                "file",
+                "key"
+              ],
+              [
+                "file",
+                "meth"
+              ],
+              [
+                "file",
+                "rows"
+              ],
+              [
+                "file",
+                "sections"
+              ],
+              [
+                "key",
+                "audit"
+              ],
+              [
+                "key",
+                "file"
+              ],
+              [
+                "key",
+                "meth"
+              ],
+              [
+                "key",
+                "rows"
+              ],
+              [
+                "key",
+                "sections"
+              ],
+              [
+                "meth",
+                "audit"
+              ],
+              [
+                "meth",
+                "file"
+              ],
+              [
+                "meth",
+                "key"
+              ],
+              [
+                "meth",
+                "rows"
+              ],
+              [
+                "meth",
+                "sections"
+              ]
+            ],
+            "end_line": 18,
+            "index": 2,
+            "line": 8,
+            "reads": [
+              "audit",
+              "file",
+              "key",
+              "meth",
+              "rows",
+              "sections"
+            ],
+            "source": "sections.each do |title, findings| next unless findings findings.each do |finding| file, meth, = parse_loc(finding.loc) next unless file && !file.empty? && meth && !meth.empty? key = [file, meth] rows << \"| #{key.join(\":\")} | #{audit.findings.size} |\" end end",
+            "span": [
+              8,
+              4,
+              18,
+              7
+            ],
+            "writes": [
+              "file",
+              "key",
+              "meth"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 3,
+            "line": 20,
+            "reads": [
+              "audit"
+            ],
+            "source": "assert_empty audit.findings",
+            "span": [
+              20,
+              4,
+              20,
+              31
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 21,
+            "index": 4,
+            "line": 21,
+            "reads": [
+              "rows"
+            ],
+            "source": "rows",
+            "span": [
+              21,
+              4,
+              21,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactLocalFlowEdges"
       }
     ],
     "path_conditions": [
@@ -212,6 +1216,102 @@
         "line": 6
       }
     ],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [
+          {
+            "line": 12,
+            "mid": "parse_loc",
+            "span": [
+              12,
+              22,
+              12,
+              44
+            ]
+          },
+          {
+            "line": 20,
+            "mid": "assert_empty",
+            "span": [
+              20,
+              4,
+              20,
+              31
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 20,
+            "mid": "assert_empty",
+            "span": [
+              20,
+              4,
+              20,
+              31
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 6,
+            "mid": "skip",
+            "span": [
+              6,
+              4,
+              6,
+              26
+            ]
+          },
+          {
+            "line": 20,
+            "mid": "assert_empty",
+            "span": [
+              20,
+              4,
+              20,
+              31
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "build",
+        "owner": "SourceFactLocalFlowEdges",
+        "reads": [
+          "assert_empty",
+          "audit.findings",
+          "audit.findings.size",
+          "file.empty",
+          "finding.loc",
+          "findings.each",
+          "key.join",
+          "meth.empty",
+          "parse_loc",
+          "sections.each",
+          "skip"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "<<",
@@ -226,6 +1326,8 @@
         "line": 6
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "each",
@@ -281,6 +1383,7 @@
         "line": 16,
         "receiver": "audit.findings"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

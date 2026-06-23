@@ -1,0 +1,226 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "MyFunc",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "OtherFunc",
+      "statements": []
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "MyFunc",
+        "line": 2,
+        "message": "new",
+        "receiver": "Class",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(method(id)))",
+        "line": 2,
+        "mass": 5,
+        "method_name": "MyFunc",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "MyFunc",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(block(call(id id) body(method(id)))))",
+        "line": 1,
+        "mass": 7,
+        "method_name": "MyFunc",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 3,
+        "mass": 1,
+        "method_name": "method",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 7,
+        "mass": 1,
+        "method_name": "OtherFunc",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 3,
+        "name": "method",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#MyFunc",
+        "score": 0.0,
+        "signals": {
+          "loops": 1
+        }
+      },
+      {
+        "id": "(top-level)#OtherFunc",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#MyFunc",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "MyFunc",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "Class.new do def method; end end",
+            "span": [
+              2,
+              2,
+              4,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#OtherFunc",
+        "line": 7,
+        "local_contract_assignments": {},
+        "name": "OtherFunc",
+        "owner": "(top-level)",
+        "statements": []
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 3,
+        "name": "method",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 3,
+        "name": "method",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

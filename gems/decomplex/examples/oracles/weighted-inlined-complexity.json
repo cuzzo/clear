@@ -1,12 +1,11 @@
 {
   "detector": "weighted-inlined-complexity",
-  "options": {
-  },
   "expected": [
     {
-      "method": "checkout",
+      "callee_count": 4,
       "depth": 1,
-      "callee_count": 4
+      "method": "checkout"
     }
-  ]
+  ],
+  "options": {}
 }

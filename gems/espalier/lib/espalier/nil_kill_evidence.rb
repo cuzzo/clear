@@ -32,20 +32,20 @@ module Espalier
 
     def apply!(modules)
       Array(modules).each do |mod|
-        owner = mod[:name].to_s
+        mod_owner = mod[:name].to_s
         mod[:ivar_types] ||= {}
         mod[:ivar_properties] ||= {}
 
-        state_types.fetch(owner, {}).each do |state, type|
+        state_types.fetch(mod_owner, {}).each do |state, type|
           mod[:ivar_types][state] = type
         end
 
         Array(mod[:states]).each do |state|
           props = []
-          if (origins = state_param_origins.dig(owner, state.to_s))
+          if (origins = state_param_origins.dig(mod_owner, state.to_s))
             props << "loaded from param: #{origins.join(', ')}"
           end
-          if (protocols = state_protocols.dig(owner, state.to_s))
+          if (protocols = state_protocols.dig(mod_owner, state.to_s))
             props << "protocol interfaces: #{protocols.join(', ')}"
           end
           mod[:ivar_properties][state.to_s] = props unless props.empty?
@@ -86,23 +86,23 @@ module Espalier
 
     def load_legacy_runtime_types!
       Array(facts["ivar_runtime"]).each do |entry|
-        owner = entry["class"]
+        runtime_owner = entry["class"]
         state = entry["name"]
         classes = Array(entry["classes"])
-        next unless owner && state && !classes.empty?
+        next unless runtime_owner && state && !classes.empty?
 
-        @state_types[owner] ||= {}
-        @state_types[owner][state] = sorbet_type(classes)
+        @state_types[runtime_owner] ||= {}
+        @state_types[runtime_owner][state] = sorbet_type(classes)
       end
     end
 
     def nested_state_map(map)
       Hash(map).each_with_object({}) do |(key, value), out|
-        owner, state = key.to_s.split("\u0000", 2)
-        next if owner.to_s.empty? || state.to_s.empty?
+        map_owner, state = key.to_s.split("\u0000", 2)
+        next if map_owner.to_s.empty? || state.to_s.empty?
 
-        out[owner] ||= {}
-        out[owner][state] = value.is_a?(Array) ? value.map(&:to_s).sort.uniq : value.to_s
+        out[map_owner] ||= {}
+        out[map_owner][state] = value.is_a?(Array) ? value.map(&:to_s).sort.uniq : value.to_s
       end
     end
 

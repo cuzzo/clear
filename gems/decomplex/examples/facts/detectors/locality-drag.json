@@ -1,206 +1,5 @@
 {
   "detector": "locality-drag",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/locality.rb",
-        "language": "ruby",
-        "local_complexity_scores": {
-          "Fixture#assemble": {
-            "score": 18.0,
-            "signals": {
-              "branches": 2
-            }
-          }
-        },
-        "local_methods": [
-          {
-            "id": "Fixture#assemble",
-            "owner": "Fixture",
-            "name": "assemble",
-            "file": "facts/locality.rb",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              20,
-              3
-            ],
-            "statements": [
-              {
-                "index": 0,
-                "line": 1,
-                "end_line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  23
-                ],
-                "source": "payload = build_payload",
-                "reads": [
-                  "build_payload"
-                ],
-                "writes": [
-                  "payload"
-                ],
-                "dependencies": [
-                  [
-                    "payload",
-                    "build_payload"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 1,
-                "line": 3,
-                "end_line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  18
-                ],
-                "source": "alpha = load_alpha",
-                "reads": [
-                  "load_alpha"
-                ],
-                "writes": [
-                  "alpha"
-                ],
-                "dependencies": [
-                  [
-                    "alpha",
-                    "load_alpha"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 2,
-                "line": 5,
-                "end_line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  16
-                ],
-                "source": "beta = load_beta",
-                "reads": [
-                  "load_beta"
-                ],
-                "writes": [
-                  "beta"
-                ],
-                "dependencies": [
-                  [
-                    "beta",
-                    "load_beta"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 3,
-                "line": 7,
-                "end_line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  18
-                ],
-                "source": "gamma = load_gamma",
-                "reads": [
-                  "load_gamma"
-                ],
-                "writes": [
-                  "gamma"
-                ],
-                "dependencies": [
-                  [
-                    "gamma",
-                    "load_gamma"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 4,
-                "line": 9,
-                "end_line": 9,
-                "span": [
-                  9,
-                  0,
-                  9,
-                  18
-                ],
-                "source": "delta = load_delta",
-                "reads": [
-                  "load_delta"
-                ],
-                "writes": [
-                  "delta"
-                ],
-                "dependencies": [
-                  [
-                    "delta",
-                    "load_delta"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 5,
-                "line": 13,
-                "end_line": 13,
-                "span": [
-                  13,
-                  0,
-                  13,
-                  16
-                ],
-                "source": "consume(payload)",
-                "reads": [
-                  "payload"
-                ],
-                "writes": [
-
-                ],
-                "dependencies": [
-
-                ],
-                "co_uses": [
-
-                ]
-              }
-            ],
-            "boundaries": [
-              {
-                "before_index": 0,
-                "after_index": 5,
-                "line": 11,
-                "kind": "comment",
-                "text": "# phase 2"
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": [
     {
       "at": "facts/locality.rb:assemble:1",
@@ -256,5 +55,190 @@
       "used_at": 13,
       "variable": "payload"
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "file": "facts/locality.rb",
+        "language": "ruby",
+        "local_complexity_scores": {
+          "Fixture#assemble": {
+            "score": 18.0,
+            "signals": {
+              "branches": 2
+            }
+          }
+        },
+        "local_methods": [
+          {
+            "boundaries": [
+              {
+                "after_index": 5,
+                "before_index": 0,
+                "kind": "comment",
+                "line": 11,
+                "text": "# phase 2"
+              }
+            ],
+            "file": "facts/locality.rb",
+            "id": "Fixture#assemble",
+            "line": 1,
+            "name": "assemble",
+            "owner": "Fixture",
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "payload",
+                    "build_payload"
+                  ]
+                ],
+                "end_line": 1,
+                "index": 0,
+                "line": 1,
+                "reads": [
+                  "build_payload"
+                ],
+                "source": "payload = build_payload",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  23
+                ],
+                "writes": [
+                  "payload"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "alpha",
+                    "load_alpha"
+                  ]
+                ],
+                "end_line": 3,
+                "index": 1,
+                "line": 3,
+                "reads": [
+                  "load_alpha"
+                ],
+                "source": "alpha = load_alpha",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  18
+                ],
+                "writes": [
+                  "alpha"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "beta",
+                    "load_beta"
+                  ]
+                ],
+                "end_line": 5,
+                "index": 2,
+                "line": 5,
+                "reads": [
+                  "load_beta"
+                ],
+                "source": "beta = load_beta",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  16
+                ],
+                "writes": [
+                  "beta"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "gamma",
+                    "load_gamma"
+                  ]
+                ],
+                "end_line": 7,
+                "index": 3,
+                "line": 7,
+                "reads": [
+                  "load_gamma"
+                ],
+                "source": "gamma = load_gamma",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  18
+                ],
+                "writes": [
+                  "gamma"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "delta",
+                    "load_delta"
+                  ]
+                ],
+                "end_line": 9,
+                "index": 4,
+                "line": 9,
+                "reads": [
+                  "load_delta"
+                ],
+                "source": "delta = load_delta",
+                "span": [
+                  9,
+                  0,
+                  9,
+                  18
+                ],
+                "writes": [
+                  "delta"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [],
+                "end_line": 13,
+                "index": 5,
+                "line": 13,
+                "reads": [
+                  "payload"
+                ],
+                "source": "consume(payload)",
+                "span": [
+                  13,
+                  0,
+                  13,
+                  16
+                ],
+                "writes": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
