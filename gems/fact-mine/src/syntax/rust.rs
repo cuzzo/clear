@@ -404,6 +404,134 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn test_rust_behavior_state_declaration_and_spans() {
+        let behavior = RustNormalizedBehavior;
+
+        let field_node = Node {
+            r#type: "struct_field".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "type_identifier".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 12,
+                    first_column: 4,
+                    last_lineno: 12,
+                    last_column: 8,
+                    text: "my_field".to_string(),
+                })),
+                Child::Node(Box::new(Node {
+                    r#type: "type_identifier".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 12,
+                    first_column: 10,
+                    last_lineno: 12,
+                    last_column: 15,
+                    text: "usize".to_string(),
+                })),
+            ],
+            first_lineno: 12,
+            first_column: 4,
+            last_lineno: 12,
+            last_column: 15,
+            text: "my_field: usize".to_string(),
+        };
+        let decl = behavior.state_declaration_from_node(&field_node, "Widget").unwrap();
+        assert_eq!(decl.field, "my_field");
+        assert_eq!(decl.r#type, Some("usize".to_string()));
+
+        let colon_field_node = Node {
+            r#type: "struct_field".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "type_identifier".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 12,
+                    first_column: 4,
+                    last_lineno: 12,
+                    last_column: 8,
+                    text: "my_field".to_string(),
+                })),
+                Child::Node(Box::new(Node {
+                    r#type: "type_identifier".to_string(),
+                    children: Vec::new(),
+                    first_lineno: 12,
+                    first_column: 10,
+                    last_lineno: 12,
+                    last_column: 11,
+                    text: ":".to_string(),
+                })),
+            ],
+            first_lineno: 12,
+            first_column: 4,
+            last_lineno: 12,
+            last_column: 11,
+            text: "my field: :".to_string(),
+        };
+        assert!(behavior.state_declaration_from_node(&colon_field_node, "Widget").is_none());
+
+        let raw_node = Node {
+            r#type: "struct_field".to_string(),
+            children: Vec::new(),
+            first_lineno: 13,
+            first_column: 4,
+            last_lineno: 13,
+            last_column: 26,
+            text: "pub field_name: FieldType".to_string(),
+        };
+        let decl2 = behavior.state_declaration_from_node(&raw_node, "Widget").unwrap();
+        assert_eq!(decl2.field, "field_name");
+        assert_eq!(decl2.r#type, Some("FieldType".to_string()));
+
+        let empty_raw_node = Node {
+            r#type: "struct_field".to_string(),
+            children: Vec::new(),
+            first_lineno: 13,
+            first_column: 4,
+            last_lineno: 13,
+            last_column: 15,
+            text: "field_name:".to_string(),
+        };
+        assert!(behavior.state_declaration_from_node(&empty_raw_node, "Widget").is_none());
+
+        let invalid_node = Node {
+            r#type: "struct_field".to_string(),
+            children: Vec::new(),
+            first_lineno: 14,
+            first_column: 4,
+            last_lineno: 14,
+            last_column: 15,
+            text: "1foo: Bar".to_string(),
+        };
+        assert!(behavior.state_declaration_from_node(&invalid_node, "Widget").is_none());
+
+        let multiline_node = Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 20,
+            first_column: 0,
+            last_lineno: 22,
+            last_column: 1,
+            text: "\n    struct Widget {\n}".to_string(),
+        };
+        let span = behavior.owner_name_span("Widget", &multiline_node, [20, 0, 22, 1]).unwrap();
+        assert_eq!(span[0], 21);
+        assert_eq!(span[2], 22);
+
+        let end_offset_zero_node = Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 30,
+            first_column: 5,
+            last_lineno: 31,
+            last_column: 17,
+            text: "}\n    struct Widget".to_string(),
+        };
+        let span2 = behavior.owner_name_span("Widget", &end_offset_zero_node, [30, 5, 31, 17]).unwrap();
+        assert_eq!(span2[0], 31);
+        assert_eq!(span2[2], 30);
+    }
 }
 
 fn is_simple_name(name: &str) -> bool {
