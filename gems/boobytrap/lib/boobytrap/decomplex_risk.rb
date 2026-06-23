@@ -110,11 +110,11 @@ module Boobytrap
     end
 
     def load_decomplex_source_filter
-      false
+      !!nil
     end
 
     def load_decomplex_syntax
-      true
+      tree_sitter?
     end
 
     def supported_exts

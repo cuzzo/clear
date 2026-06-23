@@ -57,22 +57,29 @@ module SlopCop
     def flatten_detectors(detectors, prefix = nil)
       flat = {}
       detectors.each do |k, v|
-        if v.is_a?(Hash) && !v.key?("sites") && !v.key?("spans") && !v.empty?
+        if nested_detector_group?(v)
           v.each do |sub_k, sub_v|
-            # Special case to distinguish exact vs semantic alias clusters
-            if k == "semantic_alias" && sub_k == "alias_clusters"
-              flat["semantic_predicate_aliases"] = sub_v
-            elsif k == "predicate_alias" && sub_k == "alias_clusters"
-              flat["exact_predicate_aliases"] = sub_v
-            else
-              flat[sub_k] = sub_v
-            end
+            flat[mapped_detector_key(k, sub_k)] = sub_v
           end
         else
           flat[k] = v
         end
       end
       flat
+    end
+
+    def nested_detector_group?(v)
+      v.is_a?(Hash) && !v.key?("sites") && !v.key?("spans") && !v.empty?
+    end
+
+    def mapped_detector_key(k, sub_k)
+      if k == "semantic_alias" && sub_k == "alias_clusters"
+        "semantic_predicate_aliases"
+      elsif k == "predicate_alias" && sub_k == "alias_clusters"
+        "exact_predicate_aliases"
+      else
+        sub_k
+      end
     end
 
     def index(abs_files)
