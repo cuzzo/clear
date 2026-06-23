@@ -119,8 +119,8 @@ end
 source_files = source_files.uniq.sort
 
 # 5. Print Markdown Report
-puts "\n| File | Executable LoC | Unit Cov % (Lines) | Integration Cov % (Lines) | Total Cov % (Lines) |"
-puts "| --- | --- | --- | --- | --- |"
+puts "\n| File | Executable LoC (Union) | Integration Cov % (Union) | Prod LoC | Prod Integration Cov % | Missed Prod Lines |"
+puts "| --- | --- | --- | --- | --- | --- |"
 
 source_files.each do |file|
   # Relpath for nice display
@@ -137,15 +137,22 @@ source_files.each do |file|
     next
   end
 
-  unit_hits = all_lines.count { |l| (unit_file_cov[l] || 0) > 0 }
   int_hits = all_lines.count { |l| (int_file_cov[l] || 0) > 0 }
-  union_hits = all_lines.count { |l| (unit_file_cov[l] || 0) > 0 || (int_file_cov[l] || 0) > 0 }
-
-  unit_pct = (unit_hits.to_f / loc * 100).round(2)
   int_pct = (int_hits.to_f / loc * 100).round(2)
-  union_pct = (union_hits.to_f / loc * 100).round(2)
 
-  puts "| `#{rel_file}` | #{loc} | #{unit_pct}% (#{unit_hits}/#{loc}) | #{int_pct}% (#{int_hits}/#{loc}) | #{union_pct}% (#{union_hits}/#{loc}) |"
+  prod_loc = int_file_cov.keys.size
+  if prod_loc > 0
+    prod_int_hits = int_file_cov.values.count { |hits| hits > 0 }
+    prod_int_pct = (prod_int_hits.to_f / prod_loc * 100).round(2)
+    prod_int_str = "#{prod_int_pct}% (#{prod_int_hits}/#{prod_loc})"
+    missed_lines = int_file_cov.select { |l, hits| hits == 0 }.keys.sort
+    missed_str = missed_lines.empty? ? "None" : missed_lines.join(", ")
+  else
+    prod_int_str = "N/A"
+    missed_str = "N/A"
+  end
+
+  puts "| `#{rel_file}` | #{loc} | #{int_pct}% (#{int_hits}/#{loc}) | #{prod_loc} | #{prod_int_str} | #{missed_str} |"
 end
 
 # Cleanup temporary files

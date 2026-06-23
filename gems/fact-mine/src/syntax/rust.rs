@@ -113,11 +113,6 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         }
     }
 
-    fn owner_name_from_text(&self, node: &Node) -> Option<String> {
-        owner_after_keyword(&node.text, "impl")
-            .or_else(|| owner_after_keyword(&node.text, "struct"))
-    }
-
     fn declarative_owner(&self, node: &Node, _current_owner: &str) -> Option<NormalizedOwner> {
         (node.r#type == "STRUCT_ITEM")
             .then(|| owner_after_keyword(&node.text, "struct"))
@@ -128,12 +123,8 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
             })
     }
 
-    fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
-        if node.r#type == "STRUCT_ITEM" {
-            Some(default_span)
-        } else {
-            keyword_block_span(node, "struct").or(Some(default_span))
-        }
+    fn owner_name_span(&self, _name: &str, _node: &Node, default_span: Span) -> Option<Span> {
+        Some(default_span)
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
@@ -152,10 +143,6 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         let before_colon = text.split_once(':')?.0.trim();
         let name = before_colon.strip_prefix("mut ").unwrap_or(before_colon);
         simple_identifier(name).then(|| name.to_string())
-    }
-
-    fn function_name_from_text(&self, text: &str) -> Option<String> {
-        function_name_after_fn(text)
     }
 
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
@@ -235,27 +222,6 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
                 }
             }
         }
-        let text = node.text.trim();
-        // Rust struct field: `name: Type` or `pub name: Type`
-        let text = text.strip_prefix("pub ").unwrap_or(text);
-        if let Some((name, rest)) = text.split_once(':') {
-            let name = name.trim();
-            if !name.is_empty() && !name.contains(' ') && !name.contains('.')
-                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-            {
-                let type_text = rest.trim().to_string();
-                if !type_text.is_empty() {
-                    return Some(StateDeclaration {
-                        field: name.to_string(),
-                        owner: String::new(),
-                        r#type: Some(type_text),
-                        file: String::new(),
-                        line: node.first_lineno,
-                        span: span(node),
-                    });
-                }
-            }
-        }
         None
     }
 }
@@ -281,45 +247,11 @@ pub(crate) fn simple_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-pub(crate) fn function_name_after_fn(text: &str) -> Option<String> {
-    let source = text.trim_start();
-    let source = source.strip_prefix("pub ").unwrap_or(source).trim_start();
-    let rest = source.strip_prefix("fn ")?;
-    rest.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-        .find(|part| !part.is_empty())
-        .map(str::to_string)
-}
-
 fn owner_after_keyword(text: &str, keyword: &str) -> Option<String> {
     let rest = text.split_once(keyword)?.1.trim_start();
     rest.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .find(|part| !part.is_empty())
         .map(str::to_string)
-}
-
-fn keyword_block_span(node: &Node, keyword: &str) -> Option<Span> {
-    let lines = node.text.lines().collect::<Vec<_>>();
-    let start_offset = lines.iter().position(|line| line.contains(keyword))?;
-    let end_offset = lines
-        .iter()
-        .rposition(|line| line.contains('}'))
-        .unwrap_or(lines.len() - 1);
-    let start_line = node.first_lineno + start_offset;
-    let end_line = node.first_lineno + end_offset;
-    let start_column = if start_offset == 0 {
-        node.first_column
-    } else {
-        0
-    } + lines[start_offset].find(keyword).unwrap_or(0);
-    let end_column = if end_offset == 0 {
-        node.first_column
-    } else {
-        0
-    } + lines[end_offset]
-        .find('}')
-        .unwrap_or(lines[end_offset].len())
-        + 1;
-    Some([start_line, start_column, end_line, end_column])
 }
 
 #[cfg(test)]
@@ -339,30 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn rust_behavior_extracts_fallback_owner_and_function_names() {
-        let behavior = RustNormalizedBehavior;
-        let impl_node = node("CLASS", "impl Widget {}");
-        let struct_node = node("CLASS", "struct Widget {}");
-
-        assert_eq!(
-            behavior.owner_name_from_text(&impl_node).as_deref(),
-            Some("Widget")
-        );
-        assert_eq!(
-            behavior.owner_name_from_text(&struct_node).as_deref(),
-            Some("Widget")
-        );
-        assert_eq!(
-            behavior.function_name_from_text("pub fn parse_value(input: &str)"),
-            Some("parse_value".to_string())
-        );
-        assert_eq!(
-            function_name_after_fn("fn local_helper()"),
-            Some("local_helper".to_string())
-        );
-    }
-
-    #[test]
     fn rust_behavior_classifies_fallback_keywords_and_owner_spans() {
         let behavior = RustNormalizedBehavior;
         let impl_node = node("CLASS", "trait Widget {}");
@@ -371,7 +279,7 @@ mod tests {
         assert_eq!(behavior.owner_kind(&impl_node, "class"), "class");
         assert_eq!(
             behavior.owner_name_span("Widget", &struct_node, [1, 0, 1, 1]),
-            Some([10, 6, 12, 1,])
+            Some([1, 0, 1, 1])
         );
         assert!(behavior.local_flow_declaration_keyword("let"));
         assert!(behavior.local_flow_keyword("match"));
@@ -399,10 +307,6 @@ mod tests {
         assert!(behavior.terminating_call_message("panic"));
         assert!(!behavior.terminating_call_message("recover"));
         assert_eq!(owner_after_keyword("enum Widget {}", "struct"), None);
-        assert_eq!(
-            keyword_block_span(&node("CLASS", "enum Widget {}"), "struct"),
-            None
-        );
     }
 
     #[test]
@@ -471,40 +375,6 @@ mod tests {
         };
         assert!(behavior.state_declaration_from_node(&colon_field_node, "Widget").is_none());
 
-        let raw_node = Node {
-            r#type: "struct_field".to_string(),
-            children: Vec::new(),
-            first_lineno: 13,
-            first_column: 4,
-            last_lineno: 13,
-            last_column: 26,
-            text: "pub field_name: FieldType".to_string(),
-        };
-        let decl2 = behavior.state_declaration_from_node(&raw_node, "Widget").unwrap();
-        assert_eq!(decl2.field, "field_name");
-        assert_eq!(decl2.r#type, Some("FieldType".to_string()));
-
-        let empty_raw_node = Node {
-            r#type: "struct_field".to_string(),
-            children: Vec::new(),
-            first_lineno: 13,
-            first_column: 4,
-            last_lineno: 13,
-            last_column: 15,
-            text: "field_name:".to_string(),
-        };
-        assert!(behavior.state_declaration_from_node(&empty_raw_node, "Widget").is_none());
-
-        let invalid_node = Node {
-            r#type: "struct_field".to_string(),
-            children: Vec::new(),
-            first_lineno: 14,
-            first_column: 4,
-            last_lineno: 14,
-            last_column: 15,
-            text: "1foo: Bar".to_string(),
-        };
-        assert!(behavior.state_declaration_from_node(&invalid_node, "Widget").is_none());
 
         let multiline_node = Node {
             r#type: "CLASS".to_string(),
@@ -516,8 +386,7 @@ mod tests {
             text: "\n    struct Widget {\n}".to_string(),
         };
         let span = behavior.owner_name_span("Widget", &multiline_node, [20, 0, 22, 1]).unwrap();
-        assert_eq!(span[0], 21);
-        assert_eq!(span[2], 22);
+        assert_eq!(span, [20, 0, 22, 1]);
 
         let end_offset_zero_node = Node {
             r#type: "CLASS".to_string(),
@@ -529,8 +398,7 @@ mod tests {
             text: "}\n    struct Widget".to_string(),
         };
         let span2 = behavior.owner_name_span("Widget", &end_offset_zero_node, [30, 5, 31, 17]).unwrap();
-        assert_eq!(span2[0], 31);
-        assert_eq!(span2[2], 30);
+        assert_eq!(span2, [30, 5, 31, 17]);
     }
 }
 

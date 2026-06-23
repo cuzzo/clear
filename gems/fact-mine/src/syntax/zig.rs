@@ -72,15 +72,6 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         _node: &Node,
         default_span: Span,
     ) -> Vec<NormalizedStateWrite> {
-        if let Some(field) = field.and_then(|field| field.strip_prefix("self.")) {
-            if simple_identifier(field) {
-                return vec![NormalizedStateWrite {
-                    receiver: "self".to_string(),
-                    field: field.to_string(),
-                    span: default_span,
-                }];
-            }
-        }
         let Some(field) = field.and_then(|field| field.strip_prefix('.')) else {
             return Vec::new();
         };
@@ -237,14 +228,6 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         }
     }
 
-    fn function_name_from_text(&self, text: &str) -> Option<String> {
-        let source = text.trim_start();
-        let source = source.strip_prefix("pub ").unwrap_or(source).trim_start();
-        let rest = source.strip_prefix("fn ")?;
-        rest.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .find(|part| !part.is_empty())
-            .map(str::to_string)
-    }
 
     fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
         let before_colon = param.split_once(':')?.0.trim();
@@ -408,14 +391,6 @@ mod tests {
     fn test_zig_behavior_uncovered_paths() {
         let behavior = ZigNormalizedBehavior;
 
-        let writes = behavior.local_assignment_writes(Some("self.my_field"), &node("ASSIGN", ""), [1, 2, 3, 4]);
-        assert_eq!(writes.len(), 1);
-        assert_eq!(writes[0].receiver, "self");
-        assert_eq!(writes[0].field, "my_field");
-
-        let invalid_writes = behavior.local_assignment_writes(Some("self.1field"), &node("ASSIGN", ""), [1, 2, 3, 4]);
-        assert!(invalid_writes.is_empty());
-
         let reads_no_dot = behavior.literal_state_reads(&node("READ", "val"), "val", [1, 2, 3, 4], "");
         assert!(reads_no_dot.is_empty());
 
@@ -441,8 +416,6 @@ mod tests {
         let mut container_node_no_lvar = node("CONTAINER_FIELD", "");
         container_node_no_lvar.children = vec![Child::Node(Box::new(node("NOT_LVAR", "")))];
         assert!(behavior.state_declaration_from_node(&container_node_no_lvar, "Widget").is_none());
-
-        assert_eq!(behavior.function_name_from_text("pub fn setup_device()"), Some("setup_device".to_string()));
 
         assert!(behavior.local_flow_declaration_keyword("const"));
         assert!(behavior.local_flow_declaration_keyword("var"));
