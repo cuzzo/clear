@@ -60,7 +60,6 @@ module SlopCop
 
     def to_markdown
       gaps = @r[:top_gaps]
-      g = @r[:grand]
       o = +"# SlopCop Report\n\n"
       o << "> Top true coverage gaps, ranked by fix-churn x structural\n" \
            "> deviance. Every dark arm is categorized; only GENUINE\n" \
@@ -123,14 +122,15 @@ module SlopCop
         end
       end
 
+      g = @r[:grand]
       o << "## Category Summary\n"
       o << "_#{g} dark arms; only #{gaps.size} are genuine gaps. " \
            "The rest are not test targets:_\n\n"
       o << "| category | arms | % | what it means |\n|---|---|---|---|\n"
       Rollup::CATS.each do |c|
-        n = @r[:totals][c].to_i
-        pct = g.zero? ? 0 : (100.0 * n / g).round(1)
-        o << "| #{c} | #{n} | #{pct}% | #{Rollup::ACTION[c]} |\n"
+        cat_total = @r[:totals][c].to_i
+        pct = g.zero? ? 0 : (100.0 * cat_total / g).round(1)
+        o << "| #{c} | #{cat_total} | #{pct}% | #{Rollup::ACTION[c]} |\n"
       end
 
       o << "\n## Run Summary\n"

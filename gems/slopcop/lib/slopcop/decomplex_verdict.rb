@@ -85,39 +85,51 @@ module SlopCop
     def index(abs_files)
       return blank(:absent) if abs_files.empty?
 
-      tmp = nil
-      data = if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
-               JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
-             else
-               require "tempfile"
-               tmp = Tempfile.new(["decomplex-facts", ".json"])
-               tmp.close
-               
-               bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
-               unless ::File.executable?(bin)
-                 return blank(:absent)
-               end
-               
-               ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
-               return blank(:error) unless ok
-               
-               JSON.parse(File.read(tmp.path))
-             end
-      detectors = flatten_detectors(data["detectors"] || {})
+      data = load_decomplex_facts(abs_files)
+      return blank(data[:status]) if data[:status] != :ok
+
+      detectors = flatten_detectors(data[:detectors] || {})
       
       span_recs = Hash.new { |h, k| h[k] = [] }      # file => [rec...]
       m_all  = Hash.new { |h, k| h[k] = {} }         # [f,m] => {title=>1}
       m_spur = Hash.new(false)                       # [f,m] => Bool
       m_devw = Hash.new { |h, k| h[k] = {} }         # [f,m] => {title=>w}
 
-      detectors.each do |detector, items|
-        if detector == "semantic_predicate_aliases"
-          title, tier = ["Semantic Predicate Aliases", 1]
-        elsif detector == "exact_predicate_aliases"
-          title, tier = ["Exact Predicate Aliases", 1]
-        else
-          title, tier = DETECTOR_MAP.fetch(detector, [detector.to_s, 3])
+      process_detectors(detectors, span_recs, m_all, m_spur, m_devw)
+      
+      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw, status: :ok }
+    rescue StandardError => e
+      warn "SlopCop::DecomplexVerdict error: #{e.message}"
+      blank(:error)
+    end
+
+    def load_decomplex_facts(abs_files)
+      if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
+        { detectors: JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))["detectors"], status: :ok }
+      else
+        begin
+          require "tempfile"
+          tmp = Tempfile.new(["decomplex-facts", ".json"])
+          tmp.close
+          
+          bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
+          unless ::File.executable?(bin)
+            return { status: :absent }
+          end
+          
+          ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
+          return { status: :error } unless ok
+          
+          { detectors: JSON.parse(File.read(tmp.path))["detectors"], status: :ok }
+        ensure
+          tmp&.unlink if tmp
         end
+      end
+    end
+
+    def process_detectors(detectors, span_recs, m_all, m_spur, m_devw)
+      detectors.each do |detector, items|
+        title, tier = detector_title_and_tier(detector)
         w = [1, 4 - tier].max # simple tier weight: 1=>3, 2=>2, 3=>1
         spur = SPURIOUS.include?(title)
         dev  = DEVIANCE.include?(title)
@@ -138,13 +150,17 @@ module SlopCop
                                spurious: spur, devw: (dev ? w : 0) }
         end
       end
-      
-      { spans: span_recs, m_all: m_all, m_spur: m_spur, m_devw: m_devw, status: :ok }
-    rescue StandardError => e
-      warn "SlopCop::DecomplexVerdict error: #{e.message}"
-      blank(:error)
-    ensure
-      tmp&.unlink
+    end
+
+    def detector_title_and_tier(detector)
+      case detector
+      when "semantic_predicate_aliases"
+        ["Semantic Predicate Aliases", 1]
+      when "exact_predicate_aliases"
+        ["Exact Predicate Aliases", 1]
+      else
+        DETECTOR_MAP.fetch(detector, [detector.to_s, 3])
+      end
     end
 
     def extract_sites(payload)
