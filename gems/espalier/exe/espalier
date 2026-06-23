@@ -12,7 +12,8 @@ options = {
   nil_kill: nil,
   risk: nil,
   manifest: nil,
-  exclude: []
+  exclude: [],
+  fact_mine: nil
 }
 
 def report_link_base(output)
@@ -49,7 +50,13 @@ OptionParser.new do |opts|
   opts.on("--exclude PATTERN", "Exclude a path/glob from directory scans. May be repeated.") do |pattern|
     options[:exclude] << pattern
   end
+
+  opts.on("--fact-mine FILE", "Use previously mined fact file") do |f|
+    options[:fact_mine] = f
+  end
 end.parse!
+
+ENV["FACT_MINE_FACTS_FILE"] = options[:fact_mine] if options[:fact_mine]
 
 if options[:manifest]
   unless File.exist?(options[:manifest])

@@ -3,7 +3,6 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SemanticAliasReport {
@@ -56,20 +55,21 @@ pub fn scan_documents(documents: &[Document]) -> SemanticAliasReport {
     let mut preds = Vec::new();
     let mut uses = Vec::new();
     for document in documents {
+        let dialect = crate::decomplex::dialect::dialect_for_document(document);
         for predicate in &document.predicate_aliases {
             if !semantic_predicate_definition(&predicate.name, &predicate.body) {
                 continue;
             }
             preds.push(Pred {
                 name: predicate.name.clone(),
-                canon: canon(&predicate.body),
+                canon: canon(&predicate.body, &*dialect),
                 file: predicate.file.clone(),
                 line: predicate.line,
                 span: predicate.span,
             });
         }
         uses.extend(document.comparison_uses.iter().map(|comparison| Use {
-            canon: canon(&comparison.raw),
+            canon: canon(&comparison.raw, &*dialect),
             file: comparison.file.clone(),
             defn: comparison.function.clone(),
             line: comparison.line,
@@ -80,20 +80,9 @@ pub fn scan_documents(documents: &[Document]) -> SemanticAliasReport {
     Report::new(preds, uses).findings()
 }
 
-fn canon(text: &str) -> String {
-    let (mut t, _) = canon_polarity(text);
-    t = t.strip_prefix("self.").unwrap_or(&t).to_string();
-    t = t.strip_prefix('@').unwrap_or(&t).to_string();
-
-    // Ruby: t = t.sub(/\A[A-Za-z_]\w*(?:\([^)]*\))?\.(?=[A-Za-z_]\w*\s*(==|!=|\.))/, "")
-    static RECEIVER_PREFIX: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RECEIVER_PREFIX.get_or_init(|| {
-        regex::Regex::new(r"^[A-Za-z_]\w*(?:\([^)]*\))?\.(?P<rest>[A-Za-z_]\w*\s*(?:==|!=|\.))")
-            .expect("semantic-alias receiver prefix regex")
-    });
-    t = re.replace(&t, "$rest").to_string();
-
-    t.split_whitespace().collect::<Vec<_>>().join(" ")
+fn canon(text: &str, dialect: &dyn crate::decomplex::dialect::Dialect) -> String {
+    let (t, _) = canon_polarity(text);
+    dialect.canonicalize_predicate(&t)
 }
 
 fn canon_polarity(text: &str) -> (String, bool) {

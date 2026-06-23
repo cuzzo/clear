@@ -78,19 +78,24 @@ module SlopCop
     def index(abs_files)
       return blank(:absent) if abs_files.empty?
 
-      require "tempfile"
-      tmp = Tempfile.new(["decomplex-facts", ".json"])
-      tmp.close
-      
-      bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
-      unless ::File.executable?(bin)
-        return blank(:absent)
-      end
-      
-      ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
-      return blank(:error) unless ok
-      
-      data = JSON.parse(File.read(tmp.path))
+      tmp = nil
+      data = if ENV["DECOMPLEX_FACTS_FILE"] && !ENV["DECOMPLEX_FACTS_FILE"].empty?
+               JSON.parse(File.read(ENV["DECOMPLEX_FACTS_FILE"]))
+             else
+               require "tempfile"
+               tmp = Tempfile.new(["decomplex-facts", ".json"])
+               tmp.close
+               
+               bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
+               unless ::File.executable?(bin)
+                 return blank(:absent)
+               end
+               
+               ok = system(bin, "facts", "--output", tmp.path, *abs_files, err: File::NULL)
+               return blank(:error) unless ok
+               
+               JSON.parse(File.read(tmp.path))
+             end
       detectors = flatten_detectors(data["detectors"] || {})
       
       span_recs = Hash.new { |h, k| h[k] = [] }      # file => [rec...]

@@ -47,6 +47,7 @@ pub fn scan_documents_with_summaries(
     let assignment_maps = build_assignment_maps(&methods);
 
     for document in documents {
+        let dialect = crate::decomplex::dialect::dialect_for_document(document);
         let eliminable_guard_calls = eliminable_guard_call_keys(document);
         for call in &document.call_sites {
             if call.receiver.is_empty() {
@@ -57,7 +58,7 @@ pub fn scan_documents_with_summaries(
                 .get(&(call.file.clone(), call.function.clone()))
                 .unwrap_or(&empty);
             if essential_dispatch(call) && !eliminable_guard_calls.contains(&call_key(call)) {
-                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0) {
+                if let Some(contract) = contract_of(&call.receiver, assignment_map, 0, &*dialect) {
                     dispatch.push(hit(contract, call));
                 }
             }
@@ -71,7 +72,7 @@ pub fn scan_documents_with_summaries(
             let assignment_map = assignment_maps
                 .get(&(effect.file.clone(), effect.function.clone()))
                 .unwrap_or(&empty);
-            if let Some(contract) = contract_of(&effect.detail, assignment_map, 0) {
+            if let Some(contract) = contract_of(&effect.detail, assignment_map, 0, &*dialect) {
                 guard.push(Hit {
                     contract,
                     file: effect.file.clone(),
@@ -150,9 +151,11 @@ fn build_assignment_maps(
 }
 
 fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String> {
+    let dialect = crate::decomplex::dialect::dialect_for_method(method);
+
     local_flow::local_contract_assignments(method)
         .into_iter()
-        .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0).map(|c| (name, c)))
+        .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0, &*dialect).map(|c| (name, c)))
         .collect()
 }
 
@@ -160,6 +163,7 @@ fn contract_of(
     receiver: &str,
     assignment_map: &BTreeMap<String, String>,
     depth: usize,
+    dialect: &dyn crate::decomplex::dialect::Dialect,
 ) -> Option<String> {
     let source = receiver.trim();
     if source.is_empty() || depth >= 8 {
@@ -169,7 +173,7 @@ fn contract_of(
     if let Some(mapped) = assignment_map.get(source) {
         return Some(mapped.clone());
     }
-    if source.starts_with('@') {
+    if dialect.is_ivar(source) {
         return Some(source.to_string());
     }
 

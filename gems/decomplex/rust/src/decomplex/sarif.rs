@@ -157,34 +157,79 @@ pub fn json_safe_value(value: Value) -> Value {
 }
 
 fn compact_value(value: Value) -> Value {
+    enum State {
+        Pending(Value),
+        PostObject { keys: Vec<String> },
+        PostArray { len: usize },
+    }
+
+    let mut state_stack = vec![State::Pending(value)];
+    let mut results = Vec::new();
+
+    while let Some(state) = state_stack.pop() {
+        match state {
+            State::Pending(val) => {
+                match val {
+                    Value::Object(obj) => {
+                        let mut keys = Vec::new();
+                        let mut vals = Vec::new();
+                        for (k, v) in obj {
+                            keys.push(k);
+                            vals.push(v);
+                        }
+                        state_stack.push(State::PostObject { keys });
+                        for v in vals.into_iter().rev() {
+                            state_stack.push(State::Pending(v));
+                        }
+                    }
+                    Value::Array(arr) => {
+                        let len = arr.len();
+                        state_stack.push(State::PostArray { len });
+                        for v in arr.into_iter().rev() {
+                            state_stack.push(State::Pending(v));
+                        }
+                    }
+                    other => {
+                        results.push(other);
+                    }
+                }
+            }
+            State::PostObject { keys } => {
+                let mut out = Map::new();
+                for key in keys.into_iter().rev() {
+                    let val = results.pop().unwrap();
+                    if !is_empty_value(&val) {
+                        out.insert(key, val);
+                    }
+                }
+                results.push(Value::Object(out));
+            }
+            State::PostArray { len } => {
+                let mut items = Vec::new();
+                for _ in 0..len {
+                    items.push(results.pop().unwrap());
+                }
+                items.reverse();
+                results.push(Value::Array(items));
+            }
+        }
+    }
+
+    results.pop().unwrap_or(Value::Null)
+}
+
+fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Object(object) => compact_object(object),
-        other => other,
+        Value::Null => true,
+        Value::Array(items) => items.is_empty(),
+        Value::Object(object) => object.is_empty(),
+        Value::String(text) => text.is_empty(),
+        _ => false,
     }
 }
 
 fn compact_object(object: Map<String, Value>) -> Value {
-    let mut out = Map::new();
-    for (key, value) in object {
-        if value.is_null() {
-            continue;
-        }
-        let value = match value {
-            Value::Object(object) => compact_object(object),
-            Value::Array(items) => Value::Array(items.into_iter().map(compact_value).collect()),
-            other => other,
-        };
-        let empty = match &value {
-            Value::Array(items) => items.is_empty(),
-            Value::Object(object) => object.is_empty(),
-            Value::String(text) => text.is_empty(),
-            _ => false,
-        };
-        if !empty {
-            out.insert(key, value);
-        }
-    }
-    Value::Object(out)
+    compact_value(Value::Object(object))
 }
 
 fn unique_rules(rules: Vec<Value>) -> Vec<Value> {

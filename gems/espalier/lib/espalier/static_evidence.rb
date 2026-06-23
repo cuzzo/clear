@@ -149,6 +149,11 @@ module Espalier
       files = target_files
       return empty_evidence if files.empty?
 
+      if ENV["FACT_MINE_FACTS_FILE"] && !ENV["FACT_MINE_FACTS_FILE"].empty?
+        facts_by_file = JSON.parse(File.read(ENV["FACT_MINE_FACTS_FILE"]))
+        return build_from_rust_facts(facts_by_file, files)
+      end
+
       profile = @include_annotations ? "nil-kill" : "espalier"
       tmp = Tempfile.new(["espalier-rust-facts", ".json"])
       tmp.close
@@ -160,7 +165,7 @@ module Espalier
       facts_by_file = JSON.parse(File.read(tmp.path))
       build_from_rust_facts(facts_by_file, files)
     ensure
-      tmp&.unlink
+      tmp&.unlink if defined?(tmp) && tmp
     end
 
     private
@@ -403,6 +408,7 @@ module Espalier
     end
 
     def ruby_annotation_type_definitions(files)
+      return [] if ENV["FACT_MINE_FACTS_FILE"] && !ENV["FACT_MINE_FACTS_FILE"].empty?
       return [] unless @include_annotations
       return [] unless ruby_annotation_index?(files)
 

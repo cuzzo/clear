@@ -90,7 +90,7 @@ end
 
 def run_report(args)
   opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
-           json: nil, sarif: nil, top: 50, ffi: [], diagnostic: [], files: nil, mutation: nil, exclude: [] }
+           json: nil, sarif: nil, top: 50, ffi: [], diagnostic: [], files: nil, mutation: nil, exclude: [], decomplex_facts: nil }
   until args.empty?
     a = args.shift
     case a
@@ -106,9 +106,12 @@ def run_report(args)
     when /\A--mutation=(.+)/ then opts[:mutation] = Regexp.last_match(1)
     when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
     when "--exclude"         then opts[:exclude] << args.shift.to_s
+    when /\A--decomplex-facts=(.+)/ then opts[:decomplex_facts] = Regexp.last_match(1)
     else usage
     end
   end
+
+  ENV["DECOMPLEX_FACTS_FILE"] = opts[:decomplex_facts] if opts[:decomplex_facts]
 
   opts[:files] = if opts[:files]
                    filter_files(opts[:files], opts[:repo], opts[:exclude])
@@ -133,7 +136,7 @@ end
 
 def run_dark_arms(args)
   opts = { repo: ".", coverage: "coverage/.resultset.json", json: nil,
-           ffi: [], diagnostic: [], files: nil, exclude: [] }
+           ffi: [], diagnostic: [], files: nil, exclude: [], decomplex_facts: nil }
   until args.empty?
     a = args.shift
     case a
@@ -145,9 +148,12 @@ def run_dark_arms(args)
     when /\A--diagnostic=(.+)/ then opts[:diagnostic] = Regexp.last_match(1).split(",")
     when /\A--exclude=(.+)/  then opts[:exclude] << Regexp.last_match(1)
     when "--exclude"         then opts[:exclude] << args.shift.to_s
+    when /\A--decomplex-facts=(.+)/ then opts[:decomplex_facts] = Regexp.last_match(1)
     else usage
     end
   end
+
+  ENV["DECOMPLEX_FACTS_FILE"] = opts[:decomplex_facts] if opts[:decomplex_facts]
 
   opts[:files] = if opts[:files]
                    filter_files(opts[:files], opts[:repo], opts[:exclude])

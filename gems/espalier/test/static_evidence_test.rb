@@ -135,6 +135,38 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "connect", mod[:methods].first[:name]
   end
 
+  def test_builds_using_fact_mine_facts_file
+    Dir.mktmpdir("espalier-mock", Dir.pwd) do |dir|
+      mock_file = File.join(dir, "mock.rb")
+      File.write(mock_file, "class MockClass; def mock_method; end; end")
+
+      mock_facts = {
+        "methods" => [
+          {
+            "name" => "mock_method",
+            "owner" => "MockClass",
+            "path" => "mock.rb",
+            "line" => 1,
+            "language" => "ruby"
+          }
+        ]
+      }
+      Tempfile.create(["mock-facts", ".json"]) do |f|
+        f.write(JSON.dump(mock_facts))
+        f.close
+        begin
+          ENV["FACT_MINE_FACTS_FILE"] = f.path
+          evidence = Espalier::StaticEvidence.build([mock_file], root: dir)
+          assert_equal "espalier_static_evidence", evidence["kind"]
+          assert_equal 1, evidence.dig("summary", "methods")
+          assert_equal "mock_method", evidence.dig("methods", 0, "name")
+        ensure
+          ENV["FACT_MINE_FACTS_FILE"] = nil
+        end
+      end
+    end
+  end
+
   private
 
   def loaded_nil_kill_features

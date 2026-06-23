@@ -810,7 +810,7 @@ fn extract_type_definitions(
         }
 
         // Only emit type definitions for languages that have typed signatures
-        let (return_type, params) = parse_typed_signature(&sig, language);
+        let (return_type, params) = SignatureParser::parse(&sig, language);
         if return_type.is_none() && params.is_empty() {
             continue;
         }
@@ -846,11 +846,7 @@ fn extract_type_definitions(
     // Type aliases from Document type_aliases map
     for (name, target) in &document.type_aliases {
         let ts = language_type_system(language);
-        let (owner, short_name) = if let Some(idx) = name.rfind("::") {
-            (name[..idx].to_string(), name[idx + 2..].to_string())
-        } else {
-            (String::new(), name.clone())
-        };
+        let (owner, short_name) = AliasResolver::resolve(name);
         out.push(TypeDefinition {
             id: [language, path, &owner, "type_alias", &short_name, "1", ts]
                 .join("\u{0}"),
@@ -950,15 +946,31 @@ fn extract_type_definitions(
     out
 }
 
-fn parse_typed_signature(
-    sig: &str,
-    language: &str,
-) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    match language {
-        "ruby" => parse_sorbet_signature(sig),
-        "python" => parse_python_signature(sig),
-        "typescript" | "javascript" => parse_typescript_signature(sig),
-        _ => (None, Vec::new()),
+struct SignatureParser;
+
+impl SignatureParser {
+    fn parse(
+        sig: &str,
+        language: &str,
+    ) -> (Option<String>, Vec<BTreeMap<String, String>>) {
+        match language {
+            "ruby" => parse_sorbet_signature(sig),
+            "python" => parse_python_signature(sig),
+            "typescript" | "javascript" => parse_typescript_signature(sig),
+            _ => (None, Vec::new()),
+        }
+    }
+}
+
+struct AliasResolver;
+
+impl AliasResolver {
+    fn resolve(name: &str) -> (String, String) {
+        if let Some(idx) = name.rfind("::") {
+            (name[..idx].to_string(), name[idx + 2..].to_string())
+        } else {
+            (String::new(), name.to_string())
+        }
     }
 }
 

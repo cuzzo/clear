@@ -1,4 +1,5 @@
 pub use fact_mine_rust::{parallel, syntax, syntax_oracle};
+pub mod dialect;
 #[cfg(test)]
 mod architecture_test;
 pub mod convergence;
