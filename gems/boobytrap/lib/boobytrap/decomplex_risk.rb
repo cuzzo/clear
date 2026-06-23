@@ -109,12 +109,19 @@ module Boobytrap
       tmp&.unlink
     end
 
-    def load_decomplex_source_filter
-      !!nil
-    end
-
     def load_decomplex_syntax
-      tree_sitter?
+      return true if defined?(Decomplex::Syntax)
+
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      if ::File.file?("#{sibling}.rb")
+        require sibling
+        return true
+      end
+
+      require "decomplex/syntax"
+      true
+    rescue LoadError
+      false
     end
 
     def supported_exts
@@ -127,7 +134,7 @@ module Boobytrap
 
 
     def tree_sitter?
-      true
+      load_decomplex_syntax
     end
 
     def source_file?(file, root:, parser: nil, exclude: [])

@@ -180,6 +180,21 @@ module Boobytrap
     end
 
     def to_markdown
+      o = markdown_header
+      o << markdown_prioritization
+      o << markdown_hotspots
+      o << markdown_dark_methods
+      o << markdown_state_branch_hotspots
+      o << markdown_blast_radius
+      o << markdown_lineage
+      o << markdown_unmeasured
+      o << markdown_summary
+      o
+    end
+
+    private
+
+    def markdown_header
       o = +"# Boobytrap Report\n\n"
       o << "> Defect-risk hotspots: recurring bug-fix locality " \
            "(bugspots, time-decayed) x branch-coverage gap.\n" \
@@ -201,8 +216,11 @@ module Boobytrap
       o << "- [Fixed But Unmeasured (#{@unmeasured.size})]" \
            "(#fixed-but-unmeasured-#{@unmeasured.size})\n"
       o << "- [Run Summary](#run-summary)\n\n"
+      o
+    end
 
-      o << "## Project Prioritization\n"
+    def markdown_prioritization
+      o = +"## Project Prioritization\n"
       if @ranked.empty?
         o << "_No hotspots: no fix-churn x coverage-gap overlap found._\n\n"
       else
@@ -214,30 +232,30 @@ module Boobytrap
              "branch gap=#{(top.gap * 100).round(1)}%).\n"
         o << "- #{near} file(s) are within 50% of the top score " \
              "(hotspot >= #{cutoff.round(4)}); triage those first.\n"
-        if (state_branch = @state_branch_hotspots.first)
+        if (first_state_hotspot = @state_branch_hotspots.first)
           o << "- Highest state-based branch hotspot: " \
-               "`#{state_branch[:file]}:#{state_branch[:method]}` " \
-               "(score=#{state_branch[:risk].round(2)}, " \
-               "state branches=#{state_branch[:decisions]}, " \
-               "fix_norm=#{state_branch[:fix_norm]}, " \
-               "branch gap=#{(state_branch[:branch_gap] * 100).round(1)}%).\n"
+               "`#{first_state_hotspot[:file]}:#{first_state_hotspot[:method]}` " \
+               "(score=#{first_state_hotspot[:risk].round(2)}, " \
+               "state branches=#{first_state_hotspot[:decisions]}, " \
+               "fix_norm=#{first_state_hotspot[:fix_norm]}, " \
+               "branch gap=#{(first_state_hotspot[:branch_gap] * 100).round(1)}%).\n"
         end
-        if (blast = @blast_radius.first)
-          o << "- Highest multi-file fix blast radius: `#{blast.file}` " \
-               "(score=#{blast.score}, avg files/fix=#{blast.avg_touched}, " \
-               "max=#{blast.max_touched}).\n"
+        if (first_blast_radius = @blast_radius.first)
+          o << "- Highest multi-file fix blast radius: `#{first_blast_radius.file}` " \
+               "(score=#{first_blast_radius.score}, avg files/fix=#{first_blast_radius.avg_touched}, " \
+               "max=#{first_blast_radius.max_touched}).\n"
         end
-        if (method = dark_methods.first)
+        if (first_dark_method = dark_methods.first)
           o << "- Highest empirical method risk: " \
-               "`#{method.file}:#{method.first_line}` `#{method.name}` " \
-               "(risk=#{method.risk.round(2)}, fix_norm=#{method.fix_norm}, " \
-               "verification=#{method.verification_status || 'not supplied'}, " \
-               "tests=#{method.test_exposure_status || 'not supplied'}).\n"
+               "`#{first_dark_method.file}:#{first_dark_method.first_line}` `#{first_dark_method.name}` " \
+               "(risk=#{first_dark_method.risk.round(2)}, fix_norm=#{first_dark_method.fix_norm}, " \
+               "verification=#{first_dark_method.verification_status || 'not supplied'}, " \
+               "tests=#{first_dark_method.test_exposure_status || 'not supplied'}).\n"
         end
-        if (unit = @lineage[:units].first)
-          o << "- Highest lineage unit risk: `#{unit.file}` `#{unit.name}` " \
-               "(risk=#{unit.risk_score.round(1)}, fixes=#{unit.fixes}, " \
-               "changes=#{unit.changes}, moves=#{unit.moves}).\n"
+        if (first_lineage_unit = @lineage[:units].first)
+          o << "- Highest lineage unit risk: `#{first_lineage_unit.file}` `#{first_lineage_unit.name}` " \
+               "(risk=#{first_lineage_unit.risk_score.round(1)}, fixes=#{first_lineage_unit.fixes}, " \
+               "changes=#{first_lineage_unit.changes}, moves=#{first_lineage_unit.moves}).\n"
         end
         unless @have_cov
           o << "- WARNING: no branch-coverage resultset supplied; " \
@@ -245,8 +263,11 @@ module Boobytrap
         end
         o << "\n"
       end
+      o
+    end
 
-      o << "## Hotspots (#{@ranked.size})\n"
+    def markdown_hotspots
+      o = +"## Hotspots (#{@ranked.size})\n"
       o << "_normalized fix-churn x branch-gap; highest = most likely " \
            "defect source._\n\n"
       if @ranked.empty?
@@ -261,8 +282,11 @@ module Boobytrap
         o << "\n- ...(+#{@ranked.size - @top} more)\n" if @ranked.size > @top
         o << "\n"
       end
+      o
+    end
 
-      o << "## Mostly Uncovered Methods (#{dark_method_count})\n"
+    def markdown_dark_methods
+      o = +"## Mostly Uncovered Methods (#{dark_method_count})\n"
       o << "_non-trivial methods (`>=5` executable lines) with very low line coverage; " \
            "risk = missed lines x gap, Decomplex detector score, " \
            "instance-state writes, dark branches, fix history, mutation " \
@@ -306,8 +330,11 @@ module Boobytrap
         o << "\n- ...(+#{dark_method_count - @top} more)\n" if dark_method_count > @top
         o << "\n"
       end
+      o
+    end
 
-      o << "## State-Based Branch Hotspots (#{@state_branch_hotspots.size})\n"
+    def markdown_state_branch_hotspots
+      o = +"## State-Based Branch Hotspots (#{@state_branch_hotspots.size})\n"
       o << "_Decomplex state-based branch density joined with fix-cache and branch coverage. " \
            "These are branches over mutable/object state that are uncovered and/or historically fixed._\n\n"
       if @state_branch_hotspots.empty?
@@ -324,8 +351,11 @@ module Boobytrap
         o << "\n- ...(+#{@state_branch_hotspots.size - @top} more)\n" if @state_branch_hotspots.size > @top
         o << "\n"
       end
+      o
+    end
 
-      o << "## Multi-File Fix Blast Radius (#{@blast_radius.size})\n"
+    def markdown_blast_radius
+      o = +"## Multi-File Fix Blast Radius (#{@blast_radius.size})\n"
       o << "_Time-decayed fix commits where a file repeatedly changes with many other files. " \
            "High rows are bug fixes whose blast radius is cross-module, not local._\n\n"
       if @blast_radius.empty?
@@ -341,8 +371,11 @@ module Boobytrap
         o << "\n- ...(+#{@blast_radius.size - @top} more)\n" if @blast_radius.size > @top
         o << "\n"
       end
+      o
+    end
 
-      o << "## Lineage Unit Risk (#{@lineage[:units].size})\n"
+    def markdown_lineage
+      o = +"## Lineage Unit Risk (#{@lineage[:units].size})\n"
       o << "_Optional Lineage SQLite overlay: time-decayed semantic `FIX`/`CHANGE` " \
            "events at logical-unit granularity. Pure moves are shown but do not add risk._\n\n"
       if @lineage[:status] != :ok
@@ -360,8 +393,11 @@ module Boobytrap
         o << "\n- ...(+#{@lineage[:units].size - @top} more)\n" if @lineage[:units].size > @top
         o << "\n"
       end
+      o
+    end
 
-      o << "## Fixed But Unmeasured (#{@unmeasured.size})\n"
+    def markdown_unmeasured
+      o = +"## Fixed But Unmeasured (#{@unmeasured.size})\n"
       o << "_files with recurring fixes but NO branch-coverage data -- " \
            "recurring-fix code the corpus does not measure at all; " \
            "itself a risk._\n\n"
@@ -373,8 +409,11 @@ module Boobytrap
         end
         o << "\n"
       end
+      o
+    end
 
-      o << "## Run Summary\n"
+    def markdown_summary
+      o = +"## Run Summary\n"
       o << "- Repo: `#{@repo}`\n"
       o << "- Scope: #{scope_label}\n"
       o << "- Fix commits matched: #{@fix_commits} (time span over whole history, unfiltered)\n"
@@ -395,6 +434,8 @@ module Boobytrap
            "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
     end
+
+    public
 
     def to_json(*_args)
       to_sarif
