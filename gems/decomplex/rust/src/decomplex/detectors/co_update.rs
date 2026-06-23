@@ -189,3 +189,50 @@ impl Report {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_co_update_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "state_writes": [
+                {
+                    "field": "a",
+                    "receiver": "self",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 1,
+                    "span": [1, 2, 3, 4],
+                    "owner": "MyType"
+                },
+                {
+                    "field": "b",
+                    "receiver": "self",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 2,
+                    "span": [1, 2, 3, 4],
+                    "owner": "MyType"
+                }
+            ]
+        })).unwrap();
+
+        let writes = state_writes_for_documents(&[doc]);
+        assert_eq!(writes.len(), 2);
+
+        let writes_from_files = state_writes_for_files(&[], Language::Ruby).unwrap();
+        assert!(writes_from_files.is_empty());
+
+        let w1 = write_from_state_write(&writes[0]);
+        let w2 = write_from_state_write(&writes[1]);
+        let r = Report::new(vec![w1, w2]);
+        let pairs = r.co_written_pairs(2);
+        assert!(pairs.is_empty());
+    }
+}
+

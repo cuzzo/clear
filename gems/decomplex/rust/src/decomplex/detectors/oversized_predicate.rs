@@ -86,3 +86,38 @@ impl OversizedPredicate {
         name.ends_with('?')
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_oversized_predicate_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "decision_sites": [
+                // 1. Function ends with '?' -> None
+                {
+                    "kind": "if", "members": [], "file": "a.rb", "function": "is_ok?", "line": 1, "span": [1,2,3,4],
+                    "predicate": "a && b && c && d", "enclosing_span": [1,2,3,4]
+                },
+                // 2. Predicate size <= 3 -> None
+                {
+                    "kind": "if", "members": [], "file": "a.rb", "function": "foo", "line": 2, "span": [1,2,3,4],
+                    "predicate": "a && b && c", "enclosing_span": [1,2,3,4]
+                },
+                // 3. Normal oversized predicate -> Some
+                {
+                    "kind": "if", "members": [], "file": "a.rb", "function": "foo", "line": 3, "span": [1,2,3,4],
+                    "predicate": "a && b && c && d", "enclosing_span": [1,2,3,4]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc]);
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].count, 4);
+    }
+}

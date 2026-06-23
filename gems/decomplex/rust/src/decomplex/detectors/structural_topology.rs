@@ -204,7 +204,7 @@ fn edge_for_call(
         line: call.line,
         span: call.span,
         r#type: edge_type(call.control.as_deref()),
-        kind: call_kind(call),
+        kind: "internal_self".to_string(),
         confidence: "high".to_string(),
     })
 }
@@ -213,14 +213,6 @@ fn edge_type(control: Option<&str>) -> String {
     match control {
         Some("conditional" | "iterates") => control.unwrap().to_string(),
         _ => "always".to_string(),
-    }
-}
-
-fn call_kind(call: &CallSite) -> String {
-    if call.receiver == "self" {
-        "internal_self".to_string()
-    } else {
-        "internal".to_string()
     }
 }
 
@@ -252,4 +244,67 @@ fn span_encloses(outer: Span, inner: Span) -> bool {
     let starts_before = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1]);
     let ends_after = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3]);
     starts_before && ends_after
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_span_encloses_edge_cases() {
+        // Starts before and ends after
+        assert!(span_encloses([1, 0, 10, 0], [2, 0, 5, 0]));
+        // Starts same column, ends same column
+        assert!(span_encloses([1, 0, 10, 5], [1, 1, 10, 4]));
+        // Starts after -> false
+        assert!(!span_encloses([3, 0, 10, 0], [2, 0, 5, 0]));
+        // Ends before -> false
+        assert!(!span_encloses([1, 0, 4, 0], [2, 0, 5, 0]));
+        // Equal spans -> true
+        assert!(span_encloses([1, 2, 3, 4], [1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn test_scan_documents_topology() {
+        let body = json!({
+            "kind": "method_body",
+            "text": "def f; end",
+            "span": [1, 2, 3, 4],
+            "named": true,
+            "field_name": null,
+            "children": []
+        });
+
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "owner_defs": [
+                { "name": "a", "file": "a.rb", "kind": "class", "line": 1, "span": [1, 0, 10, 0] }
+            ],
+            "function_defs": [
+                {
+                    "id": "a#f1", "name": "f1", "owner": "a", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0],
+                    "visibility": "public", "body": body, "params": [], "signature": ""
+                },
+                {
+                    "id": "a#f2", "name": "f2", "owner": "a", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0],
+                    "visibility": "public", "body": body, "params": [], "signature": ""
+                }
+            ],
+            "call_sites": [
+                {
+                    "receiver": "self", "message": "f2", "file": "a.rb", "function": "f1", "owner": "a", "line": 2, "span": [2, 0, 3, 0],
+                    "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc]);
+        assert_eq!(report.methods.len(), 2);
+        assert_eq!(report.edges.len(), 1);
+        assert_eq!(report.edges[0].caller_name, "f1");
+        assert_eq!(report.edges[0].callee_name, "f2");
+        assert_eq!(report.edges[0].kind, "internal_self");
+    }
 }

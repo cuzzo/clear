@@ -273,16 +273,10 @@ impl Report {
                 .then_with(|| a.contract.cmp(&b.contract))
         });
 
-        let mut local: Vec<_> = rows
+        let local: Vec<_> = rows
             .into_iter()
             .filter(|r| r.contract == "~local")
             .collect();
-        local.sort_by(|a, b| {
-            b.decisions
-                .cmp(&a.decisions)
-                .then_with(|| b.methods.cmp(&a.methods))
-                .then_with(|| a.contract.cmp(&b.contract))
-        });
         named.into_iter().chain(local).collect()
     }
 }
@@ -290,3 +284,174 @@ impl Report {
 fn loc(h: &Hit) -> String {
     format!("{}:{}:{}", h.file, h.defn, h.line)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_decision_pressure_gaps() {
+        let dialect = crate::decomplex::dialect::RubyDialect;
+        let empty_map = BTreeMap::new();
+
+        assert_eq!(contract_of("", &empty_map, 0, &dialect), None);
+        assert_eq!(contract_of("self", &empty_map, 8, &dialect), None);
+
+        assert_eq!(contract_of("@my_ivar", &empty_map, 0, &dialect), Some("@my_ivar".to_string()));
+
+        assert_eq!(contract_of("self[foo]", &empty_map, 0, &dialect), Some("[foo]".to_string()));
+
+        assert_eq!(contract_of("my_local", &empty_map, 0, &dialect), Some("~local".to_string()));
+
+        assert_eq!(contract_of("obj.foo()", &empty_map, 0, &dialect), Some(".foo".to_string()));
+
+        assert_eq!(contract_of("obj.pop", &empty_map, 0, &dialect), None);
+        assert_eq!(contract_of("obj.", &empty_map, 0, &dialect), None);
+
+        assert_eq!(contract_of("obj.bar", &empty_map, 0, &dialect), Some(".bar".to_string()));
+
+        assert_eq!(contract_of("obj + 2", &empty_map, 0, &dialect), None);
+    }
+
+    #[test]
+    fn test_scan_documents_edge_cases() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "call_sites": [
+                {
+                    "receiver": "",
+                    "message": "foo?",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 1,
+                    "span": [1, 2, 3, 4],
+                    "conditional": false,
+                    "arguments": [],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                },
+                {
+                    "receiver": "@ivar1",
+                    "message": "foo?",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 2,
+                    "span": [1, 2, 3, 4],
+                    "conditional": false,
+                    "arguments": [],
+                    "control": null,
+                    "safe_navigation": false,
+                    "block": false
+                }
+            ],
+
+            "semantic_effect_sites": [
+                {
+                    "kind": "other_effect",
+                    "detail": "x",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 3,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "@ivar1",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 4,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "@ivar1",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 5,
+                    "span": [1, 2, 3, 4]
+                },
+                // Local2 with 3 decisions (highest score for locals)
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local2",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 12,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local2",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 13,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local2",
+                    "file": "foo.rb",
+                    "function": "m",
+                    "owner": "MyType",
+                    "line": 14,
+                    "span": [1, 2, 3, 4]
+                },
+                // Local1 with 2 decisions, 2 methods
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local1",
+                    "file": "foo.rb",
+                    "function": "m1",
+                    "owner": "MyType",
+                    "line": 10,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local1",
+                    "file": "foo.rb",
+                    "function": "m2",
+                    "owner": "MyType",
+                    "line": 11,
+                    "span": [1, 2, 3, 4]
+                },
+                // Local3 with 2 decisions, 1 method (sorted after local1)
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local3",
+                    "file": "foo.rb",
+                    "function": "m1",
+                    "owner": "MyType",
+                    "line": 15,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "kind": "eliminable_guard",
+                    "detail": "local3",
+                    "file": "foo.rb",
+                    "function": "m1",
+                    "owner": "MyType",
+                    "line": 16,
+                    "span": [1, 2, 3, 4]
+                }
+            ]
+        })).unwrap();
+
+        let res = scan_documents(&[doc]);
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0].contract, "@ivar1");
+        assert_eq!(res[1].contract, "~local");
+        assert_eq!(res[1].decisions, 7);
+    }
+}
+

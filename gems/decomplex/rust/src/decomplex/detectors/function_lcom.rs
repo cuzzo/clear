@@ -295,3 +295,100 @@ impl<'a> FunctionLcom<'a> {
         statement.reads.union(&statement.writes).cloned().collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_function_lcom_gaps() {
+        let m_few_locals: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "1", "owner": "C", "name": "foo", "file": "a.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 1, "end_line": 1, "span": [1,2,3,4], "source": "a = 1", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 1, "line": 2, "end_line": 2, "span": [1,2,3,4], "source": "b = 2", "reads": [], "writes": ["b"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 3, "end_line": 3, "span": [1,2,3,4], "source": "c = 3", "reads": [], "writes": ["c"], "dependencies": [], "co_uses": [] },
+                { "index": 3, "line": 4, "end_line": 4, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m_short: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "2", "owner": "C", "name": "short", "file": "a.rb", "line": 10, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "a = 1", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m_empty: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "3", "owner": "C", "name": "empty", "file": "a.rb", "line": 20, "span": [1,2,3,4],
+            "statements": [], "boundaries": []
+        })).unwrap();
+
+        let m_low_score: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "4", "owner": "C", "name": "low", "file": "a.rb", "line": 30, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 30, "end_line": 30, "span": [1,2,3,4], "source": "a = 1", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 1, "line": 31, "end_line": 31, "span": [1,2,3,4], "source": "b = 2", "reads": [], "writes": ["b"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 32, "end_line": 32, "span": [1,2,3,4], "source": "c = 3", "reads": [], "writes": ["c"], "dependencies": [], "co_uses": [] },
+                { "index": 3, "line": 33, "end_line": 33, "span": [1,2,3,4], "source": "d = 4", "reads": [], "writes": ["d"], "dependencies": [], "co_uses": [] },
+                { "index": 4, "line": 34, "end_line": 34, "span": [1,2,3,4], "source": "e = 5", "reads": [], "writes": ["e"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m_high1: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "5", "owner": "C", "name": "high1", "file": "a.rb", "line": 50, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 50, "end_line": 50, "span": [1,2,3,4], "source": "y = x", "reads": ["x"], "writes": ["y"], "dependencies": [["y", "x"], ["x", "x"]], "co_uses": [] },
+                { "index": 1, "line": 51, "end_line": 51, "span": [1,2,3,4], "source": "x = 1", "reads": [], "writes": ["x"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 52, "end_line": 52, "span": [1,2,3,4], "source": "z = w", "reads": ["w"], "writes": ["z"], "dependencies": [["z", "w"], ["w", "not_in_vars"]], "co_uses": [] },
+                { "index": 3, "line": 53, "end_line": 53, "span": [1,2,3,4], "source": "w = 2", "reads": [], "writes": ["w"], "dependencies": [], "co_uses": [] },
+                { "index": 4, "line": 54, "end_line": 54, "span": [1,2,3,4], "source": "v = u", "reads": ["u"], "writes": ["v"], "dependencies": [["v", "u"]], "co_uses": [] },
+                { "index": 5, "line": 55, "end_line": 55, "span": [1,2,3,4], "source": "u = 3", "reads": [], "writes": ["u"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m_high2: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "6", "owner": "C", "name": "high2", "file": "a.rb", "line": 40, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 40, "end_line": 40, "span": [1,2,3,4], "source": "y = x", "reads": ["x"], "writes": ["y"], "dependencies": [["y", "x"]], "co_uses": [] },
+                { "index": 1, "line": 41, "end_line": 41, "span": [1,2,3,4], "source": "x = 1", "reads": [], "writes": ["x"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 42, "end_line": 42, "span": [1,2,3,4], "source": "z = w", "reads": ["w"], "writes": ["z"], "dependencies": [["z", "w"]], "co_uses": [] },
+                { "index": 3, "line": 43, "end_line": 43, "span": [1,2,3,4], "source": "w = 2", "reads": [], "writes": ["w"], "dependencies": [], "co_uses": [] },
+                { "index": 4, "line": 44, "end_line": 44, "span": [1,2,3,4], "source": "v = u", "reads": ["u"], "writes": ["v"], "dependencies": [["v", "u"]], "co_uses": [] },
+                { "index": 5, "line": 45, "end_line": 45, "span": [1,2,3,4], "source": "u = 3", "reads": [], "writes": ["u"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m_high3: local_flow::MethodSummary = serde_json::from_value(json!({
+            "id": "7", "owner": "C", "name": "high3", "file": "b.rb", "line": 45, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 45, "end_line": 45, "span": [1,2,3,4], "source": "y = x", "reads": ["x"], "writes": ["y"], "dependencies": [["y", "x"]], "co_uses": [] },
+                { "index": 1, "line": 46, "end_line": 46, "span": [1,2,3,4], "source": "x = 1", "reads": [], "writes": ["x"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 47, "end_line": 47, "span": [1,2,3,4], "source": "z = w", "reads": ["w"], "writes": ["z"], "dependencies": [["z", "w"]], "co_uses": [] },
+                { "index": 3, "line": 48, "end_line": 48, "span": [1,2,3,4], "source": "w = 2", "reads": [], "writes": ["w"], "dependencies": [], "co_uses": [] },
+                { "index": 4, "line": 49, "end_line": 49, "span": [1,2,3,4], "source": "v = u", "reads": ["u"], "writes": ["v"], "dependencies": [["v", "u"]], "co_uses": [] },
+                { "index": 5, "line": 50, "end_line": 50, "span": [1,2,3,4], "source": "u = 3", "reads": [], "writes": ["u"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let summaries = vec![m_few_locals, m_short, m_empty, m_low_score, m_high1, m_high2, m_high3];
+        let res = scan_summaries(&summaries);
+        
+        assert_eq!(res.len(), 3);
+        assert_eq!(res[0].file, "a.rb");
+        assert_eq!(res[0].line, 40);
+        assert_eq!(res[1].file, "a.rb");
+        assert_eq!(res[1].line, 50);
+        assert_eq!(res[2].file, "b.rb");
+        assert_eq!(res[2].line, 45);
+
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "local_methods": summaries
+        })).unwrap();
+        let doc_res = scan_documents(&[doc]);
+        assert_eq!(doc_res.len(), 3);
+    }
+}

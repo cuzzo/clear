@@ -259,3 +259,119 @@ impl Report {
         rows
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_branch_metadata() {
+        let doc: Document = serde_json::from_value(serde_json::json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "immutable_struct_readers": {
+                "OtherType": ["b"]
+            },
+            "immutable_struct_reader_types": {
+                "MyType": { "a": "OtherType" }
+            },
+            "type_aliases": {
+                "AliasType": "MyType",
+                "Loop1": "Loop2",
+                "Loop2": "Loop1"
+            },
+            "method_param_types": {
+                "foo": { "obj": "AliasType" }
+            }
+        })).unwrap();
+
+        let metadata = BranchMetadata::from_documents(&[doc.clone()]);
+
+        // len < 2
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj"));
+
+        // param not found
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "missing.field"));
+
+        // valid path obj.a.b
+        assert!(metadata.immutable_state_ref(&doc, "foo", "obj.a.b"));
+
+        // path where middle type reader doesn't exist
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj.unknown.b"));
+
+        // path where last field is not reader
+        assert!(!metadata.immutable_state_ref(&doc, "foo", "obj.a.unknown"));
+
+        // loop alias resolution
+        let mut loop_doc = doc.clone();
+        loop_doc.method_param_types.insert(
+            "loop_fn".to_string(),
+            vec![("obj".to_string(), "Loop1".to_string())].into_iter().collect(),
+        );
+        let metadata_loop = BranchMetadata::from_documents(&[loop_doc.clone()]);
+        assert!(!metadata_loop.immutable_state_ref(&loop_doc, "loop_fn", "obj.a"));
+    }
+
+    #[test]
+    fn test_span_encloses_and_nested_state_decision() {
+        assert!(span_encloses([1, 0, 3, 10], [1, 2, 2, 5]));
+        assert!(span_encloses([1, 0, 3, 10], [1, 2, 3, 5]));
+        assert!(span_encloses([1, 2, 3, 10], [1, 2, 3, 10]));
+        assert!(!span_encloses([1, 2, 3, 10], [1, 1, 3, 10]));
+        assert!(!span_encloses([1, 2, 3, 10], [1, 2, 3, 11]));
+
+        let d1 = Decision {
+            file: "foo.rb".to_string(),
+            defn: "foo".to_string(),
+            line: 1,
+            span: [1, 0, 5, 10],
+            predicate: "a".to_string(),
+            state_refs: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let d2 = Decision {
+            file: "foo.rb".to_string(),
+            defn: "foo".to_string(),
+            line: 2,
+            span: [2, 0, 3, 10],
+            predicate: "b".to_string(),
+            state_refs: vec!["x".to_string()],
+        };
+
+        // d1 encloses d2, and d2's state refs are subset of d1's state refs
+        let decisions = &[d1, d2];
+        // d1 (outer) has nested d2
+        assert!(nested_state_decision(&decisions[0], decisions));
+        // d2 (inner) has no nested
+        assert!(!nested_state_decision(&decisions[1], decisions));
+    }
+
+    #[test]
+    fn test_report_findings_sorting() {
+        let d_a = Decision {
+            file: "a.rb".to_string(),
+            defn: "foo".to_string(),
+            line: 1,
+            span: [1, 0, 1, 10],
+            predicate: "a".to_string(),
+            state_refs: vec!["x".to_string()],
+        };
+
+        let d_b = Decision {
+            file: "b.rb".to_string(),
+            defn: "foo".to_string(),
+            line: 1,
+            span: [1, 0, 1, 10],
+            predicate: "b".to_string(),
+            state_refs: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let report = Report::new(vec![d_a, d_b]);
+        let findings = report.findings();
+        assert_eq!(findings.len(), 2);
+        // d_b should sort first because score is 1 * 2 = 2, vs d_a score is 1 * 1 = 1
+        assert_eq!(findings[0].file, "b.rb");
+        assert_eq!(findings[1].file, "a.rb");
+    }
+}
+

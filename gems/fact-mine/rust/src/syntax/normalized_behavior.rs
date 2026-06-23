@@ -557,3 +557,76 @@ fn matching_paren_index(source: &str, open_index: usize) -> Option<usize> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestBehavior;
+    impl NormalizedLanguageBehavior for TestBehavior {}
+
+    struct TestBehaviorOverride;
+    impl NormalizedLanguageBehavior for TestBehaviorOverride {
+        fn access_span_call_site(&self, _message: &str, _current_function: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn test_default_behavior_methods() {
+        let b = TestBehavior;
+        let node = Node {
+            r#type: "dummy".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+
+        // call_site_span branches
+        let parts = NormalizedCallParts {
+            receiver: "self".to_string(),
+            message: "foo".to_string(),
+            arguments: Vec::new(),
+        };
+        let full = [1, 0, 1, 10];
+        let acc = [1, 0, 1, 5];
+        assert_eq!(b.call_site_span(&node, &parts, full, acc, "func"), full);
+        
+        let bo = TestBehaviorOverride;
+        assert_eq!(bo.call_site_span(&node, &parts, full, acc, "func"), acc);
+
+        // other default trait methods with missing lines
+        assert!(!b.emit_index_assignment_mutation(&node, None));
+        assert_eq!(b.self_member_receiver("m"), "m");
+        assert!(b.owner_name_from_text(&node).is_none());
+        assert_eq!(b.parameter_list_source("("), "");
+        assert!(b.parameter_name_from_signature("").is_none());
+        assert!(b.literal_state_refs(&node, "text").is_empty());
+        assert!(b.nil_guard_fact("msg", "sub").is_none());
+        assert!(!b.local_flow_declaration_keyword("key"));
+        assert!(!b.local_flow_keyword("name"));
+        assert!(b.semantic_effect_for_call(&CallSite {
+            receiver: "".to_string(),
+            message: "".to_string(),
+            file: "".to_string(),
+            function: "".to_string(),
+            owner: "".to_string(),
+            line: 0,
+            span: [0,0,0,0],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        }).is_none());
+        assert!(b.core_owner_names().is_empty());
+    }
+
+    #[test]
+    fn test_matching_paren_index_none() {
+        assert!(matching_paren_index("(", 0).is_none());
+    }
+}

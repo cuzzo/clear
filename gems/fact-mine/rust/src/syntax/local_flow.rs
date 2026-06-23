@@ -135,9 +135,7 @@ pub fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, St
         if statement.writes.len() != 1 {
             continue;
         }
-        let Some(name) = statement.writes.iter().next() else {
-            continue;
-        };
+        let name = statement.writes.iter().next().unwrap();
         if map.contains_key(name) {
             continue;
         }
@@ -600,10 +598,7 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
         || declaration_like_lhs(lhs, behavior)
         || identifiers.len() == 1
     {
-        return identifiers
-            .into_iter()
-            .filter(|name| simple_identifier(name))
-            .collect();
+        return identifiers;
     }
 
     Vec::new()
@@ -821,4 +816,305 @@ struct BoundaryText {
     line: usize,
     kind: String,
     text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::Language;
+
+    #[test]
+    fn test_empty_node() {
+        let node = empty_node();
+        assert_eq!(node.r#type, "ROOT");
+        assert!(node.children.is_empty());
+    }
+
+    #[test]
+    fn test_scan_documents_parallel() {
+        let prev_jobs = parallel::job_count();
+        parallel::set_jobs_for_process(Some(2)).unwrap();
+        let mut doc1: Document = serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
+        doc1.local_methods = vec![MethodSummary {
+            id: "a".to_string(),
+            owner: "A".to_string(),
+            name: "foo".to_string(),
+            file: "a.rb".to_string(),
+            line: 10,
+            span: [10, 0, 12, 0],
+            node: empty_node(),
+            statements: Vec::new(),
+            boundaries: Vec::new(),
+        }];
+
+        let mut doc2: Document = serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
+        doc2.local_methods = vec![MethodSummary {
+            id: "b".to_string(),
+            owner: "B".to_string(),
+            name: "bar".to_string(),
+            file: "b.rb".to_string(),
+            line: 20,
+            span: [20, 0, 22, 0],
+            node: empty_node(),
+            statements: Vec::new(),
+            boundaries: Vec::new(),
+        }];
+
+        let methods = scan_documents(&[doc1, doc2]);
+        assert_eq!(methods.len(), 2);
+        parallel::set_jobs_for_process(Some(prev_jobs)).ok();
+    }
+
+    #[test]
+    fn test_comment_boundaries() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec![
+                "def foo".to_string(),
+                "  x = 1".to_string(),
+                "  # comment line".to_string(),
+                "  y = 2".to_string(),
+                "end".to_string(),
+            ],
+            BTreeMap::new(),
+            behavior,
+        );
+        let boundary = detector.source_boundary(3, 3).unwrap();
+        assert_eq!(boundary.kind, "comment");
+        assert_eq!(boundary.text, "# comment line");
+    }
+
+    #[test]
+    fn test_defs_method_name() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["def self.foo".to_string(), "def receiver.bar".to_string()],
+            BTreeMap::new(),
+            behavior,
+        );
+        let self_node = Node {
+            r#type: "SELF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 4,
+            last_lineno: 1,
+            last_column: 8,
+            text: "self".to_string(),
+        };
+        let name_node1 = Child::Symbol("foo".to_string());
+        let defs_node_self = Node {
+            r#type: "DEFS".to_string(),
+            children: vec![Child::Node(Box::new(self_node)), name_node1],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 12,
+            text: "def self.foo".to_string(),
+        };
+        assert_eq!(detector.method_name(&defs_node_self), "foo");
+
+        let receiver_node = Node {
+            r#type: "IDENTIFIER".to_string(),
+            children: Vec::new(),
+            first_lineno: 2,
+            first_column: 4,
+            last_lineno: 2,
+            last_column: 12,
+            text: "receiver".to_string(),
+        };
+        let name_node2 = Child::Symbol("bar".to_string());
+        let defs_node_rec = Node {
+            r#type: "DEFS".to_string(),
+            children: vec![Child::Node(Box::new(receiver_node)), name_node2],
+            first_lineno: 2,
+            first_column: 0,
+            last_lineno: 2,
+            last_column: 16,
+            text: "def receiver.bar".to_string(),
+        };
+        assert_eq!(detector.method_name(&defs_node_rec), "receiver.bar");
+
+        let normal_node = Node {
+            r#type: "DEF".to_string(),
+            children: vec![Child::Symbol("normal_method".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 10,
+            text: "def normal_method".to_string(),
+        };
+        assert_eq!(detector.method_name(&normal_node), "normal_method");
+    }
+
+    #[test]
+    fn test_owner_segment_empty() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["".to_string()],
+            BTreeMap::new(),
+            behavior,
+        );
+        let empty_node = Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert_eq!(detector.owner_segment(&empty_node), "(anonymous)");
+    }
+
+    #[test]
+    fn test_local_read_name_nil() {
+        let node_nil = Node {
+            r#type: "NIL_NODE".to_string(),
+            children: vec![Child::Nil],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert_eq!(local_read_name(&node_nil), Some(String::new()));
+
+        let node_other = Node {
+            r#type: "INT_NODE".to_string(),
+            children: vec![Child::Integer(42)],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert_eq!(local_read_name(&node_other), None);
+    }
+
+    #[test]
+    fn test_textual_local_writes_edge_cases() {
+        let behavior = crate::syntax::lua::behavior();
+        // empty identifiers
+        assert!(textual_local_writes("1 + 2", behavior).is_empty());
+        
+        // declaration like lhs
+        assert!(declaration_like_lhs("local x", behavior));
+        
+        // simple_identifier check
+        assert!(!simple_identifier("123foo"));
+
+        // dollar sign not followed by start
+        assert!(textual_local_writes("$ = 1", behavior).is_empty());
+
+        // fallback path (+= with len > 1 LHS)
+        assert!(textual_local_writes("a, b += 1", behavior).is_empty());
+
+        // successful multiple identifier parse path
+        assert_eq!(textual_local_writes("a, b = 1", behavior), vec!["a", "b"]);
+
+        // first false, second true
+        let lua_behavior = crate::syntax::lua::behavior();
+        assert_eq!(textual_local_writes("local a, b := 1", lua_behavior), vec!["a", "b"]);
+
+        // first false, second false, third true
+        assert_eq!(textual_local_writes("a := 1", behavior), vec!["a"]);
+
+        // first false, second false, third false
+        assert!(textual_local_writes("a, b := 1", behavior).is_empty());
+    }
+
+    #[test]
+    fn test_local_reads_push() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["x = y".to_string()],
+            BTreeMap::new(),
+            behavior,
+        );
+        let node = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Symbol("y".to_string())],
+            first_lineno: 1,
+            first_column: 4,
+            last_lineno: 1,
+            last_column: 5,
+            text: "y".to_string(),
+        };
+        let mut local_names = BTreeSet::new();
+        local_names.insert("y".to_string());
+        let writes = BTreeSet::new();
+        let reads = detector.local_reads(&node, &local_names, &writes);
+        assert!(reads.contains("y"));
+
+        let node_nil = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Nil],
+            first_lineno: 1,
+            first_column: 4,
+            last_lineno: 1,
+            last_column: 5,
+            text: "nil_read".to_string(),
+        };
+        let reads_nil = detector.local_reads(&node_nil, &local_names, &writes);
+        assert!(reads_nil.is_empty());
+
+        let node_empty = Node {
+            r#type: "LVAR".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 4,
+            last_lineno: 1,
+            last_column: 5,
+            text: "empty_read".to_string(),
+        };
+        let reads_empty = detector.local_reads(&node_empty, &local_names, &writes);
+        assert!(reads_empty.is_empty());
+    }
+
+    #[test]
+    fn test_assignment_dependencies_same() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["x = x".to_string()],
+            BTreeMap::new(),
+            behavior,
+        );
+        let rhs = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Symbol("x".to_string())],
+            first_lineno: 1,
+            first_column: 4,
+            last_lineno: 1,
+            last_column: 5,
+            text: "x".to_string(),
+        };
+        let node = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("x".to_string()),
+                Child::Node(Box::new(rhs)),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 5,
+            text: "x = x".to_string(),
+        };
+        let mut local_names = BTreeSet::new();
+        local_names.insert("x".to_string());
+        let deps = detector.assignment_dependencies(&node, &local_names);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_symbol_child() {
+        assert_eq!(symbol_child(&Child::Symbol("foo".to_string())), Some("foo"));
+        assert_eq!(symbol_child(&Child::String("bar".to_string())), Some("bar"));
+        assert_eq!(symbol_child(&Child::Nil), None);
+    }
 }

@@ -205,4 +205,133 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].score, 5);
     }
+
+    #[test]
+    fn test_rollup_edge_cases() {
+        let sections = vec![
+            ReportSection::new("A", 1, "", vec![
+                json!({"at": "foo"}), // parts.len() < 2
+                json!({"at": ":m:1"}), // empty file
+                json!({"at": "a.rb::1"}), // empty method
+                json!({"at": "a.rb:m"}), // no line number
+                json!({"at": "a.rb:m:notdigits"}), // not all digits line
+            ]),
+        ];
+        let rows = rollup(&sections, 1);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|u| u.file == "a.rb" && u.method == "m" && u.at == "a.rb:m"));
+        assert!(rows.iter().any(|u| u.file == "a.rb:m" && u.method == "notdigits" && u.at == "a.rb:m:notdigits"));
+    }
+
+
+    #[test]
+    fn test_rollup_sorting() {
+        let sections = vec![
+            // Unit 1: file "y.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 5 (3 + 2)
+            ReportSection::new("A", 1, "", vec![json!({"at": "y.rb:m:1"})]),
+            ReportSection::new("B", 2, "", vec![json!({"at": "y.rb:m:1"})]),
+            // Unit 2: file "x.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4 (3 + 1), findings = 3
+            ReportSection::new("C", 3, "", vec![json!({"at": "x.rb:m:1"}), json!({"at": "x.rb:m:2"})]),
+            ReportSection::new("A", 1, "", vec![json!({"at": "x.rb:m:1"})]),
+            // Unit 3: file "b.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
+            ReportSection::new("A", 1, "", vec![json!({"at": "b.rb:m:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "b.rb:m:1"})]),
+            // Unit 4: file "c.rb", method "m1", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
+            ReportSection::new("A", 1, "", vec![json!({"at": "c.rb:m1:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m1:1"})]),
+            // Unit 5: file "c.rb", method "m2", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
+            ReportSection::new("A", 1, "", vec![json!({"at": "c.rb:m2:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m2:1"})]),
+        ];
+        let units = rollup(&sections, 2);
+        assert_eq!(units.len(), 5);
+        // Expected order:
+        // 1. y.rb:m (n_detectors = 2, score = 5)
+        // 2. x.rb:m (n_detectors = 2, score = 4, findings = 3)
+        // 3. b.rb:m (n_detectors = 2, score = 4, findings = 2, file = b.rb)
+        // 4. c.rb:m1 (n_detectors = 2, score = 4, findings = 2, file = c.rb, method = m1)
+        // 5. c.rb:m2 (n_detectors = 2, score = 4, findings = 2, file = c.rb, method = m2)
+        assert_eq!(units[0].file, "y.rb");
+        assert_eq!(units[1].file, "x.rb");
+        assert_eq!(units[2].file, "b.rb");
+        assert_eq!(units[3].method, "m1");
+        assert_eq!(units[4].method, "m2");
+    }
+
+    #[test]
+    fn test_by_file_edge_cases_and_sorting() {
+        let units = vec![
+            // File "a": detectors [A, B], score 10, methods 1
+            Unit {
+                file: "a".to_string(),
+                method: "m".to_string(),
+                detectors: vec!["A".to_string(), "B".to_string()],
+                n_detectors: 2,
+                score: 10,
+                findings: 1,
+                at: "a:m".to_string(),
+            },
+            // File "b": detectors [A, B], score 5, methods 2
+            Unit {
+                file: "b".to_string(),
+                method: "m1".to_string(),
+                detectors: vec!["A".to_string(), "B".to_string()],
+                n_detectors: 2,
+                score: 3,
+                findings: 1,
+                at: "b:m1".to_string(),
+            },
+            Unit {
+                file: "b".to_string(),
+                method: "m2".to_string(),
+                detectors: vec!["A".to_string()],
+                n_detectors: 1,
+                score: 2,
+                findings: 1,
+                at: "b:m2".to_string(),
+            },
+            // File "c": detectors [A, B], score 5, methods 1
+            Unit {
+                file: "c".to_string(),
+                method: "m".to_string(),
+                detectors: vec!["A".to_string(), "B".to_string()],
+                n_detectors: 2,
+                score: 5,
+                findings: 1,
+                at: "c:m".to_string(),
+            },
+            // File "d": detectors [A, B], score 5, methods 1
+            Unit {
+                file: "d".to_string(),
+                method: "m".to_string(),
+                detectors: vec!["A".to_string(), "B".to_string()],
+                n_detectors: 2,
+                score: 5,
+                findings: 1,
+                at: "d:m".to_string(),
+            },
+            // File "e": only 1 detector -> should be excluded!
+            Unit {
+                file: "e".to_string(),
+                method: "m".to_string(),
+                detectors: vec!["A".to_string()],
+                n_detectors: 1,
+                score: 5,
+                findings: 1,
+                at: "e:m".to_string(),
+            },
+        ];
+        let rolls = by_file(&units);
+        assert_eq!(rolls.len(), 4);
+        // Expected order:
+        // 1. "a" (n_detectors = 2, score = 10)
+        // 2. "b" (n_detectors = 2, score = 5, methods = 2)
+        // 3. "c" (n_detectors = 2, score = 5, methods = 1, file = c)
+        // 4. "d" (n_detectors = 2, score = 5, methods = 1, file = d)
+        assert_eq!(rolls[0].file, "a");
+        assert_eq!(rolls[1].file, "b");
+        assert_eq!(rolls[2].file, "c");
+        assert_eq!(rolls[3].file, "d");
+    }
 }
+

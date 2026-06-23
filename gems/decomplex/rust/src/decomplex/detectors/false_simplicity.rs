@@ -215,3 +215,61 @@ impl Report {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_false_simplicity_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "function_defs": [],
+            "owner_defs": [
+                {
+                    "file": "foo.rb",
+                    "name": "::",
+                    "kind": "class",
+                    "line": 1,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "file": "foo.rb",
+                    "name": "UnusedClass",
+                    "kind": "class",
+                    "line": 2,
+                    "span": [1, 2, 3, 4]
+                }
+            ],
+            "call_sites": [],
+            "state_declarations": [],
+            "state_reads": [],
+            "state_writes": [],
+            "decision_sites": [],
+            "branch_decisions": [],
+            "branch_arms": [],
+            "dispatch_sites": [],
+            "semantic_effect_sites": [],
+            "local_complexity_scores": {},
+            "local_methods": [],
+            "predicate_aliases": [],
+            "comparison_uses": [],
+            "path_condition_sites": [],
+            "protocol_method_effects": [],
+            "protocol_call_paths": [],
+            "clone_candidates": [],
+            "redundant_nil_guards": [],
+            "immutable_struct_readers": {},
+            "immutable_struct_reader_types": {},
+            "type_aliases": {},
+            "method_param_types": {},
+            "state_param_origins": []
+        })).unwrap();
+
+        let res = scan_documents(&[doc]);
+        assert!(res.is_empty());
+    }
+}
+

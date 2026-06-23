@@ -184,3 +184,78 @@ fn unique_mids(calls: &[Call]) -> Vec<String> {
     let set: BTreeSet<_> = calls.iter().map(|call| call.mid.clone()).collect();
     set.into_iter().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_sequence_mine_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "protocol_call_paths": [
+                {
+                    "file": "foo.rb",
+                    "owner": "Class",
+                    "name": "u1",
+                    "line": 1,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u1", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u1", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u1", "line": 10, "span": [14, 15, 16, 17] },
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u1", "line": 11, "span": [10, 11, 12, 13] },
+                        { "mid": "b", "file": "foo.rb", "owner": "Class", "defn": "u1", "line": 10, "span": [10, 11, 12, 13] }
+                    ]
+                },
+                {
+                    "file": "foo.rb",
+                    "owner": "Class",
+                    "name": "u2",
+                    "line": 2,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u2", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "b", "file": "foo.rb", "owner": "Class", "defn": "u2", "line": 10, "span": [10, 11, 12, 13] }
+                    ]
+                },
+                {
+                    "file": "foo.rb",
+                    "owner": "Class",
+                    "name": "u3",
+                    "line": 3,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u3", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "b", "file": "foo.rb", "owner": "Class", "defn": "u3", "line": 10, "span": [10, 11, 12, 13] }
+                    ]
+                },
+                {
+                    "file": "foo.rb",
+                    "owner": "Class",
+                    "name": "u4",
+                    "line": 4,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u4", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "b", "file": "foo.rb", "owner": "Class", "defn": "u4", "line": 10, "span": [10, 11, 12, 13] }
+                    ]
+                },
+                {
+                    "file": "foo.rb",
+                    "owner": "Class",
+                    "name": "u5",
+                    "line": 5,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u5", "line": 10, "span": [10, 11, 12, 13] }
+                    ]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc]);
+        assert_eq!(report.broken.len(), 1);
+        assert_eq!(report.broken[0].has, "a");
+        assert_eq!(report.broken[0].missing, "b");
+        assert_eq!(report.broken[0].at, "foo.rb:u5:10");
+        assert_eq!(report.broken[0].confidence, 0.8);
+    }
+}

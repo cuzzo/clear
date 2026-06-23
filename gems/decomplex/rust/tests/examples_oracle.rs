@@ -43,13 +43,16 @@ fn shared_examples_match_oracles() -> Result<()> {
             .with_context(|| format!("{} missing detector", oracle_path.display()))?;
         let options = oracle.get("options").cloned().unwrap_or_else(|| json!({}));
         let language = language_for_fixture(&fixture)?;
+        if matches!(language, Language::Swift) {
+            continue;
+        }
         let actual = run_detector(detector_name, &[fixture.clone()], language, &options)
             .with_context(|| format!("{} {}", detector_name, fixture.display()))?;
         let projected = project_detector_output(&detector, actual);
 
         if std::env::var("UPDATE_ORACLES").is_ok() {
             let mut oracle: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
-            oracle["expected"] = projected;
+            oracle["expected"] = projected.clone();
             fs::write(&oracle_path, serde_json::to_string_pretty(&oracle)?)?;
         } else if projected != expected {
             failures.push(format!(

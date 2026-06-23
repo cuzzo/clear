@@ -452,4 +452,125 @@ end
         );
         assert!(out.iter().any(|finding| finding.clone_type == "type3"));
     }
+
+    #[test]
+    fn test_flay_similarity_gaps() {
+        let out = scan(
+            r#"
+def a(node)
+  alpha(node.left)
+  beta(node.right)
+  delta(node.type)
+end
+
+def b(entry)
+  alpha(entry.left)
+  beta(entry.right)
+  delta(entry.type)
+end
+"#,
+            4,
+            0,
+        );
+        assert!(out.iter().all(|finding| finding.clone_type != "type3"));
+
+        let c1: CloneCandidate = serde_json::from_value(serde_json::json!({
+            "file": "foo.rb",
+            "line": 1,
+            "span": [1, 2, 3, 4],
+            "method_name": "m1",
+            "node_name": "defn",
+            "mass": 10,
+            "fingerprint": "fp1",
+            "raw": "def m\n  body\nend",
+            "child_fingerprints": [],
+            "child_masses": []
+        })).unwrap();
+
+        let c2: CloneCandidate = serde_json::from_value(serde_json::json!({
+            "file": "bar.rb",
+            "line": 1,
+            "span": [1, 2, 3, 4],
+            "method_name": "m2",
+            "node_name": "defn",
+            "mass": 10,
+            "fingerprint": "fp1",
+            "raw": "def m\n  body\nend",
+            "child_fingerprints": [],
+            "child_masses": []
+        })).unwrap();
+
+        let scanner = Scanner::new(5, 0);
+        let type2 = scanner.type2_findings(&[c1, c2]);
+        assert!(type2.is_empty());
+
+
+        let inner = SimilarityFinding {
+            clone_type: "type2".to_string(),
+            node: "defn".to_string(),
+            mass: 10,
+            sites: vec!["file:a:1".to_string(), "file:b:1".to_string()],
+            at: "file:a:1".to_string(),
+            spans: vec![
+                ("file:a:1".to_string(), [1, 0, 1, 10]),
+                ("file:b:1".to_string(), [1, 0, 1, 10])
+            ].into_iter().collect(),
+            locations: Vec::new(),
+        };
+        let outer = SimilarityFinding {
+            clone_type: "type2".to_string(),
+            node: "defn".to_string(),
+            mass: 5,
+            sites: vec!["file:a:1".to_string(), "file:b:1".to_string()],
+            at: "file:a:1".to_string(),
+            spans: vec![
+                ("file:a:1".to_string(), [1, 0, 1, 10]),
+                ("file:b:1".to_string(), [1, 0, 1, 10])
+            ].into_iter().collect(),
+            locations: Vec::new(),
+        };
+        assert!(!nested_finding(&inner, &outer));
+
+        let short_finding = SimilarityFinding {
+            clone_type: "type2".to_string(),
+            node: "defn".to_string(),
+            mass: 10,
+            sites: vec!["foo".to_string()],
+            at: "foo".to_string(),
+            spans: vec![("foo".to_string(), [1,0,1,10])].into_iter().collect(),
+            locations: Vec::new(),
+        };
+        let idents = site_identities(&short_finding);
+        assert_eq!(idents, vec![(String::new(), "foo".to_string())]);
+
+        let f_inner = SimilarityFinding {
+            clone_type: "type2".to_string(),
+            node: "expr".to_string(),
+            mass: 5,
+            sites: vec!["file:a:2".to_string(), "file:b:2".to_string()],
+            at: "file:a:2".to_string(),
+            spans: vec![
+                ("file:a:2".to_string(), [2, 1, 2, 5]),
+                ("file:b:2".to_string(), [2, 1, 2, 5])
+            ].into_iter().collect(),
+            locations: Vec::new(),
+        };
+        let f_outer = SimilarityFinding {
+            clone_type: "type2".to_string(),
+            node: "expr".to_string(),
+            mass: 15,
+            sites: vec!["file:a:2".to_string(), "file:b:2".to_string()],
+            at: "file:a:2".to_string(),
+            spans: vec![
+                ("file:a:2".to_string(), [1, 0, 3, 10]),
+                ("file:b:2".to_string(), [1, 0, 3, 10])
+            ].into_iter().collect(),
+            locations: Vec::new(),
+        };
+        let scanner = Scanner::new(1, 1);
+        let pruned = scanner.prune_nested_findings(vec![f_outer.clone(), f_inner.clone()]);
+        assert_eq!(pruned.len(), 1);
+        assert_eq!(pruned[0].mass, 15);
+    }
 }
+

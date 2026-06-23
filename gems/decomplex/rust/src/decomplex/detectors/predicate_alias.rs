@@ -104,3 +104,31 @@ impl Report {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_predicate_alias_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "predicate_aliases": [
+                {
+                    "name": "a",
+                    "body": "x > 0",
+                    "file": "foo.rb",
+                    "defn": "m",
+                    "line": 1,
+                    "span": [1, 2, 3, 4]
+                }
+            ]
+        })).unwrap();
+
+        let res = scan_documents(&[doc]);
+        assert!(res.alias_clusters.is_empty());
+    }
+}
+

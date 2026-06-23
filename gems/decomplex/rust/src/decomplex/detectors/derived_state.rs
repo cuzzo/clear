@@ -188,3 +188,90 @@ fn analyze(file: &str, defn: &str, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_derived_state_gaps() {
+        let m1: MethodSummary = serde_json::from_value(json!({
+            "id": "1", "owner": "T", "name": "m1", "file": "b.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m2: MethodSummary = serde_json::from_value(json!({
+            "id": "2", "owner": "T", "name": "m1", "file": "a.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m3: MethodSummary = serde_json::from_value(json!({
+            "id": "3", "owner": "T", "name": "m2", "file": "b.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m4: MethodSummary = serde_json::from_value(json!({
+            "id": "4", "owner": "T", "name": "m3", "file": "b.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m5: MethodSummary = serde_json::from_value(json!({
+            "id": "5", "owner": "T", "name": "m4", "file": "b.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "c = a", "reads": [], "writes": ["c"], "dependencies": [["c", "a"]], "co_uses": [] },
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let m6: MethodSummary = serde_json::from_value(json!({
+            "id": "6", "owner": "T", "name": "m5", "file": "b.rb", "line": 1, "span": [1,2,3,4],
+            "statements": [
+                { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a; b = c", "reads": [], "writes": ["b"], "dependencies": [["b", "a"], ["b", "c"]], "co_uses": [] },
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2; c = 2", "reads": [], "writes": ["a", "c"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        let res = scan_summaries(&[m1, m2, m3, m4, m5, m6]);
+        assert_eq!(res.len(), 7);
+        assert_eq!(res[0].file, "b.rb");
+        assert_eq!(res[0].gap, 5);
+
+        assert_eq!(res[1].file, "a.rb");
+        assert_eq!(res[1].gap, 4);
+
+        assert_eq!(res[2].file, "b.rb");
+        assert_eq!(res[2].derived_at, 10);
+
+        // res[3] and res[4] both have derived = "b", derived_at = 11, source = "a"
+        assert_eq!(res[3].derived, "b");
+        assert_eq!(res[3].derived_at, 11);
+        assert_eq!(res[3].source, "a");
+
+        assert_eq!(res[4].derived, "b");
+        assert_eq!(res[4].derived_at, 11);
+        assert_eq!(res[4].source, "a");
+
+        // res[5] has derived = "b", source = "c"
+        assert_eq!(res[5].derived, "b");
+        assert_eq!(res[5].source, "c");
+
+        // res[6] has derived = "c"
+        assert_eq!(res[6].derived, "c");
+    }
+}
+
+
+

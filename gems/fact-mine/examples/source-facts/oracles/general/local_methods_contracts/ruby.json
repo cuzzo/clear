@@ -78,7 +78,7 @@
         "control": "conditional",
         "function": "process",
         "line": 12,
-        "message": "any",
+        "message": "any?",
         "receiver": "names",
         "safe_navigation": false
       },
@@ -100,7 +100,7 @@
         "control": "conditional",
         "function": "process",
         "line": 8,
-        "message": "ready",
+        "message": "ready?",
         "receiver": "item",
         "safe_navigation": false
       },

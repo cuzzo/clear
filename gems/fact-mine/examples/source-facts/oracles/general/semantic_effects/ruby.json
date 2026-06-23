@@ -109,6 +109,22 @@
         "visibility": "public"
       },
       {
+        "line": 26,
+        "name": "initialize",
+        "owner": "MyMutator",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 30,
+        "name": "add_item",
+        "owner": "MyMutator",
+        "params": [
+          "item"
+        ],
+        "visibility": "public"
+      },
+      {
         "line": 4,
         "name": "perform",
         "owner": "SourceFactSemanticEffects",
@@ -120,6 +136,12 @@
       }
     ],
     "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "add_item",
+        "kind": "hidden_mutation",
+        "line": 31
+      },
       {
         "detail": "<<",
         "function": "mutate",
@@ -175,6 +197,12 @@
         "function": "shape_hash",
         "line": 20,
         "receiver": "data"
+      },
+      {
+        "field": "items",
+        "function": "add_item",
+        "line": 31,
+        "receiver": "self"
       },
       {
         "field": "items",

@@ -188,3 +188,111 @@ fn sorted_unique(values: impl Iterator<Item = String>) -> Vec<String> {
     out.sort();
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_temporal_ordering_pressure_gaps() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "owner_defs": [
+                { "name": "OwnerFew", "file": "a.rb", "kind": "class", "line": 1, "span": [1,0,10,0] },
+                { "name": "OwnerNoShared", "file": "a.rb", "kind": "class", "line": 1, "span": [1,0,10,0] },
+                { "name": "OwnerA", "file": "a.rb", "kind": "class", "line": 1, "span": [1,0,10,0] },
+                { "name": "OwnerB", "file": "a.rb", "kind": "class", "line": 1, "span": [1,0,10,0] }
+            ],
+            "function_defs": [
+                // OwnerFew: too few state methods
+                { "id": "OwnerFew#m1", "name": "m1", "owner": "OwnerFew", "file": "a.rb", "line": 2, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerFew#m2", "name": "m2", "owner": "OwnerFew", "file": "a.rb", "line": 3, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+
+                // OwnerNoShared: enough methods, but no shared fields
+                { "id": "OwnerNoShared#m1", "name": "m1", "owner": "OwnerNoShared", "file": "a.rb", "line": 4, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerNoShared#m2", "name": "m2", "owner": "OwnerNoShared", "file": "a.rb", "line": 5, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerNoShared#m3", "name": "m3", "owner": "OwnerNoShared", "file": "a.rb", "line": 6, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+
+                // OwnerA: 3 methods, 2 writes, 1 shared field
+                { "id": "OwnerA#m1", "name": "m1", "owner": "OwnerA", "file": "a.rb", "line": 10, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerA#m2", "name": "m2", "owner": "OwnerA", "file": "a.rb", "line": 11, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerA#m3", "name": "m3", "owner": "OwnerA", "file": "a.rb", "line": 12, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+
+                // OwnerB: same config as OwnerA to check owner sorting tie-breaker
+                { "id": "OwnerB#m1", "name": "m1", "owner": "OwnerB", "file": "a.rb", "line": 20, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerB#m2", "name": "m2", "owner": "OwnerB", "file": "a.rb", "line": 21, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerB#m3", "name": "m3", "owner": "OwnerB", "file": "a.rb", "line": 22, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" }
+            ],
+            "state_reads": [
+                // OwnerFew reads
+                { "owner": "OwnerFew", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 2, "span": [2,0,3,0] },
+                { "owner": "OwnerFew", "function": "m2", "field": "x", "receiver": "self", "file": "a.rb", "line": 3, "span": [2,0,3,0] },
+
+                // OwnerNoShared reads
+                { "owner": "OwnerNoShared", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 4, "span": [2,0,3,0] },
+                { "owner": "OwnerNoShared", "function": "m2", "field": "y", "receiver": "self", "file": "a.rb", "line": 5, "span": [2,0,3,0] },
+                { "owner": "OwnerNoShared", "function": "m3", "field": "z", "receiver": "self", "file": "a.rb", "line": 6, "span": [2,0,3,0] },
+
+                // OwnerA reads (shared "x")
+                { "owner": "OwnerA", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 10, "span": [2,0,3,0] },
+                { "owner": "OwnerA", "function": "m2", "field": "x", "receiver": "self", "file": "a.rb", "line": 11, "span": [2,0,3,0] },
+                { "owner": "OwnerA", "function": "m3", "field": "x", "receiver": "self", "file": "a.rb", "line": 12, "span": [2,0,3,0] },
+
+                // OwnerB reads (shared "x")
+                { "owner": "OwnerB", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 20, "span": [2,0,3,0] },
+                { "owner": "OwnerB", "function": "m2", "field": "x", "receiver": "self", "file": "a.rb", "line": 21, "span": [2,0,3,0] },
+                { "owner": "OwnerB", "function": "m3", "field": "x", "receiver": "self", "file": "a.rb", "line": 22, "span": [2,0,3,0] }
+            ],
+            "state_writes": [
+                // OwnerFew writes
+                { "owner": "OwnerFew", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 2, "span": [2,0,3,0] },
+
+                // OwnerNoShared writes
+                { "owner": "OwnerNoShared", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 4, "span": [2,0,3,0] },
+                { "owner": "OwnerNoShared", "function": "m2", "field": "y", "receiver": "self", "file": "a.rb", "line": 5, "span": [2,0,3,0] },
+
+                // OwnerA writes
+                { "owner": "OwnerA", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 10, "span": [2,0,3,0] },
+                { "owner": "OwnerA", "function": "m2", "field": "x", "receiver": "self", "file": "a.rb", "line": 11, "span": [2,0,3,0] },
+
+                // OwnerB writes
+                { "owner": "OwnerB", "function": "m1", "field": "x", "receiver": "self", "file": "a.rb", "line": 20, "span": [2,0,3,0] },
+                { "owner": "OwnerB", "function": "m2", "field": "x", "receiver": "self", "file": "a.rb", "line": 21, "span": [2,0,3,0] }
+            ]
+        })).unwrap();
+
+        // Also add doc2 for file tie-breaker OwnerC
+        let doc2: Document = serde_json::from_value(json!({
+            "file": "b.rb",
+            "language": "ruby",
+            "owner_defs": [
+                { "name": "OwnerC", "file": "b.rb", "kind": "class", "line": 1, "span": [1,0,10,0] }
+            ],
+            "function_defs": [
+                { "id": "OwnerC#m1", "name": "m1", "owner": "OwnerC", "file": "b.rb", "line": 30, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerC#m2", "name": "m2", "owner": "OwnerC", "file": "b.rb", "line": 31, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "OwnerC#m3", "name": "m3", "owner": "OwnerC", "file": "b.rb", "line": 32, "span": [2,0,3,0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,3,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" }
+            ],
+            "state_reads": [
+                { "owner": "OwnerC", "function": "m1", "field": "x", "receiver": "self", "file": "b.rb", "line": 30, "span": [2,0,3,0] },
+                { "owner": "OwnerC", "function": "m2", "field": "x", "receiver": "self", "file": "b.rb", "line": 31, "span": [2,0,3,0] },
+                { "owner": "OwnerC", "function": "m3", "field": "x", "receiver": "self", "file": "b.rb", "line": 32, "span": [2,0,3,0] }
+            ],
+            "state_writes": [
+                { "owner": "OwnerC", "function": "m1", "field": "x", "receiver": "self", "file": "b.rb", "line": 30, "span": [2,0,3,0] },
+                { "owner": "OwnerC", "function": "m2", "field": "x", "receiver": "self", "file": "b.rb", "line": 31, "span": [2,0,3,0] }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc, doc2]);
+        assert_eq!(report.len(), 3);
+        assert_eq!(report[0].file, "a.rb");
+        assert_eq!(report[0].owner, "OwnerA");
+        assert_eq!(report[1].file, "a.rb");
+        assert_eq!(report[1].owner, "OwnerB");
+        assert_eq!(report[2].file, "b.rb");
+        assert_eq!(report[2].owner, "OwnerC");
+    }
+}

@@ -345,10 +345,6 @@ impl Report {
                 let diff_s_gs: BTreeSet<_> = s_guards_set.difference(&gs_set).cloned().collect();
 
                 if diff_gs_s.len() == 1 && diff_s_gs.is_empty() {
-                    if s.guards == *gs {
-                        continue;
-                    }
-
                     let at = format!("{}:{}:{}", s.file, s.defn, s.line);
                     let missing = diff_gs_s.into_iter().next().unwrap();
 

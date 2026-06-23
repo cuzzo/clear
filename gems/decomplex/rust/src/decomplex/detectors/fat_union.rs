@@ -142,3 +142,87 @@ fn fat_unions_from_sites(
     });
     rows.into_iter().map(|(_, row)| row).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_fat_union_gaps() {
+        let doc1: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "dispatch_sites": [
+                {
+                    "variant_set": ["A", "B"],
+                    "arm_members": {},
+                    "outside": [],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 1,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "variant_set": ["A", "B", "C"],
+                    "arm_members": {
+                        "A": ["x"],
+                        "B": ["x"],
+                        "C": ["x"]
+                    },
+                    "outside": [],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 2,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "variant_set": ["A", "B", "C", "D"],
+                    "arm_members": {
+                        "A": ["x", "y"],
+                        "B": ["x", "y"],
+                        "C": ["x", "y"],
+                        "D": ["x", "y"]
+                    },
+                    "outside": ["z"],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 3,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "variant_set": ["A", "B", "C"],
+                    "arm_members": {
+                        "A": ["x"],
+                        "B": ["x"],
+                        "C": []
+                    },
+                    "outside": [],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 4,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "variant_set": ["A", "B", "C"],
+                    "arm_members": {
+                        "A": ["x", "y", "z", "v1"],
+                        "B": ["x", "y", "z", "v2"],
+                        "C": ["x", "y", "z"]
+                    },
+                    "outside": [],
+                    "file": "foo.rb",
+                    "function": "m",
+                    "line": 5,
+                    "span": [1, 2, 3, 4]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc1]);
+        assert_eq!(report.fat_unions.len(), 2);
+        assert!(report.fat_unions[0].degenerate);
+        assert!(!report.fat_unions[1].degenerate);
+    }
+}
+

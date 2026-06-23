@@ -65,45 +65,33 @@ fn decomplex_does_not_reexport_fact_mine_internals() {
     }
 }
 
-#[test]
-fn detectors_do_not_import_tree_sitter_directly() {
-    for path in detector_files() {
-        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
-        assert!(
-            !source.contains("tree_sitter"),
+fn check_tree_sitter(path: &Path, source: &str) -> Option<String> {
+    if source.contains("tree_sitter") {
+        Some(format!(
             "{} imports tree_sitter directly; detectors should consume normalized syntax/AST facts",
             path.display()
-        );
+        ))
+    } else {
+        None
     }
 }
 
-#[test]
-fn detectors_do_not_read_raw_document_text() {
+fn check_raw_document_text(path: &Path, source: &str) -> Vec<String> {
     let forbidden = [
         ("raw document lines", "document.lines"),
         ("raw document source", "document.source"),
         ("local source slicing helper", "source_text("),
     ];
     let mut offenders = Vec::new();
-
-    for path in detector_files() {
-        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
-        for (reason, pattern) in forbidden {
-            if source.contains(pattern) {
-                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
-            }
+    for (reason, pattern) in forbidden {
+        if source.contains(pattern) {
+            offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
         }
     }
-
-    assert!(
-        offenders.is_empty(),
-        "Detectors must consume computed facts, not raw document text:\n{}",
-        offenders.join("\n")
-    );
+    offenders
 }
 
-#[test]
-fn detectors_do_not_cross_the_syntax_boundary() {
+fn check_syntax_boundary(path: &Path, source: &str) -> Vec<String> {
     let forbidden = [
         ("syntax adapter access", "syntax::adapters"),
         ("language profile access", "language_profile("),
@@ -131,25 +119,15 @@ fn detectors_do_not_cross_the_syntax_boundary() {
         ("Php language branch", "Language::Php"),
     ];
     let mut offenders = Vec::new();
-
-    for path in detector_files() {
-        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
-        for (reason, pattern) in forbidden {
-            if source.contains(pattern) {
-                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
-            }
+    for (reason, pattern) in forbidden {
+        if source.contains(pattern) {
+            offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
         }
     }
-
-    assert!(
-        offenders.is_empty(),
-        "Detectors must consume syntax facts, not language/parser internals:\n{}",
-        offenders.join("\n")
-    );
+    offenders
 }
 
-#[test]
-fn post_syntax_consumers_do_not_access_parser_or_adapter_internals() {
+fn check_parser_or_adapter_internals(path: &Path, source: &str) -> Vec<String> {
     let forbidden = [
         ("syntax adapter access", "syntax::adapters"),
         ("language profile access", "language_profile("),
@@ -162,25 +140,15 @@ fn post_syntax_consumers_do_not_access_parser_or_adapter_internals() {
         ),
     ];
     let mut offenders = Vec::new();
-
-    for path in post_syntax_consumer_files() {
-        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
-        for (reason, pattern) in forbidden {
-            if source.contains(pattern) {
-                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
-            }
+    for (reason, pattern) in forbidden {
+        if source.contains(pattern) {
+            offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
         }
     }
-
-    assert!(
-        offenders.is_empty(),
-        "Post-syntax consumers must consume generated facts, not parser/adaptor internals:\n{}",
-        offenders.join("\n")
-    );
+    offenders
 }
 
-#[test]
-fn post_syntax_consumers_do_not_branch_on_concrete_languages() {
+fn check_concrete_languages(path: &Path, source: &str) -> Vec<String> {
     let forbidden = [
         ("Ruby language branch", "Language::Ruby"),
         ("Python language branch", "Language::Python"),
@@ -199,22 +167,80 @@ fn post_syntax_consumers_do_not_branch_on_concrete_languages() {
         ("Php language branch", "Language::Php"),
     ];
     let mut offenders = Vec::new();
-
-    for path in post_syntax_consumer_files() {
-        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
-        for (reason, pattern) in forbidden {
-            if source.contains(pattern) {
-                offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
-            }
+    for (reason, pattern) in forbidden {
+        if source.contains(pattern) {
+            offenders.push(format!("{}: {}: {}", path.display(), reason, pattern));
         }
     }
+    offenders
+}
 
+#[test]
+fn detectors_do_not_import_tree_sitter_directly() {
+    for path in detector_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
+        if let Some(err) = check_tree_sitter(&path, &source) {
+            panic!("{}", err);
+        }
+    }
+}
+
+#[test]
+fn detectors_do_not_read_raw_document_text() {
+    let mut offenders = Vec::new();
+    for path in detector_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
+        offenders.extend(check_raw_document_text(&path, &source));
+    }
+    assert!(
+        offenders.is_empty(),
+        "Detectors must consume computed facts, not raw document text:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn detectors_do_not_cross_the_syntax_boundary() {
+    let mut offenders = Vec::new();
+    for path in detector_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read detector source"));
+        offenders.extend(check_syntax_boundary(&path, &source));
+    }
+    assert!(
+        offenders.is_empty(),
+        "Detectors must consume syntax facts, not language/parser internals:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn post_syntax_consumers_do_not_access_parser_or_adapter_internals() {
+    let mut offenders = Vec::new();
+    for path in post_syntax_consumer_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
+        offenders.extend(check_parser_or_adapter_internals(&path, &source));
+    }
+    assert!(
+        offenders.is_empty(),
+        "Post-syntax consumers must consume generated facts, not parser/adaptor internals:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn post_syntax_consumers_do_not_branch_on_concrete_languages() {
+    let mut offenders = Vec::new();
+    for path in post_syntax_consumer_files() {
+        let source = production_source(&fs::read_to_string(&path).expect("read consumer source"));
+        offenders.extend(check_concrete_languages(&path, &source));
+    }
     assert!(
         offenders.is_empty(),
         "Post-syntax consumers must not encode language-specific branches:\n{}",
         offenders.join("\n")
     );
 }
+
 
 #[test]
 fn report_facts_uses_document_detector_apis() {
@@ -346,3 +372,14 @@ fn production_source(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[test]
+fn test_architecture_rules_uncovered_paths() {
+    let mock_path = Path::new("mock.rs");
+    assert!(check_tree_sitter(mock_path, "tree_sitter").is_some());
+    assert!(!check_raw_document_text(mock_path, "document.lines").is_empty());
+    assert!(!check_syntax_boundary(mock_path, "Language::Ruby").is_empty());
+    assert!(!check_parser_or_adapter_internals(mock_path, "syntax::adapters").is_empty());
+    assert!(!check_concrete_languages(mock_path, "Language::Python").is_empty());
+}
+

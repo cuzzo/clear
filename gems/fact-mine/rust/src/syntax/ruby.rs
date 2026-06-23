@@ -214,16 +214,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         let t = token.strip_prefix("self.").unwrap_or(token);
         let t = t.strip_prefix('@').unwrap_or(t);
         let t = t.strip_prefix('$').unwrap_or(t);
-        t.trim_end_matches(['!', '?', '=']).to_string()
+        t.to_string()
     }
 
     fn clean_receiver(&self, receiver: &str) -> String {
         let mut t = receiver.replace('@', "");
-        t = t.replace('$', "");
-        t.split('.')
-            .map(|part| part.trim_end_matches(['!', '?', '=']))
-            .collect::<Vec<_>>()
-            .join(".")
+        t.replace('$', "")
     }
 
     fn emit_index_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
@@ -348,14 +344,14 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
-        (message == "nil").then(|| NormalizedNilGuardFact {
+        (message == "nil?").then(|| NormalizedNilGuardFact {
             local: subject.to_string(),
             non_nil_when_true: false,
         })
     }
 
     fn terminating_call_message(&self, message: &str) -> bool {
-        matches!(message, "raise" | "fail" | "abort" | "exit")
+        matches!(message, "raise" | "fail" | "abort" | "exit" | "exit!")
     }
 
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
@@ -615,20 +611,18 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
 
         if line.starts_with("class ") || line.starts_with("module ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() > 1 {
-                let name = parts[1].trim_end_matches('<');
-                let name = name.split('<').next().unwrap_or(name).trim();
-                let qualified = if let Some(parent) = owner_stack.last() {
-                    if name.contains("::") {
-                        name.to_string()
-                    } else {
-                        format!("{}::{}", parent, name)
-                    }
-                } else {
+            let name = parts[1].trim_end_matches('<');
+            let name = name.split('<').next().unwrap_or(name).trim();
+            let qualified = if let Some(parent) = owner_stack.last() {
+                if name.contains("::") {
                     name.to_string()
-                };
-                owner_stack.push(qualified);
-            }
+                } else {
+                    format!("{parent}::{name}")
+                }
+            } else {
+                name.to_string()
+            };
+            owner_stack.push(qualified);
             i += 1;
             continue;
         }
@@ -691,11 +685,10 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                                 }
                             } else {
                                 if text == "end" || text.starts_with("end ") || text.ends_with(" end") {
-                                    if let Some((left, _)) = text.split_once("end") {
-                                        let left_trimmed = left.trim();
-                                        if !left_trimmed.is_empty() {
-                                            block_lines.push(left_trimmed);
-                                        }
+                                    let (left, _) = text.split_once("end").unwrap();
+                                    let left_trimmed = left.trim();
+                                    if !left_trimmed.is_empty() {
+                                        block_lines.push(left_trimmed);
                                     }
                                     break;
                                 }
@@ -711,14 +704,15 @@ fn type_aliases(source: &str) -> BTreeMap<String, String> {
                         }
                     }
 
-                    if !target.is_empty() {
-                        let qualified_name = if let Some(parent) = owner_stack.last() {
-                            format!("{}::{}", parent, name)
-                        } else {
-                            name.to_string()
-                        };
-                        aliases.insert(qualified_name, target);
+                    if target.is_empty() {
+                        continue;
                     }
+                    let qualified_name = if let Some(parent) = owner_stack.last() {
+                        format!("{parent}::{name}")
+                    } else {
+                        name.to_string()
+                    };
+                    aliases.insert(qualified_name, target);
                 }
             }
         }
@@ -798,3 +792,68 @@ fn constant_path(value: &str) -> bool {
             && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
+
+    #[test]
+    fn ruby_behavior_edge_cases() {
+        let behavior = RubyNormalizedBehavior;
+        assert_eq!(behavior.core_owner_names(), RUBY_CORE_CONSTS);
+        assert_eq!(behavior.self_member_receiver("foo"), "self.foo");
+
+        // Test local_flow_keyword
+        assert!(behavior.local_flow_keyword("break"));
+        assert!(behavior.local_flow_keyword("return"));
+        assert!(!behavior.local_flow_keyword("my_var"));
+
+        // sig_param_types syntax error fallback (params_end not found)
+        let param_types = sig_param_types("sig { params(x: String", 1);
+        assert!(param_types.is_empty());
+
+        // type_aliases edge cases
+        let aliases = type_aliases(
+            r#"
+            TopLevelAlias = T.type_alias { String }
+            module Parent
+              class Nested::Child
+                MyAlias1 = T.type_alias { T.any(String, Integer) }
+                MyAlias2 = T.type_alias {
+                  T.any(
+                    String,
+                    Integer
+                  )
+                }
+                MyAlias3 = T.type_alias do T.any(String, Integer) end
+                MyAlias4 = T.type_alias do
+                  T.any(String, Integer) end
+                # Trigger right_trimmed.is_empty() and left_trimmed.is_empty()
+                MyAlias5 = T.type_alias do
+                  T.any(String, Integer)
+                end
+                # Trigger split_once("do") returning None
+                MyAlias6 = T.type_alias
+                do
+                  T.any(String, Integer)
+                end
+              end
+            end
+            class 
+            module 
+            "#
+        );
+        assert_eq!(aliases.len(), 7);
+        assert!(aliases.contains_key("TopLevelAlias"));
+        assert!(aliases.contains_key("Nested::Child::MyAlias1"));
+        assert!(aliases.contains_key("Nested::Child::MyAlias2"));
+        assert!(aliases.contains_key("Nested::Child::MyAlias3"));
+        assert!(aliases.contains_key("Nested::Child::MyAlias4"));
+        assert!(aliases.contains_key("Nested::Child::MyAlias5"));
+        assert!(aliases.contains_key("Parent::MyAlias6"));
+        assert!(!aliases.contains_key("Nested::Child::MyAliasEmpty"));
+    }
+}
+
+

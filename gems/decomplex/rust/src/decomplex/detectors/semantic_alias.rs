@@ -202,3 +202,126 @@ impl Report {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_semantic_alias_gaps() {
+        // 1. Test semantic_predicate_definition filtering (line 61 and 106-110)
+        let doc_ignore: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "predicate_aliases": [
+                {
+                    "name": "ignored",
+                    "body": "x > 0",
+                    "file": "foo.rb",
+                    "defn": "m",
+                    "line": 1,
+                    "span": [1, 2, 3, 4]
+                }
+            ],
+            "comparison_uses": []
+        })).unwrap();
+
+        let report = scan_documents(&[doc_ignore]);
+        assert!(report.alias_clusters.is_empty());
+
+        // 2. Test semantic_predicate_definition operator matches (lines 106-110) and canon_polarity (lines 91-97)
+        let doc_operators: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "predicate_aliases": [
+                {
+                    "name": "a?",
+                    "body": "x != 0",
+                    "file": "foo.rb",
+                    "defn": "m",
+                    "line": 1,
+                    "span": [1, 2, 3, 4]
+                },
+                {
+                    "name": "b?",
+                    "body": "x && y",
+                    "file": "foo.rb",
+                    "defn": "m2",
+                    "line": 2,
+                    "span": [2, 3, 4, 5]
+                },
+                {
+                    "name": "c?",
+                    "body": "x || y",
+                    "file": "foo.rb",
+                    "defn": "m3",
+                    "line": 3,
+                    "span": [3, 4, 5, 6]
+                },
+                {
+                    "name": "d?",
+                    "body": "x and y",
+                    "file": "foo.rb",
+                    "defn": "m4",
+                    "line": 4,
+                    "span": [4, 5, 6, 7]
+                },
+                {
+                    "name": "e?",
+                    "body": "x or y",
+                    "file": "foo.rb",
+                    "defn": "m5",
+                    "line": 5,
+                    "span": [5, 6, 7, 8]
+                },
+                {
+                    "name": "f?",
+                    "body": "!(x == 0)",
+                    "file": "foo.rb",
+                    "defn": "m6",
+                    "line": 6,
+                    "span": [6, 7, 8, 9]
+                },
+                {
+                    "name": "f_alias?",
+                    "body": "x == 0",
+                    "file": "foo.rb",
+                    "defn": "m7",
+                    "line": 7,
+                    "span": [7, 8, 9, 10]
+                }
+            ],
+            "comparison_uses": [
+                {
+                    "canon_source": "x == 0",
+                    "file": "foo.rb",
+                    "function": "other_func",
+                    "line": 10,
+                    "raw": "x == 0",
+                    "span": [10, 11, 12, 13],
+                    "enclosing_span": [10, 11, 12, 13]
+                },
+                {
+                    "canon_source": "x == 0",
+                    "file": "foo.rb",
+                    "function": "f_alias?",
+                    "line": 11,
+                    "raw": "x == 0",
+                    "span": [11, 12, 13, 14],
+                    "enclosing_span": [11, 12, 13, 14]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc_operators]);
+        let cluster = report.alias_clusters.iter().find(|c| c.canon == "x == 0");
+        assert!(cluster.is_some());
+        let cluster = cluster.unwrap();
+        assert_eq!(cluster.names, vec!["f?", "f_alias?"]);
+
+        assert_eq!(report.reification_misses.len(), 1);
+        assert_eq!(report.reification_misses[0].canon, "x == 0");
+        assert_eq!(report.reification_misses[0].at, "foo.rb:other_func:10");
+    }
+}

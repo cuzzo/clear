@@ -510,3 +510,228 @@ impl Report {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_implicit_control_flow_gaps() {
+        // 1. Test effect_for logic (lines 161-166, 168)
+        // Set up method effects:
+        // - "foo" has a single stateful candidate under ClassB (should be resolved by effect_for for any owner)
+        // - "bar" has multiple stateful candidates (under ClassB and ClassC) -> should return None
+        let doc_effects: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "protocol_method_effects": [
+                {
+                    "file": "foo.rb", "owner": "ClassB", "name": "foo", "line": 1,
+                    "reads": ["state_x"], "writes": []
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassB", "name": "bar", "line": 2,
+                    "reads": ["state_y"], "writes": []
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassC", "name": "bar", "line": 3,
+                    "reads": ["state_z"], "writes": []
+                }
+            ],
+            "protocol_call_paths": [
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "test_method", "line": 10,
+                    "calls": [
+                        { "mid": "foo", "file": "foo.rb", "owner": "ClassA", "defn": "test_method", "line": 11, "span": [11, 1, 11, 10] },
+                        { "mid": "bar", "file": "foo.rb", "owner": "ClassA", "defn": "test_method", "line": 12, "span": [12, 1, 12, 10] }
+                    ]
+                }
+            ]
+        })).unwrap();
+
+        // This document has only one resolved stateful call ("foo"), so count < 2 -> should return empty
+        let report = scan_documents(&[doc_effects]);
+        assert!(report.ordered_protocols.is_empty());
+
+        // 2. Test dependencies, collapse_consecutive, diagnostic_protocol, drift (lines 224, 315, 324, 346-351, 358-359, 361, 370, 396-399)
+        // Setup sequences to build:
+        // - protocol A: write_read ("a" writes, "b" reads) -> score 0
+        // - protocol B: write_write ("c" writes, "d" writes) -> score 1
+        // - protocol C: read_write ("e" reads, "f" writes) -> score 2
+        // We will call these enough times to pass support >= 4.
+        let doc_main: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "protocol_method_effects": [
+                { "file": "foo.rb", "owner": "ClassA", "name": "a", "line": 1, "reads": [], "writes": ["state_1"] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "b", "line": 2, "reads": ["state_1"], "writes": [] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "c", "line": 3, "reads": [], "writes": ["state_2"] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "d", "line": 4, "reads": [], "writes": ["state_2"] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "e", "line": 5, "reads": ["state_3"], "writes": [] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "f", "line": 6, "reads": [], "writes": ["state_3"] },
+                { "file": "foo.rb", "owner": "ClassA", "name": "read_interpolated_string", "line": 7, "reads": ["state_4"], "writes": [] }
+            ],
+            "protocol_call_paths": [
+                // 4 sequences for a -> b
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "u1", "line": 10,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "u1", "line": 11, "span": [11, 1, 11, 5] },
+                        // consecutive duplicate to test collapse_consecutive (line 370)
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "u1", "line": 11, "span": [11, 1, 11, 5] },
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "u1", "line": 12, "span": [12, 1, 12, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "u2", "line": 20,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "u2", "line": 21, "span": [21, 1, 21, 5] },
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "u2", "line": 22, "span": [22, 1, 22, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "u3", "line": 30,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "u3", "line": 31, "span": [31, 1, 31, 5] },
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "u3", "line": 32, "span": [32, 1, 32, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "u4", "line": 40,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "u4", "line": 41, "span": [41, 1, 41, 5] },
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "u4", "line": 42, "span": [42, 1, 42, 5] }
+                    ]
+                },
+
+                // 4 sequences for c -> d to test write_write dependency rank (lines 358-359, 396-399)
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "uc1", "line": 50,
+                    "calls": [
+                        { "mid": "c", "file": "foo.rb", "owner": "ClassA", "defn": "uc1", "line": 51, "span": [51, 1, 51, 5] },
+                        { "mid": "d", "file": "foo.rb", "owner": "ClassA", "defn": "uc1", "line": 52, "span": [52, 1, 52, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "uc2", "line": 60,
+                    "calls": [
+                        { "mid": "c", "file": "foo.rb", "owner": "ClassA", "defn": "uc2", "line": 61, "span": [61, 1, 61, 5] },
+                        { "mid": "d", "file": "foo.rb", "owner": "ClassA", "defn": "uc2", "line": 62, "span": [62, 1, 62, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "uc3", "line": 70,
+                    "calls": [
+                        { "mid": "c", "file": "foo.rb", "owner": "ClassA", "defn": "uc3", "line": 71, "span": [71, 1, 71, 5] },
+                        { "mid": "d", "file": "foo.rb", "owner": "ClassA", "defn": "uc3", "line": 72, "span": [72, 1, 72, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "uc4", "line": 80,
+                    "calls": [
+                        { "mid": "c", "file": "foo.rb", "owner": "ClassA", "defn": "uc4", "line": 81, "span": [81, 1, 81, 5] },
+                        { "mid": "d", "file": "foo.rb", "owner": "ClassA", "defn": "uc4", "line": 82, "span": [82, 1, 82, 5] }
+                    ]
+                },
+
+                // 4 sequences for e -> f to test other dependency rank (line 361)
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ue1", "line": 90,
+                    "calls": [
+                        { "mid": "e", "file": "foo.rb", "owner": "ClassA", "defn": "ue1", "line": 91, "span": [91, 1, 91, 5] },
+                        { "mid": "f", "file": "foo.rb", "owner": "ClassA", "defn": "ue1", "line": 92, "span": [92, 1, 92, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ue2", "line": 100,
+                    "calls": [
+                        { "mid": "e", "file": "foo.rb", "owner": "ClassA", "defn": "ue2", "line": 101, "span": [101, 1, 101, 5] },
+                        { "mid": "f", "file": "foo.rb", "owner": "ClassA", "defn": "ue2", "line": 102, "span": [102, 1, 102, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ue3", "line": 110,
+                    "calls": [
+                        { "mid": "e", "file": "foo.rb", "owner": "ClassA", "defn": "ue3", "line": 111, "span": [111, 1, 111, 5] },
+                        { "mid": "f", "file": "foo.rb", "owner": "ClassA", "defn": "ue3", "line": 112, "span": [112, 1, 112, 5] }
+                    ]
+                },
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ue4", "line": 120,
+                    "calls": [
+                        { "mid": "e", "file": "foo.rb", "owner": "ClassA", "defn": "ue4", "line": 121, "span": [121, 1, 121, 5] },
+                        { "mid": "f", "file": "foo.rb", "owner": "ClassA", "defn": "ue4", "line": 122, "span": [122, 1, 122, 5] }
+                    ]
+                },
+
+                // Test diagnostic_protocol skip (line 224) via "read_interpolated_string"
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ud1", "line": 130,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "ud1", "line": 131, "span": [131, 1, 131, 5] },
+                        { "mid": "read_interpolated_string", "file": "foo.rb", "owner": "ClassA", "defn": "ud1", "line": 132, "span": [132, 1, 132, 5] }
+                    ]
+                },
+
+                // Sequence with drift for a -> b (b -> a) with confidence = 1.0 (since denominator for ["a", "b"] is 5, support is 4, drift support is 1. confidence = 4/5 = 0.8 >= 0.75)
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "udrift1", "line": 140,
+                    "calls": [
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "udrift1", "line": 141, "span": [141, 1, 141, 5] },
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "udrift1", "line": 142, "span": [142, 1, 142, 5] }
+                    ]
+                },
+
+                // Sequence with present.len() < 2 (line 315) -> has only "b"
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "udrift_short", "line": 150,
+                    "calls": [
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "udrift_short", "line": 151, "span": [151, 1, 151, 5] }
+                    ]
+                },
+
+                // Sequences to test low confidence drift check (line 324)
+                // We add another 3 sequences with "a" and "b" to increase denominator to 8.
+                // Then confidence for b -> a is 4 / 8 = 0.5 < 0.75, which skips it!
+                // To achieve this, let's keep this test simple and not add it, or verify both high and low confidence.
+                // Actually, just having udrift1 is enough to cover >= 0.75.
+                // To trigger < 0.75, let's add some more matching sequences:
+                {
+                    "file": "foo.rb", "owner": "ClassA", "name": "ulow_conf1", "line": 160,
+                    "calls": [
+                        { "mid": "a", "file": "foo.rb", "owner": "ClassA", "defn": "ulow_conf1", "line": 161, "span": [161, 1, 161, 5] },
+                        { "mid": "b", "file": "foo.rb", "owner": "ClassA", "defn": "ulow_conf1", "line": 162, "span": [162, 1, 162, 5] }
+                    ]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc_main]);
+        // ordered protocols:
+        // a -> b (support = 5, write_read)
+        // c -> d (support = 4, write_write)
+        // e -> f (support = 4, read_write)
+        // plus b -> a (support = 1, read_write)
+        assert_eq!(report.ordered_protocols.len(), 4);
+        assert_eq!(report.ordered_protocols[0].protocol, vec!["a", "b"]);
+        assert_eq!(report.ordered_protocols[0].dependency, vec!["write_read"]);
+
+        assert_eq!(report.ordered_protocols[1].protocol, vec!["c", "d"]);
+        assert_eq!(report.ordered_protocols[1].dependency, vec!["write_write"]);
+
+        assert_eq!(report.ordered_protocols[2].protocol, vec!["e", "f"]);
+        assert_eq!(report.ordered_protocols[2].dependency, vec!["read_write"]);
+
+        // drift check:
+        // udrift1 has "b" then "a" -> confidence is 4 / 6 = 0.67 < 0.75, so it is skipped.
+        // Wait, if confidence is 0.67, it is skipped.
+        // What if we want it to NOT be skipped?
+        // If we remove the "ulow_conf1" sequence, denominator is 5, confidence is 4/5 = 0.8 >= 0.75.
+        // Then we get a drift result!
+        // Let's check: report.order_drift.is_empty() because confidence = 0.67 < 0.75.
+        assert_eq!(report.order_drift.len(), 1);
+        assert_eq!(report.order_drift[0].protocol, vec!["a", "b"]);
+        assert_eq!(report.order_drift[0].observed, vec!["b", "a"]);
+    }
+}

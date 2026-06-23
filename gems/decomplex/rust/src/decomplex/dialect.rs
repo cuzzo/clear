@@ -164,3 +164,23 @@ pub fn dialect_for_method(method: &crate::decomplex::syntax::local_flow::MethodS
         .unwrap_or(crate::decomplex::syntax::Language::Ruby);
     dialect_for(language)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_python_dialect_gaps() {
+        let dialect = PythonDialect;
+        assert!(!dialect.is_identifier(""));
+        assert_eq!(dialect.scoped_name("self.foo", "bar"), "self.bar");
+    }
+
+    #[test]
+    fn test_default_dialect_gaps() {
+        let dialect = DefaultDialect;
+        assert_eq!(dialect.scoped_name("self.foo", "bar"), "self.bar");
+        assert!(!dialect.is_identifier(""));
+    }
+}
+

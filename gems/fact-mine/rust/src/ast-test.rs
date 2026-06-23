@@ -20658,3 +20658,124 @@ fn flatten_and_matches_ruby_ast_helper() {
 
     assert_eq!(super::flatten_and(&and_node).len(), 2);
 }
+
+#[test]
+fn ruby_ast_adapter_edge_cases() {
+    use crate::ast::adapters::base::AstNormalizationAdapter;
+    use crate::ast::adapters::normalization_adapter;
+
+    fn collect_all_nodes<'tree>(
+        node: TreeSitterNode<'tree>,
+        found: &mut Vec<TreeSitterNode<'tree>>,
+    ) {
+        found.push(node);
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            collect_all_nodes(child, found);
+        }
+    }
+
+    let adapter = normalization_adapter(Language::Ruby);
+
+    assert!(adapter.tracks_dynamic_local_scope());
+
+    // yield_statement
+    let tree = raw_tree("yield\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(yield_node) = nodes.iter().find(|n| n.kind() == "body_statement") {
+        adapter.yield_statement(*yield_node, "yield\n");
+    }
+
+    // super_statement
+    let tree = raw_tree("super\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(super_node) = nodes.iter().find(|n| n.kind() == "body_statement") {
+        assert!(adapter.super_statement(*super_node, "super\n"));
+    }
+
+    let tree = raw_tree("super(a)\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(super_node) = nodes.iter().find(|n| n.kind() == "call") {
+        adapter.super_statement(*super_node, "super(a)\n");
+    }
+
+    // elsif_parts
+    let tree = raw_tree("if a; elsif b; end\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(elsif_node) = nodes.iter().find(|n| n.kind() == "elsif") {
+        assert!(adapter.elsif_statement(*elsif_node, "if a; elsif b; end\n"));
+        assert!(adapter.elsif_parts(*elsif_node, "if a; elsif b; end\n").is_some());
+    }
+    assert!(adapter.elsif_parts(node, "if a; elsif b; end\n").is_none());
+
+    // variables
+    let tree = raw_tree("@x = 1\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(ivar_node) = nodes.iter().find(|n| n.kind() == "instance_variable") {
+        assert!(adapter.instance_variable(*ivar_node, "@x = 1\n"));
+    }
+
+    let tree = raw_tree("$x = 1\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(gvar_node) = nodes.iter().find(|n| n.kind() == "global_variable") {
+        assert!(adapter.global_variable(*gvar_node, "$x = 1\n"));
+    }
+
+    // dynamic matching
+    assert!(adapter.dynamic_constant_pattern_text("Constant"));
+    assert!(adapter.dynamic_exception_constant_text("StandardError"));
+    assert!(adapter.dynamic_instance_variable_text("@ivar"));
+
+    // case_argument_list
+    let tree = raw_tree("case x; when 1; end\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(arg_node) = nodes.iter().find(|n| n.kind() == "argument_list") {
+        adapter.case_argument_list(*arg_node, "case x; when 1; end\n");
+    }
+
+    // loop / conditional kind overrides
+    assert_eq!(adapter.conditional_node_type("if"), Some("IF"));
+    assert_eq!(adapter.conditional_node_type("unless"), Some("UNLESS"));
+    assert_eq!(adapter.conditional_node_type("other"), None);
+    assert_eq!(adapter.conditional_keyword_node_type("if"), Some("IF"));
+    assert_eq!(adapter.conditional_keyword_node_type("unless"), Some("UNLESS"));
+    assert_eq!(adapter.conditional_keyword_node_type("other"), None);
+    assert_eq!(adapter.modifier_node_type("if"), Some("IF"));
+    assert_eq!(adapter.modifier_node_type("unless"), Some("UNLESS"));
+    assert_eq!(adapter.modifier_node_type("while"), Some("WHILE"));
+    assert_eq!(adapter.modifier_node_type("until"), Some("UNTIL"));
+    assert_eq!(adapter.modifier_node_type("other"), None);
+    assert_eq!(adapter.loop_node_type("while"), Some("WHILE"));
+    assert_eq!(adapter.loop_node_type("until_modifier"), Some("UNTIL"));
+    assert_eq!(adapter.loop_node_type("for"), Some("FOR"));
+    assert_eq!(adapter.loop_node_type("other"), None);
+    assert!(adapter.modifier_loop_kind("while_modifier"));
+    assert!(adapter.conditional_branch_skip_kind("elsif"));
+    assert!(adapter.branch_child_skip_kind("elsif"));
+
+    // rescue
+    let tree = raw_tree("begin; a; rescue StandardError, CustomError => e; nil; end\n", Language::Ruby);
+    let node = tree.root_node();
+    let mut nodes = Vec::new();
+    collect_all_nodes(node, &mut nodes);
+    if let Some(rescue_node) = nodes.iter().find(|n| n.kind() == "rescue") {
+        assert!(adapter.rescue_clause(*rescue_node));
+        assert!(adapter.rescue_clause_handler(*rescue_node).is_some());
+        assert!(!adapter.rescue_clause_exceptions(*rescue_node, "begin; a; rescue StandardError, CustomError => e; nil; end\n").is_empty());
+    }
+}
+

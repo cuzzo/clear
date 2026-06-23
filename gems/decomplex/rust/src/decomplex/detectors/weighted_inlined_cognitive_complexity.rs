@@ -341,3 +341,73 @@ impl Analyzer {
         (value * 10.0).round() / 10.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_cognitive_complexity_gaps() {
+        let body = json!({
+            "kind": "method_body",
+            "text": "def f; end",
+            "span": [1, 2, 3, 4],
+            "named": true,
+            "field_name": null,
+            "children": []
+        });
+
+        let summaries: Vec<local_flow::MethodSummary> = serde_json::from_value(json!([
+            { "id": "a#f1", "owner": "a", "name": "f1", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0], "statements": [], "boundaries": [] },
+            { "id": "a#f2", "owner": "a", "name": "f2", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0], "statements": [], "boundaries": [] },
+            { "id": "a#f3", "owner": "a", "name": "f3", "file": "a.rb", "line": 6, "span": [6, 0, 7, 0], "statements": [], "boundaries": [] },
+            { "id": "a#f4", "owner": "a", "name": "f4", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "statements": [], "boundaries": [] }
+        ])).unwrap();
+
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "owner_defs": [
+                { "name": "a", "file": "a.rb", "kind": "class", "line": 1, "span": [1, 0, 10, 0] }
+            ],
+            "function_defs": [
+                { "id": "a#f1", "name": "f1", "owner": "a", "file": "a.rb", "line": 2, "span": [2, 0, 3, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
+                { "id": "a#f2", "name": "f2", "owner": "a", "file": "a.rb", "line": 4, "span": [4, 0, 5, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
+                { "id": "a#f3", "name": "f3", "owner": "a", "file": "a.rb", "line": 6, "span": [6, 0, 7, 0], "visibility": "public", "body": body, "params": [], "signature": "" },
+                { "id": "a#f4", "name": "f4", "owner": "a", "file": "a.rb", "line": 8, "span": [8, 0, 9, 0], "visibility": "public", "body": body, "params": [], "signature": "" }
+            ],
+            "call_sites": [
+                {
+                    "receiver": "self", "message": "f2", "file": "a.rb", "function": "f1", "owner": "a", "line": 2, "span": [2, 0, 3, 0],
+                    "conditional": false, "arguments": [], "control": "conditional", "safe_navigation": false, "block": false
+                },
+                {
+                    "receiver": "self", "message": "f3", "file": "a.rb", "function": "f2", "owner": "a", "line": 4, "span": [4, 0, 5, 0],
+                    "conditional": false, "arguments": [], "control": "iterates", "safe_navigation": false, "block": false
+                },
+                {
+                    "receiver": "self", "message": "f4", "file": "a.rb", "function": "f3", "owner": "a", "line": 6, "span": [6, 0, 7, 0],
+                    "conditional": false, "arguments": [], "control": "always", "safe_navigation": false, "block": false
+                },
+                {
+                    "receiver": "self", "message": "f1", "file": "a.rb", "function": "f4", "owner": "a", "line": 8, "span": [8, 0, 9, 0],
+                    "conditional": false, "arguments": [], "control": "other_weight", "safe_navigation": false, "block": false
+                },
+                {
+                    "receiver": "self", "message": "f_unknown", "file": "a.rb", "function": "f1", "owner": "a", "line": 3, "span": [2, 0, 3, 0],
+                    "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false
+                }
+            ],
+            "local_complexity_scores": {
+                "a#f1": { "score": 20.0, "signals": {} },
+                "a#f2": { "score": 5.0, "signals": {} },
+                "a#f3": { "score": 2.0, "signals": {} },
+                "a#f4": { "score": 1.0, "signals": {} }
+            }
+        })).unwrap();
+
+        let res = scan_documents_with_summaries(&[doc], &summaries);
+        assert!(!res.is_empty());
+    }
+}

@@ -74,7 +74,7 @@
         "control": "conditional",
         "function": "branch_refs",
         "line": 5,
-        "message": "empty",
+        "message": "empty?",
         "receiver": "states(mod)",
         "safe_navigation": false
       },
@@ -85,7 +85,7 @@
         "control": "conditional",
         "function": "branch_refs",
         "line": 6,
-        "message": "positive",
+        "message": "positive?",
         "receiver": "state_touch_count(fn)",
         "safe_navigation": false
       },
@@ -96,7 +96,7 @@
         "control": "conditional",
         "function": "branch_refs",
         "line": 7,
-        "message": "empty",
+        "message": "empty?",
         "receiver": "calls",
         "safe_navigation": false
       },
@@ -107,7 +107,7 @@
         "control": "conditional",
         "function": "branch_refs",
         "line": 7,
-        "message": "empty",
+        "message": "empty?",
         "receiver": "internal_calls_for(fn)",
         "safe_navigation": false
       }

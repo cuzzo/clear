@@ -20,6 +20,48 @@ class SourceFactProtocolsNilClone
     value&.name
   end
 
+  def guard_eq_nil(value)
+    if value == nil
+      return
+    end
+    value.name
+  end
+
+  def guard_ne_nil(value)
+    if value != nil
+      value.name
+    end
+  end
+
+  def guard_negated(value)
+    if !value
+      return
+    end
+    value.name
+  end
+
+  def guard_both_terminate(value)
+    if value.nil?
+      raise "nil!"
+    else
+      raise "not nil!"
+    end
+  end
+
+  def guard_else_terminate(value)
+    if !value.nil?
+      value.name
+    else
+      raise "nil!"
+    end
+  end
+
+  def guard_safe_nav_cond(value)
+    if value&.name
+      value.name
+    end
+  end
+
   def clone_left(user)
     data = user.profile.name
     audit(data)

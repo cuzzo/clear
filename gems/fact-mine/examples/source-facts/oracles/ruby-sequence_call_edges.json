@@ -172,7 +172,7 @@
         "control": "conditional",
         "function": "chained_multiline",
         "line": 26,
-        "message": "file",
+        "message": "file?",
         "receiver": "File",
         "safe_navigation": false
       },

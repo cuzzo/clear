@@ -190,8 +190,7 @@ fn normalized_call_message(node: &Node) -> Option<String> {
 
     let message = match node.r#type.as_str() {
         "CALL" | "QCALL" | "ATTRASGN" => normalized_scalar_child(node, 1),
-        "FCALL" | "VCALL" => normalized_scalar_child(node, 0),
-        _ => None,
+        _ => normalized_scalar_child(node, 0),
     }?;
     let args = normalized_child_node(
         node,
@@ -350,3 +349,143 @@ const NORMALIZED_CLONE_LITERAL_TYPES: &[&str] = &[
     "INTEGER",
     "LIT",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_cycle_detection() {
+        let node = Node {
+            r#type: "BLOCK".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let mut active = HashSet::new();
+        let key = &node as *const Node as usize;
+        active.insert(key);
+        let (fp, mass) = normalized_fingerprint_for(&node, &mut active);
+        assert_eq!(fp, "");
+        assert_eq!(mass, 0);
+    }
+
+    #[test]
+    fn test_scalar_tokens() {
+        let child_node = Child::Node(Box::new(Node {
+            r#type: "LVAR".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        }));
+        assert_eq!(normalized_scalar_token(&child_node), None);
+        assert_eq!(normalized_scalar_token(&Child::Integer(42)), Some("lit".to_string()));
+        assert_eq!(normalized_scalar_token(&Child::Bool(true)), Some("id".to_string()));
+        assert_eq!(normalized_scalar_token(&Child::Nil), None);
+    }
+
+    #[test]
+    fn test_empty_call_arguments() {
+        let rec = Node {
+            r#type: "SELF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "self".to_string(),
+        };
+        let args = Node {
+            r#type: "ARGS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let call_node = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(rec)),
+                Child::Symbol("foo".to_string()),
+                Child::Node(Box::new(args)),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "self.foo()".to_string(),
+        };
+        assert_eq!(normalized_call_message(&call_node), None);
+    }
+
+    #[test]
+    fn test_normalized_call_message_none_message() {
+        let rec = Node {
+            r#type: "SELF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "self".to_string(),
+        };
+        let args = Node {
+            r#type: "ARGS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let call_node = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(rec)),
+                Child::Nil,
+                Child::Node(Box::new(args)),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "self.foo()".to_string(),
+        };
+        assert_eq!(normalized_call_message(&call_node), None);
+    }
+
+    #[test]
+    fn test_non_identifier_scalar_text() {
+        let node = Node {
+            r#type: "LIT_VAL".to_string(),
+            children: vec![Child::Symbol("123".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "123".to_string(),
+        };
+        let token = normalized_terminal_token(&node);
+        assert_eq!(token, Some("123".to_string()));
+    }
+
+    #[test]
+    fn test_normalized_child_text_types() {
+        assert_eq!(normalized_child_text(&Child::Integer(100)), "100");
+        assert_eq!(normalized_child_text(&Child::Bool(false)), "false");
+    }
+
+    #[test]
+    fn test_normalized_identifier_empty() {
+        assert!(!normalized_identifier_text(""));
+    }
+}

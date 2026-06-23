@@ -141,7 +141,7 @@
         "control": "conditional",
         "function": "route",
         "line": 9,
-        "message": "active",
+        "message": "active?",
         "receiver": "user",
         "safe_navigation": false
       }

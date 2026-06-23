@@ -285,4 +285,43 @@ mod tests {
         let right = entities(&json!({"guards": ["a", "b"]}));
         assert_eq!(left, right);
     }
+
+    #[test]
+    fn test_stopwords_and_short_tokens() {
+        assert_eq!(tokens("a nil valid"), vec!["valid"]);
+    }
+
+    #[test]
+    fn test_finding_units_none() {
+        let finding = json!({"at": "foo"});
+        assert!(finding_units(&finding).is_empty());
+    }
+
+    #[test]
+    fn test_fat_union_true() {
+        let finding = json!({
+            "kind": "case_dispatch",
+            "members": ["Foo", "Bar"],
+            "at": "file.rs:method:12"
+        });
+        let sec = ReportSection::new("detector", 1, "desc", vec![finding]);
+        let cls = cluster(&[sec], 1);
+        assert!(!cls.is_empty());
+        assert!(cls[0].fat_union);
+        assert_eq!(cls[0].fix, FAT_UNION_FIX);
+    }
+
+    #[test]
+    fn test_fat_union_false_due_to_lowercase() {
+        let finding = json!({
+            "kind": "case_dispatch",
+            "members": ["foo", "bar"],
+            "at": "file.rs:method:12"
+        });
+        let sec = ReportSection::new("detector", 1, "desc", vec![finding]);
+        let cls = cluster(&[sec], 1);
+        assert!(!cls.is_empty());
+        assert!(!cls[0].fat_union);
+    }
 }
+

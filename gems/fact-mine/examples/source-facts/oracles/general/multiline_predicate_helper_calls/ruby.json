@@ -11,7 +11,7 @@
         "control": "always",
         "function": "summarize",
         "line": 5,
-        "message": "data_carrier",
+        "message": "data_carrier?",
         "receiver": "self",
         "safe_navigation": false
       },
@@ -22,7 +22,7 @@
         "control": "always",
         "function": "data_carrier?",
         "line": 13,
-        "message": "positive",
+        "message": "positive?",
         "receiver": "public_methods",
         "safe_navigation": false
       },
@@ -33,7 +33,7 @@
         "control": "always",
         "function": "data_carrier?",
         "line": 13,
-        "message": "zero",
+        "message": "zero?",
         "receiver": "state_count",
         "safe_navigation": false
       },

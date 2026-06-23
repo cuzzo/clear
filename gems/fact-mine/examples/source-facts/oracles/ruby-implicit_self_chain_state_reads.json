@@ -91,7 +91,7 @@
         "control": "iterates",
         "function": "filtered",
         "line": 10,
-        "message": "ready",
+        "message": "ready?",
         "receiver": "item",
         "safe_navigation": false
       },

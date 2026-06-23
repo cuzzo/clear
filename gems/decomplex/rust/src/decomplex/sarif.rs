@@ -253,6 +253,7 @@ fn unique_rules(rules: Vec<Value>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn slug_matches_ruby_sarif_slug() {
@@ -261,4 +262,36 @@ mod tests {
             "structural-similarity-type-2-3"
         );
     }
+
+    #[test]
+    fn test_sarif_edge_cases() {
+        let rules = vec![
+            json!({"id": "rule1"}),
+            json!({"id": "rule1"}),
+            json!({"id": ""}),
+        ];
+        let uniq = unique_rules(rules);
+        assert_eq!(uniq.len(), 1);
+        assert_eq!(uniq[0].get("id").and_then(Value::as_str), Some("rule1"));
+
+        let doc = document(
+            "mytool",
+            vec![json!({"id": "rule1"})],
+            vec![
+                json!({"ruleId": "rule2"}),
+                json!({}),
+            ],
+            None,
+            json!({}),
+        );
+        let runs = doc.get("runs").unwrap().as_array().unwrap();
+        let results = runs[0].get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 2);
+
+        let empty_locs = sarif_locations(None, None, None, None, None);
+        assert_eq!(empty_locs, Value::Array(vec![]));
+        let empty_locs2 = sarif_locations(Some(""), None, None, None, None);
+        assert_eq!(empty_locs2, Value::Array(vec![]));
+    }
 }
+

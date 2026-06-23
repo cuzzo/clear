@@ -80,7 +80,7 @@
         "control": "iterates",
         "function": "scan",
         "line": 13,
-        "message": "source_path",
+        "message": "source_path?",
         "receiver": "self",
         "safe_navigation": false
       },
@@ -141,7 +141,7 @@
         "control": "conditional",
         "function": "guarded_emit",
         "line": 21,
-        "message": "covered",
+        "message": "covered?",
         "receiver": "evidence",
         "safe_navigation": false
       },
@@ -152,7 +152,7 @@
         "control": "conditional",
         "function": "report",
         "line": 8,
-        "message": "positive",
+        "message": "positive?",
         "receiver": "dup",
         "safe_navigation": false
       },
@@ -163,7 +163,7 @@
         "control": "conditional",
         "function": "scan",
         "line": 12,
-        "message": "empty",
+        "message": "empty?",
         "receiver": "Array(paths)",
         "safe_navigation": false
       },
@@ -174,7 +174,7 @@
         "control": "iterates",
         "function": "report",
         "line": 5,
-        "message": "empty",
+        "message": "empty?",
         "receiver": "x[:detectors].to_a",
         "safe_navigation": false
       },

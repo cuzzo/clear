@@ -339,9 +339,8 @@ impl<'a> RedundantNilGuard<'a> {
 
     fn branch_nil_facts(&self, node: &Node, cond_truth: bool) -> Vec<NilFact> {
         if self.parenthesized_wrapper(node) {
-            if let Some(child) = self.first_node_child(node) {
-                return self.branch_nil_facts(child, cond_truth);
-            }
+            let child = self.first_node_child(node).expect("wrapper must have node child");
+            return self.branch_nil_facts(child, cond_truth);
         }
 
         if node.r#type == "AND" {
@@ -557,5 +556,225 @@ impl<'a> RedundantNilGuard<'a> {
             node.last_lineno,
             node.last_column,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestBehavior;
+    impl NormalizedLanguageBehavior for TestBehavior {}
+
+    fn scanner() -> RedundantNilGuard<'static> {
+        RedundantNilGuard {
+            file: "foo.rb".to_string(),
+            lines: Vec::new(),
+            behavior: &TestBehavior,
+            findings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_scan_files_and_sort_rows() {
+        let prev_jobs = crate::parallel::job_count();
+        crate::parallel::set_jobs_for_process(Some(2)).unwrap();
+        
+        let mut doc1: Document = serde_json::from_str(r#"{"file":"a.rb","language":"ruby"}"#).unwrap();
+        doc1.redundant_nil_guards = serde_json::from_str(r#"[{"defn":"foo","line":10,"local":"x","guard":"safe","proof":"proof","file":"a.rb","span":[10,0,10,5],"at":"","spans":{}}]"#).unwrap();
+
+        let mut doc2: Document = serde_json::from_str(r#"{"file":"b.rb","language":"ruby"}"#).unwrap();
+        doc2.redundant_nil_guards = serde_json::from_str(r#"[{"defn":"bar","line":20,"local":"y","guard":"safe","proof":"proof","file":"b.rb","span":[20,0,20,5],"at":"","spans":{}}]"#).unwrap();
+
+        let results = scan_documents(&[doc2, doc1]); // reverse order to test sort_rows
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].file, "a.rb");
+        assert_eq!(results[1].file, "b.rb");
+
+        crate::parallel::set_jobs_for_process(Some(prev_jobs)).ok();
+    }
+
+    #[test]
+    fn test_scan_files_api() {
+        // scan_files wrapper
+        let res = scan_files(&[], Language::Ruby).unwrap();
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn test_subject_key_fallback() {
+        let s = scanner();
+        let node = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Nil], // not String or Symbol
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(s.subject_key(&node).is_none());
+    }
+
+    #[test]
+    fn test_child_name_and_node_name_fallback() {
+        let s = scanner();
+        // child_name node path
+        let node_child = Child::Node(Box::new(Node {
+            r#type: "foo".to_string(),
+            children: vec![Child::Nil], // falls back to text extraction
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "my_name".to_string(),
+        }));
+        assert_eq!(s.child_name(&node_child), Some("my_name".to_string()));
+        
+        // child_name fallback
+        assert_eq!(s.child_name(&Child::Nil), None);
+
+        // node_name with first child as String
+        let node_string = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::String("var_str".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert_eq!(s.node_name(&node_string), Some("var_str".to_string()));
+
+        // node_name with first child as Symbol
+        let node_symbol = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Symbol("var_sym".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert_eq!(s.node_name(&node_symbol), Some("var_sym".to_string()));
+    }
+
+    #[test]
+    fn test_no_call_arguments_non_node() {
+        let s = scanner();
+        assert!(!s.no_call_arguments(Some(&Child::Integer(42))));
+    }
+
+    #[test]
+    fn test_nil_arg_edge_cases() {
+        let s = scanner();
+        assert!(!s.nil_arg(Some(&Child::Integer(42)))); // not Node
+        
+        let nil_node = Node {
+            r#type: "LIST".to_string(),
+            children: vec![Child::Nil], // Child::Nil path
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(s.nil_arg(Some(&Child::Node(Box::new(nil_node)))));
+
+        let other_node = Node {
+            r#type: "LIST".to_string(),
+            children: vec![Child::Integer(42)], // _ fallback path
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(!s.nil_arg(Some(&Child::Node(Box::new(other_node)))));
+    }
+
+    #[test]
+    fn test_opcall_symbol_fallback() {
+        let s = scanner();
+        let node = Node {
+            r#type: "OPCALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "LVAR".to_string(),
+                    children: vec![Child::Symbol("x".to_string())],
+                    first_lineno: 1,
+                    first_column: 0,
+                    last_lineno: 1,
+                    last_column: 0,
+                    text: "x".to_string(),
+                })),
+                Child::Nil, // not Child::Symbol
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(s.nil_fact(&node).is_none());
+    }
+
+    #[test]
+    fn test_known_for_branch_none_cond() {
+        let mut s = scanner();
+        let if_node = Node {
+            r#type: "IF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let flow = s.process_stmt(&if_node, &[], &BTreeSet::new());
+        assert!(flow.known.is_empty());
+    }
+
+    #[test]
+    fn test_opcall_no_child_negated() {
+        let s = scanner();
+        let opcall_no_child = Node {
+            r#type: "OPCALL".to_string(),
+            children: vec![
+                Child::Nil,
+                Child::Symbol("!".to_string()),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(s.branch_nil_facts(&opcall_no_child, true).is_empty());
+    }
+
+    #[test]
+    fn test_opcall_no_symbol() {
+        let s = scanner();
+        let opcall_no_symbol = Node {
+            r#type: "OPCALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(Node {
+                    r#type: "LVAR".to_string(),
+                    children: vec![Child::Symbol("x".to_string())],
+                    first_lineno: 1,
+                    first_column: 0,
+                    last_lineno: 1,
+                    last_column: 0,
+                    text: "x".to_string(),
+                })),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        assert!(s.branch_nil_facts(&opcall_no_symbol, true).is_empty());
     }
 }

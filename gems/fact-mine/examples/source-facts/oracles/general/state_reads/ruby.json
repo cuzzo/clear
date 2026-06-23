@@ -30,7 +30,7 @@
         "control": "always",
         "function": "inspect_profile",
         "line": 12,
-        "message": "active",
+        "message": "active?",
         "receiver": "account",
         "safe_navigation": false
       }

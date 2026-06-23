@@ -122,10 +122,6 @@ impl Miner {
                 let diff_s_mem: BTreeSet<_> = s_mem_set.difference(&mem_set).cloned().collect();
 
                 if diff_mem_s.len() == 1 && diff_s_mem.is_empty() {
-                    if s.members == *mem {
-                        continue;
-                    }
-
                     let l = self.loc(s);
                     let mut spans = BTreeMap::new();
                     spans.insert(l.clone(), s.span);
@@ -147,5 +143,49 @@ impl Miner {
 
     fn loc(&self, s: &DecisionSite) -> String {
         format!("{}:{}:{}", s.file, s.function, s.line)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_miner_gaps() {
+        // We need 3 sites with kind1 and members ["a", "b", "c"] to make it popular (support >= 3)
+        // We also need another site with kind2 (different kind) to hit line 115 continue.
+        // We also need another site with kind1 and members ["a", "b"] to trigger the neglected condition (diff_mem_s is ["c"]).
+        let doc: Document = serde_json::from_value(json!({
+            "file": "a.rb",
+            "language": "ruby",
+            "decision_sites": [
+                {
+                    "kind": "kind1", "members": ["a", "b", "c"], "file": "a.rb", "function": "f", "line": 1, "span": [1,2,3,4],
+                    "predicate": "a && b && c", "enclosing_span": [1,2,3,4]
+                },
+                {
+                    "kind": "kind1", "members": ["a", "b", "c"], "file": "a.rb", "function": "f", "line": 2, "span": [1,2,3,4],
+                    "predicate": "a && b && c", "enclosing_span": [1,2,3,4]
+                },
+                {
+                    "kind": "kind1", "members": ["a", "b", "c"], "file": "a.rb", "function": "f", "line": 3, "span": [1,2,3,4],
+                    "predicate": "a && b && c", "enclosing_span": [1,2,3,4]
+                },
+                {
+                    "kind": "kind2", "members": ["a", "b", "c"], "file": "a.rb", "function": "f", "line": 4, "span": [1,2,3,4],
+                    "predicate": "a && b && c", "enclosing_span": [1,2,3,4]
+                },
+                {
+                    "kind": "kind1", "members": ["a", "b"], "file": "a.rb", "function": "f", "line": 5, "span": [1,2,3,4],
+                    "predicate": "a && b", "enclosing_span": [1,2,3,4]
+                }
+            ]
+        })).unwrap();
+
+        let report = scan_documents(&[doc]);
+        assert_eq!(report.neglected_conditions.len(), 1);
+        assert_eq!(report.neglected_conditions[0].missing, "c");
+        assert_eq!(report.neglected_conditions[0].support, 3);
     }
 }

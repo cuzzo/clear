@@ -158,3 +158,59 @@ fn compensated_sum(values: impl IntoIterator<Item = f64>) -> f64 {
     }
     sum + compensation
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_nested() {
+        let node = Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let mut signals = BTreeMap::new();
+        let scorer = LocalComplexityScorer;
+        let score = scorer.score_node(&node, 0, &mut signals);
+        assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn test_nested_loop_signal() {
+        let node = Node {
+            r#type: "WHILE".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let mut signals = BTreeMap::new();
+        let scorer = LocalComplexityScorer;
+        let _score = scorer.score_node(&node, 1, &mut signals);
+        assert_eq!(signals.get("nested"), Some(&1));
+    }
+
+    #[test]
+    fn test_predicate_cost_none() {
+        let node = Node {
+            r#type: "IF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 0,
+            text: "".to_string(),
+        };
+        let mut signals = BTreeMap::new();
+        let scorer = LocalComplexityScorer;
+        let _score = scorer.score_node(&node, 0, &mut signals);
+        assert_eq!(signals.get("boolean_ops"), None);
+    }
+}

@@ -10,7 +10,7 @@
         "control": "iterates",
         "function": "resolve",
         "line": 8,
-        "message": "file",
+        "message": "file?",
         "receiver": "::File",
         "safe_navigation": false
       },
@@ -51,7 +51,7 @@
         "control": "always",
         "function": "direct",
         "line": 13,
-        "message": "file",
+        "message": "file?",
         "receiver": "::File",
         "safe_navigation": false
       },
@@ -91,13 +91,13 @@
     ],
     "semantic_effects": [
       {
-        "detail": "File.file",
+        "detail": "File.file?",
         "function": "direct",
         "kind": "hidden_io",
         "line": 13
       },
       {
-        "detail": "File.file",
+        "detail": "File.file?",
         "function": "resolve",
         "kind": "hidden_io",
         "line": 8

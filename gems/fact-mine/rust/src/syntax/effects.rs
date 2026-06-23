@@ -216,3 +216,120 @@ fn variable_receiver(receiver: &str) -> bool {
     matches!(chars.next(), Some(first) if first == '@' || first == '$' || first == '_' || first.is_ascii_lowercase())
         && chars.all(|ch| ch == '_' || ch == '!' || ch == '?' || ch.is_ascii_alphanumeric())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lexicon_empty() {
+        let lexicon = EffectLexicon::empty();
+        assert!(lexicon.meta_mids.is_empty());
+        assert!(!lexicon.bang_mutation);
+    }
+
+    #[test]
+    fn test_method_object_call() {
+        let mut lexicon = EffectLexicon::empty();
+        lexicon.method_obj_mids = &["method"];
+        let call = CallSite {
+            receiver: "method(:foo)".to_string(),
+            message: "call".to_string(),
+            file: "foo.rb".to_string(),
+            function: "bar".to_string(),
+            owner: "A".to_string(),
+            line: 1,
+            span: [1, 0, 1, 5],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        };
+        let effect = effect_from_call_with_lexicon(&call, &lexicon).unwrap();
+        assert_eq!(effect.kind, "dynamic_dispatch");
+        assert_eq!(effect.detail, "method(...).call");
+    }
+
+    #[test]
+    fn test_call_other_receiver_none() {
+        let lexicon = EffectLexicon::empty();
+        let call = CallSite {
+            receiver: "OtherNode".to_string(), // not variable receiver (starts with uppercase)
+            message: "call".to_string(),
+            file: "foo.rb".to_string(),
+            function: "bar".to_string(),
+            owner: "A".to_string(),
+            line: 1,
+            span: [1, 0, 1, 5],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        };
+        assert!(effect_from_call_with_lexicon(&call, &lexicon).is_none());
+    }
+
+    #[test]
+    fn test_context_bare_effect() {
+        let mut lexicon = EffectLexicon::empty();
+        lexicon.context_bare = &["current_user"];
+        let call = CallSite {
+            receiver: "self".to_string(),
+            message: "current_user".to_string(),
+            file: "foo.rb".to_string(),
+            function: "bar".to_string(),
+            owner: "A".to_string(),
+            line: 1,
+            span: [1, 0, 1, 5],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        };
+        let effect = effect_from_call_with_lexicon(&call, &lexicon).unwrap();
+        assert_eq!(effect.kind, "context_dependency");
+        assert_eq!(effect.detail, "current_user");
+    }
+
+    #[test]
+    fn test_bang_mutation_excludes() {
+        let mut lexicon = EffectLexicon::empty();
+        lexicon.bang_mutation = true;
+        let call1 = CallSite {
+            receiver: "self".to_string(),
+            message: "!=".to_string(),
+            file: "foo.rb".to_string(),
+            function: "bar".to_string(),
+            owner: "A".to_string(),
+            line: 1,
+            span: [1, 0, 1, 5],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        };
+        assert!(effect_from_call_with_lexicon(&call1, &lexicon).is_none());
+
+        let call2 = CallSite {
+            receiver: "self".to_string(),
+            message: "update!".to_string(),
+            file: "foo.rb".to_string(),
+            function: "bar".to_string(),
+            owner: "A".to_string(),
+            line: 1,
+            span: [1, 0, 1, 5],
+            conditional: false,
+            arguments: Vec::new(),
+            control: None,
+            safe_navigation: false,
+            block: false,
+        };
+        let effect = effect_from_call_with_lexicon(&call2, &lexicon).unwrap();
+        assert_eq!(effect.kind, "hidden_mutation");
+        assert_eq!(effect.detail, "update!");
+    }
+}
