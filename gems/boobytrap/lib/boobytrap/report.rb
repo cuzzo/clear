@@ -22,6 +22,8 @@ module Boobytrap
   # top-down, NOT a verdict -- a hotspot is "look here first," not
   # "this is a bug."
   class Report
+    attr_reader :fix_scores
+
     HEADER_TEXT = "# Boobytrap Report\n\n" \
                   "> Defect-risk hotspots: recurring bug-fix locality " \
                   "(bugspots, time-decayed) x branch-coverage gap.\n" \

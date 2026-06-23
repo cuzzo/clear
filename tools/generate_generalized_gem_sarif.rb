@@ -167,7 +167,26 @@ end
 previous_parser = ENV["DECOMPLEX_PARSER"]
 ENV["DECOMPLEX_PARSER"] = "tree_sitter"
 
+fact_mine_temp = nil
+churn_temp = nil
+
 begin
+  if !ENV["FACT_MINE_FACTS_FILE"] || ENV["FACT_MINE_FACTS_FILE"].empty?
+    fact_mine_bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("gems/fact-mine/target/release/fact-mine-rust", ROOT))
+    if File.executable?(fact_mine_bin)
+      require "tempfile"
+      fact_mine_temp = Tempfile.new(["fact-mine-facts", ".json"])
+      fact_mine_temp.close
+      warn "Pre-computing fact-mine static facts..."
+      ok = system(fact_mine_bin, "profile", "nil-kill", "--output", fact_mine_temp.path, *rel_files)
+      if ok
+        ENV["FACT_MINE_FACTS_FILE"] = fact_mine_temp.path
+      else
+        warn "Pre-computing fact-mine-rust facts failed"
+      end
+    end
+  end
+
   if options[:decomplex_binary]
     run_decomplex_rust(options[:decomplex_binary], rel_files, out_dir, repo)
   else
@@ -194,6 +213,13 @@ begin
   )
   write(File.join(out_dir, "boobytrap.sarif"), boobytrap.to_sarif)
   write(File.join(out_dir, "boobytrap.md"), boobytrap.to_markdown)
+
+  # Share Boobytrap's computed churn output with SlopCop to avoid re-deriving
+  require "tempfile"
+  churn_temp = Tempfile.new(["boobytrap-churn", ".json"])
+  churn_temp.write(JSON.generate(boobytrap.fix_scores))
+  churn_temp.close
+  ENV["BOOBYTRAP_CHURN_FILE"] = churn_temp.path
 
   slopcop = SlopCop::Report.new(
     files: rel_files,
@@ -224,4 +250,12 @@ begin
   end
 ensure
   previous_parser.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous_parser
+  if fact_mine_temp
+    ENV.delete("FACT_MINE_FACTS_FILE")
+    fact_mine_temp.unlink
+  end
+  if churn_temp
+    ENV.delete("BOOBYTRAP_CHURN_FILE")
+    churn_temp.unlink
+  end
 end
