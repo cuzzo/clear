@@ -1449,8 +1449,10 @@ jobs:
             tree-sitter-go \
             tree-sitter-rust \
             @tree-sitter-grammars/tree-sitter-zig
-      - name: Build Rust Decomplex binary
-        run: cargo build --release --manifest-path gems/decomplex/Cargo.toml
+      - name: Build Rust binaries
+        run: |
+          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+          cargo build --release --manifest-path gems/decomplex/Cargo.toml
       - name: Download Ruby coverage artifacts
         if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
         uses: actions/download-artifact@v4
