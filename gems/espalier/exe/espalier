@@ -64,7 +64,7 @@ if options[:manifest]
     exit 1
   end
 
-  manifest = YAML.load_file(options[:manifest])
+  manifest = YAML.respond_to?(:unsafe_load_file) ? YAML.unsafe_load_file(options[:manifest]) : YAML.load_file(options[:manifest])
   output_contents = if options[:format] == :report
                       Espalier::Reporter.new(
                         manifest,

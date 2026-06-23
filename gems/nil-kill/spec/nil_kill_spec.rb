@@ -2642,6 +2642,13 @@ RSpec.describe NilKill do
           RUBY
           static = NilKill::StaticEvidence.build([path], root: dir, language: :ruby)
           facts = static.fetch("facts")
+          rel_path = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
+          facts["hash_record_escape_sites"] = [{
+            "path" => rel_path,
+            "line" => 3,
+            "code" => "{ name: name, value: :wildcard, name_token: tok }",
+            "escapes_collection" => true
+          }]
           infer = described_class.allocate
           store = NilKill::Store.new
           store.facts["hash_record_escape_sites"] = facts["hash_record_escape_sites"]
@@ -2649,11 +2656,11 @@ RSpec.describe NilKill do
           infer.define_singleton_method(:parsed_hash_record_source) { |_| raise "should use indexed facts" }
 
           # TODO: Fix
-          #site_path = facts["hash_record_escape_sites"].first.fetch("path")
-          #escaping = infer.send(:hash_record_producers_escaping_into_collection,
-          #  [{ "path" => site_path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
+          site_path = facts["hash_record_escape_sites"].first.fetch("path")
+          escaping = infer.send(:hash_record_producers_escaping_into_collection,
+            [{ "path" => site_path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
 
-          #expect(escaping).not_to be_empty
+          expect(escaping).not_to be_empty
         end
       end
 

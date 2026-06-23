@@ -207,7 +207,7 @@ module NilKill
         when "block_parameters" then BlockParametersNode
         when "block", "do_block" then BlockNode
         when "assignment", "operator_assignment" then assignment_class(raw)
-        when "call" then hidden_method_definition?(raw) ? DefNode : CallNode
+        when "call", "command", "command_call" then hidden_method_definition?(raw) ? DefNode : CallNode
         when "element_reference" then CallNode
         when "binary" then binary_class(raw)
         when "unary" then CallNode

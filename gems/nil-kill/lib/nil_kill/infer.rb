@@ -663,6 +663,16 @@ module NilKill
     # value. One-hop local aliasing is followed; deeper chains are
     # conservatively treated as escaping.
     def hash_record_producers_escaping_into_collection(producers)
+      escape_sites = @store.facts["hash_record_escape_sites"]
+      if escape_sites && !escape_sites.empty?
+        escape_lookup = escape_sites.each_with_object({}) do |site, lookup|
+          lookup[[site["path"].to_s, site["line"].to_i]] = site["escapes_collection"]
+        end
+        return Array(producers).select do |producer|
+          escape_lookup.fetch([producer["path"].to_s, producer["line"].to_i], false)
+        end
+      end
+
       by_path = Array(producers).group_by { |p| p["path"].to_s }
       by_path.flat_map do |rel_path, entries|
         next [] if rel_path.empty?

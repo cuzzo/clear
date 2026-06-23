@@ -191,6 +191,7 @@ module Espalier
       deterministic_guards = Array(facts_by_file["deterministic_guards"])
       return_origins = Array(facts_by_file["return_origins"])
       noreturn_methods = Array(facts_by_file["noreturn_methods"])
+      hash_record_escape_sites = Array(facts_by_file["hash_record_escape_sites"])
 
       type_definitions.concat(ruby_annotation_type_definitions(files)) if @include_annotations
 
@@ -265,6 +266,7 @@ module Espalier
           "deterministic_guards" => deterministic_guards.sort_by { |f| [f["path"].to_s, f["line"].to_i, f["code"].to_s] },
           "return_origins" => return_origins.sort_by { |o| [o["path"].to_s, o["line"].to_i, o["method"].to_s] },
           "noreturn_methods" => noreturn_methods.sort_by { |m| [m["path"].to_s, m["owner"].to_s, m["name"].to_s] },
+          "hash_record_escape_sites" => hash_record_escape_sites.sort_by { |s| [s["path"].to_s, s["line"].to_i] },
           "rbi_field_types" => rbi_field_types.sort_by { |r| [r["class"].to_s, r["field"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
