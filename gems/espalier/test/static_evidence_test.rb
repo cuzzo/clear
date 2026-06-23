@@ -72,8 +72,6 @@ class StaticEvidenceTest < Minitest::Test
   # Hash shapes / collection lookups not yet implemented in Rust FactMine (Phase 2c).
   # This test documents the expected behavior once implemented.
   def test_static_evidence_includes_hash_record_lookup_facts
-    skip "hash shapes / collection lookups not yet implemented in Rust FactMine (Phase 2c)"
-
     Dir.mktmpdir("espalier-static-hash", Dir.pwd) do |dir|
       src = File.join(dir, "src")
       FileUtils.mkdir_p(src)

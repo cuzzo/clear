@@ -2,7 +2,7 @@
 
 require "json"
 
-module SlopCop
+module NilKill
   # Small SARIF 2.1.0 builder shared by the generalized gems. It keeps
   # report producers consistent without each gem hand-rolling subtly
   # different JSON.

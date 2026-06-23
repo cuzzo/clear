@@ -77,7 +77,7 @@ RSpec.describe NilKill::EspalierEvidence do
 
   it "emits Tree-sitter static evidence for Zig targets" do
     skip "Zig static evidence pending in Rust FactMine (Phase 3)"
-    FactMine::Syntax::TreeSitterAdapter.new.send(:parser_for, :zig)
+    Espalier::TreeSitter.parser_for(:zig)
 
     Dir.mktmpdir("nil-kill-espalier-zig", NilKill::ROOT) do |dir|
       source = File.join(dir, "box.zig")

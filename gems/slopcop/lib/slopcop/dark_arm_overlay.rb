@@ -6,7 +6,7 @@ sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir
 if File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
 else
-  require "decomplex/sarif"
+  require "slopcop/sarif"
 end
 
 module SlopCop
@@ -52,7 +52,7 @@ module SlopCop
     def to_sarif_hash(**kwargs)
       overlay = build(**kwargs)
       arms = overlay.fetch("dark_arms")
-      Decomplex::Sarif.document(
+      SlopCop::Sarif.document(
         tool_name: "SlopCop",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules(arms),
@@ -87,8 +87,8 @@ module SlopCop
 
     def sarif_rules(arms)
       arms.map { |arm| arm.fetch("arm_category", "unknown") }.uniq.sort.map do |category|
-        Decomplex::Sarif.rule(
-          id: "slopcop.dark-arm.#{Decomplex::Sarif.slug(category)}",
+        SlopCop::Sarif.rule(
+          id: "slopcop.dark-arm.#{SlopCop::Sarif.slug(category)}",
           name: "Dark Arm: #{category}",
           short_description: "Classified uncovered branch arm",
           default_level: category == "genuine" ? "warning" : "note",
@@ -99,8 +99,8 @@ module SlopCop
 
     def sarif_result(arm)
       span = arm["arm_span"]
-      Decomplex::Sarif.result(
-        rule_id: "slopcop.dark-arm.#{Decomplex::Sarif.slug(arm.fetch("arm_category", "unknown"))}",
+      SlopCop::Sarif.result(
+        rule_id: "slopcop.dark-arm.#{SlopCop::Sarif.slug(arm.fetch("arm_category", "unknown"))}",
         level: arm["arm_category"] == "genuine" ? "warning" : "note",
         message: arm["category"],
         path: arm["file"] || arm["path"],

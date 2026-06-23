@@ -284,13 +284,15 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             return None;
         }
         let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && self.if_node_kind(raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
+        if raw_named.len() == 1 {
+            if self.if_node_kind(raw_named[0].kind())
+                && node_text(raw_named[0], source) == node_text(node, source)
+            {
+                return Some(raw_named[0]);
+            }
+            return Some(node);
         }
-        Some(node)
+        None
     }
 
     fn leading_case_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -314,13 +316,15 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             return None;
         }
         let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && CASE_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
+        if raw_named.len() == 1 {
+            if CASE_NODE_KINDS.contains(&raw_named[0].kind())
+                && node_text(raw_named[0], source) == node_text(node, source)
+            {
+                return Some(raw_named[0]);
+            }
+            return Some(node);
         }
-        Some(node)
+        None
     }
 
     fn leading_loop_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -344,13 +348,15 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             return None;
         }
         let raw_named = named_children(node);
-        if raw_named.len() == 1
-            && LOOP_NODE_KINDS.contains(&raw_named[0].kind())
-            && node_text(raw_named[0], source) == node_text(node, source)
-        {
-            return Some(raw_named[0]);
+        if raw_named.len() == 1 {
+            if LOOP_NODE_KINDS.contains(&raw_named[0].kind())
+                && node_text(raw_named[0], source) == node_text(node, source)
+            {
+                return Some(raw_named[0]);
+            }
+            return Some(node);
         }
-        Some(node)
+        None
     }
 
     fn rescue_body_statement(&self, node: TreeSitterNode<'_>, source: &str) -> bool {

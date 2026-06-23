@@ -4,12 +4,7 @@ require "yaml"
 require "json"
 require_relative "dependency_graph"
 require_relative "graphviz_formatter"
-sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
-if File.file?("#{sibling_sarif}.rb")
-  require sibling_sarif
-else
-  require "decomplex/sarif"
-end
+require_relative "type_profile"
 
 module Espalier
   # Transforms synthesized schemas into Markdown or clean structured formats

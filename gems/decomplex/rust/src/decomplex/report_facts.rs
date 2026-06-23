@@ -719,11 +719,16 @@ fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
         return;
     }
 
-    let language = options.language.or_else(|| {
-        path.extension()
-            .and_then(|value| value.to_str())
-            .and_then(|extension| Language::for_extension(&extension.to_ascii_lowercase()))
-    });
+    let ext_lang = path.extension()
+        .and_then(|value| value.to_str())
+        .and_then(|extension| Language::for_extension(&extension.to_ascii_lowercase()));
+
+    let language = match (options.language, ext_lang) {
+        (Some(opt_lang), Some(e_lang)) if opt_lang == e_lang => Some(opt_lang),
+        (Some(opt_lang), _) if path.extension().is_none() => Some(opt_lang),
+        (None, Some(e_lang)) => Some(e_lang),
+        _ => None,
+    };
     let Some(language) = language else {
         return;
     };

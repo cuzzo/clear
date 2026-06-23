@@ -14,7 +14,6 @@ sibling_sarif = ::File.expand_path("../../../decomplex/lib/decomplex/sarif", __d
 if ::File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
 else
-  require "decomplex/sarif"
 end
 
 module Boobytrap
@@ -457,6 +456,7 @@ module Boobytrap
       ]
     end
 
+
     def sarif_results
       hotspot_results + dark_method_results + state_branch_results +
         blast_radius_results + lineage_results + unmeasured_results
@@ -545,6 +545,7 @@ module Boobytrap
         )
       end
     end
+
 
     def sarif_summary
       {

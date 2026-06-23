@@ -4,7 +4,7 @@ require_relative "spec_helper"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
   def require_tree_sitter_language!(language)
-    FactMine::Syntax::TreeSitterAdapter.new.send(:parser_for, language)
+    Espalier::TreeSitter.parser_for(language)
   end
 
   it "publishes language provider capabilities for Ruby, Python, TypeScript, Lua, Go, Rust, Zig, C, C++, C#, Java, Kotlin, and Swift" do

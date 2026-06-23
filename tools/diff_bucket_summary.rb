@@ -9,7 +9,7 @@ require "set"
 
 ROOT = File.expand_path("..", __dir__)
 require_relative "../gems/nil-kill/lib/nil_kill"
-require_relative "../gems/decomplex/lib/decomplex/sarif"
+require_relative "../gems/slopcop/lib/slopcop/sarif"
 require_relative "loom_atomic_coverage"
 require_relative "src_ast_walk_guardrail"
 require_relative "vopr_coverage"
@@ -1089,7 +1089,7 @@ end
 def type_guardrails_sarif_hash(findings)
   sorted = Array(findings).sort_by { |finding| [finding.path.to_s, finding.line.to_i, finding.kind.to_s] }
   rules = sorted.map(&:kind).uniq.sort.map do |kind|
-    Decomplex::Sarif.rule(
+    SlopCop::Sarif.rule(
       id: kind,
       name: kind.tr("_", " "),
       short_description: "Src type guardrail",
@@ -1101,7 +1101,7 @@ def type_guardrails_sarif_hash(findings)
   results = sorted.map do |finding|
     message = [finding.message.to_s, finding.detail.to_s].reject(&:empty?).join("; ")
     location_path = finding.line.to_i.positive? ? finding.path : nil
-    Decomplex::Sarif.result(
+    SlopCop::Sarif.result(
       rule_id: finding.kind,
       level: "warning",
       message: message.empty? ? finding.kind.to_s : message,
@@ -1117,7 +1117,7 @@ def type_guardrails_sarif_hash(findings)
     )
   end
 
-  Decomplex::Sarif.document(
+  SlopCop::Sarif.document(
     tool_name: "Src Type Guardrails",
     rules: rules,
     results: results,

@@ -9,12 +9,7 @@ require "set"
 require "tempfile"
 require "time"
 
-sibling_decomplex = File.expand_path("../../../decomplex/lib/decomplex", __dir__)
-if File.file?("#{sibling_decomplex}/source_filter.rb")
-  require "#{sibling_decomplex}/source_filter"
-else
-  require "decomplex/source_filter"
-end
+require_relative "type_profile"
 require_relative "alias_recommendations"
 require_relative "languages"
 require_relative "static_helpers"

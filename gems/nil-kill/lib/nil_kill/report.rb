@@ -1,12 +1,7 @@
 # typed: false
 # frozen_string_literal: true
 
-sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir__)
-if File.file?("#{sibling_sarif}.rb")
-  require sibling_sarif
-else
-  require "decomplex/sarif"
-end
+require_relative "sarif"
 
 module NilKill
   class Report
@@ -83,7 +78,7 @@ module NilKill
     end
 
     def to_sarif_hash(evidence = @evidence)
-      Decomplex::Sarif.document(
+      NilKill::Sarif.document(
         tool_name: "Nil-Kill",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules(evidence),
@@ -222,29 +217,29 @@ module NilKill
       diagnostic_codes = sarif_diagnostics(evidence).map { |diagnostic| diagnostic_code(diagnostic) }.uniq
       static_kinds = sarif_static_findings(evidence).map { |finding| finding.fetch("kind") }.uniq
       action_rules = action_kinds.map do |kind|
-        Decomplex::Sarif.rule(
-          id: "nil-kill.action.#{Decomplex::Sarif.slug(kind)}",
+        NilKill::Sarif.rule(
+          id: "nil-kill.action.#{NilKill::Sarif.slug(kind)}",
           name: "Action: #{kind}",
           short_description: "Nil-Kill inferred action"
         )
       end
       diagnostic_rules = diagnostic_codes.map do |code|
-        Decomplex::Sarif.rule(
-          id: "nil-kill.diagnostic.#{Decomplex::Sarif.slug(code)}",
+        NilKill::Sarif.rule(
+          id: "nil-kill.diagnostic.#{NilKill::Sarif.slug(code)}",
           name: "Diagnostic: #{code}",
           short_description: "Nil-Kill diagnostic"
         )
       end
       static_rules = static_kinds.map do |kind|
-        Decomplex::Sarif.rule(
-          id: "nil-kill.static.#{Decomplex::Sarif.slug(kind)}",
+        NilKill::Sarif.rule(
+          id: "nil-kill.static.#{NilKill::Sarif.slug(kind)}",
           name: "Static: #{kind.tr("_", " ")}",
           short_description: "Nil-Kill static analysis signal"
         )
       end
       pressure_rules = sarif_pressure_findings(evidence).map { |finding| finding.fetch("kind") }.uniq.map do |kind|
-        Decomplex::Sarif.rule(
-          id: "nil-kill.pressure.#{Decomplex::Sarif.slug(kind)}",
+        NilKill::Sarif.rule(
+          id: "nil-kill.pressure.#{NilKill::Sarif.slug(kind)}",
           name: "Pressure: #{kind.tr("_", " ")}",
           short_description: "Nil-Kill pressure signal"
         )
@@ -465,13 +460,13 @@ module NilKill
 
     def sarif_action_result(action, evidence)
       kind = action["kind"].to_s.empty? ? "action" : action["kind"].to_s
-      Decomplex::Sarif.result(
-        rule_id: "nil-kill.action.#{Decomplex::Sarif.slug(kind)}",
+      NilKill::Sarif.result(
+        rule_id: "nil-kill.action.#{NilKill::Sarif.slug(kind)}",
         level: sarif_action_level(action),
         message: "#{kind} [#{action["confidence"] || "unknown"}]: #{action["message"]}",
         path: action_path(action),
         line: action_line(action),
-        properties: Decomplex::Sarif.json_safe_value(action).merge(
+        properties: NilKill::Sarif.json_safe_value(action).merge(
           "source_format" => Schema::EvidenceBundle.v2?(evidence) ? "nil-kill.evidence.v2" : "nil-kill.evidence.v1"
         )
       )
@@ -479,13 +474,13 @@ module NilKill
 
     def sarif_diagnostic_result(diagnostic)
       code = diagnostic_code(diagnostic)
-      Decomplex::Sarif.result(
-        rule_id: "nil-kill.diagnostic.#{Decomplex::Sarif.slug(code)}",
+      NilKill::Sarif.result(
+        rule_id: "nil-kill.diagnostic.#{NilKill::Sarif.slug(code)}",
         level: diagnostic["severity"] || "warning",
         message: diagnostic["message"] || diagnostic.to_s,
         path: diagnostic_path(diagnostic),
         line: diagnostic_line(diagnostic),
-        properties: Decomplex::Sarif.json_safe_value(diagnostic).merge(
+        properties: NilKill::Sarif.json_safe_value(diagnostic).merge(
           "source_format" => "nil-kill.diagnostics"
         )
       )
@@ -493,13 +488,13 @@ module NilKill
 
     def sarif_static_result(finding)
       kind = finding["kind"].to_s.empty? ? "static" : finding["kind"].to_s
-      Decomplex::Sarif.result(
-        rule_id: "nil-kill.static.#{Decomplex::Sarif.slug(kind)}",
+      NilKill::Sarif.result(
+        rule_id: "nil-kill.static.#{NilKill::Sarif.slug(kind)}",
         level: finding["level"] || "note",
         message: finding["message"] || kind,
         path: finding["path"],
         line: finding["line"],
-        properties: Decomplex::Sarif.json_safe_value(finding).merge(
+        properties: NilKill::Sarif.json_safe_value(finding).merge(
           "source_format" => "nil-kill.static.evidence.v2"
         )
       )
@@ -507,13 +502,13 @@ module NilKill
 
     def sarif_pressure_result(finding)
       kind = finding["kind"].to_s.empty? ? "pressure" : finding["kind"].to_s
-      Decomplex::Sarif.result(
-        rule_id: "nil-kill.pressure.#{Decomplex::Sarif.slug(kind)}",
+      NilKill::Sarif.result(
+        rule_id: "nil-kill.pressure.#{NilKill::Sarif.slug(kind)}",
         level: finding["level"] || "note",
         message: finding["message"] || kind,
         path: finding["path"],
         line: finding["line"],
-        properties: Decomplex::Sarif.json_safe_value(finding).merge(
+        properties: NilKill::Sarif.json_safe_value(finding).merge(
           "source_format" => "nil-kill.pressure"
         )
       )

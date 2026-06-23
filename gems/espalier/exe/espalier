@@ -3,12 +3,7 @@
 
 require "optparse"
 require_relative "../lib/espalier"
-sibling_source_filter = File.expand_path("../../decomplex/lib/decomplex/source_filter", __dir__)
-if File.file?("#{sibling_source_filter}.rb")
-  require sibling_source_filter
-else
-  require "decomplex/source_filter"
-end
+require_relative "../lib/espalier/type_profile"
 
 options = {
   format: :markdown,
@@ -129,11 +124,7 @@ if options[:risk] && File.exist?(options[:risk])
 end
 
 # Extract Static Skeletons
-modules = []
-targets.each do |file|
-  extractor = Espalier::AstExtractor.new(file)
-  modules.concat(extractor.extract)
-end
+evidence = Espalier::StaticEvidence.build(targets, root: Dir.pwd)
 
 # Synthesize Aggregated Architecture
 aggregator = Espalier::Aggregator.new(
@@ -142,9 +133,9 @@ aggregator = Espalier::Aggregator.new(
   risk_data: risk_data
 )
 
-nil_kill_evidence.apply!(modules)
+nil_kill_evidence.apply!(evidence)
 
-manifest = aggregator.aggregate(modules)
+manifest = aggregator.aggregate(evidence)
 
 # Format & Outflow
 output_contents = if options[:format] == :yaml

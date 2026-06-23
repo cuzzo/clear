@@ -8,7 +8,6 @@ end
 require_relative "espalier/static_helpers"
 require_relative "espalier/languages"
 require_relative "espalier/tree_sitter"
-require_relative "espalier/ast_extractor"
 require_relative "espalier/nil_kill_evidence"
 require_relative "espalier/static_evidence"
 require_relative "espalier/privacy_analyzer"

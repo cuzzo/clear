@@ -587,30 +587,130 @@ fn immutable_struct_reader_types(source: &str) -> BTreeMap<String, BTreeMap<Stri
 
 fn type_aliases(source: &str) -> BTreeMap<String, String> {
     let mut aliases = BTreeMap::new();
-    for line in source.lines() {
-        let stripped = line.trim();
-        if let Some((name, rest)) = stripped.split_once('=') {
-            let name = name.trim();
-            if !constant_path(name) {
-                continue;
+    let lines: Vec<&str> = source.lines().map(|l| l.trim()).collect();
+    let mut owner_stack: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.is_empty() || line.starts_with('#') {
+            i += 1;
+            continue;
+        }
+
+        if line.starts_with("class ") || line.starts_with("module ") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() > 1 {
+                let name = parts[1].trim_end_matches('<');
+                let name = name.split('<').next().unwrap_or(name).trim();
+                let qualified = if let Some(parent) = owner_stack.last() {
+                    if name.contains("::") {
+                        name.to_string()
+                    } else {
+                        format!("{}::{}", parent, name)
+                    }
+                } else {
+                    name.to_string()
+                };
+                owner_stack.push(qualified);
             }
-            let rest = rest.trim();
-            let target = if let Some(inner) = rest
-                .strip_prefix("T.type_alias")
-                .and_then(|value| value.split_once('{').map(|(_, right)| right))
-                .and_then(|value| value.split_once('}').map(|(left, _)| left.trim()))
-            {
-                inner
-            } else {
-                rest.split_whitespace().next().unwrap_or("")
-            };
-            if constant_path(target) {
-                aliases.insert(name.to_string(), target.to_string());
+            i += 1;
+            continue;
+        }
+
+        if line == "end" {
+            owner_stack.pop();
+            i += 1;
+            continue;
+        }
+
+        if let Some((name, rest)) = line.split_once('=') {
+            let name = name.trim();
+            if constant_path(name) {
+                let rest = rest.trim();
+                if rest.starts_with("T.type_alias") {
+                    let mut target = String::new();
+                    if rest.contains('{') {
+                        let mut depth = 0;
+                        let mut found_start = false;
+                        let mut current_line = i;
+                        let mut block_text = String::new();
+                        while current_line < lines.len() {
+                            let text = if current_line == i { rest } else { lines[current_line] };
+                            for ch in text.chars() {
+                                if ch == '{' {
+                                    depth += 1;
+                                    found_start = true;
+                                    if depth == 1 {
+                                        continue;
+                                    }
+                                } else if ch == '}' {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                if found_start {
+                                    block_text.push(ch);
+                                }
+                            }
+                            if found_start && depth == 0 {
+                                break;
+                            }
+                            current_line += 1;
+                        }
+                        target = block_text.trim().to_string();
+                    } else if rest.contains(" do") || rest.ends_with(" do") || (i + 1 < lines.len() && lines[i+1].starts_with("do")) {
+                        let mut current_line = i;
+                        let mut block_lines = Vec::new();
+                        let mut started = false;
+                        while current_line < lines.len() {
+                            let text = if current_line == i { rest } else { lines[current_line] };
+                            if !started {
+                                if let Some((_, right)) = text.split_once("do") {
+                                    let right_trimmed = right.trim();
+                                    if !right_trimmed.is_empty() {
+                                        block_lines.push(right_trimmed);
+                                    }
+                                    started = true;
+                                }
+                            } else {
+                                if text == "end" || text.starts_with("end ") || text.ends_with(" end") {
+                                    if let Some((left, _)) = text.split_once("end") {
+                                        let left_trimmed = left.trim();
+                                        if !left_trimmed.is_empty() {
+                                            block_lines.push(left_trimmed);
+                                        }
+                                    }
+                                    break;
+                                }
+                                block_lines.push(text);
+                            }
+                            current_line += 1;
+                        }
+                        target = block_lines.join(" ").trim().to_string();
+                    } else {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if parts.len() > 1 {
+                            target = parts[1..].join(" ").trim().to_string();
+                        }
+                    }
+
+                    if !target.is_empty() {
+                        let qualified_name = if let Some(parent) = owner_stack.last() {
+                            format!("{}::{}", parent, name)
+                        } else {
+                            name.to_string()
+                        };
+                        aliases.insert(qualified_name, target);
+                    }
+                }
             }
         }
+        i += 1;
     }
     aliases
 }
+
 
 fn method_param_types(
     source: &str,
