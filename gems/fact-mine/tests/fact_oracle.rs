@@ -17,8 +17,15 @@ fn syntax_fact_examples_match_oracles() -> Result<()> {
         let language = language_for_fixture(&fixture)?;
         let name = file_stem(&fixture)?;
         let oracle_path = oracle_dir.join(format!("{}-{name}.json", language.as_str()));
-        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)
-            .with_context(|| format!("read {}", oracle_path.display()))?;
+        let expected: Value = if std::env::var("UPDATE_ORACLES").is_ok() && !oracle_path.exists() {
+            if let Some(parent) = oracle_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            json!({})
+        } else {
+            serde_json::from_str(&fs::read_to_string(&oracle_path)?)
+                .with_context(|| format!("read {}", oracle_path.display()))?
+        };
         let actual = syntax_oracle::project_files(&[fixture.clone()], language)
             .with_context(|| format!("project {}", fixture.display()))?;
         let actual = project_expected_shape(&actual, &expected)?;
@@ -50,8 +57,19 @@ fn source_fact_examples_match_oracles() -> Result<()> {
     for fixture in source_fact_fixture_paths(&examples_root)? {
         let language = source_fixture_language(&fixture)?;
         let oracle_path = source_oracle_path(&examples_root, &fixture)?;
-        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)
-            .with_context(|| format!("read {}", oracle_path.display()))?;
+        let expected: Value = if std::env::var("UPDATE_ORACLES").is_ok() && !oracle_path.exists() {
+            if let Some(parent) = oracle_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            json!({
+                "syntax": {},
+                "local_flow": [],
+                "path_condition": {}
+            })
+        } else {
+            serde_json::from_str(&fs::read_to_string(&oracle_path)?)
+                .with_context(|| format!("read {}", oracle_path.display()))?
+        };
         let mut actual = Map::new();
 
         if let Some(syntax_expected) = expected.get("syntax") {

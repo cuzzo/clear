@@ -1,0 +1,85 @@
+{
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 3,
+        "mass": 1,
+        "method_name": "method_one",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 3,
+        "name": "method_one",
+        "owner": "Parent::Child",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "Parent::Child#method_one",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "Parent::Child#method_one",
+        "line": 3,
+        "local_contract_assignments": {},
+        "name": "method_one",
+        "owner": "Parent::Child",
+        "statements": []
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 2,
+        "name": "Parent::Child"
+      },
+      {
+        "kind": "module",
+        "line": 1,
+        "name": "Parent"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 3,
+        "name": "method_one",
+        "owner": "Parent::Child"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 3,
+        "name": "method_one",
+        "owner": "Parent::Child",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

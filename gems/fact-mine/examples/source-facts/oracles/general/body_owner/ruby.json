@@ -1,0 +1,26 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "MyFunc",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "OtherFunc",
+      "statements": []
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {}
+}

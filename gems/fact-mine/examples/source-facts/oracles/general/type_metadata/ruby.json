@@ -1,0 +1,23 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "initialize",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "my_field"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {}
+}

@@ -1,0 +1,140 @@
+{
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(return(struct_declaration(container_field(id)))))",
+        "line": 1,
+        "mass": 6,
+        "method_name": "MyFunc",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 7,
+        "mass": 1,
+        "method_name": "OtherFunc",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "zig",
+        "params": [],
+        "visibility": "private"
+      },
+      {
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "zig",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#MyFunc",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#OtherFunc",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#MyFunc",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "MyFunc",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 0,
+            "line": 4,
+            "reads": [],
+            "source": "return struct {}",
+            "span": [
+              4,
+              4,
+              4,
+              20
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#OtherFunc",
+        "line": 7,
+        "local_contract_assignments": {},
+        "name": "OtherFunc",
+        "owner": "(top-level)",
+        "statements": []
+      }
+    ],
+    "owners": [
+      {
+        "kind": "struct",
+        "line": 1,
+        "name": "MyFunc"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "zig"
+      },
+      {
+        "calls": [],
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "zig"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "MyFunc",
+        "owner": "zig",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 7,
+        "name": "OtherFunc",
+        "owner": "zig",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "method_with_empty_block",
+        "line": 6,
+        "message": "each",
+        "receiver": "[1]",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id argument_list(lit))",
+        "line": 6,
+        "mass": 3,
+        "method_name": "method_with_empty_block",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id argument_list(lit))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "block(call(id argument_list(lit)))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "method_with_empty_block",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_three",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "method_with_empty_block",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(block(call(id argument_list(lit)))))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "method_with_empty_block",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(yield(argument_list(lit))))",
+        "line": 1,
+        "mass": 5,
+        "method_name": "method_three",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "ruby",
+        "params": [
+          "1"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "ruby",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_three",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#method_with_empty_block",
+        "score": 0.0,
+        "signals": {
+          "loops": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_three",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_three",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "yield(1)",
+            "span": [
+              2,
+              2,
+              2,
+              10
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_with_empty_block",
+        "line": 5,
+        "local_contract_assignments": {},
+        "name": "method_with_empty_block",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 6,
+            "reads": [],
+            "source": "[1].each {}",
+            "span": [
+              6,
+              2,
+              6,
+              13
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_three",
+        "owner": "ruby"
+      },
+      {
+        "calls": [],
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "ruby"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "ruby",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "yield",
+        "function": "method_three",
+        "kind": "dynamic_dispatch",
+        "line": 2
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
+}

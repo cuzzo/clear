@@ -1,0 +1,38 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_five",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "Obj"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "_",
+              "Obj"
+            ]
+          ],
+          "reads": [
+            "Obj"
+          ],
+          "writes": [
+            "_"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {}
+}

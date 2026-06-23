@@ -1,0 +1,23 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_four",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "_"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {}
+}
