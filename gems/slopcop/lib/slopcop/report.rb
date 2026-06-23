@@ -8,7 +8,7 @@ sibling_sarif = File.expand_path("../../../decomplex/lib/decomplex/sarif", __dir
 if File.file?("#{sibling_sarif}.rb")
   require sibling_sarif
 else
-  require "slopcop/sarif"
+  require_relative "sarif"
 end
 
 module SlopCop
