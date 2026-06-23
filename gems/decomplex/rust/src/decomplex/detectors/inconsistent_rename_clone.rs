@@ -63,10 +63,12 @@ fn block_from_method(method: &local_flow::MethodSummary) -> Option<Block> {
     if method.statements.len() < 3 {
         return None;
     }
+    let dialect = crate::decomplex::dialect::dialect_for_method(method);
+
     let mut skeleton = Vec::new();
     let mut names = Vec::new();
     for statement in &method.statements {
-        tokenize_source(&statement.source, &mut skeleton, &mut names);
+        tokenize_source(&statement.source, &mut skeleton, &mut names, &*dialect);
     }
     if skeleton.len() < MIN_TOKENS {
         return None;
@@ -84,15 +86,12 @@ fn block_from_method(method: &local_flow::MethodSummary) -> Option<Block> {
     })
 }
 
-fn tokenize_source(source: &str, skeleton: &mut Vec<Skeleton>, names: &mut Vec<String>) {
+fn tokenize_source(source: &str, skeleton: &mut Vec<Skeleton>, names: &mut Vec<String>, dialect: &dyn crate::decomplex::dialect::Dialect) {
     for token in token_re().find_iter(source).map(|match_| match_.as_str()) {
-        if identifier_token(token) {
+        if dialect.is_identifier(token) {
             skeleton.push(Skeleton::ID);
             names.push(
-                token
-                    .trim_start_matches('@')
-                    .trim_end_matches('=')
-                    .to_string(),
+                dialect.clean_identifier(token)
             );
         } else if literal_token(token) {
             skeleton.push(Skeleton::Node("LIT".to_string()));
@@ -108,17 +107,6 @@ fn token_re() -> &'static Regex {
         Regex::new(r#"[A-Za-z_]\w*[!?=]?|@\w+|\d+(?:\.\d+)?|:[A-Za-z_]\w*|"[^"]*"|'[^']*'|\S"#)
             .expect("inconsistent-rename-clone token regex")
     })
-}
-
-fn identifier_token(token: &str) -> bool {
-    let token = token.strip_prefix('@').unwrap_or(token);
-    let token = token.trim_end_matches(['!', '?', '=']);
-    let mut chars = token.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn literal_token(token: &str) -> bool {

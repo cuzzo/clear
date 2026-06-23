@@ -188,7 +188,8 @@ fn edge_for_call(
 
     let owner = top_level_owner_for(document, &call.owner, call.span);
     let caller = method_by_id.get(&format!("{}#{}", owner, call.function))?;
-    let callee_name = scoped_name(caller, &call.message);
+    let dialect = crate::decomplex::dialect::dialect_for_document(document);
+    let callee_name = dialect.scoped_name(&caller.name, &call.message);
     let callee = method_by_id.get(&format!("{}#{}", owner, callee_name))?;
     if caller.id == callee.id {
         return None;
@@ -206,14 +207,6 @@ fn edge_for_call(
         kind: call_kind(call),
         confidence: "high".to_string(),
     })
-}
-
-fn scoped_name(caller: &Method, message: &str) -> String {
-    if caller.name.starts_with("self.") {
-        format!("self.{message}")
-    } else {
-        message.to_string()
-    }
 }
 
 fn edge_type(control: Option<&str>) -> String {

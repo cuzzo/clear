@@ -194,8 +194,9 @@ impl StateMesh {
 
     fn load_document_facts(&mut self, documents: &[Document]) {
         for document in documents {
+            let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for write in &document.state_writes {
-                let norm = self.normalize(&write.field);
+                let norm = self.normalize(&write.field, &*dialect);
                 self.writes.push(Write {
                     attr: write.field.clone(),
                     norm,
@@ -214,8 +215,9 @@ impl StateMesh {
         }
 
         for document in documents {
+            let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for read in &document.state_reads {
-                let norm = self.normalize(&read.field);
+                let norm = self.normalize(&read.field, &*dialect);
                 if !field_norms.contains(&norm) {
                     continue;
                 }
@@ -568,8 +570,8 @@ impl StateMesh {
         }
     }
 
-    fn normalize(&self, attr: &str) -> String {
-        attr.trim_start_matches('@').to_string()
+    fn normalize(&self, attr: &str, dialect: &dyn crate::decomplex::dialect::Dialect) -> String {
+        dialect.clean_identifier(attr)
     }
 
     fn known_field_norms(&self) -> BTreeSet<String> {

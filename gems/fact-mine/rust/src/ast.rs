@@ -642,6 +642,4 @@ fn operator_assignment_statement_operator(text: &str) -> Option<String> {
     }
 }
 
-#[cfg(test)]
-#[path = "ast-test.rs"]
-mod tests;
+

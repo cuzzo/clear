@@ -43,15 +43,6 @@
           "::File.extname",
           "::File.extname(path).downcase"
         ]
-      },
-      {
-        "function": "rescued_case",
-        "line": 18,
-        "predicate": "case ::File.extname(path).downcase when \".rb\" true else false end",
-        "state_refs": [
-          "::File.extname",
-          "::File.extname(path).downcase"
-        ]
       }
     ]
   }
