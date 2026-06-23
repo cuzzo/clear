@@ -165,7 +165,7 @@ module Espalier
       facts_by_file = JSON.parse(File.read(tmp.path))
       build_from_rust_facts(facts_by_file, files)
     ensure
-      tmp&.unlink if defined?(tmp) && tmp
+      tmp.unlink if tmp
     end
 
     private
