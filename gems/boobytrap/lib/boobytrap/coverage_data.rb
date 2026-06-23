@@ -267,8 +267,37 @@ module Boobytrap
       if file_coverage&.branch_coverage?
         return tuple_branch_arm_coverage(file_coverage, branch_arms)
       end
+      if file_coverage&.line_coverage?
+        return line_branch_arm_coverage(file_coverage, branch_arms)
+      end
 
       []
+    end
+
+    def line_branch_arm_coverage(file_coverage, branch_arms)
+      branch_arms.map do |arm|
+        start_line = arm.span[0]
+        end_line = arm.span[2]
+        hits_in_span = (start_line..end_line).map { |line| file_coverage.line_hits(line) }.compact
+        
+        covered = if hits_in_span.any? { |hits| hits.positive? }
+                    true
+                  elsif hits_in_span.empty?
+                    declared_hits = file_coverage.line_hits(arm.line)
+                    declared_hits.nil? || declared_hits.positive?
+                  else
+                    false
+                  end
+        
+        max_hits = hits_in_span.max || 0
+        ArmCoverage.new(
+          arm: arm,
+          covered: covered,
+          hits: max_hits,
+          executable_lines: (start_line..end_line).to_a,
+          source: :tree_sitter_static
+        )
+      end
     end
 
     def tuple_branch_arm_coverage(file_coverage, branch_arms)

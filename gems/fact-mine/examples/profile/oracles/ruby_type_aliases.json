@@ -1,0 +1,28 @@
+{
+  "type_definitions": [
+    {
+      "id": "ruby\u0000gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00001\u0000sorbet",
+      "language": "ruby",
+      "type_system": "sorbet",
+      "kind": "type_alias",
+      "path": "gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "owner": "Demo",
+      "name": "RawBody",
+      "line": 0,
+      "target": "T::Array[AST::Node]",
+      "source": "syntax"
+    },
+    {
+      "id": "ruby\u0000gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00001\u0000sorbet",
+      "language": "ruby",
+      "type_system": "sorbet",
+      "kind": "type_alias",
+      "path": "gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "owner": "Demo",
+      "name": "ScopeType",
+      "line": 0,
+      "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
+      "source": "syntax"
+    }
+  ]
+}

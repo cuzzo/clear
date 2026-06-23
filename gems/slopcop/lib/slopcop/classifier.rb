@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../../boobytrap/lib/boobytrap/coverage_data"
+require_relative "lexicon"
 
 module SlopCop
   # Classifies every never-taken branch arm in a target file into ONE
@@ -72,39 +73,54 @@ module SlopCop
     end
 
     def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [])
-      return [] unless load_decomplex_syntax
-      return [] unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+      return [] unless tree_sitter_source?(abspath)
 
-      doc = Decomplex::Syntax.parse(abspath, parser: "tree_sitter")
-      lexicon = Decomplex::Syntax.language_lexicon(doc.language)
-      doc.branch_arms.filter_map do |arm|
+      arms = get_branch_arms(abspath)
+      lexicon = SlopCop.language_lexicon(language_for(abspath))
+      arms.filter_map do |arm|
         cat = categorize_text(
-          arm.function,
-          arm.kind,
-          arm.body,
+          arm.fetch("function"),
+          arm.fetch("kind").to_sym,
+          arm.fetch("body"),
           true,
-          arm.predicate,
+          arm.fetch("predicate"),
           ffi_boundary,
           diagnostic_mids,
           lexicon: lexicon
         )
         next if cat.nil?
 
-        Arm.new(file: abspath, defn: arm.function, line: arm.line,
-                span: arm.span, decision_span: arm.decision_span,
+        Arm.new(file: abspath, defn: arm.fetch("function"), line: arm.fetch("line"),
+                span: arm.fetch("span"), decision_span: arm.fetch("decision_span"),
                 category: cat, source: :tree_sitter_static)
       end
-    rescue LoadError, StandardError
+    rescue StandardError => e
+      warn "SlopCop::Classifier.classify_static_file error: #{e.message}"
       []
     end
 
     def classify_coverage_file(abspath, file_coverage, ffi_boundary: [], diagnostic_mids: [])
-      return [] unless load_decomplex_syntax
-      return [] unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+      return [] unless tree_sitter_source?(abspath)
 
-      doc = Decomplex::Syntax.parse(abspath, parser: "tree_sitter")
-      lexicon = Decomplex::Syntax.language_lexicon(doc.language)
-      covered_arms = Boobytrap::CoverageData.branch_arm_coverage(file_coverage, doc.branch_arms)
+      arms = get_branch_arms(abspath)
+      lexicon = SlopCop.language_lexicon(language_for(abspath))
+      
+      doc_arms = arms.map do |arm|
+        Struct.new(:file, :function, :kind, :line, :span, :decision_line, :decision_span, :predicate, :member, :body, keyword_init: true).new(
+          file: arm.fetch("file", abspath),
+          function: arm.fetch("function"),
+          kind: arm.fetch("kind").to_sym,
+          line: arm.fetch("line"),
+          span: arm.fetch("span"),
+          decision_line: arm.fetch("decision_line", arm.fetch("line")),
+          decision_span: arm.fetch("decision_span", arm.fetch("span")),
+          predicate: arm.fetch("predicate", ""),
+          member: arm.fetch("member", ""),
+          body: arm.fetch("body", "")
+        )
+      end
+
+      covered_arms = Boobytrap::CoverageData.branch_arm_coverage(file_coverage, doc_arms)
       groups = covered_arms.group_by do |arm_cov|
         arm = arm_cov.arm
         [arm.kind, arm.decision_line, arm.decision_span]
@@ -132,33 +148,61 @@ module SlopCop
                 span: arm.span, decision_span: arm.decision_span,
                 category: cat, source: arm_cov.source)
       end
-    rescue LoadError, StandardError
+    rescue StandardError => e
+      warn "SlopCop::Classifier.classify_coverage_file error: #{e.message}"
       []
     end
 
-    def tree_sitter_source?(abspath)
-      return false unless load_decomplex_syntax
-      return false unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+    def get_branch_arms(abspath)
+      bin = ENV.fetch("DECOMPLEX_RUST_BINARY", ::File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__))
+      unless ::File.executable?(bin)
+        warn "SlopCop::Classifier cannot find executable decomplex-rust at #{bin}"
+        return []
+      end
+      
+      lang = language_for(abspath)
+      cmd = [bin, "syntax-facts", "--language", lang.to_s, abspath]
+      out = IO.popen(cmd, err: [:child, :out]) { |io| io.read }
+      raise "decomplex-rust syntax-facts failed: #{out}" unless $?.success?
+      
+      payload = JSON.parse(out)
+      doc = payload.fetch("documents", []).first
+      return [] unless doc
+      doc.fetch("branch_arms", [])
+    end
 
-      true
-    rescue LoadError, StandardError
-      false
+    def language_for(path)
+      ext = ::File.extname(path).downcase
+      case ext
+      when ".rb" then :ruby
+      when ".py" then :python
+      when ".js", ".jsx" then :javascript
+      when ".ts", ".tsx" then :typescript
+      when ".go" then :go
+      when ".rs" then :rust
+      when ".zig" then :zig
+      else :ruby
+      end
+    end
+
+    def tree_sitter_source?(abspath)
+      [:ruby, :python, :javascript, :typescript, :go, :rust, :zig].include?(language_for(abspath))
     end
 
     def tree_sitter_coverage_file?(abspath, file_coverage)
-      return false unless file_coverage&.branch_arm_coverage? || file_coverage&.branch_coverage?
+      return false unless file_coverage && (file_coverage.branch_arm_coverage? || file_coverage.branch_coverage? || file_coverage.line_coverage?)
 
       tree_sitter_source?(abspath)
     end
 
     def tree_sitter?
-      ENV.fetch("DECOMPLEX_PARSER", "tree_sitter").to_s.tr("-", "_") == "tree_sitter"
+      true
     end
 
     def categorize_text(method, pkind, body, sibling_taken, predicate = nil,
                         ffi_boundary = [], diagnostic_mids = [],
                         language: :ruby, lexicon: nil)
-      lexicon ||= classification_lexicon(language)
+      lexicon ||= SlopCop.language_lexicon(language)
       return :ffi if ffi_boundary.include?(method)
       return :diagnostic if diagnostic_text?(body, diagnostic_mids, lexicon: lexicon)
       return :type_norm if type_guard_text?(predicate, lexicon: lexicon) ||
@@ -174,43 +218,21 @@ module SlopCop
     end
 
     def diagnostic_text?(text, diagnostic_mids = [], language: :ruby, lexicon: nil)
-      (lexicon || classification_lexicon(language)).diagnostic?(
+      (lexicon || SlopCop.language_lexicon(language)).diagnostic?(
         text,
         extra_names: diagnostic_mids
       )
     end
 
     def type_guard_text?(text, allow_literal_nil: true, language: :ruby, lexicon: nil)
-      (lexicon || classification_lexicon(language)).type_guard?(
+      (lexicon || SlopCop.language_lexicon(language)).type_guard?(
         text,
         allow_literal_nil: allow_literal_nil
       )
     end
 
     def trivial_text?(text, language: :ruby, lexicon: nil)
-      (lexicon || classification_lexicon(language)).trivial?(text)
-    end
-
-    def classification_lexicon(language)
-      return Decomplex::Syntax.language_lexicon(language) if load_decomplex_syntax &&
-                                                             Decomplex::Syntax.respond_to?(:language_lexicon)
-
-      raise LoadError, "SlopCop classification requires Decomplex::Syntax language lexicons"
-    end
-
-    def load_decomplex_syntax
-      return true if defined?(Decomplex::Syntax)
-
-      sibling = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
-      if File.file?("#{sibling}.rb")
-        require sibling
-        return true
-      end
-
-      require "decomplex/syntax"
-      true
-    rescue LoadError
-      false
+      (lexicon || SlopCop.language_lexicon(language)).trivial?(text)
     end
   end
 end
