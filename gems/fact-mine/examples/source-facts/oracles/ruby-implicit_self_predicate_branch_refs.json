@@ -1,5 +1,88 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 3,
+          "before_index": 2,
+          "kind": "blank"
+        }
+      ],
+      "method": "branch_refs",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "mod"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "fn"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "calls",
+              "fn"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "calls",
+            "fn"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "return false",
+        "decision_line": 5,
+        "function": "branch_refs",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "states(mod).empty?"
+      },
+      {
+        "body": "return false",
+        "decision_line": 6,
+        "function": "branch_refs",
+        "kind": "if",
+        "line": 6,
+        "member": "then",
+        "predicate": "state_touch_count(fn).positive?"
+      },
+      {
+        "body": "return false",
+        "decision_line": 7,
+        "function": "branch_refs",
+        "kind": "if",
+        "line": 7,
+        "member": "then",
+        "predicate": "calls.empty? && internal_calls_for(fn).empty?"
+      }
+    ],
     "branch_decisions": [
       {
         "function": "branch_refs",
@@ -112,6 +195,246 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(call(id id) call(id call<internal_calls_for>(id argument_list(id))))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          7,
+          2
+        ],
+        "fingerprint": "unless(and(call(id id) call(id call<internal_calls_for>(id argument_list(id)))) return(bool))",
+        "line": 7,
+        "mass": 10,
+        "method_name": "branch_refs",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<internal_calls_for>(id argument_list(id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<state_touch_count>(id argument_list(id))",
+        "line": 6,
+        "mass": 3,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<states>(id argument_list(id))",
+        "line": 5,
+        "mass": 3,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<state_touch_count>(id argument_list(id)))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          4,
+          2
+        ],
+        "fingerprint": "if(call(id call<state_touch_count>(id argument_list(id))) return(bool))",
+        "line": 6,
+        "mass": 7,
+        "method_name": "branch_refs",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<states>(id argument_list(id)))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          4,
+          2
+        ],
+        "fingerprint": "unless(call(id call<states>(id argument_list(id))) return(bool))",
+        "line": 5,
+        "mass": 7,
+        "method_name": "branch_refs",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(id call<internal_calls_for>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "and(call(id id) call(id call<internal_calls_for>(id argument_list(id))))",
+        "line": 7,
+        "mass": 7,
+        "method_name": "branch_refs",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "call<internal_calls_for>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<internal_calls_for>(id argument_list(id)))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<state_touch_count>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<state_touch_count>(id argument_list(id)))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<states>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<states>(id argument_list(id)))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "branch_refs",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "branch_refs",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "branch_refs",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "branch_refs",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "unless(call(id call<states>(id argument_list(id))) return(bool))",
+          "if(call(id call<state_touch_count>(id argument_list(id))) return(bool))",
+          "unless(and(call(id id) call(id call<internal_calls_for>(id argument_list(id)))) return(bool))",
+          "bool"
+        ],
+        "child_masses": [
+          7,
+          7,
+          10,
+          1
+        ],
+        "fingerprint": "body_statement(unless(call(id call<states>(id argument_list(id))) return(bool)) if(call(id call<state_touch_count>(id argument_list(id))) return(bool)) unless(and(call(id id) call(id call<internal_calls_for>(id argument_list(id)))) return(bool)) bool)",
+        "line": 5,
+        "mass": 26,
+        "method_name": "branch_refs",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id) body_statement(unless(call(id call<states>(id argument_list(id))) return(bool)) if(call(id call<state_touch_count>(id argument_list(id))) return(bool)) unless(and(call(id id) call(id call<internal_calls_for>(id argument_list(id)))) return(bool)) bool)))",
+        "line": 4,
+        "mass": 32,
+        "method_name": "branch_refs",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          7,
+          24,
+          7,
+          69
+        ],
+        "function": "branch_refs",
+        "kind": "conjunction",
+        "line": 7,
+        "members": [
+          "calls.empty?",
+          "internal_calls_for(fn).empty?"
+        ],
+        "predicate": "calls.empty? && internal_calls_for(fn).empty?"
+      }
+    ],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 4,
@@ -125,6 +448,201 @@
         "visibility": "public"
       }
     ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactImplicitSelfPredicateBranchRefs#branch_refs",
+        "score": 4.1,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 3
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [
+          {
+            "after_index": 3,
+            "before_index": 2,
+            "kind": "blank",
+            "line": 8,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactImplicitSelfPredicateBranchRefs#branch_refs",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "mod"
+            ],
+            "source": "return false unless states(mod).empty?",
+            "span": [
+              5,
+              4,
+              5,
+              42
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [
+              "fn"
+            ],
+            "source": "return false if state_touch_count(fn).positive?",
+            "span": [
+              6,
+              4,
+              6,
+              51
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "calls",
+                "fn"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "calls",
+              "fn"
+            ],
+            "source": "return false unless calls.empty? && internal_calls_for(fn).empty?",
+            "span": [
+              7,
+              4,
+              7,
+              69
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 3,
+            "line": 9,
+            "reads": [],
+            "source": "true",
+            "span": [
+              9,
+              4,
+              9,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactImplicitSelfPredicateBranchRefs"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "states",
+            "span": [
+              5,
+              24,
+              5,
+              35
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 6,
+            "mid": "state_touch_count",
+            "span": [
+              6,
+              20,
+              6,
+              41
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 7,
+            "mid": "internal_calls_for",
+            "span": [
+              7,
+              40,
+              7,
+              62
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs",
+        "reads": [
+          "calls.empty",
+          "internal_calls_for",
+          "internal_calls_for(fn).empty",
+          "state_touch_count",
+          "state_touch_count(fn).positive",
+          "states",
+          "states(mod).empty"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "empty?",
@@ -150,6 +668,7 @@
         "line": 6,
         "receiver": "state_touch_count(fn)"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

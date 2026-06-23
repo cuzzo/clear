@@ -19,5 +19,112 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment(id lit)))",
+        "line": 2,
+        "mass": 4,
+        "method_name": "initialize",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 2,
+        "name": "initialize",
+        "owner": "MyClass",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "MyClass#initialize",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "MyClass#initialize",
+        "line": 2,
+        "local_contract_assignments": {
+          "my_field": "1"
+        },
+        "name": "initialize",
+        "owner": "MyClass",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 3,
+            "index": 0,
+            "line": 3,
+            "reads": [],
+            "source": "@my_field = 1",
+            "span": [
+              3,
+              4,
+              3,
+              17
+            ],
+            "writes": [
+              "my_field"
+            ]
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 1,
+        "name": "MyClass"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 2,
+        "name": "initialize",
+        "owner": "MyClass"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 2,
+        "name": "initialize",
+        "owner": "MyClass",
+        "reads": [],
+        "writes": [
+          "my_field"
+        ]
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": [
+      {
+        "field": "my_field",
+        "function": "initialize",
+        "line": 3,
+        "receiver": "self"
+      }
+    ]
+  }
 }

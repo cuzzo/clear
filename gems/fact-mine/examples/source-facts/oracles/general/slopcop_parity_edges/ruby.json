@@ -1,5 +1,157 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "report",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "flagged",
+              "gaps"
+            ]
+          ],
+          "reads": [
+            "gaps"
+          ],
+          "writes": [
+            "flagged"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "dup",
+              "flagged"
+            ]
+          ],
+          "reads": [
+            "flagged"
+          ],
+          "writes": [
+            "dup"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "gaps"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "dup",
+              "gaps"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "dup",
+            "gaps"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "scan",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "paths"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        }
+      ],
+      "method": "guarded_emit",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "source"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "evidence"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "source"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "Array(paths).select { |path| source_path?(path) }",
+        "decision_line": 12,
+        "function": "scan",
+        "kind": "if",
+        "line": 13,
+        "member": "then",
+        "predicate": "paths && !Array(paths).empty?"
+      },
+      {
+        "body": "[]",
+        "decision_line": 12,
+        "function": "scan",
+        "kind": "if",
+        "line": 15,
+        "member": "else",
+        "predicate": "paths && !Array(paths).empty?"
+      },
+      {
+        "body": "return",
+        "decision_line": 20,
+        "function": "guarded_emit",
+        "kind": "if",
+        "line": 20,
+        "member": "then",
+        "predicate": "source"
+      },
+      {
+        "body": "return",
+        "decision_line": 21,
+        "function": "guarded_emit",
+        "kind": "if",
+        "line": 21,
+        "member": "then",
+        "predicate": "evidence.covered?"
+      }
+    ],
     "branch_decisions": [
       {
         "function": "guarded_emit",
@@ -234,6 +386,622 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(id call(lit call(id call<Array>(id argument_list(id)))))",
+          "block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id))))"
+        ],
+        "child_masses": [
+          7,
+          9
+        ],
+        "fingerprint": "if(and(id call(lit call(id call<Array>(id argument_list(id))))) block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id)))))",
+        "line": 12,
+        "mass": 17,
+        "method_name": "scan",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Array>(id argument_list(id))",
+        "line": 12,
+        "mass": 3,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Array>(id argument_list(id))",
+        "line": 13,
+        "mass": 3,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<emit>(id argument_list(id))",
+        "line": 23,
+        "mass": 3,
+        "method_name": "guarded_emit",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<source_path?>(id argument_list(id))",
+        "line": 13,
+        "mass": 3,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit)))))))",
+          "assignment(id block(call(id id) body(call<[]>(lit id argument_list(lit)))))",
+          "block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit))))",
+          "lit"
+        ],
+        "child_masses": [
+          11,
+          9,
+          11,
+          1
+        ],
+        "fingerprint": "body_statement(assignment(id block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit))))))) assignment(id block(call(id id) body(call<[]>(lit id argument_list(lit))))) block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit)))) lit)",
+        "line": 5,
+        "mass": 33,
+        "method_name": "report",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<Array>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id))))",
+        "line": 13,
+        "mass": 9,
+        "method_name": "scan",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<Array>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(lit call(id call<Array>(id argument_list(id))))",
+        "line": 12,
+        "mass": 5,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<[]>(lit id argument_list(lit)))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id call(id call<[]>(lit id argument_list(lit))))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<first>(id id argument_list(id)))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit))))",
+        "line": 7,
+        "mass": 11,
+        "method_name": "report",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "id",
+          "lit"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "if(call(id id) id lit)",
+        "line": 8,
+        "mass": 5,
+        "method_name": "report",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit))))))",
+        "line": 5,
+        "mass": 10,
+        "method_name": "report",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call<[]>(lit id argument_list(lit))))",
+        "line": 6,
+        "mass": 8,
+        "method_name": "report",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "if(call(id id))",
+        "line": 21,
+        "mass": 3,
+        "method_name": "guarded_emit",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call<Array>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<Array>(id argument_list(id)))",
+        "line": 12,
+        "mass": 4,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<Array>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<Array>(id argument_list(id)))",
+        "line": 13,
+        "mass": 4,
+        "method_name": "scan",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 5,
+        "mass": 5,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<first>(id id argument_list(id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<first>(id id argument_list(id)))",
+        "line": 7,
+        "mass": 5,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<first>(id id argument_list(id))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "call(lit call(id call<Array>(id argument_list(id))))"
+        ],
+        "child_masses": [
+          1,
+          5
+        ],
+        "fingerprint": "and(id call(lit call(id call<Array>(id argument_list(id)))))",
+        "line": 12,
+        "mass": 7,
+        "method_name": "scan",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "scan",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "scan",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "scan",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 23,
+        "mass": 2,
+        "method_name": "guarded_emit",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 21,
+        "mass": 2,
+        "method_name": "guarded_emit",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "unless(id)",
+        "line": 20,
+        "mass": 2,
+        "method_name": "guarded_emit",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "report",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(parameters(id) body_statement(assignment(id block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit))))))) assignment(id block(call(id id) body(call<[]>(lit id argument_list(lit))))) block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit)))) lit)))",
+          "method(id body(parameters(id) if(and(id call(lit call(id call<Array>(id argument_list(id))))) block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id)))))))",
+          "method(id body(parameters(id id) body_statement(unless(id) if(call(id id)) call<emit>(id argument_list(id)))))"
+        ],
+        "child_masses": [
+          37,
+          21,
+          14
+        ],
+        "fingerprint": "body_statement(method(id body(parameters(id) body_statement(assignment(id block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit))))))) assignment(id block(call(id id) body(call<[]>(lit id argument_list(lit))))) block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit)))) lit))) method(id body(parameters(id) if(and(id call(lit call(id call<Array>(id argument_list(id))))) block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id))))))) method(id body(parameters(id id) body_statement(unless(id) if(call(id id)) call<emit>(id argument_list(id))))))",
+        "line": 4,
+        "mass": 73,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "unless(id)",
+          "if(call(id id))",
+          "call<emit>(id argument_list(id))"
+        ],
+        "child_masses": [
+          2,
+          3,
+          3
+        ],
+        "fingerprint": "body_statement(unless(id) if(call(id id)) call<emit>(id argument_list(id)))",
+        "line": 20,
+        "mass": 9,
+        "method_name": "guarded_emit",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) body_statement(unless(id) if(call(id id)) call<emit>(id argument_list(id)))))",
+        "line": 19,
+        "mass": 14,
+        "method_name": "guarded_emit",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id block(call(id id) body(call(id call(id call<[]>(lit id argument_list(lit))))))) assignment(id block(call(id id) body(call<[]>(lit id argument_list(lit))))) block(call(id call<first>(id id argument_list(id))) body(call<[]>(lit id argument_list(lit)))) lit)))",
+        "line": 4,
+        "mass": 37,
+        "method_name": "report",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) if(and(id call(lit call(id call<Array>(id argument_list(id))))) block(call(id call<Array>(id argument_list(id))) body(call<source_path?>(id argument_list(id)))))))",
+        "line": 11,
+        "mass": 21,
+        "method_name": "scan",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          12,
+          7,
+          12,
+          36
+        ],
+        "function": "scan",
+        "kind": "conjunction",
+        "line": 12,
+        "members": [
+          "paths",
+          "!Array(paths).empty?"
+        ],
+        "predicate": "paths && !Array(paths).empty?"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges",
+        "params": [
+          "paths"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 19,
+        "name": "guarded_emit",
+        "owner": "SourceFactSlopcopParityEdges",
+        "params": [
+          "source",
+          "evidence"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "report",
+        "owner": "SourceFactSlopcopParityEdges",
+        "params": [
+          "gaps"
+        ],
+        "visibility": "public"
+      }
+    ],
     "local_complexity_scores": [
       {
         "id": "SourceFactSlopcopParityEdges#guarded_emit",
@@ -262,6 +1030,385 @@
         }
       }
     ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactSlopcopParityEdges#report",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "report",
+        "owner": "SourceFactSlopcopParityEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "flagged",
+                "gaps"
+              ]
+            ],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "gaps"
+            ],
+            "source": "flagged = gaps.reject { |x| x[:detectors].to_a.empty? }",
+            "span": [
+              5,
+              4,
+              5,
+              59
+            ],
+            "writes": [
+              "flagged"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "dup",
+                "flagged"
+              ]
+            ],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [
+              "flagged"
+            ],
+            "source": "dup = flagged.count { |x| x[:coarse_dup] }",
+            "span": [
+              6,
+              4,
+              6,
+              46
+            ],
+            "writes": [
+              "dup"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "gaps"
+            ],
+            "source": "gaps.first(@top).map { |x| x[:file] }",
+            "span": [
+              7,
+              4,
+              7,
+              41
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "dup",
+                "gaps"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 8,
+            "index": 3,
+            "line": 8,
+            "reads": [
+              "dup",
+              "gaps"
+            ],
+            "source": "\"#{gaps.size} #{dup.positive? ? @top : 0}\"",
+            "span": [
+              8,
+              4,
+              8,
+              46
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactSlopcopParityEdges#scan",
+        "line": 11,
+        "local_contract_assignments": {},
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 16,
+            "index": 0,
+            "line": 12,
+            "reads": [
+              "paths"
+            ],
+            "source": "if paths && !Array(paths).empty? Array(paths).select { |path| source_path?(path) } else [] end",
+            "span": [
+              12,
+              4,
+              16,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 2,
+            "before_index": 1,
+            "kind": "blank",
+            "line": 22,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactSlopcopParityEdges#guarded_emit",
+        "line": 19,
+        "local_contract_assignments": {},
+        "name": "guarded_emit",
+        "owner": "SourceFactSlopcopParityEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 0,
+            "line": 20,
+            "reads": [
+              "source"
+            ],
+            "source": "return unless source",
+            "span": [
+              20,
+              4,
+              20,
+              24
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 21,
+            "index": 1,
+            "line": 21,
+            "reads": [
+              "evidence"
+            ],
+            "source": "return if evidence.covered?",
+            "span": [
+              21,
+              4,
+              21,
+              31
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 23,
+            "index": 2,
+            "line": 23,
+            "reads": [
+              "source"
+            ],
+            "source": "emit(source)",
+            "span": [
+              23,
+              4,
+              23,
+              16
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactSlopcopParityEdges"
+      }
+    ],
+    "path_conditions": [
+      {
+        "action": "Array(paths)",
+        "function": "scan",
+        "guards": [
+          "!Array(paths).empty?",
+          "paths"
+        ],
+        "line": 13
+      },
+      {
+        "action": "Array(paths).select",
+        "function": "scan",
+        "guards": [
+          "!Array(paths).empty?",
+          "paths"
+        ],
+        "line": 13
+      },
+      {
+        "action": "source_path?(path)",
+        "function": "scan",
+        "guards": [
+          "!Array(paths).empty?",
+          "paths"
+        ],
+        "line": 13
+      }
+    ],
+    "predicate_bodies": [
+      {
+        "body": "if paths && !Array(paths).empty? Array(paths).select { |path| source_path?(path) } else [] end",
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "report",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "report",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 12,
+            "mid": "Array",
+            "span": [
+              12,
+              17,
+              12,
+              29
+            ]
+          }
+        ],
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 13,
+            "mid": "Array",
+            "span": [
+              13,
+              6,
+              13,
+              18
+            ]
+          }
+        ],
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 13,
+            "mid": "source_path",
+            "span": [
+              13,
+              35,
+              13,
+              53
+            ]
+          }
+        ],
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "emit",
+            "span": [
+              23,
+              4,
+              23,
+              16
+            ]
+          }
+        ],
+        "line": 19,
+        "name": "guarded_emit",
+        "owner": "SourceFactSlopcopParityEdges"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 11,
+        "name": "scan",
+        "owner": "SourceFactSlopcopParityEdges",
+        "reads": [
+          "Array",
+          "source_path"
+        ],
+        "writes": []
+      },
+      {
+        "line": 19,
+        "name": "guarded_emit",
+        "owner": "SourceFactSlopcopParityEdges",
+        "reads": [
+          "emit",
+          "evidence.covered"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "report",
+        "owner": "SourceFactSlopcopParityEdges",
+        "reads": [
+          "dup.positive",
+          "flagged.count",
+          "gaps.first",
+          "gaps.first(@top).map",
+          "gaps.reject",
+          "gaps.size",
+          "top",
+          "x[:detectors].to_a",
+          "x[:detectors].to_a.empty"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "count",
@@ -329,6 +1476,7 @@
         "line": 8,
         "receiver": "self"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

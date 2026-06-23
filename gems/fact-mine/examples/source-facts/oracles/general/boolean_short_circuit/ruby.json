@@ -1,4 +1,39 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_seven",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "x",
+              "y"
+            ],
+            [
+              "x",
+              "z"
+            ],
+            [
+              "y",
+              "z"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "x",
+            "y",
+            "z"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [
       {

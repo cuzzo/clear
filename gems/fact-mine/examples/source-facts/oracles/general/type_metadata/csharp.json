@@ -1,4 +1,9 @@
 {
+  "local_flow": [],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],

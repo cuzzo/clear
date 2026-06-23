@@ -34,5 +34,240 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "{ do_something(); }",
+        "decision_line": 2,
+        "function": "method_seven",
+        "kind": "if",
+        "line": 2,
+        "member": "then",
+        "predicate": "x and y or z"
+      }
+    ],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_seven",
+        "line": 3,
+        "message": "do_something",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(id id)",
+          "id"
+        ],
+        "child_masses": [
+          3,
+          1
+        ],
+        "fingerprint": "or(and(id id) id)",
+        "line": 2,
+        "mass": 5,
+        "method_name": "method_seven",
+        "node_name": "or"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "and(id id)",
+        "line": 2,
+        "mass": 3,
+        "method_name": "method_seven",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "body_statement(id)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_seven",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "or(and(id id) id)",
+          "block_expression(body_statement(id))"
+        ],
+        "child_masses": [
+          5,
+          3
+        ],
+        "fingerprint": "if(or(and(id id) id) block_expression(body_statement(id)))",
+        "line": 2,
+        "mass": 9,
+        "method_name": "method_seven",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(if(or(and(id id) id) block_expression(body_statement(id)))))",
+        "line": 1,
+        "mass": 11,
+        "method_name": "method_seven",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [
+      {
+        "enclosing_span": [
+          2,
+          4,
+          4,
+          5
+        ],
+        "function": "method_seven",
+        "kind": "conjunction",
+        "line": 2,
+        "members": [
+          "x",
+          "y"
+        ],
+        "predicate": "x and y"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_seven",
+        "owner": "bool",
+        "params": [
+          "x",
+          "y",
+          "z"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "bool#method_seven",
+        "score": 2.6,
+        "signals": {
+          "boolean_ops": 4,
+          "branches": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "bool#method_seven",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_seven",
+        "owner": "bool",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "x",
+                "y"
+              ],
+              [
+                "x",
+                "z"
+              ],
+              [
+                "y",
+                "z"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "x",
+              "y",
+              "z"
+            ],
+            "source": "if (x and y or z) { do_something(); }",
+            "span": [
+              2,
+              4,
+              4,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_seven",
+        "owner": "bool"
+      },
+      {
+        "calls": [
+          {
+            "line": 3,
+            "mid": "do_something",
+            "span": [
+              3,
+              8,
+              3,
+              22
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_seven",
+        "owner": "bool"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_seven",
+        "owner": "bool",
+        "reads": [
+          "do_something"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "do_something",
+        "function": "method_seven",
+        "line": 3,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
 }

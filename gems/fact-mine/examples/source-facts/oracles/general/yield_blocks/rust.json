@@ -41,5 +41,302 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "1"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_three",
+        "line": 2,
+        "message": "f",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "|_| {}"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_with_empty_block",
+        "line": 7,
+        "message": "for_each",
+        "receiver": "arr.iter()",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_with_empty_block",
+        "line": 7,
+        "message": "iter",
+        "receiver": "arr",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<for_each>(id call(id id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "method_with_empty_block",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "method_with_empty_block",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "let_declaration(assignment(id))",
+          "call<for_each>(id call(id id))"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "body_statement(let_declaration(assignment(id)) call<for_each>(id call(id id)))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "method_with_empty_block",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "call<f>(id)",
+        "line": 2,
+        "mass": 1,
+        "method_name": "method_three",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id)) call<for_each>(id call(id id)))))",
+        "line": 5,
+        "mass": 8,
+        "method_name": "method_with_empty_block",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(call<f>(id)))",
+        "line": 1,
+        "mass": 3,
+        "method_name": "method_three",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "rust",
+        "params": [
+          "f"
+        ],
+        "visibility": "private"
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_three",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#method_with_empty_block",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_three",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_three",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "f"
+            ],
+            "source": "f(1)",
+            "span": [
+              2,
+              4,
+              2,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_with_empty_block",
+        "line": 5,
+        "local_contract_assignments": {
+          "arr": "[1]"
+        },
+        "name": "method_with_empty_block",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 6,
+            "reads": [],
+            "source": "let arr = [1];",
+            "span": [
+              6,
+              4,
+              6,
+              18
+            ],
+            "writes": [
+              "arr"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 1,
+            "line": 7,
+            "reads": [
+              "arr"
+            ],
+            "source": "arr.iter().for_each(|_| {})",
+            "span": [
+              7,
+              4,
+              7,
+              31
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "rust"
+      },
+      {
+        "calls": [
+          {
+            "line": 2,
+            "mid": "f",
+            "span": [
+              2,
+              4,
+              2,
+              8
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_three",
+        "owner": "rust"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_three",
+        "owner": "rust",
+        "reads": [
+          "f"
+        ],
+        "writes": []
+      },
+      {
+        "line": 5,
+        "name": "method_with_empty_block",
+        "owner": "rust",
+        "reads": [
+          "arr.iter",
+          "arr.iter().for_each"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "f",
+        "function": "method_three",
+        "line": 2,
+        "receiver": "self"
+      },
+      {
+        "field": "for_each",
+        "function": "method_with_empty_block",
+        "line": 7,
+        "receiver": "arr.iter()"
+      },
+      {
+        "field": "iter",
+        "function": "method_with_empty_block",
+        "line": 7,
+        "receiver": "arr"
+      }
+    ],
+    "state_writes": []
+  }
 }

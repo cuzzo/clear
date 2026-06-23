@@ -19,5 +19,95 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 1,
+        "mass": 1,
+        "method_name": "method_four",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_four",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_four",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_four",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_four",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "let _ = std::process::Command::new(\"ls\").output();",
+            "span": [
+              2,
+              4,
+              2,
+              54
+            ],
+            "writes": [
+              "_"
+            ]
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_four",
+        "owner": "rust"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_four",
+        "owner": "rust",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
 }

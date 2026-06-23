@@ -1,4 +1,52 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_eight",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_case_no_val",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_case_one_pattern",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "x"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [
       {

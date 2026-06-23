@@ -40,5 +40,336 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "else |e| { log(e); }",
+        "decision_line": 5,
+        "function": "method_two",
+        "kind": "if",
+        "line": 7,
+        "member": "else",
+        "predicate": "result"
+      },
+      {
+        "body": "{ _ = value; }",
+        "decision_line": 5,
+        "function": "method_two",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "result"
+      }
+    ],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "e"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_two",
+        "line": 8,
+        "message": "log",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_two",
+        "line": 10,
+        "message": "cleanup",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<log>(id argument_list(id))",
+        "line": 8,
+        "mass": 3,
+        "method_name": "method_two",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "break(break_label(id) error_type(id))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "body_statement(break(break_label(id) error_type(id)))",
+        "line": 2,
+        "mass": 6,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call<log>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "body_statement(call<log>(id argument_list(id)))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "block_expression(body_statement(variable_declaration(assignment(id id))))",
+          "else_clause(payload(id) labeled_statement(body_statement(call<log>(id argument_list(id)))))"
+        ],
+        "child_masses": [
+          1,
+          5,
+          8
+        ],
+        "fingerprint": "if(id block_expression(body_statement(variable_declaration(assignment(id id)))) else_clause(payload(id) labeled_statement(body_statement(call<log>(id argument_list(id))))))",
+        "line": 5,
+        "mass": 15,
+        "method_name": "method_two",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "method_two",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "variable_declaration(assignment(id id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "body_statement(variable_declaration(assignment(id id)))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "variable_declaration(assignment(id labeled_type_expression(block_label(id) body_statement(break(break_label(id) error_type(id))))))",
+          "if(id block_expression(body_statement(variable_declaration(assignment(id id)))) else_clause(payload(id) labeled_statement(body_statement(call<log>(id argument_list(id))))))",
+          "id"
+        ],
+        "child_masses": [
+          11,
+          15,
+          1
+        ],
+        "fingerprint": "body_statement(variable_declaration(assignment(id labeled_type_expression(block_label(id) body_statement(break(break_label(id) error_type(id)))))) if(id block_expression(body_statement(variable_declaration(assignment(id id)))) else_clause(payload(id) labeled_statement(body_statement(call<log>(id argument_list(id)))))) id)",
+        "line": 1,
+        "mass": 28,
+        "method_name": "method_two",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(variable_declaration(assignment(id labeled_type_expression(block_label(id) body_statement(break(break_label(id) error_type(id)))))) if(id block_expression(body_statement(variable_declaration(assignment(id id)))) else_clause(payload(id) labeled_statement(body_statement(call<log>(id argument_list(id)))))) id)))",
+        "line": 1,
+        "mass": 30,
+        "method_name": "method_two",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_two",
+        "owner": "zig",
+        "params": [],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_two",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_two",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_two",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 0,
+            "line": 2,
+            "reads": [],
+            "source": "const result = blk: { break :blk error.Err; };",
+            "span": [
+              2,
+              4,
+              4,
+              6
+            ],
+            "writes": [
+              "result"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "_",
+                "result"
+              ]
+            ],
+            "end_line": 9,
+            "index": 1,
+            "line": 5,
+            "reads": [
+              "result"
+            ],
+            "source": "if (result) |value| { _ = value; } else |e| { log(e); }",
+            "span": [
+              5,
+              4,
+              9,
+              5
+            ],
+            "writes": [
+              "_"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 10,
+            "index": 2,
+            "line": 10,
+            "reads": [],
+            "source": "cleanup()",
+            "span": [
+              10,
+              4,
+              10,
+              13
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [
+          {
+            "line": 10,
+            "mid": "cleanup",
+            "span": [
+              10,
+              4,
+              10,
+              13
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_two",
+        "owner": "zig"
+      },
+      {
+        "calls": [
+          {
+            "line": 8,
+            "mid": "log",
+            "span": [
+              8,
+              8,
+              8,
+              14
+            ]
+          },
+          {
+            "line": 10,
+            "mid": "cleanup",
+            "span": [
+              10,
+              4,
+              10,
+              13
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_two",
+        "owner": "zig"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_two",
+        "owner": "zig",
+        "reads": [
+          "cleanup",
+          "log"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "cleanup",
+        "function": "method_two",
+        "line": 10,
+        "receiver": "self"
+      },
+      {
+        "field": "log",
+        "function": "method_two",
+        "line": 8,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
 }

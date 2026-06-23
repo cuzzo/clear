@@ -10,5 +10,104 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "struct_item(id)",
+          "class(id body(method(id)))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "body_statement(struct_item(id) class(id body(method(id))))",
+        "line": 1,
+        "mass": 7,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 4,
+        "mass": 1,
+        "method_name": "method_one",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 4,
+        "name": "method_one",
+        "owner": "Child",
+        "params": [
+          "&self"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "Child#method_one",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "Child#method_one",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "method_one",
+        "owner": "Child",
+        "statements": []
+      }
+    ],
+    "owners": [
+      {
+        "kind": "impl",
+        "line": 3,
+        "name": "Child"
+      },
+      {
+        "kind": "struct",
+        "line": 2,
+        "name": "Child"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "method_one",
+        "owner": "Child"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "method_one",
+        "owner": "Child",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
+  }
 }

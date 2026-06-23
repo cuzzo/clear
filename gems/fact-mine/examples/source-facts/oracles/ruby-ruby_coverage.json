@@ -1,0 +1,2244 @@
+{
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "initialize",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "x"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "global_var"
+          ]
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "method_missing",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "args",
+              "symbol"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "args",
+            "symbol"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "symbol"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "respond_to_missing?",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        },
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        },
+        {
+          "after_index": 3,
+          "before_index": 2,
+          "kind": "blank"
+        },
+        {
+          "after_index": 4,
+          "before_index": 3,
+          "kind": "blank"
+        },
+        {
+          "after_index": 7,
+          "before_index": 6,
+          "kind": "blank"
+        }
+      ],
+      "method": "some_call",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "e"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "elsif @x == 2 puts \"2\" else puts \"other\"",
+        "decision_line": 36,
+        "function": "some_call",
+        "kind": "if",
+        "line": 38,
+        "member": "else",
+        "predicate": "self.some_call == 1"
+      },
+      {
+        "body": "elsif self.some_call == 1 puts \"some_call is 1\" elsif @x == 2 puts \"2\" else puts \"other\"",
+        "decision_line": 34,
+        "function": "some_call",
+        "kind": "if",
+        "line": 36,
+        "member": "else",
+        "predicate": "!@x == 1"
+      },
+      {
+        "body": "puts \"2\"",
+        "decision_line": 38,
+        "function": "some_call",
+        "kind": "if",
+        "line": 39,
+        "member": "then",
+        "predicate": "@x == 2"
+      },
+      {
+        "body": "puts \"not 1\"",
+        "decision_line": 34,
+        "function": "some_call",
+        "kind": "if",
+        "line": 35,
+        "member": "then",
+        "predicate": "!@x == 1"
+      },
+      {
+        "body": "puts \"one\"",
+        "decision_line": 44,
+        "function": "some_call",
+        "kind": "case",
+        "line": 45,
+        "member": "1",
+        "predicate": "@x"
+      },
+      {
+        "body": "puts \"other\"",
+        "decision_line": 38,
+        "function": "some_call",
+        "kind": "if",
+        "line": 41,
+        "member": "else",
+        "predicate": "@x == 2"
+      },
+      {
+        "body": "puts \"some_call is 1\"",
+        "decision_line": 36,
+        "function": "some_call",
+        "kind": "if",
+        "line": 37,
+        "member": "then",
+        "predicate": "self.some_call == 1"
+      },
+      {
+        "body": "puts \"yes\"",
+        "decision_line": 27,
+        "function": "respond_to_missing?",
+        "kind": "if",
+        "line": 28,
+        "member": "then",
+        "predicate": "self.some_call"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "respond_to_missing?",
+        "line": 27,
+        "predicate": "self.some_call",
+        "state_refs": [
+          "some_call"
+        ]
+      },
+      {
+        "function": "some_call",
+        "line": 34,
+        "predicate": "!@x == 1",
+        "state_refs": [
+          "@x"
+        ]
+      },
+      {
+        "function": "some_call",
+        "line": 36,
+        "predicate": "self.some_call == 1",
+        "state_refs": [
+          "some_call"
+        ]
+      },
+      {
+        "function": "some_call",
+        "line": 38,
+        "predicate": "@x == 2",
+        "state_refs": [
+          "@x"
+        ]
+      },
+      {
+        "function": "some_call",
+        "line": 44,
+        "predicate": "@x",
+        "state_refs": [
+          "@x"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [
+          "Float"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 11,
+        "message": "type_alias",
+        "receiver": "T",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "String",
+          "Hash{Symbol => String}"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "(top-level)",
+        "line": 7,
+        "message": "any",
+        "receiver": "T",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"2\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 39,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"inline\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "some_call",
+        "line": 56,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"not 1\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 35,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"one\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 46,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"other\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 41,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"some_call is 1\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 37,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"trying\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "some_call",
+        "line": 50,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"yes\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "respond_to_missing?",
+        "line": 28,
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "val: Integer"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "(top-level)",
+        "line": 18,
+        "message": "params",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "{Symbol => String}"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "(top-level)",
+        "line": 7,
+        "message": "Hash",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "respond_to_missing?",
+        "line": 30,
+        "message": "some_call",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "respond_to_missing?",
+        "line": 27,
+        "message": "some_call",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "some_call",
+        "line": 36,
+        "message": "some_call",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "(top-level)",
+        "line": 18,
+        "message": "void",
+        "receiver": "params(val: Integer)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 18,
+        "message": "sig",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 3,
+        "message": "type_alias",
+        "receiver": "T",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 7,
+        "message": "type_alias",
+        "receiver": "T",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 8,
+        "message": "type_alias",
+        "receiver": "T",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(hash(hash(id id)))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call<Hash>(id argument_list(hash(hash(id id))))",
+        "line": 7,
+        "mass": 6,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(hash(lit id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call<params>(id argument_list(hash(lit id)))",
+        "line": 18,
+        "mass": 5,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "call<puts>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "when(argument_list(lit) call<puts>(id argument_list(lit)))",
+        "line": 45,
+        "mass": 6,
+        "method_name": "some_call",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 28,
+        "mass": 3,
+        "method_name": "respond_to_missing?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 35,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 37,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 39,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 41,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 46,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 50,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<puts>(id argument_list(lit))",
+        "line": 56,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))))))",
+          "assignment(id block(call(id id) body(id)))",
+          "assignment(id call<type_alias>(id id argument_list(id)))",
+          "method(id body(body_statement(assignment(id lit) assignment(id lit))))",
+          "block(id body(call(id call<params>(id argument_list(hash(lit id))))))",
+          "method(id body(parameters(id id) body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id)))))",
+          "method(id body(parameters(id assignment(id bool)) body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id))))",
+          "method(id body(body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id))))))"
+        ],
+        "child_masses": [
+          15,
+          6,
+          5,
+          7,
+          9,
+          14,
+          15,
+          67
+        ],
+        "fingerprint": "body_statement(assignment(id block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))))) assignment(id block(call(id id) body(id))) assignment(id call<type_alias>(id id argument_list(id))) method(id body(body_statement(assignment(id lit) assignment(id lit)))) block(id body(call(id call<params>(id argument_list(hash(lit id)))))) method(id body(parameters(id id) body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id))))) method(id body(parameters(id assignment(id bool)) body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id)))) method(id body(body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id)))))))",
+        "line": 7,
+        "mass": 139,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id lit)",
+          "assignment(id lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "body_statement(assignment(id lit) assignment(id lit))",
+        "line": 14,
+        "mass": 5,
+        "method_name": "initialize",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id)",
+          "nil"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "body_statement(assignment(id) nil)",
+        "line": 51,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "bool",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "until(id bool lit)",
+        "line": 62,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "until"
+      },
+      {
+        "child_fingerprints": [
+          "bool",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "while(id bool lit)",
+        "line": 61,
+        "mass": 3,
+        "method_name": "some_call",
+        "node_name": "while"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(lit))",
+        "line": 36,
+        "mass": 5,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call<puts>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "if(call(id id) call<puts>(id argument_list(lit)))",
+        "line": 27,
+        "mass": 6,
+        "method_name": "respond_to_missing?",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))))",
+        "line": 7,
+        "mass": 14,
+        "method_name": "(top-level)",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(id))",
+        "line": 3,
+        "mass": 5,
+        "method_name": "(top-level)",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(id))",
+        "line": 8,
+        "mass": 5,
+        "method_name": "(top-level)",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(id id) argument_list(lit))",
+          "call<puts>(id argument_list(lit))",
+          "if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit)))"
+        ],
+        "child_masses": [
+          5,
+          3,
+          11
+        ],
+        "fingerprint": "if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))",
+        "line": 36,
+        "mass": 20,
+        "method_name": "some_call",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(lit id) argument_list(lit))",
+          "call<puts>(id argument_list(lit))",
+          "if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))"
+        ],
+        "child_masses": [
+          5,
+          3,
+          20
+        ],
+        "fingerprint": "if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit)))))",
+        "line": 34,
+        "mass": 29,
+        "method_name": "some_call",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))",
+          "call<puts>(id argument_list(lit))",
+          "call<puts>(id argument_list(lit))"
+        ],
+        "child_masses": [
+          4,
+          3,
+          3
+        ],
+        "fingerprint": "if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit)))",
+        "line": 38,
+        "mass": 11,
+        "method_name": "some_call",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(lit id) argument_list(lit))",
+        "line": 34,
+        "mass": 5,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<params>(id argument_list(hash(lit id)))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id call<params>(id argument_list(hash(lit id))))",
+        "line": 18,
+        "mass": 6,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "hash(hash(id id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "argument_list(hash(hash(id id)))",
+        "line": 7,
+        "mass": 5,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "hash(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "hash(hash(id id))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "(top-level)",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "hash(lit id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "argument_list(hash(lit id))",
+        "line": 18,
+        "mass": 4,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))"
+        ],
+        "child_masses": [
+          1,
+          8
+        ],
+        "fingerprint": "call<any>(id id argument_list(id call<Hash>(id argument_list(hash(hash(id id))))))",
+        "line": 7,
+        "mass": 10,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<type_alias>(id id argument_list(id))",
+        "line": 11,
+        "mass": 4,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 38,
+        "mass": 4,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "call<Hash>(id argument_list(hash(hash(id id))))"
+        ],
+        "child_masses": [
+          1,
+          6
+        ],
+        "fingerprint": "argument_list(id call<Hash>(id argument_list(hash(hash(id id)))))",
+        "line": 7,
+        "mass": 8,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(id id)",
+        "line": 7,
+        "mass": 3,
+        "method_name": "(top-level)",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "splat_argument(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "argument_list(id splat_argument(id))",
+        "line": 21,
+        "mass": 4,
+        "method_name": "method_missing",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(lit) call<puts>(id argument_list(lit)))"
+        ],
+        "child_masses": [
+          1,
+          6
+        ],
+        "fingerprint": "case(id when(argument_list(lit) call<puts>(id argument_list(lit))))",
+        "line": 44,
+        "mass": 8,
+        "method_name": "some_call",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "(top-level)",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 23,
+        "mass": 2,
+        "method_name": "method_missing",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 51,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "block(id body(call(id call<params>(id argument_list(hash(lit id))))))",
+        "line": 18,
+        "mass": 9,
+        "method_name": "(top-level)",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 27,
+        "mass": 2,
+        "method_name": "respond_to_missing?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 30,
+        "mass": 2,
+        "method_name": "respond_to_missing?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "(top-level)",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(lit id)",
+        "line": 34,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "if(call(id id) call<puts>(id argument_list(lit)))",
+          "call(id id)"
+        ],
+        "child_masses": [
+          6,
+          2
+        ],
+        "fingerprint": "body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id))",
+        "line": 27,
+        "mass": 9,
+        "method_name": "respond_to_missing?",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit)))))",
+          "case(id when(argument_list(lit) call<puts>(id argument_list(lit))))",
+          "rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil)))",
+          "rescue(call<puts>(id argument_list(lit)) resbody(nil))",
+          "while(id bool lit)",
+          "until(id bool lit)",
+          "lit",
+          "sclass(id body(method(id)))"
+        ],
+        "child_masses": [
+          29,
+          8,
+          10,
+          6,
+          3,
+          3,
+          1,
+          4
+        ],
+        "fingerprint": "body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id))))",
+        "line": 34,
+        "mass": 65,
+        "method_name": "some_call",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 18,
+        "mass": 3,
+        "method_name": "(top-level)",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 28,
+        "mass": 2,
+        "method_name": "respond_to_missing?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 34,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 35,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 37,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 38,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 39,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 41,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 45,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 46,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 50,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 56,
+        "mass": 2,
+        "method_name": "some_call",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "super(argument_list(id splat_argument(id)))",
+          "yield(argument_list(id))"
+        ],
+        "child_masses": [
+          5,
+          3
+        ],
+        "fingerprint": "body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id)))",
+        "line": 20,
+        "mass": 9,
+        "method_name": "method_missing",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(assignment(id lit) assignment(id lit))))",
+        "line": 13,
+        "mass": 7,
+        "method_name": "initialize",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(if(call(lit call(lit id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit call(id id) argument_list(lit)) call<puts>(id argument_list(lit)) if(call(lit id argument_list(lit)) call<puts>(id argument_list(lit)) call<puts>(id argument_list(lit))))) case(id when(argument_list(lit) call<puts>(id argument_list(lit)))) rescue(call<puts>(id argument_list(lit)) resbody(argument_list(id) body_statement(assignment(id) nil))) rescue(call<puts>(id argument_list(lit)) resbody(nil)) while(id bool lit) until(id bool lit) lit sclass(id body(method(id))))))",
+        "line": 33,
+        "mass": 67,
+        "method_name": "some_call",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id assignment(id bool)) body_statement(if(call(id id) call<puts>(id argument_list(lit))) call(id id))))",
+        "line": 26,
+        "mass": 15,
+        "method_name": "respond_to_missing?",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) body_statement(super(argument_list(id splat_argument(id))) yield(argument_list(id)))))",
+        "line": 19,
+        "mass": 14,
+        "method_name": "method_missing",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id)",
+        "line": 66,
+        "mass": 1,
+        "method_name": "class_method",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "some_call == 1",
+        "function": "some_call",
+        "line": 36,
+        "operator": "==",
+        "raw": "self.some_call == 1",
+        "source": "self.some_call == 1"
+      },
+      {
+        "canon_source": "x == 1",
+        "function": "some_call",
+        "line": 34,
+        "operator": "==",
+        "raw": "!@x == 1",
+        "source": "!@x == 1"
+      },
+      {
+        "canon_source": "x == 2",
+        "function": "some_call",
+        "line": 38,
+        "operator": "==",
+        "raw": "@x == 2",
+        "source": "@x == 2"
+      }
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 13,
+        "name": "initialize",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 19,
+        "name": "method_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "params": [
+          "symbol",
+          "args"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 26,
+        "name": "respond_to_missing?",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "params": [
+          "symbol",
+          "include_private"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 33,
+        "name": "some_call",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "params": [],
+        "visibility": "public"
+      },
+      {
+        "line": 66,
+        "name": "class_method",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "params": [],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "RubyCoverageParent::RubyCoverageChild#initialize",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "RubyCoverageParent::RubyCoverageChild#method_missing",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "RubyCoverageParent::RubyCoverageChild#respond_to_missing?",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "RubyCoverageParent::RubyCoverageChild#some_call",
+        "score": 15.9,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 3,
+          "cases": 2,
+          "loops": 2,
+          "nested": 2,
+          "rescues": 4
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "RubyCoverageParent::RubyCoverageChild#initialize",
+        "line": 13,
+        "local_contract_assignments": {
+          "global_var": "2",
+          "x": "1"
+        },
+        "name": "initialize",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 0,
+            "line": 14,
+            "reads": [],
+            "source": "@x = 1",
+            "span": [
+              14,
+              6,
+              14,
+              12
+            ],
+            "writes": [
+              "x"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 15,
+            "index": 1,
+            "line": 15,
+            "reads": [],
+            "source": "$global_var = 2",
+            "span": [
+              15,
+              6,
+              15,
+              21
+            ],
+            "writes": [
+              "global_var"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "RubyCoverageParent::RubyCoverageChild#method_missing",
+        "line": 19,
+        "local_contract_assignments": {},
+        "name": "method_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 0,
+            "line": 20,
+            "reads": [],
+            "source": "super",
+            "span": [
+              20,
+              6,
+              20,
+              11
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "args",
+                "symbol"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 21,
+            "index": 1,
+            "line": 21,
+            "reads": [
+              "args",
+              "symbol"
+            ],
+            "source": "super(symbol, *args)",
+            "span": [
+              21,
+              6,
+              21,
+              26
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 22,
+            "index": 2,
+            "line": 22,
+            "reads": [],
+            "source": "yield",
+            "span": [
+              22,
+              6,
+              22,
+              11
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 23,
+            "index": 3,
+            "line": 23,
+            "reads": [
+              "symbol"
+            ],
+            "source": "yield(symbol)",
+            "span": [
+              23,
+              6,
+              23,
+              19
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "RubyCoverageParent::RubyCoverageChild#respond_to_missing?",
+        "line": 26,
+        "local_contract_assignments": {},
+        "name": "respond_to_missing?",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 29,
+            "index": 0,
+            "line": 27,
+            "reads": [],
+            "source": "if self.some_call puts \"yes\" end",
+            "span": [
+              27,
+              6,
+              29,
+              9
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 30,
+            "index": 1,
+            "line": 30,
+            "reads": [],
+            "source": "self.some_call",
+            "span": [
+              30,
+              6,
+              30,
+              20
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 43,
+            "text": ""
+          },
+          {
+            "after_index": 2,
+            "before_index": 1,
+            "kind": "blank",
+            "line": 48,
+            "text": ""
+          },
+          {
+            "after_index": 3,
+            "before_index": 2,
+            "kind": "blank",
+            "line": 54,
+            "text": ""
+          },
+          {
+            "after_index": 4,
+            "before_index": 3,
+            "kind": "blank",
+            "line": 60,
+            "text": ""
+          },
+          {
+            "after_index": 7,
+            "before_index": 6,
+            "kind": "blank",
+            "line": 64,
+            "text": ""
+          }
+        ],
+        "id": "RubyCoverageParent::RubyCoverageChild#some_call",
+        "line": 33,
+        "local_contract_assignments": {},
+        "name": "some_call",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 42,
+            "index": 0,
+            "line": 34,
+            "reads": [],
+            "source": "if !@x == 1 puts \"not 1\" elsif self.some_call == 1 puts \"some_call is 1\" elsif @x == 2 puts \"2\" else puts \"other\" end",
+            "span": [
+              34,
+              6,
+              42,
+              9
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 47,
+            "index": 1,
+            "line": 44,
+            "reads": [],
+            "source": "case @x when 1 puts \"one\" end",
+            "span": [
+              44,
+              6,
+              47,
+              9
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 52,
+            "index": 2,
+            "line": 50,
+            "reads": [],
+            "source": "puts \"trying\" rescue StandardError => e nil",
+            "span": [
+              50,
+              8,
+              52,
+              11
+            ],
+            "writes": [
+              "e"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 58,
+            "index": 3,
+            "line": 56,
+            "reads": [],
+            "source": "puts \"inline\" rescue nil",
+            "span": [
+              56,
+              8,
+              58,
+              11
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 61,
+            "index": 4,
+            "line": 61,
+            "reads": [],
+            "source": "1 while false",
+            "span": [
+              61,
+              6,
+              61,
+              19
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 62,
+            "index": 5,
+            "line": 62,
+            "reads": [],
+            "source": "1 until true",
+            "span": [
+              62,
+              6,
+              62,
+              18
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 63,
+            "index": 6,
+            "line": 63,
+            "reads": [],
+            "source": "`ls`",
+            "span": [
+              63,
+              6,
+              63,
+              10
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 69,
+            "index": 7,
+            "line": 65,
+            "reads": [],
+            "source": "class << self def class_method nil end end",
+            "span": [
+              65,
+              6,
+              69,
+              9
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 5,
+        "name": "RubyCoverageParent"
+      },
+      {
+        "kind": "class",
+        "line": 6,
+        "name": "RubyCoverageParent::RubyCoverageChild"
+      }
+    ],
+    "path_conditions": [
+      {
+        "action": "puts \"2\"",
+        "function": "some_call",
+        "guards": [
+          "!self.some_call == 1",
+          "@x == 1",
+          "@x == 2"
+        ],
+        "line": 39
+      },
+      {
+        "action": "puts \"other\"",
+        "function": "some_call",
+        "guards": [
+          "!@x == 2",
+          "!self.some_call == 1",
+          "@x == 1"
+        ],
+        "line": 41
+      },
+      {
+        "action": "puts \"some_call is 1\"",
+        "function": "some_call",
+        "guards": [
+          "@x == 1",
+          "self.some_call == 1"
+        ],
+        "line": 37
+      }
+    ],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 13,
+        "name": "initialize",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [],
+        "line": 19,
+        "name": "method_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [],
+        "line": 33,
+        "name": "some_call",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [],
+        "line": 66,
+        "name": "class_method",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [
+          {
+            "line": 27,
+            "mid": "some_call",
+            "span": [
+              27,
+              9,
+              27,
+              23
+            ]
+          },
+          {
+            "line": 30,
+            "mid": "some_call",
+            "span": [
+              30,
+              6,
+              30,
+              20
+            ]
+          }
+        ],
+        "line": 26,
+        "name": "respond_to_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [
+          {
+            "line": 30,
+            "mid": "some_call",
+            "span": [
+              30,
+              6,
+              30,
+              20
+            ]
+          }
+        ],
+        "line": 26,
+        "name": "respond_to_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      },
+      {
+        "calls": [
+          {
+            "line": 36,
+            "mid": "some_call",
+            "span": [
+              36,
+              12,
+              36,
+              26
+            ]
+          }
+        ],
+        "line": 33,
+        "name": "some_call",
+        "owner": "RubyCoverageParent::RubyCoverageChild"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 13,
+        "name": "initialize",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "reads": [],
+        "writes": [
+          "global_var",
+          "x"
+        ]
+      },
+      {
+        "line": 19,
+        "name": "method_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 26,
+        "name": "respond_to_missing",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "reads": [
+          "some_call"
+        ],
+        "writes": []
+      },
+      {
+        "line": 33,
+        "name": "some_call",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "reads": [
+          "some_call",
+          "x"
+        ],
+        "writes": []
+      },
+      {
+        "line": 66,
+        "name": "class_method",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "backtick",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 63
+      },
+      {
+        "detail": "def method_missing",
+        "function": "(top-level)",
+        "kind": "metaprogramming",
+        "line": 19
+      },
+      {
+        "detail": "def respond_to_missing?",
+        "function": "(top-level)",
+        "kind": "metaprogramming",
+        "line": 26
+      },
+      {
+        "detail": "global_var",
+        "function": "initialize",
+        "kind": "context_dependency",
+        "line": 15
+      },
+      {
+        "detail": "puts \"inline\"",
+        "function": "some_call",
+        "kind": "eliminable_guard",
+        "line": 56
+      },
+      {
+        "detail": "puts",
+        "function": "respond_to_missing?",
+        "kind": "hidden_io",
+        "line": 28
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 35
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 37
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 39
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 41
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 46
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 50
+      },
+      {
+        "detail": "puts",
+        "function": "some_call",
+        "kind": "hidden_io",
+        "line": 56
+      },
+      {
+        "detail": "yield",
+        "function": "method_missing",
+        "kind": "dynamic_dispatch",
+        "line": 22
+      },
+      {
+        "detail": "yield",
+        "function": "method_missing",
+        "kind": "dynamic_dispatch",
+        "line": 23
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "void",
+        "function": "(top-level)",
+        "line": 18,
+        "receiver": "params(val: Integer)"
+      },
+      {
+        "field": "x",
+        "function": "some_call",
+        "line": 34,
+        "receiver": "self"
+      },
+      {
+        "field": "x",
+        "function": "some_call",
+        "line": 38,
+        "receiver": "self"
+      },
+      {
+        "field": "x",
+        "function": "some_call",
+        "line": 44,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": [
+      {
+        "field": "global_var",
+        "function": "initialize",
+        "line": 15,
+        "receiver": "self"
+      },
+      {
+        "field": "x",
+        "function": "initialize",
+        "line": 14,
+        "receiver": "self"
+      }
+    ]
+  }
+}

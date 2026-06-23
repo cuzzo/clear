@@ -1,5 +1,118 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 3,
+          "before_index": 2,
+          "kind": "blank"
+        }
+      ],
+      "method": "checks",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "lines"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "rescued_case",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "return false",
+        "decision_line": 5,
+        "function": "checks",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "External::Risk.enabled?"
+      },
+      {
+        "body": "return false",
+        "decision_line": 6,
+        "function": "checks",
+        "kind": "if",
+        "line": 6,
+        "member": "then",
+        "predicate": "External::Risk.load_config"
+      },
+      {
+        "body": "return false",
+        "decision_line": 7,
+        "function": "checks",
+        "kind": "if",
+        "line": 7,
+        "member": "then",
+        "predicate": "lines.any? { |hit| !hit.nil? }"
+      },
+      {
+        "body": "true",
+        "decision_line": 18,
+        "function": "rescued_case",
+        "kind": "case",
+        "line": 19,
+        "member": "\".rb\"",
+        "predicate": "::File.extname(path).downcase"
+      },
+      {
+        "body": "true",
+        "decision_line": 9,
+        "function": "checks",
+        "kind": "case",
+        "line": 10,
+        "member": "\".rb\"",
+        "predicate": "::File.extname(path).downcase"
+      }
+    ],
     "branch_decisions": [
       {
         "function": "checks",
@@ -44,6 +157,715 @@
           "::File.extname(path).downcase"
         ]
       }
-    ]
+    ],
+    "calls": [
+      {
+        "arguments": [
+          "path"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "checks",
+        "line": 9,
+        "message": "extname",
+        "receiver": "::File",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "path"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "rescued_case",
+        "line": 18,
+        "message": "extname",
+        "receiver": "::File",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "checks",
+        "line": 9,
+        "message": "downcase",
+        "receiver": "::File.extname(path)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "rescued_case",
+        "line": 18,
+        "message": "downcase",
+        "receiver": "::File.extname(path)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "checks",
+        "line": 7,
+        "message": "nil?",
+        "receiver": "hit",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": true,
+        "control": "conditional",
+        "function": "checks",
+        "line": 7,
+        "message": "any?",
+        "receiver": "lines",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "bool",
+          "bool"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "when(argument_list(lit) bool bool)",
+        "line": 10,
+        "mass": 5,
+        "method_name": "checks",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "bool",
+          "bool"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "when(argument_list(lit) bool bool)",
+        "line": 19,
+        "mass": 5,
+        "method_name": "rescued_case",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "block(call(id id) body(call(lit call(id id))))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          7,
+          2
+        ],
+        "fingerprint": "if(block(call(id id) body(call(lit call(id id)))) return(bool))",
+        "line": 7,
+        "mass": 10,
+        "method_name": "checks",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<extname>(id colon2(id id) argument_list(id)))",
+          "when(argument_list(lit) bool bool)"
+        ],
+        "child_masses": [
+          6,
+          5
+        ],
+        "fingerprint": "case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))",
+        "line": 18,
+        "mass": 12,
+        "method_name": "rescued_case",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<extname>(id colon2(id id) argument_list(id)))",
+          "when(argument_list(lit) bool bool)"
+        ],
+        "child_masses": [
+          6,
+          5
+        ],
+        "fingerprint": "case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))",
+        "line": 9,
+        "mass": 12,
+        "method_name": "checks",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "call(id colon2(id id))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          3,
+          2
+        ],
+        "fingerprint": "unless(call(id colon2(id id)) return(bool))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "checks",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "call(id colon2(id id))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          3,
+          2
+        ],
+        "fingerprint": "unless(call(id colon2(id id)) return(bool))",
+        "line": 6,
+        "mass": 6,
+        "method_name": "checks",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(lit call(id id))))",
+        "line": 7,
+        "mass": 7,
+        "method_name": "checks",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(lit call(id id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<extname>(id colon2(id id) argument_list(id))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id call<extname>(id colon2(id id) argument_list(id)))",
+        "line": 18,
+        "mass": 6,
+        "method_name": "rescued_case",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<extname>(id colon2(id id) argument_list(id))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id call<extname>(id colon2(id id) argument_list(id)))",
+        "line": 9,
+        "mass": 6,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<extname>(id colon2(id id) argument_list(id))",
+        "line": 18,
+        "mass": 5,
+        "method_name": "rescued_case",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<extname>(id colon2(id id) argument_list(id))",
+        "line": 9,
+        "mass": 5,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id colon2(id id))",
+        "line": 5,
+        "mass": 3,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id colon2(id id))",
+        "line": 6,
+        "mass": 3,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "rescued_case",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 24,
+        "mass": 2,
+        "method_name": "rescued_case",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "checks",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "checks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "checks",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 19,
+        "mass": 2,
+        "method_name": "rescued_case",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
+          "method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool))))"
+        ],
+        "child_masses": [
+          40,
+          21
+        ],
+        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))))) method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool)))))",
+        "line": 4,
+        "mass": 62,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "unless(call(id colon2(id id)) return(bool))",
+          "unless(call(id colon2(id id)) return(bool))",
+          "if(block(call(id id) body(call(lit call(id id)))) return(bool))",
+          "case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool))"
+        ],
+        "child_masses": [
+          6,
+          6,
+          10,
+          12
+        ],
+        "fingerprint": "body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))",
+        "line": 5,
+        "mass": 35,
+        "method_name": "checks",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) body_statement(unless(call(id colon2(id id)) return(bool)) unless(call(id colon2(id id)) return(bool)) if(block(call(id id) body(call(lit call(id id)))) return(bool)) case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)))))",
+        "line": 4,
+        "mass": 40,
+        "method_name": "checks",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) rescue(case(call(id call<extname>(id colon2(id id) argument_list(id))) when(argument_list(lit) bool bool)) resbody(argument_list(id) bool))))",
+        "line": 17,
+        "mass": 21,
+        "method_name": "rescued_case",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 17,
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "params": [
+          "path"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "checks",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "params": [
+          "lines",
+          "path"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactBranchQualifiedPredicates#checks",
+        "score": 4.3,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 3,
+          "cases": 2,
+          "loops": 1
+        }
+      },
+      {
+        "id": "SourceFactBranchQualifiedPredicates#rescued_case",
+        "score": 4.2,
+        "signals": {
+          "cases": 2,
+          "rescues": 2
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactBranchQualifiedPredicates#rescued_case",
+        "line": 17,
+        "local_contract_assignments": {},
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 23,
+            "index": 0,
+            "line": 18,
+            "reads": [
+              "path"
+            ],
+            "source": "case ::File.extname(path).downcase when \".rb\" true else false end",
+            "span": [
+              18,
+              4,
+              23,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 25,
+            "index": 1,
+            "line": 24,
+            "reads": [],
+            "source": "rescue JSON::ParserError false",
+            "span": [
+              24,
+              2,
+              25,
+              9
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 3,
+            "before_index": 2,
+            "kind": "blank",
+            "line": 8,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactBranchQualifiedPredicates#checks",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "checks",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "return false unless External::Risk.enabled?",
+            "span": [
+              5,
+              4,
+              5,
+              47
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [],
+            "source": "return false unless External::Risk.load_config",
+            "span": [
+              6,
+              4,
+              6,
+              50
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "lines"
+            ],
+            "source": "return false if lines.any? { |hit| !hit.nil? }",
+            "span": [
+              7,
+              4,
+              7,
+              50
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 3,
+            "line": 9,
+            "reads": [
+              "path"
+            ],
+            "source": "case ::File.extname(path).downcase when \".rb\" true else false end",
+            "span": [
+              9,
+              4,
+              14,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactBranchQualifiedPredicates"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "case ::File.extname(path).downcase when \".rb\" true else false end rescue JSON::ParserError false",
+        "line": 17,
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 17,
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates"
+      },
+      {
+        "calls": [],
+        "line": 17,
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "checks",
+        "owner": "SourceFactBranchQualifiedPredicates"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "checks",
+        "owner": "SourceFactBranchQualifiedPredicates"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 17,
+        "name": "rescued_case",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "checks",
+        "owner": "SourceFactBranchQualifiedPredicates",
+        "reads": [
+          "hit.nil",
+          "lines.any"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "File.extname",
+        "function": "checks",
+        "kind": "hidden_io",
+        "line": 9
+      },
+      {
+        "detail": "File.extname",
+        "function": "rescued_case",
+        "kind": "hidden_io",
+        "line": 18
+      },
+      {
+        "detail": "hit",
+        "function": "checks",
+        "kind": "eliminable_guard",
+        "line": 7
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "any?",
+        "function": "checks",
+        "line": 7,
+        "receiver": "lines"
+      },
+      {
+        "field": "nil?",
+        "function": "checks",
+        "line": 7,
+        "receiver": "hit"
+      }
+    ],
+    "state_writes": []
   }
 }

@@ -1,5 +1,523 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "label",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "Data"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "lineage_summary",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "out"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "return \"#{@data[:label]} (Data)\"",
+        "decision_line": 5,
+        "function": "label",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "@data[:enabled]"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "label",
+        "line": 5,
+        "predicate": "@data[:enabled]",
+        "state_refs": [
+          "@data"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [
+          ":enabled"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "label",
+        "line": 5,
+        "message": "[]",
+        "receiver": "data",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          ":label"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "label",
+        "line": 5,
+        "message": "[]",
+        "receiver": "data",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          ":units"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 11,
+        "message": "[]",
+        "receiver": "lineage",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          ":units"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 12,
+        "message": "[]",
+        "receiver": "lineage",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 11,
+        "message": "size",
+        "receiver": "lineage[:units]",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 12,
+        "message": "size",
+        "receiver": "lineage[:units]",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))",
+          "return(argument_list(evstr(call<[]>(lit id argument_list(lit))) lit))"
+        ],
+        "child_masses": [
+          4,
+          8
+        ],
+        "fingerprint": "if(call<[]>(lit id argument_list(lit)) return(argument_list(evstr(call<[]>(lit id argument_list(lit))) lit)))",
+        "line": 5,
+        "mass": 13,
+        "method_name": "label",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 11,
+        "mass": 5,
+        "method_name": "lineage_summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 12,
+        "mass": 5,
+        "method_name": "lineage_summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "evstr(call<[]>(lit id argument_list(lit)))",
+          "lit"
+        ],
+        "child_masses": [
+          5,
+          1
+        ],
+        "fingerprint": "argument_list(evstr(call<[]>(lit id argument_list(lit))) lit)",
+        "line": 5,
+        "mass": 7,
+        "method_name": "label",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 11,
+        "mass": 4,
+        "method_name": "lineage_summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 11,
+        "mass": 4,
+        "method_name": "lineage_summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 12,
+        "mass": 4,
+        "method_name": "lineage_summary",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "label",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "label",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "lineage_summary",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "lineage_summary",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "lineage_summary",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "label",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "label",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(if(call<[]>(lit id argument_list(lit)) return(argument_list(evstr(call<[]>(lit id argument_list(lit))) lit)))))",
+          "method(id body(parameters(id) call(lit id argument_list(lit))))"
+        ],
+        "child_masses": [
+          15,
+          8
+        ],
+        "fingerprint": "body_statement(method(id body(if(call<[]>(lit id argument_list(lit)) return(argument_list(evstr(call<[]>(lit id argument_list(lit))) lit))))) method(id body(parameters(id) call(lit id argument_list(lit)))))",
+        "line": 4,
+        "mass": 24,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(if(call<[]>(lit id argument_list(lit)) return(argument_list(evstr(call<[]>(lit id argument_list(lit))) lit)))))",
+        "line": 4,
+        "mass": 15,
+        "method_name": "label",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) call(lit id argument_list(lit))))",
+        "line": 10,
+        "mass": 8,
+        "method_name": "lineage_summary",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 10,
+        "name": "lineage_summary",
+        "owner": "SourceFactIndexedStateReads",
+        "params": [
+          "out"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "label",
+        "owner": "SourceFactIndexedStateReads",
+        "params": [
+          "Data"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactIndexedStateReads#label",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactIndexedStateReads#lineage_summary",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactIndexedStateReads#label",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "label",
+        "owner": "SourceFactIndexedStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "Data"
+            ],
+            "source": "return \"#{@data[:label]} (Data)\" if @data[:enabled]",
+            "span": [
+              5,
+              4,
+              5,
+              55
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactIndexedStateReads#lineage_summary",
+        "line": 10,
+        "local_contract_assignments": {},
+        "name": "lineage_summary",
+        "owner": "SourceFactIndexedStateReads",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 0,
+            "line": 11,
+            "reads": [
+              "out"
+            ],
+            "source": "out << \"- [Lineage Unit Risk (#{@lineage[:units].size})]\" \\ \"(#lineage-unit-risk-#{@lineage[:units].size})\\n\"",
+            "span": [
+              11,
+              4,
+              12,
+              60
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactIndexedStateReads"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 10,
+        "name": "lineage_summary",
+        "owner": "SourceFactIndexedStateReads"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "label",
+        "owner": "SourceFactIndexedStateReads"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "label",
+        "owner": "SourceFactIndexedStateReads"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 10,
+        "name": "lineage_summary",
+        "owner": "SourceFactIndexedStateReads",
+        "reads": [
+          "lineage"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "label",
+        "owner": "SourceFactIndexedStateReads",
+        "reads": [
+          "data"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "lineage_summary",
+        "kind": "hidden_mutation",
+        "line": 11
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "data",
@@ -25,6 +543,7 @@
         "line": 12,
         "receiver": "self"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

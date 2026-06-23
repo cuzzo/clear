@@ -49,6 +49,32 @@ fn syntax_fact_examples_match_oracles() -> Result<()> {
     }
 }
 
+fn full_syntax_expected() -> Value {
+    json!({
+        "functions": [],
+        "owners": [],
+        "calls": [],
+        "state_declarations": [],
+        "state_param_origins": [],
+        "state_reads": [],
+        "state_writes": [],
+        "decisions": [],
+        "branch_decisions": [],
+        "branch_arms": [],
+        "dispatch_sites": [],
+        "semantic_effects": [],
+        "predicate_bodies": [],
+        "comparisons": [],
+        "path_conditions": [],
+        "protocol_method_effects": [],
+        "protocol_call_paths": [],
+        "clone_candidates": [],
+        "redundant_nil_guards": [],
+        "local_methods": [],
+        "local_complexity_scores": []
+    })
+}
+
 #[test]
 fn source_fact_examples_match_oracles() -> Result<()> {
     let examples_root = examples_root().join("source-facts");
@@ -72,13 +98,20 @@ fn source_fact_examples_match_oracles() -> Result<()> {
         };
         let mut actual = Map::new();
 
-        if let Some(syntax_expected) = expected.get("syntax") {
+        let is_update = std::env::var("UPDATE_ORACLES").is_ok();
+        let syntax_expected = if is_update {
+            Some(full_syntax_expected())
+        } else {
+            expected.get("syntax").cloned()
+        };
+
+        if let Some(syntax_expected) = &syntax_expected {
             actual.insert(
                 "syntax".to_string(),
                 project_source_syntax(&fixture, language, syntax_expected)?,
             );
         }
-        if expected.get("local_flow").is_some() {
+        if is_update || expected.get("local_flow").is_some() {
             actual.insert(
                 "local_flow".to_string(),
                 project_local_flow(&value(syntax::local_flow::scan_files(
@@ -87,7 +120,7 @@ fn source_fact_examples_match_oracles() -> Result<()> {
                 )?)?),
             );
         }
-        if expected.get("path_condition").is_some() {
+        if is_update || expected.get("path_condition").is_some() {
             actual.insert(
                 "path_condition".to_string(),
                 project_path_condition(&value(syntax::path_condition::scan_files(
@@ -98,7 +131,7 @@ fn source_fact_examples_match_oracles() -> Result<()> {
         }
 
         let actual = Value::Object(actual);
-        if std::env::var("UPDATE_ORACLES").is_ok() {
+        if is_update {
             fs::write(&oracle_path, serde_json::to_string_pretty(&actual)?)?;
         } else if actual != expected {
             failures.push(format!(

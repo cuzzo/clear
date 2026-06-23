@@ -1,4 +1,24 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "myMethod",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "field"
+          ]
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],

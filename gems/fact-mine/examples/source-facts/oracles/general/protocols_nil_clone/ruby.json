@@ -1,5 +1,387 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "open",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "opened"
+          ]
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "close",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "opened"
+          ]
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "run",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "item"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        }
+      ],
+      "method": "guard",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_eq_nil",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_ne_nil",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_negated",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_both_terminate",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_else_terminate",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "guard_safe_nav_cond",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "value"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "clone_left",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "data",
+              "user"
+            ]
+          ],
+          "reads": [
+            "user"
+          ],
+          "writes": [
+            "data"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "clone_right",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [
+            [
+              "data",
+              "account"
+            ]
+          ],
+          "reads": [
+            "account"
+          ],
+          "writes": [
+            "data"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "data"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "close",
+        "decision_line": 14,
+        "function": "run",
+        "kind": "if",
+        "line": 14,
+        "member": "then",
+        "predicate": "item.ready?"
+      },
+      {
+        "body": "raise \"nil!\"",
+        "decision_line": 44,
+        "function": "guard_both_terminate",
+        "kind": "if",
+        "line": 45,
+        "member": "then",
+        "predicate": "value.nil?"
+      },
+      {
+        "body": "raise \"nil!\"",
+        "decision_line": 52,
+        "function": "guard_else_terminate",
+        "kind": "if",
+        "line": 55,
+        "member": "else",
+        "predicate": "!value.nil?"
+      },
+      {
+        "body": "raise \"not nil!\"",
+        "decision_line": 44,
+        "function": "guard_both_terminate",
+        "kind": "if",
+        "line": 47,
+        "member": "else",
+        "predicate": "value.nil?"
+      },
+      {
+        "body": "return",
+        "decision_line": 18,
+        "function": "guard",
+        "kind": "if",
+        "line": 18,
+        "member": "then",
+        "predicate": "value"
+      },
+      {
+        "body": "return",
+        "decision_line": 24,
+        "function": "guard_eq_nil",
+        "kind": "if",
+        "line": 25,
+        "member": "then",
+        "predicate": "value == nil"
+      },
+      {
+        "body": "return",
+        "decision_line": 37,
+        "function": "guard_negated",
+        "kind": "if",
+        "line": 38,
+        "member": "then",
+        "predicate": "!value"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 31,
+        "function": "guard_ne_nil",
+        "kind": "if",
+        "line": 32,
+        "member": "then",
+        "predicate": "value != nil"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 52,
+        "function": "guard_else_terminate",
+        "kind": "if",
+        "line": 53,
+        "member": "then",
+        "predicate": "!value.nil?"
+      },
+      {
+        "body": "value.name",
+        "decision_line": 60,
+        "function": "guard_safe_nav_cond",
+        "kind": "if",
+        "line": 61,
+        "member": "then",
+        "predicate": "value&.name"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "guard_both_terminate",
+        "line": 44,
+        "predicate": "value.nil?",
+        "state_refs": [
+          "value.nil?"
+        ]
+      },
+      {
+        "function": "guard_else_terminate",
+        "line": 52,
+        "predicate": "!value.nil?",
+        "state_refs": [
+          "value.nil?"
+        ]
+      },
+      {
+        "function": "guard_safe_nav_cond",
+        "line": 60,
+        "predicate": "value&.name",
+        "state_refs": [
+          "value.name"
+        ]
+      },
+      {
+        "function": "run",
+        "line": 14,
+        "predicate": "item.ready?",
+        "state_refs": [
+          "item.ready?"
+        ]
+      }
+    ],
     "calls": [
       {
         "arguments": [
@@ -994,6 +1376,26 @@
         "node_name": "defn"
       }
     ],
+    "comparisons": [
+      {
+        "canon_source": "value != nil",
+        "function": "guard_ne_nil",
+        "line": 31,
+        "operator": "!=",
+        "raw": "value != nil",
+        "source": "value != nil"
+      },
+      {
+        "canon_source": "value == nil",
+        "function": "guard_eq_nil",
+        "line": 24,
+        "operator": "==",
+        "raw": "value == nil",
+        "source": "value == nil"
+      }
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 12,
@@ -1098,6 +1500,630 @@
         "owner": "SourceFactProtocolsNilClone",
         "params": [],
         "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactProtocolsNilClone#clone_left",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#clone_right",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#close",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_both_terminate",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_else_terminate",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_eq_nil",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_ne_nil",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_negated",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#guard_safe_nav_cond",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#open",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactProtocolsNilClone#run",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#clone_left",
+        "line": 65,
+        "local_contract_assignments": {
+          "data": "user.profile.name"
+        },
+        "name": "clone_left",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "data",
+                "user"
+              ]
+            ],
+            "end_line": 66,
+            "index": 0,
+            "line": 66,
+            "reads": [
+              "user"
+            ],
+            "source": "data = user.profile.name",
+            "span": [
+              66,
+              4,
+              66,
+              28
+            ],
+            "writes": [
+              "data"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 67,
+            "index": 1,
+            "line": 67,
+            "reads": [
+              "data"
+            ],
+            "source": "audit(data)",
+            "span": [
+              67,
+              4,
+              67,
+              15
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 68,
+            "index": 2,
+            "line": 68,
+            "reads": [
+              "data"
+            ],
+            "source": "data",
+            "span": [
+              68,
+              4,
+              68,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#clone_right",
+        "line": 71,
+        "local_contract_assignments": {
+          "data": "account.profile.name"
+        },
+        "name": "clone_right",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [
+              [
+                "data",
+                "account"
+              ]
+            ],
+            "end_line": 72,
+            "index": 0,
+            "line": 72,
+            "reads": [
+              "account"
+            ],
+            "source": "data = account.profile.name",
+            "span": [
+              72,
+              4,
+              72,
+              31
+            ],
+            "writes": [
+              "data"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 73,
+            "index": 1,
+            "line": 73,
+            "reads": [
+              "data"
+            ],
+            "source": "audit(data)",
+            "span": [
+              73,
+              4,
+              73,
+              15
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 74,
+            "index": 2,
+            "line": 74,
+            "reads": [
+              "data"
+            ],
+            "source": "data",
+            "span": [
+              74,
+              4,
+              74,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#close",
+        "line": 8,
+        "local_contract_assignments": {
+          "opened": "false"
+        },
+        "name": "close",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 9,
+            "reads": [],
+            "source": "@opened = false",
+            "span": [
+              9,
+              4,
+              9,
+              19
+            ],
+            "writes": [
+              "opened"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_both_terminate",
+        "line": 43,
+        "local_contract_assignments": {},
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 48,
+            "index": 0,
+            "line": 44,
+            "reads": [
+              "value"
+            ],
+            "source": "if value.nil? raise \"nil!\" else raise \"not nil!\" end",
+            "span": [
+              44,
+              4,
+              48,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_else_terminate",
+        "line": 51,
+        "local_contract_assignments": {},
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 56,
+            "index": 0,
+            "line": 52,
+            "reads": [
+              "value"
+            ],
+            "source": "if !value.nil? value.name else raise \"nil!\" end",
+            "span": [
+              52,
+              4,
+              56,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_eq_nil",
+        "line": 23,
+        "local_contract_assignments": {},
+        "name": "guard_eq_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 26,
+            "index": 0,
+            "line": 24,
+            "reads": [
+              "value"
+            ],
+            "source": "if value == nil return end",
+            "span": [
+              24,
+              4,
+              26,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 27,
+            "index": 1,
+            "line": 27,
+            "reads": [
+              "value"
+            ],
+            "source": "value.name",
+            "span": [
+              27,
+              4,
+              27,
+              14
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_ne_nil",
+        "line": 30,
+        "local_contract_assignments": {},
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 33,
+            "index": 0,
+            "line": 31,
+            "reads": [
+              "value"
+            ],
+            "source": "if value != nil value.name end",
+            "span": [
+              31,
+              4,
+              33,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_negated",
+        "line": 36,
+        "local_contract_assignments": {},
+        "name": "guard_negated",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 39,
+            "index": 0,
+            "line": 37,
+            "reads": [
+              "value"
+            ],
+            "source": "if !value return end",
+            "span": [
+              37,
+              4,
+              39,
+              7
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 40,
+            "index": 1,
+            "line": 40,
+            "reads": [
+              "value"
+            ],
+            "source": "value.name",
+            "span": [
+              40,
+              4,
+              40,
+              14
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#guard_safe_nav_cond",
+        "line": 59,
+        "local_contract_assignments": {},
+        "name": "guard_safe_nav_cond",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 62,
+            "index": 0,
+            "line": 60,
+            "reads": [
+              "value"
+            ],
+            "source": "if value&.name value.name end",
+            "span": [
+              60,
+              4,
+              62,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#open",
+        "line": 4,
+        "local_contract_assignments": {
+          "opened": "true"
+        },
+        "name": "open",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "@opened = true",
+            "span": [
+              5,
+              4,
+              5,
+              18
+            ],
+            "writes": [
+              "opened"
+            ]
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactProtocolsNilClone#run",
+        "line": 12,
+        "local_contract_assignments": {},
+        "name": "run",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 13,
+            "index": 0,
+            "line": 13,
+            "reads": [],
+            "source": "open",
+            "span": [
+              13,
+              4,
+              13,
+              8
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 1,
+            "line": 14,
+            "reads": [
+              "item"
+            ],
+            "source": "close if item.ready?",
+            "span": [
+              14,
+              4,
+              14,
+              24
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 19,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactProtocolsNilClone#guard",
+        "line": 17,
+        "local_contract_assignments": {},
+        "name": "guard",
+        "owner": "SourceFactProtocolsNilClone",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 18,
+            "index": 0,
+            "line": 18,
+            "reads": [
+              "value"
+            ],
+            "source": "return unless value",
+            "span": [
+              18,
+              4,
+              18,
+              23
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 20,
+            "index": 1,
+            "line": 20,
+            "reads": [
+              "value"
+            ],
+            "source": "value&.name",
+            "span": [
+              20,
+              4,
+              20,
+              15
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactProtocolsNilClone"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "if !value.nil? value.name else raise \"nil!\" end",
+        "line": 51,
+        "name": "guard_else_terminate",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "body": "if value != nil value.name end",
+        "line": 30,
+        "name": "guard_ne_nil",
+        "owner": "SourceFactProtocolsNilClone"
+      },
+      {
+        "body": "if value.nil? raise \"nil!\" else raise \"not nil!\" end",
+        "line": 43,
+        "name": "guard_both_terminate",
+        "owner": "SourceFactProtocolsNilClone"
       }
     ],
     "protocol_call_paths": [
@@ -1469,6 +2495,8 @@
         "line": 60
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "name",

@@ -1,5 +1,341 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "assertion_argument_calls",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "result"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "assertion_single_call_argument",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "coverage",
+              "dir"
+            ],
+            [
+              "coverage",
+              "file"
+            ],
+            [
+              "coverage",
+              "path"
+            ],
+            [
+              "coverage",
+              "v"
+            ],
+            [
+              "dir",
+              "file"
+            ],
+            [
+              "dir",
+              "path"
+            ],
+            [
+              "dir",
+              "v"
+            ],
+            [
+              "file",
+              "path"
+            ],
+            [
+              "file",
+              "v"
+            ],
+            [
+              "path",
+              "v"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "coverage",
+            "dir",
+            "file",
+            "path",
+            "v"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "symbol_proc_maps",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "arms"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "f",
+              "rsf"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "f",
+            "rsf"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "f",
+              "rsf"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "f",
+            "rsf"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "chained_multiline",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "abs",
+              "diagnostic_mids"
+            ],
+            [
+              "abs",
+              "ffi_boundary"
+            ],
+            [
+              "abs",
+              "files"
+            ],
+            [
+              "abs",
+              "rel"
+            ],
+            [
+              "abs",
+              "repo"
+            ],
+            [
+              "abs",
+              "resultset"
+            ],
+            [
+              "diagnostic_mids",
+              "ffi_boundary"
+            ],
+            [
+              "diagnostic_mids",
+              "files"
+            ],
+            [
+              "diagnostic_mids",
+              "rel"
+            ],
+            [
+              "diagnostic_mids",
+              "repo"
+            ],
+            [
+              "diagnostic_mids",
+              "resultset"
+            ],
+            [
+              "ffi_boundary",
+              "files"
+            ],
+            [
+              "ffi_boundary",
+              "rel"
+            ],
+            [
+              "ffi_boundary",
+              "repo"
+            ],
+            [
+              "ffi_boundary",
+              "resultset"
+            ],
+            [
+              "files",
+              "rel"
+            ],
+            [
+              "files",
+              "repo"
+            ],
+            [
+              "files",
+              "resultset"
+            ],
+            [
+              "rel",
+              "repo"
+            ],
+            [
+              "rel",
+              "resultset"
+            ],
+            [
+              "repo",
+              "resultset"
+            ]
+          ],
+          "dependencies": [
+            [
+              "abs",
+              "diagnostic_mids"
+            ],
+            [
+              "abs",
+              "ffi_boundary"
+            ],
+            [
+              "abs",
+              "files"
+            ],
+            [
+              "abs",
+              "rel"
+            ],
+            [
+              "abs",
+              "repo"
+            ],
+            [
+              "abs",
+              "resultset"
+            ],
+            [
+              "arms",
+              "abs"
+            ],
+            [
+              "arms",
+              "diagnostic_mids"
+            ],
+            [
+              "arms",
+              "ffi_boundary"
+            ],
+            [
+              "arms",
+              "files"
+            ],
+            [
+              "arms",
+              "rel"
+            ],
+            [
+              "arms",
+              "repo"
+            ],
+            [
+              "arms",
+              "resultset"
+            ],
+            [
+              "rel",
+              "abs"
+            ],
+            [
+              "rel",
+              "diagnostic_mids"
+            ],
+            [
+              "rel",
+              "ffi_boundary"
+            ],
+            [
+              "rel",
+              "files"
+            ],
+            [
+              "rel",
+              "repo"
+            ],
+            [
+              "rel",
+              "resultset"
+            ]
+          ],
+          "reads": [
+            "abs",
+            "diagnostic_mids",
+            "ffi_boundary",
+            "files",
+            "rel",
+            "repo",
+            "resultset"
+          ],
+          "writes": [
+            "abs",
+            "arms",
+            "rel"
+          ]
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "arms"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "next []",
+        "decision_line": 26,
+        "function": "chained_multiline",
+        "kind": "if",
+        "line": 26,
+        "member": "then",
+        "predicate": "File.file?(abs)"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "chained_multiline",
+        "line": 26,
+        "predicate": "File.file?(abs)",
+        "state_refs": [
+          "File.file?"
+        ]
+      }
+    ],
     "calls": [
       {
         "arguments": [
@@ -429,6 +765,1843 @@
         "receiver": "Classifier.classify_file( resultset, abs, root: repo, ffi_boundary: ffi_boundary, diagnostic_mids: diagnostic_mids )",
         "safe_navigation": false
       }
-    ]
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))"
+        ],
+        "child_masses": [
+          9
+        ],
+        "fingerprint": "call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id)))))",
+        "line": 10,
+        "mass": 10,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))"
+        ],
+        "child_masses": [
+          9
+        ],
+        "fingerprint": "call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit))))",
+        "line": 11,
+        "mass": 10,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<overlay_arm>(id argument_list(id id))",
+        "line": 34,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<repo_relative>(id argument_list(id id))",
+        "line": 24,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<Array>(id argument_list(id))",
+        "line": 23,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit)))"
+        ],
+        "child_masses": [
+          10
+        ],
+        "fingerprint": "call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit))))",
+        "line": 5,
+        "mass": 11,
+        "method_name": "assertion_argument_calls",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit lit)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<with_env>(id argument_list(lit lit))",
+        "line": 9,
+        "mass": 4,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit)))))))",
+          "id"
+        ],
+        "child_masses": [
+          69,
+          1
+        ],
+        "fingerprint": "body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)",
+        "line": 23,
+        "mass": 71,
+        "method_name": "chained_multiline",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "assignment(id call<repo_relative>(id argument_list(id id)))",
+          "assignment(id call<expand_path>(id id argument_list(id id)))",
+          "unless(call<file?>(id id argument_list(id)))",
+          "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))"
+        ],
+        "child_masses": [
+          5,
+          6,
+          5,
+          21
+        ],
+        "fingerprint": "body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))",
+        "line": 24,
+        "mass": 38,
+        "method_name": "chained_multiline",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))"
+        ],
+        "child_masses": [
+          44
+        ],
+        "fingerprint": "call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))",
+        "line": 23,
+        "mass": 45,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "block_pass(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(block_pass(lit))",
+        "line": 16,
+        "mass": 3,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "block_pass(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(block_pass(lit))",
+        "line": 17,
+        "mass": 3,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "block_pass(lit)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(block_pass(lit))",
+        "line": 18,
+        "mass": 3,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))"
+        ],
+        "child_masses": [
+          45
+        ],
+        "fingerprint": "call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))))",
+        "line": 23,
+        "mass": 46,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))))"
+        ],
+        "child_masses": [
+          46
+        ],
+        "fingerprint": "block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))",
+        "line": 23,
+        "mass": 68,
+        "method_name": "chained_multiline",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<Array>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id)))))))",
+        "line": 23,
+        "mass": 44,
+        "method_name": "chained_multiline",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id))))"
+        ],
+        "child_masses": [
+          15
+        ],
+        "fingerprint": "block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))",
+        "line": 28,
+        "mass": 21,
+        "method_name": "chained_multiline",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(id id)",
+          "hash(lit argument_list(lit))"
+        ],
+        "child_masses": [
+          2,
+          2,
+          4
+        ],
+        "fingerprint": "argument_list(call(id id) call(id id) hash(lit argument_list(lit)))",
+        "line": 18,
+        "mass": 9,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "call(id id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "argument_list(call(id id) call(id id))",
+        "line": 17,
+        "mass": 5,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call<Array>(id argument_list(id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call(id call<Array>(id argument_list(id)))",
+        "line": 23,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))",
+          "call(id call<[]>(lit id argument_list(lit)))",
+          "call(id call<[]>(lit id argument_list(lit)))",
+          "call(id call<[]>(lit id argument_list(lit)))"
+        ],
+        "child_masses": [
+          4,
+          5,
+          5,
+          5
+        ],
+        "fingerprint": "argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))",
+        "line": 36,
+        "mass": 20,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 36,
+        "mass": 5,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 36,
+        "mass": 5,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<[]>(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<[]>(lit id argument_list(lit)))",
+        "line": 36,
+        "mass": 5,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id)))))",
+          "call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit))))"
+        ],
+        "child_masses": [
+          10,
+          10
+        ],
+        "fingerprint": "body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))))",
+        "line": 10,
+        "mass": 21,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit))))",
+          "argument_list(block_pass(lit))"
+        ],
+        "child_masses": [
+          11,
+          3
+        ],
+        "fingerprint": "call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit)))",
+        "line": 18,
+        "mass": 15,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<classify_file>(id id argument_list(call(id id) call(id id)))",
+          "argument_list(block_pass(lit))"
+        ],
+        "child_masses": [
+          7,
+          3
+        ],
+        "fingerprint": "call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit)))",
+        "line": 17,
+        "mass": 11,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))"
+        ],
+        "child_masses": [
+          14
+        ],
+        "fingerprint": "call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id))))",
+        "line": 28,
+        "mass": 15,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<classify_file>(id id argument_list(id id hash(lit id)))"
+        ],
+        "child_masses": [
+          8
+        ],
+        "fingerprint": "argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))",
+        "line": 10,
+        "mass": 9,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call<file?>(id id argument_list(id))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "unless(call<file?>(id id argument_list(id)))",
+        "line": 26,
+        "mass": 5,
+        "method_name": "chained_multiline",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "call<lookup>(id colon2(id id) argument_list(id id lit lit))"
+        ],
+        "child_masses": [
+          8
+        ],
+        "fingerprint": "argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))",
+        "line": 11,
+        "mass": 9,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call<map>(id id argument_list(block_pass(lit)))",
+          "call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit)))",
+          "call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit)))"
+        ],
+        "child_masses": [
+          5,
+          11,
+          15
+        ],
+        "fingerprint": "body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit))))",
+        "line": 16,
+        "mass": 32,
+        "method_name": "symbol_proc_maps",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call<with_env>(id argument_list(lit lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))))))",
+        "line": 9,
+        "mass": 27,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id id lit lit)"
+        ],
+        "child_masses": [
+          2,
+          5
+        ],
+        "fingerprint": "call<lookup>(id colon2(id id) argument_list(id id lit lit))",
+        "line": 11,
+        "mass": 8,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(block_pass(lit))"
+        ],
+        "child_masses": [
+          1,
+          3
+        ],
+        "fingerprint": "call<map>(id id argument_list(block_pass(lit)))",
+        "line": 16,
+        "mass": 5,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(call(id id) call(id id) hash(lit argument_list(lit)))"
+        ],
+        "child_masses": [
+          1,
+          9
+        ],
+        "fingerprint": "call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit))))",
+        "line": 18,
+        "mass": 11,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(call(id id) call(id id))"
+        ],
+        "child_masses": [
+          1,
+          5
+        ],
+        "fingerprint": "call<classify_file>(id id argument_list(call(id id) call(id id)))",
+        "line": 17,
+        "mass": 7,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id id hash(lit id) hash(lit id) hash(lit id))"
+        ],
+        "child_masses": [
+          1,
+          12
+        ],
+        "fingerprint": "call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))",
+        "line": 28,
+        "mass": 14,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id id hash(lit id))"
+        ],
+        "child_masses": [
+          1,
+          6
+        ],
+        "fingerprint": "call<classify_file>(id id argument_list(id id hash(lit id)))",
+        "line": 10,
+        "mass": 8,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id id)"
+        ],
+        "child_masses": [
+          1,
+          3
+        ],
+        "fingerprint": "call<expand_path>(id id argument_list(id id))",
+        "line": 25,
+        "mass": 5,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<file?>(id id argument_list(id))",
+        "line": 26,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit lit lit lit lit)"
+        ],
+        "child_masses": [
+          1,
+          6
+        ],
+        "fingerprint": "call<dig>(id id argument_list(lit lit lit lit lit))",
+        "line": 5,
+        "mass": 8,
+        "method_name": "assertion_argument_calls",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 36,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 36,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 36,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<[]>(lit id argument_list(lit))",
+        "line": 36,
+        "mass": 4,
+        "method_name": "chained_multiline",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id",
+          "hash(lit id)",
+          "hash(lit id)",
+          "hash(lit id)"
+        ],
+        "child_masses": [
+          1,
+          1,
+          3,
+          3,
+          3
+        ],
+        "fingerprint": "argument_list(id id hash(lit id) hash(lit id) hash(lit id))",
+        "line": 28,
+        "mass": 12,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id",
+          "hash(lit id)"
+        ],
+        "child_masses": [
+          1,
+          1,
+          3
+        ],
+        "fingerprint": "argument_list(id id hash(lit id))",
+        "line": 10,
+        "mass": 6,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id",
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id lit lit)",
+        "line": 11,
+        "mass": 5,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 24,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 25,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id id)",
+        "line": 34,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 23,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 26,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 17,
+        "mass": 2,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 17,
+        "mass": 2,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 18,
+        "mass": 2,
+        "method_name": "symbol_proc_maps",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "hash(lit argument_list(lit))",
+        "line": 19,
+        "mass": 4,
+        "method_name": "symbol_proc_maps",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "call<dig>(id id argument_list(lit lit lit lit lit))"
+        ],
+        "child_masses": [
+          1,
+          8
+        ],
+        "fingerprint": "argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit)))",
+        "line": 5,
+        "mass": 10,
+        "method_name": "assertion_argument_calls",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 10,
+        "mass": 3,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 31,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 32,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "hash(lit id)",
+        "line": 33,
+        "mass": 3,
+        "method_name": "chained_multiline",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit",
+          "lit",
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit lit lit lit)",
+        "line": 5,
+        "mass": 6,
+        "method_name": "assertion_argument_calls",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit)",
+        "line": 9,
+        "mass": 3,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 19,
+        "mass": 2,
+        "method_name": "symbol_proc_maps",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 36,
+        "mass": 2,
+        "method_name": "chained_multiline",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit))))))",
+          "method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))))))))",
+          "method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit))))))",
+          "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))"
+        ],
+        "child_masses": [
+          15,
+          35,
+          38,
+          79
+        ],
+        "fingerprint": "body_statement(method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit)))))) method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit))))))))) method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit)))))) method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id))))",
+        "line": 4,
+        "mass": 168,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id id id) block(call<with_env>(id argument_list(lit lit)) body(body_statement(call<assert_empty>(id argument_list(call<classify_file>(id id argument_list(id id hash(lit id))))) call<assert_nil>(id argument_list(call<lookup>(id colon2(id id) argument_list(id id lit lit)))))))))",
+        "line": 8,
+        "mass": 35,
+        "method_name": "assertion_single_call_argument",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id id id) body_statement(assignment(id block(call(id call(id block(call(id call<Array>(id argument_list(id))) body(body_statement(assignment(id call<repo_relative>(id argument_list(id id))) assignment(id call<expand_path>(id id argument_list(id id))) unless(call<file?>(id id argument_list(id))) block(call(id call<classify_file>(id id argument_list(id id hash(lit id) hash(lit id) hash(lit id)))) body(call<overlay_arm>(id argument_list(id id))))))))) body(argument_list(call<[]>(lit id argument_list(lit)) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))) call(id call<[]>(lit id argument_list(lit))))))) id)))",
+        "line": 22,
+        "mass": 79,
+        "method_name": "chained_multiline",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id) body_statement(call<map>(id id argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id))) argument_list(block_pass(lit))) call<map>(id call<classify_file>(id id argument_list(call(id id) call(id id) hash(lit argument_list(lit)))) argument_list(block_pass(lit))))))",
+        "line": 15,
+        "mass": 38,
+        "method_name": "symbol_proc_maps",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) call<assert_equal>(id argument_list(lit call<dig>(id id argument_list(lit lit lit lit lit))))))",
+        "line": 4,
+        "mass": 15,
+        "method_name": "assertion_argument_calls",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 15,
+        "name": "symbol_proc_maps",
+        "owner": "SourceFactSequenceCallEdges",
+        "params": [
+          "arms",
+          "rsf",
+          "f"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 22,
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges",
+        "params": [
+          "files",
+          "resultset",
+          "repo",
+          "ffi_boundary",
+          "diagnostic_mids"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "assertion_argument_calls",
+        "owner": "SourceFactSequenceCallEdges",
+        "params": [
+          "result"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges",
+        "params": [
+          "coverage",
+          "file",
+          "dir",
+          "v",
+          "path"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactSequenceCallEdges#assertion_argument_calls",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactSequenceCallEdges#assertion_single_call_argument",
+        "score": 0.0,
+        "signals": {
+          "loops": 1
+        }
+      },
+      {
+        "id": "SourceFactSequenceCallEdges#chained_multiline",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1,
+          "loops": 3
+        }
+      },
+      {
+        "id": "SourceFactSequenceCallEdges#symbol_proc_maps",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactSequenceCallEdges#assertion_argument_calls",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "assertion_argument_calls",
+        "owner": "SourceFactSequenceCallEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "result"
+            ],
+            "source": "assert_equal \"uri\", result.dig(\"locations\", 0, \"physicalLocation\", \"artifactLocation\", \"uri\")",
+            "span": [
+              5,
+              4,
+              5,
+              97
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactSequenceCallEdges#assertion_single_call_argument",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "coverage",
+                "dir"
+              ],
+              [
+                "coverage",
+                "file"
+              ],
+              [
+                "coverage",
+                "path"
+              ],
+              [
+                "coverage",
+                "v"
+              ],
+              [
+                "dir",
+                "file"
+              ],
+              [
+                "dir",
+                "path"
+              ],
+              [
+                "dir",
+                "v"
+              ],
+              [
+                "file",
+                "path"
+              ],
+              [
+                "file",
+                "v"
+              ],
+              [
+                "path",
+                "v"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 0,
+            "line": 9,
+            "reads": [
+              "coverage",
+              "dir",
+              "file",
+              "path",
+              "v"
+            ],
+            "source": "with_env(\"DECOMPLEX_PARSER\", \"tree_sitter\") do assert_empty C.classify_file(coverage, file, root: dir) assert_nil SlopCop::DecomplexVerdict.lookup(v, path, \"plain\", 2) end",
+            "span": [
+              9,
+              4,
+              12,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactSequenceCallEdges#chained_multiline",
+        "line": 22,
+        "local_contract_assignments": {},
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "abs",
+                "diagnostic_mids"
+              ],
+              [
+                "abs",
+                "ffi_boundary"
+              ],
+              [
+                "abs",
+                "files"
+              ],
+              [
+                "abs",
+                "rel"
+              ],
+              [
+                "abs",
+                "repo"
+              ],
+              [
+                "abs",
+                "resultset"
+              ],
+              [
+                "diagnostic_mids",
+                "ffi_boundary"
+              ],
+              [
+                "diagnostic_mids",
+                "files"
+              ],
+              [
+                "diagnostic_mids",
+                "rel"
+              ],
+              [
+                "diagnostic_mids",
+                "repo"
+              ],
+              [
+                "diagnostic_mids",
+                "resultset"
+              ],
+              [
+                "ffi_boundary",
+                "files"
+              ],
+              [
+                "ffi_boundary",
+                "rel"
+              ],
+              [
+                "ffi_boundary",
+                "repo"
+              ],
+              [
+                "ffi_boundary",
+                "resultset"
+              ],
+              [
+                "files",
+                "rel"
+              ],
+              [
+                "files",
+                "repo"
+              ],
+              [
+                "files",
+                "resultset"
+              ],
+              [
+                "rel",
+                "repo"
+              ],
+              [
+                "rel",
+                "resultset"
+              ],
+              [
+                "repo",
+                "resultset"
+              ]
+            ],
+            "dependencies": [
+              [
+                "abs",
+                "diagnostic_mids"
+              ],
+              [
+                "abs",
+                "ffi_boundary"
+              ],
+              [
+                "abs",
+                "files"
+              ],
+              [
+                "abs",
+                "rel"
+              ],
+              [
+                "abs",
+                "repo"
+              ],
+              [
+                "abs",
+                "resultset"
+              ],
+              [
+                "arms",
+                "abs"
+              ],
+              [
+                "arms",
+                "diagnostic_mids"
+              ],
+              [
+                "arms",
+                "ffi_boundary"
+              ],
+              [
+                "arms",
+                "files"
+              ],
+              [
+                "arms",
+                "rel"
+              ],
+              [
+                "arms",
+                "repo"
+              ],
+              [
+                "arms",
+                "resultset"
+              ],
+              [
+                "rel",
+                "abs"
+              ],
+              [
+                "rel",
+                "diagnostic_mids"
+              ],
+              [
+                "rel",
+                "ffi_boundary"
+              ],
+              [
+                "rel",
+                "files"
+              ],
+              [
+                "rel",
+                "repo"
+              ],
+              [
+                "rel",
+                "resultset"
+              ]
+            ],
+            "end_line": 37,
+            "index": 0,
+            "line": 23,
+            "reads": [
+              "abs",
+              "diagnostic_mids",
+              "ffi_boundary",
+              "files",
+              "rel",
+              "repo",
+              "resultset"
+            ],
+            "source": "arms = Array(files).flat_map do |file| rel = repo_relative(file, repo) abs = File.expand_path(rel, repo) next [] unless File.file?(abs) Classifier.classify_file( resultset, abs, root: repo, ffi_boundary: ffi_boundary, diagnostic_mids: diagnostic_mids ).map { |arm| overlay_arm(arm, repo) } end.compact.sort_by do |arm| [arm[\"file\"], arm[\"line\"].to_i, arm[\"method\"].to_s, arm[\"arm_category\"].to_s] end",
+            "span": [
+              23,
+              4,
+              37,
+              7
+            ],
+            "writes": [
+              "abs",
+              "arms",
+              "rel"
+            ]
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 38,
+            "index": 1,
+            "line": 38,
+            "reads": [
+              "arms"
+            ],
+            "source": "arms",
+            "span": [
+              38,
+              4,
+              38,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactSequenceCallEdges#symbol_proc_maps",
+        "line": 15,
+        "local_contract_assignments": {},
+        "name": "symbol_proc_maps",
+        "owner": "SourceFactSequenceCallEdges",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 16,
+            "index": 0,
+            "line": 16,
+            "reads": [
+              "arms"
+            ],
+            "source": "arms.map(&:category)",
+            "span": [
+              16,
+              4,
+              16,
+              24
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "f",
+                "rsf"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 17,
+            "index": 1,
+            "line": 17,
+            "reads": [
+              "f",
+              "rsf"
+            ],
+            "source": "C.classify_file(rsf.path, f.path).map(&:category)",
+            "span": [
+              17,
+              4,
+              17,
+              53
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "f",
+                "rsf"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 19,
+            "index": 2,
+            "line": 18,
+            "reads": [
+              "f",
+              "rsf"
+            ],
+            "source": "C.classify_file(rsf.path, f.path, diagnostic_mids: [:report_invalid_input!]).map(&:category)",
+            "span": [
+              18,
+              4,
+              19,
+              78
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactSequenceCallEdges"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "with_env(\"DECOMPLEX_PARSER\", \"tree_sitter\") do assert_empty C.classify_file(coverage, file, root: dir) assert_nil SlopCop::DecomplexVerdict.lookup(v, path, \"plain\", 2) end",
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 15,
+        "name": "symbol_proc_maps",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [],
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 10,
+            "mid": "assert_empty",
+            "span": [
+              10,
+              6,
+              10,
+              61
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 11,
+            "mid": "assert_nil",
+            "span": [
+              11,
+              6,
+              11,
+              70
+            ]
+          }
+        ],
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "Array",
+            "span": [
+              23,
+              11,
+              23,
+              23
+            ]
+          },
+          {
+            "line": 24,
+            "mid": "repo_relative",
+            "span": [
+              24,
+              12,
+              24,
+              37
+            ]
+          }
+        ],
+        "line": 22,
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "Array",
+            "span": [
+              23,
+              11,
+              23,
+              23
+            ]
+          },
+          {
+            "line": 34,
+            "mid": "overlay_arm",
+            "span": [
+              34,
+              20,
+              34,
+              42
+            ]
+          }
+        ],
+        "line": 22,
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "Array",
+            "span": [
+              23,
+              11,
+              23,
+              23
+            ]
+          }
+        ],
+        "line": 22,
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "assert_equal",
+            "span": [
+              5,
+              4,
+              5,
+              97
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "assertion_argument_calls",
+        "owner": "SourceFactSequenceCallEdges"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 15,
+        "name": "symbol_proc_maps",
+        "owner": "SourceFactSequenceCallEdges",
+        "reads": [
+          "arms.map",
+          "f.path",
+          "rsf.path"
+        ],
+        "writes": []
+      },
+      {
+        "line": 22,
+        "name": "chained_multiline",
+        "owner": "SourceFactSequenceCallEdges",
+        "reads": [
+          "Array",
+          "arm[\"arm_category\"].to_s",
+          "arm[\"line\"].to_i",
+          "arm[\"method\"].to_s",
+          "overlay_arm",
+          "repo_relative"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "assertion_argument_calls",
+        "owner": "SourceFactSequenceCallEdges",
+        "reads": [
+          "assert_equal",
+          "result.dig"
+        ],
+        "writes": []
+      },
+      {
+        "line": 8,
+        "name": "assertion_single_call_argument",
+        "owner": "SourceFactSequenceCallEdges",
+        "reads": [
+          "assert_empty",
+          "assert_nil"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "File.expand_path",
+        "function": "chained_multiline",
+        "kind": "hidden_io",
+        "line": 25
+      },
+      {
+        "detail": "File.file?",
+        "function": "chained_multiline",
+        "kind": "hidden_io",
+        "line": 26
+      },
+      {
+        "detail": "with_env",
+        "function": "assertion_single_call_argument",
+        "kind": "callback_inversion",
+        "line": 9
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "dig",
+        "function": "assertion_argument_calls",
+        "line": 5,
+        "receiver": "result"
+      },
+      {
+        "field": "map",
+        "function": "symbol_proc_maps",
+        "line": 16,
+        "receiver": "arms"
+      },
+      {
+        "field": "path",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "receiver": "f"
+      },
+      {
+        "field": "path",
+        "function": "symbol_proc_maps",
+        "line": 17,
+        "receiver": "rsf"
+      },
+      {
+        "field": "path",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "receiver": "f"
+      },
+      {
+        "field": "path",
+        "function": "symbol_proc_maps",
+        "line": 18,
+        "receiver": "rsf"
+      },
+      {
+        "field": "to_i",
+        "function": "chained_multiline",
+        "line": 36,
+        "receiver": "arm[\"line\"]"
+      },
+      {
+        "field": "to_s",
+        "function": "chained_multiline",
+        "line": 36,
+        "receiver": "arm[\"arm_category\"]"
+      },
+      {
+        "field": "to_s",
+        "function": "chained_multiline",
+        "line": 36,
+        "receiver": "arm[\"method\"]"
+      }
+    ],
+    "state_writes": []
   }
 }

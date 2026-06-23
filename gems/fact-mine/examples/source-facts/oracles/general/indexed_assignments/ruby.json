@@ -1,4 +1,44 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_six",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "key",
+              "obj"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "key",
+            "obj"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "index"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],

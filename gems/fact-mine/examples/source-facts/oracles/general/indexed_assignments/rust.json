@@ -39,5 +39,305 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 4,
+        "message": "clear",
+        "receiver": "self.cache",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "assignment<status=>(id call(id id) argument_list(index_expression(id id)))",
+          "assignment<status=>(id index_expression(call(id id) id))",
+          "call(id call(id id))"
+        ],
+        "child_masses": [
+          7,
+          5,
+          3
+        ],
+        "fingerprint": "body_statement(assignment<status=>(id call(id id) argument_list(index_expression(id id))) assignment<status=>(id index_expression(call(id id) id)) call(id call(id id)))",
+        "line": 1,
+        "mass": 16,
+        "method_name": "method_six",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(index_expression(id id))"
+        ],
+        "child_masses": [
+          2,
+          4
+        ],
+        "fingerprint": "assignment<status=>(id call(id id) argument_list(index_expression(id id)))",
+        "line": 2,
+        "mass": 7,
+        "method_name": "method_six",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call(id call(id id))",
+        "line": 4,
+        "mass": 3,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 3,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 4,
+        "mass": 2,
+        "method_name": "method_six",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "index_expression(call(id id) id)"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "assignment<status=>(id index_expression(call(id id) id))",
+        "line": 3,
+        "mass": 5,
+        "method_name": "method_six",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [
+          "index_expression(id id)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "argument_list(index_expression(id id))",
+        "line": 2,
+        "mass": 4,
+        "method_name": "method_six",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(body_statement(assignment<status=>(id call(id id) argument_list(index_expression(id id))) assignment<status=>(id index_expression(call(id id) id)) call(id call(id id)))))",
+        "line": 1,
+        "mass": 18,
+        "method_name": "method_six",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_six",
+        "owner": "rust",
+        "params": [
+          "obj",
+          "index",
+          "key"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "(top-level)#method_six",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#method_six",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_six",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "key",
+                "obj"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 2,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "key",
+              "obj"
+            ],
+            "source": "self.cache.status = obj[key]",
+            "span": [
+              2,
+              4,
+              2,
+              32
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 3,
+            "index": 1,
+            "line": 3,
+            "reads": [
+              "index"
+            ],
+            "source": "self.cache[index].status = 1",
+            "span": [
+              3,
+              4,
+              3,
+              32
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 4,
+            "index": 2,
+            "line": 4,
+            "reads": [],
+            "source": "self.cache.clear()",
+            "span": [
+              4,
+              4,
+              4,
+              22
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_six",
+        "owner": "rust"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_six",
+        "owner": "rust",
+        "reads": [
+          "cache",
+          "self.cache.clear"
+        ],
+        "writes": [
+          "cache",
+          "self.cache[index].status"
+        ]
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 2,
+        "receiver": "self"
+      },
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 3,
+        "receiver": "self"
+      },
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 4,
+        "receiver": "self"
+      },
+      {
+        "field": "clear",
+        "function": "method_six",
+        "line": 4,
+        "receiver": "self.cache"
+      }
+    ],
+    "state_writes": [
+      {
+        "field": "cache",
+        "function": "method_six",
+        "line": 2,
+        "receiver": "self"
+      },
+      {
+        "field": "status",
+        "function": "method_six",
+        "line": 3,
+        "receiver": "self.cache[index]"
+      }
+    ]
+  }
 }

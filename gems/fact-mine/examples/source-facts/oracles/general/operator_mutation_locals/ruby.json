@@ -1,5 +1,49 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "append_all",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": [
+            "out"
+          ]
+        },
+        {
+          "co_uses": [
+            [
+              "items",
+              "out"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "items",
+            "out"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "out"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
     "calls": [
       {
         "arguments": [],
@@ -13,6 +57,91 @@
         "safe_navigation": false
       }
     ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "assignment(id)",
+          "block(call(id id) body(call(lit id argument_list(id))))",
+          "id"
+        ],
+        "child_masses": [
+          1,
+          8,
+          1
+        ],
+        "fingerprint": "body_statement(assignment(id) block(call(id id) body(call(lit id argument_list(id)))) id)",
+        "line": 5,
+        "mass": 11,
+        "method_name": "append_all",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(lit id argument_list(id))))",
+        "line": 6,
+        "mass": 8,
+        "method_name": "append_all",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(id))",
+        "line": 6,
+        "mass": 4,
+        "method_name": "append_all",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "append_all",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "append_all",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(assignment(id) block(call(id id) body(call(lit id argument_list(id)))) id)))",
+        "line": 4,
+        "mass": 15,
+        "method_name": "append_all",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 4,
@@ -24,6 +153,118 @@
         "visibility": "public"
       }
     ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactOperatorMutationLocals#append_all",
+        "score": 0.0,
+        "signals": {
+          "loops": 1
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactOperatorMutationLocals#append_all",
+        "line": 4,
+        "local_contract_assignments": {
+          "out": "[]"
+        },
+        "name": "append_all",
+        "owner": "SourceFactOperatorMutationLocals",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [],
+            "source": "out = []",
+            "span": [
+              5,
+              4,
+              5,
+              12
+            ],
+            "writes": [
+              "out"
+            ]
+          },
+          {
+            "co_uses": [
+              [
+                "items",
+                "out"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 1,
+            "line": 6,
+            "reads": [
+              "items",
+              "out"
+            ],
+            "source": "items.each { |item| out << item }",
+            "span": [
+              6,
+              4,
+              6,
+              37
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 2,
+            "line": 7,
+            "reads": [
+              "out"
+            ],
+            "source": "out",
+            "span": [
+              7,
+              4,
+              7,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactOperatorMutationLocals"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "append_all",
+        "owner": "SourceFactOperatorMutationLocals"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "append_all",
+        "owner": "SourceFactOperatorMutationLocals",
+        "reads": [
+          "items.each"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "<<",
@@ -32,6 +273,8 @@
         "line": 6
       }
     ],
+    "state_declarations": [],
+    "state_param_origins": [],
     "state_reads": [
       {
         "field": "each",
@@ -39,6 +282,7 @@
         "line": 6,
         "receiver": "items"
       }
-    ]
+    ],
+    "state_writes": []
   }
 }

@@ -17,5 +17,135 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "assignment<field=>(id id)",
+        "line": 6,
+        "mass": 2,
+        "method_name": "myMethod",
+        "node_name": "assignment"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(assignment<field=>(id id)))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "myMethod",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 5,
+        "name": "myMethod",
+        "owner": "MyClass",
+        "params": [
+          "&mut self"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "MyClass#myMethod",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "MyClass#myMethod",
+        "line": 5,
+        "local_contract_assignments": {},
+        "name": "myMethod",
+        "owner": "MyClass",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 6,
+            "reads": [],
+            "source": "self.field = 1",
+            "span": [
+              6,
+              8,
+              6,
+              22
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "impl",
+        "line": 4,
+        "name": "MyClass"
+      },
+      {
+        "kind": "struct",
+        "line": 1,
+        "name": "MyClass"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 5,
+        "name": "myMethod",
+        "owner": "MyClass"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 5,
+        "name": "myMethod",
+        "owner": "MyClass",
+        "reads": [],
+        "writes": [
+          "field"
+        ]
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [
+      {
+        "field": "field",
+        "line": 2,
+        "owner": "MyClass",
+        "type": "i32"
+      }
+    ],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": [
+      {
+        "field": "field",
+        "function": "myMethod",
+        "line": 6,
+        "receiver": "self"
+      }
+    ]
+  }
 }

@@ -1,5 +1,299 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "tree_sitter?",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "DECOMPLEX_PARSER",
+              "tree_sitter"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "DECOMPLEX_PARSER",
+            "tree_sitter"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "dark_arm_result",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "rule",
+              "rule_id"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "rule",
+            "rule_id"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [
+          "\"-\"",
+          "\"_\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "tree_sitter?",
+        "line": 5,
+        "message": "tr",
+        "receiver": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"DECOMPLEX_PARSER\"",
+          "\"tree_sitter\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "tree_sitter?",
+        "line": 5,
+        "message": "fetch",
+        "receiver": "ENV",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "\"id\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "dark_arm_result",
+        "line": 9,
+        "message": "fetch",
+        "receiver": "rule",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "tree_sitter?",
+        "line": 5,
+        "message": "to_s",
+        "receiver": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\")",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "call(id call<fetch>(id id argument_list(lit lit)))",
+          "argument_list(lit lit)"
+        ],
+        "child_masses": [
+          6,
+          3
+        ],
+        "fingerprint": "call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit))",
+        "line": 5,
+        "mass": 10,
+        "method_name": "tree_sitter?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<fetch>(id id argument_list(lit lit))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "call(id call<fetch>(id id argument_list(lit lit)))",
+        "line": 5,
+        "mass": 6,
+        "method_name": "tree_sitter?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<fetch>(id id argument_list(lit))",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          4,
+          2
+        ],
+        "fingerprint": "call(lit call<fetch>(id id argument_list(lit)) argument_list(id))",
+        "line": 9,
+        "mass": 7,
+        "method_name": "dark_arm_result",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit))",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          10,
+          2
+        ],
+        "fingerprint": "call(lit call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit)) argument_list(lit))",
+        "line": 5,
+        "mass": 13,
+        "method_name": "tree_sitter?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit lit)"
+        ],
+        "child_masses": [
+          1,
+          3
+        ],
+        "fingerprint": "call<fetch>(id id argument_list(lit lit))",
+        "line": 5,
+        "mass": 5,
+        "method_name": "tree_sitter?",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call<fetch>(id id argument_list(lit))",
+        "line": 9,
+        "mass": 4,
+        "method_name": "dark_arm_result",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "dark_arm_result",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit)",
+        "line": 5,
+        "mass": 3,
+        "method_name": "tree_sitter?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit)",
+        "line": 5,
+        "mass": 3,
+        "method_name": "tree_sitter?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "tree_sitter?",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 9,
+        "mass": 2,
+        "method_name": "dark_arm_result",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(call(lit call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit)) argument_list(lit))))",
+          "method(id body(parameters(id id) call(lit call<fetch>(id id argument_list(lit)) argument_list(id))))"
+        ],
+        "child_masses": [
+          15,
+          12
+        ],
+        "fingerprint": "body_statement(method(id body(call(lit call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit)) argument_list(lit)))) method(id body(parameters(id id) call(lit call<fetch>(id id argument_list(lit)) argument_list(id)))))",
+        "line": 4,
+        "mass": 28,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(call(lit call<tr>(id call(id call<fetch>(id id argument_list(lit lit))) argument_list(lit lit)) argument_list(lit))))",
+        "line": 4,
+        "mass": 15,
+        "method_name": "tree_sitter?",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) call(lit call<fetch>(id id argument_list(lit)) argument_list(id))))",
+        "line": 8,
+        "mass": 12,
+        "method_name": "dark_arm_result",
+        "node_name": "defn"
+      }
+    ],
     "comparisons": [
       {
         "canon_source": "fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
@@ -17,6 +311,186 @@
         "raw": "rule.fetch(\"id\") == rule_id",
         "source": "rule.fetch(\"id\") == rule_id"
       }
-    ]
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 4,
+        "name": "tree_sitter?",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "params": [
+          "DECOMPLEX_PARSER",
+          "tree_sitter"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 8,
+        "name": "dark_arm_result",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "params": [
+          "rule",
+          "rule_id"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactComparisonReceiverCanonicalization#dark_arm_result",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "SourceFactComparisonReceiverCanonicalization#tree_sitter?",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactComparisonReceiverCanonicalization#dark_arm_result",
+        "line": 8,
+        "local_contract_assignments": {},
+        "name": "dark_arm_result",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "rule",
+                "rule_id"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 9,
+            "index": 0,
+            "line": 9,
+            "reads": [
+              "rule",
+              "rule_id"
+            ],
+            "source": "rule.fetch(\"id\") == rule_id",
+            "span": [
+              9,
+              4,
+              9,
+              31
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactComparisonReceiverCanonicalization#tree_sitter?",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "tree_sitter?",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "DECOMPLEX_PARSER",
+                "tree_sitter"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "DECOMPLEX_PARSER",
+              "tree_sitter"
+            ],
+            "source": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+            "span": [
+              5,
+              4,
+              5,
+              83
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactComparisonReceiverCanonicalization"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+        "line": 4,
+        "name": "tree_sitter?",
+        "owner": "SourceFactComparisonReceiverCanonicalization"
+      },
+      {
+        "body": "rule.fetch(\"id\") == rule_id",
+        "line": 8,
+        "name": "dark_arm_result",
+        "owner": "SourceFactComparisonReceiverCanonicalization"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "tree_sitter",
+        "owner": "SourceFactComparisonReceiverCanonicalization"
+      },
+      {
+        "calls": [],
+        "line": 8,
+        "name": "dark_arm_result",
+        "owner": "SourceFactComparisonReceiverCanonicalization"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "tree_sitter",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 8,
+        "name": "dark_arm_result",
+        "owner": "SourceFactComparisonReceiverCanonicalization",
+        "reads": [
+          "rule.fetch"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "ENV",
+        "function": "tree_sitter?",
+        "kind": "context_dependency",
+        "line": 5
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "fetch",
+        "function": "dark_arm_result",
+        "line": 9,
+        "receiver": "rule"
+      }
+    ],
+    "state_writes": []
   }
 }

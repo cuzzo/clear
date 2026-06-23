@@ -1,5 +1,105 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        }
+      ],
+      "method": "nested_blocks",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "funcs"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "edges"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "case_arms",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "edge"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [],
+      "method": "do_block_branch",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "components"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "next",
+        "decision_line": 21,
+        "function": "do_block_branch",
+        "kind": "if",
+        "line": 21,
+        "member": "then",
+        "predicate": "component.size <= 1"
+      },
+      {
+        "body": "return false",
+        "decision_line": 5,
+        "function": "nested_blocks",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "funcs.any? { |fn| effect_list(fn, :writes).any? }"
+      },
+      {
+        "body": "touch(edge.source)",
+        "decision_line": 7,
+        "function": "nested_blocks",
+        "kind": "if",
+        "line": 7,
+        "member": "then",
+        "predicate": "edge.source == edge.target"
+      },
+      {
+        "body": "{ style: edge.conditional ? \"dashed\" : \"solid\" }",
+        "decision_line": 11,
+        "function": "case_arms",
+        "kind": "case",
+        "line": 12,
+        "member": ":internal",
+        "predicate": "edge.kind"
+      }
+    ],
     "branch_decisions": [
       {
         "function": "case_arms",
@@ -36,6 +136,761 @@
         ]
       }
     ],
+    "calls": [
+      {
+        "arguments": [
+          "component"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "do_block_branch",
+        "line": 23,
+        "message": "touch",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "edge.source"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "nested_blocks",
+        "line": 7,
+        "message": "touch",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "fn",
+          ":writes"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "nested_blocks",
+        "line": 5,
+        "message": "effect_list",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "case_arms",
+        "line": 11,
+        "message": "kind",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "case_arms",
+        "line": 13,
+        "message": "conditional",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "case_arms",
+        "line": 15,
+        "message": "conditional",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "do_block_branch",
+        "line": 21,
+        "message": "size",
+        "receiver": "component",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "nested_blocks",
+        "line": 7,
+        "message": "source",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "nested_blocks",
+        "line": 7,
+        "message": "source",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "nested_blocks",
+        "line": 7,
+        "message": "target",
+        "receiver": "edge",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "nested_blocks",
+        "line": 5,
+        "message": "any?",
+        "receiver": "effect_list(fn, :writes)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "do_block_branch",
+        "line": 20,
+        "message": "each",
+        "receiver": "components",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "nested_blocks",
+        "line": 7,
+        "message": "each",
+        "receiver": "edges",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": true,
+        "conditional": true,
+        "control": "conditional",
+        "function": "nested_blocks",
+        "line": 5,
+        "message": "any?",
+        "receiver": "funcs",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(call(id id))"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<touch>(id argument_list(call(id id)))",
+        "line": 7,
+        "mass": 4,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id lit)"
+        ],
+        "child_masses": [
+          3
+        ],
+        "fingerprint": "call<effect_list>(id argument_list(id lit))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<touch>(id argument_list(id))",
+        "line": 23,
+        "mass": 3,
+        "method_name": "do_block_branch",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "hash(hash(lit if(call(id id) lit lit)))",
+          "hash(hash(lit if(call(id id) lit lit)))"
+        ],
+        "child_masses": [
+          2,
+          8,
+          8
+        ],
+        "fingerprint": "when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit))))",
+        "line": 12,
+        "mass": 19,
+        "method_name": "case_arms",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "block(call(id id) body(call(id call<effect_list>(id argument_list(id lit)))))",
+          "return(bool)"
+        ],
+        "child_masses": [
+          9,
+          2
+        ],
+        "fingerprint": "if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
+        "line": 5,
+        "mass": 12,
+        "method_name": "nested_blocks",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(call(id id))"
+        ],
+        "child_masses": [
+          2,
+          3
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(call(id id)))",
+        "line": 7,
+        "mass": 6,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call(lit call(id id) argument_list(lit))",
+        "line": 21,
+        "mass": 5,
+        "method_name": "do_block_branch",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "if(call(id id) lit lit)",
+        "line": 13,
+        "mass": 5,
+        "method_name": "case_arms",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          2,
+          1,
+          1
+        ],
+        "fingerprint": "if(call(id id) lit lit)",
+        "line": 15,
+        "mass": 5,
+        "method_name": "case_arms",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)",
+          "when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit))))"
+        ],
+        "child_masses": [
+          2,
+          19
+        ],
+        "fingerprint": "case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit)))))",
+        "line": 11,
+        "mass": 22,
+        "method_name": "case_arms",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(call(id id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "nested_blocks",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "argument_list(call(id id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "nested_blocks",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))",
+        "line": 20,
+        "mass": 14,
+        "method_name": "do_block_branch",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(call(id call<effect_list>(id argument_list(id lit)))))",
+        "line": 5,
+        "mass": 9,
+        "method_name": "nested_blocks",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(id id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))",
+        "line": 7,
+        "mass": 15,
+        "method_name": "nested_blocks",
+        "node_name": "block"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(id id) argument_list(call(id id)))",
+          "call<touch>(id argument_list(call(id id)))"
+        ],
+        "child_masses": [
+          6,
+          4
+        ],
+        "fingerprint": "if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))",
+        "line": 7,
+        "mass": 11,
+        "method_name": "nested_blocks",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit call(id id) argument_list(lit))"
+        ],
+        "child_masses": [
+          5
+        ],
+        "fingerprint": "if(call(lit call(id id) argument_list(lit)))",
+        "line": 21,
+        "mass": 6,
+        "method_name": "do_block_branch",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "call<effect_list>(id argument_list(id lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "call(id call<effect_list>(id argument_list(id lit)))",
+        "line": 5,
+        "mass": 5,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "hash(lit if(call(id id) lit lit))"
+        ],
+        "child_masses": [
+          7
+        ],
+        "fingerprint": "hash(hash(lit if(call(id id) lit lit)))",
+        "line": 13,
+        "mass": 8,
+        "method_name": "case_arms",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "hash(lit if(call(id id) lit lit))"
+        ],
+        "child_masses": [
+          7
+        ],
+        "fingerprint": "hash(hash(lit if(call(id id) lit lit)))",
+        "line": 15,
+        "mass": 8,
+        "method_name": "case_arms",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(id lit)",
+        "line": 5,
+        "mass": 3,
+        "method_name": "nested_blocks",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 23,
+        "mass": 2,
+        "method_name": "do_block_branch",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "case_arms",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 13,
+        "mass": 2,
+        "method_name": "case_arms",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 15,
+        "mass": 2,
+        "method_name": "case_arms",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 20,
+        "mass": 2,
+        "method_name": "do_block_branch",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 21,
+        "mass": 2,
+        "method_name": "do_block_branch",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "nested_blocks",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool))",
+          "block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))"
+        ],
+        "child_masses": [
+          12,
+          15
+        ],
+        "fingerprint": "body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))",
+        "line": 5,
+        "mass": 28,
+        "method_name": "nested_blocks",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "if(call(lit call(id id) argument_list(lit)))",
+          "call<touch>(id argument_list(id))"
+        ],
+        "child_masses": [
+          6,
+          3
+        ],
+        "fingerprint": "body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))",
+        "line": 21,
+        "mass": 10,
+        "method_name": "do_block_branch",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "if(call(id id) lit lit)"
+        ],
+        "child_masses": [
+          1,
+          5
+        ],
+        "fingerprint": "hash(lit if(call(id id) lit lit))",
+        "line": 13,
+        "mass": 7,
+        "method_name": "case_arms",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "if(call(id id) lit lit)"
+        ],
+        "child_masses": [
+          1,
+          5
+        ],
+        "fingerprint": "hash(lit if(call(id id) lit lit))",
+        "line": 15,
+        "mass": 7,
+        "method_name": "case_arms",
+        "node_name": "hash"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "case_arms",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 21,
+        "mass": 2,
+        "method_name": "do_block_branch",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
+          "method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit)))))))",
+          "method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))"
+        ],
+        "child_masses": [
+          33,
+          26,
+          18
+        ],
+        "fingerprint": "body_statement(method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id))))))))) method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit))))))) method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id))))))))",
+        "line": 4,
+        "mass": 78,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) body_statement(if(block(call(id id) body(call(id call<effect_list>(id argument_list(id lit))))) return(bool)) block(call(id id) body(if(call(lit call(id id) argument_list(call(id id))) call<touch>(id argument_list(call(id id)))))))))",
+        "line": 4,
+        "mass": 33,
+        "method_name": "nested_blocks",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) block(call(id id) body(body_statement(if(call(lit call(id id) argument_list(lit))) call<touch>(id argument_list(id)))))))",
+        "line": 19,
+        "mass": 18,
+        "method_name": "do_block_branch",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) case(call(id id) when(argument_list(lit) hash(hash(lit if(call(id id) lit lit))) hash(hash(lit if(call(id id) lit lit)))))))",
+        "line": 10,
+        "mass": 26,
+        "method_name": "case_arms",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "component.size <= 1",
+        "function": "do_block_branch",
+        "line": 21,
+        "operator": "<=",
+        "raw": "component.size <= 1",
+        "source": "component.size <= 1"
+      },
+      {
+        "canon_source": "source == edge.target",
+        "function": "nested_blocks",
+        "line": 7,
+        "operator": "==",
+        "raw": "edge.source == edge.target",
+        "source": "edge.source == edge.target"
+      }
+    ],
+    "decisions": [],
+    "dispatch_sites": [],
     "functions": [
       {
         "line": 10,
@@ -65,6 +920,345 @@
         ],
         "visibility": "public"
       }
-    ]
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactBranchNestedScopeRefs#case_arms",
+        "score": 7.2,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "cases": 2,
+          "nested": 2
+        }
+      },
+      {
+        "id": "SourceFactBranchNestedScopeRefs#do_block_branch",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1,
+          "loops": 1
+        }
+      },
+      {
+        "id": "SourceFactBranchNestedScopeRefs#nested_blocks",
+        "score": 2.2,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 2,
+          "loops": 2
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactBranchNestedScopeRefs#case_arms",
+        "line": 10,
+        "local_contract_assignments": {},
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 16,
+            "index": 0,
+            "line": 11,
+            "reads": [
+              "edge"
+            ],
+            "source": "case edge.kind when :internal { style: edge.conditional ? \"dashed\" : \"solid\" } else { style: edge.conditional ? \"dotted\" : \"solid\" } end",
+            "span": [
+              11,
+              4,
+              16,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "SourceFactBranchNestedScopeRefs#do_block_branch",
+        "line": 19,
+        "local_contract_assignments": {},
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 24,
+            "index": 0,
+            "line": 20,
+            "reads": [
+              "components"
+            ],
+            "source": "components.each do |component| next if component.size <= 1 touch(component) end",
+            "span": [
+              20,
+              4,
+              24,
+              7
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 6,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactBranchNestedScopeRefs#nested_blocks",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "funcs"
+            ],
+            "source": "return false if funcs.any? { |fn| effect_list(fn, :writes).any? }",
+            "span": [
+              5,
+              4,
+              5,
+              69
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 1,
+            "line": 7,
+            "reads": [
+              "edges"
+            ],
+            "source": "edges.each { |edge| touch(edge.source) if edge.source == edge.target }",
+            "span": [
+              7,
+              4,
+              7,
+              74
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactBranchNestedScopeRefs"
+      }
+    ],
+    "path_conditions": [],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 10,
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [],
+        "line": 10,
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [],
+        "line": 19,
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [],
+        "line": 4,
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 23,
+            "mid": "touch",
+            "span": [
+              23,
+              6,
+              23,
+              22
+            ]
+          }
+        ],
+        "line": 19,
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "effect_list",
+            "span": [
+              5,
+              38,
+              5,
+              62
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      },
+      {
+        "calls": [
+          {
+            "line": 7,
+            "mid": "touch",
+            "span": [
+              7,
+              24,
+              7,
+              42
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 10,
+        "name": "case_arms",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "reads": [
+          "edge.conditional",
+          "edge.kind"
+        ],
+        "writes": []
+      },
+      {
+        "line": 19,
+        "name": "do_block_branch",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "reads": [
+          "component.size",
+          "components.each",
+          "touch"
+        ],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "nested_blocks",
+        "owner": "SourceFactBranchNestedScopeRefs",
+        "reads": [
+          "edge.source",
+          "edge.target",
+          "edges.each",
+          "effect_list",
+          "effect_list(fn, :writes).any",
+          "funcs.any",
+          "touch"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "any?",
+        "function": "nested_blocks",
+        "line": 5,
+        "receiver": "effect_list(fn, :writes)"
+      },
+      {
+        "field": "any?",
+        "function": "nested_blocks",
+        "line": 5,
+        "receiver": "funcs"
+      },
+      {
+        "field": "conditional",
+        "function": "case_arms",
+        "line": 13,
+        "receiver": "edge"
+      },
+      {
+        "field": "conditional",
+        "function": "case_arms",
+        "line": 15,
+        "receiver": "edge"
+      },
+      {
+        "field": "each",
+        "function": "do_block_branch",
+        "line": 20,
+        "receiver": "components"
+      },
+      {
+        "field": "each",
+        "function": "nested_blocks",
+        "line": 7,
+        "receiver": "edges"
+      },
+      {
+        "field": "kind",
+        "function": "case_arms",
+        "line": 11,
+        "receiver": "edge"
+      },
+      {
+        "field": "size",
+        "function": "do_block_branch",
+        "line": 21,
+        "receiver": "component"
+      },
+      {
+        "field": "source",
+        "function": "nested_blocks",
+        "line": 7,
+        "receiver": "edge"
+      },
+      {
+        "field": "source",
+        "function": "nested_blocks",
+        "line": 7,
+        "receiver": "edge"
+      },
+      {
+        "field": "target",
+        "function": "nested_blocks",
+        "line": 7,
+        "receiver": "edge"
+      }
+    ],
+    "state_writes": []
   }
 }

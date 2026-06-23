@@ -1,4 +1,15 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "method_one",
+      "statements": []
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],

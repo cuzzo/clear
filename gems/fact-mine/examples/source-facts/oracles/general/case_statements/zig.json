@@ -47,5 +47,687 @@
     "neglected": [],
     "scattered": []
   },
-  "syntax": {}
+  "syntax": {
+    "branch_arms": [
+      {
+        "body": "action_one()",
+        "decision_line": 16,
+        "function": "method_case_one_pattern",
+        "kind": "case",
+        "line": 17,
+        "member": "1",
+        "predicate": "x"
+      },
+      {
+        "body": "action_one()",
+        "decision_line": 2,
+        "function": "method_eight",
+        "kind": "case",
+        "line": 3,
+        "member": "1",
+        "predicate": "x"
+      },
+      {
+        "body": "action_two()",
+        "decision_line": 2,
+        "function": "method_eight",
+        "kind": "case",
+        "line": 4,
+        "member": "3",
+        "predicate": "x"
+      },
+      {
+        "body": "{ action_one(); }",
+        "decision_line": 10,
+        "function": "method_case_no_val",
+        "kind": "if",
+        "line": 10,
+        "member": "then",
+        "predicate": "x == 1"
+      }
+    ],
+    "branch_decisions": [],
+    "calls": [
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_case_no_val",
+        "line": 11,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_case_one_pattern",
+        "line": 17,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 3,
+        "message": "action_one",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 4,
+        "message": "action_two",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "method_eight",
+        "line": 5,
+        "message": "action_three",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "argument_list(lit lit)",
+          "id",
+          "when(argument_list(lit) id when(id))"
+        ],
+        "child_masses": [
+          3,
+          1,
+          6
+        ],
+        "fingerprint": "when(argument_list(lit lit) id when(argument_list(lit) id when(id)))",
+        "line": 3,
+        "mass": 11,
+        "method_name": "method_eight",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "id",
+          "when(id)"
+        ],
+        "child_masses": [
+          2,
+          1,
+          2
+        ],
+        "fingerprint": "when(argument_list(lit) id when(id))",
+        "line": 4,
+        "mass": 6,
+        "method_name": "method_eight",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(lit)",
+          "id"
+        ],
+        "child_masses": [
+          2,
+          1
+        ],
+        "fingerprint": "when(argument_list(lit) id)",
+        "line": 17,
+        "mass": 4,
+        "method_name": "method_case_one_pattern",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))",
+          "block_expression(body_statement(id))"
+        ],
+        "child_masses": [
+          4,
+          3
+        ],
+        "fingerprint": "if(call(lit id argument_list(lit)) block_expression(body_statement(id)))",
+        "line": 10,
+        "mass": 8,
+        "method_name": "method_case_no_val",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 10,
+        "mass": 4,
+        "method_name": "method_case_no_val",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(lit lit) id when(argument_list(lit) id when(id)))"
+        ],
+        "child_masses": [
+          1,
+          11
+        ],
+        "fingerprint": "case(id when(argument_list(lit lit) id when(argument_list(lit) id when(id))))",
+        "line": 2,
+        "mass": 13,
+        "method_name": "method_eight",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "when(argument_list(lit) id)"
+        ],
+        "child_masses": [
+          1,
+          4
+        ],
+        "fingerprint": "case(id when(argument_list(lit) id))",
+        "line": 16,
+        "mass": 6,
+        "method_name": "method_case_one_pattern",
+        "node_name": "case"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "body_statement(id)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "method_case_no_val",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "when(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "method_eight",
+        "node_name": "when"
+      },
+      {
+        "child_fingerprints": [
+          "lit",
+          "lit"
+        ],
+        "child_masses": [
+          1,
+          1
+        ],
+        "fingerprint": "argument_list(lit lit)",
+        "line": 3,
+        "mass": 3,
+        "method_name": "method_eight",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 10,
+        "mass": 2,
+        "method_name": "method_case_no_val",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 17,
+        "mass": 2,
+        "method_name": "method_case_one_pattern",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 4,
+        "mass": 2,
+        "method_name": "method_eight",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(case(id when(argument_list(lit lit) id when(argument_list(lit) id when(id))))))",
+        "line": 1,
+        "mass": 15,
+        "method_name": "method_eight",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(case(id when(argument_list(lit) id))))",
+        "line": 15,
+        "mass": 8,
+        "method_name": "method_case_one_pattern",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(if(call(lit id argument_list(lit)) block_expression(body_statement(id)))))",
+        "line": 9,
+        "mass": 10,
+        "method_name": "method_case_no_val",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "x == 1",
+        "function": "method_case_no_val",
+        "line": 10,
+        "operator": "==",
+        "raw": "x == 1",
+        "source": "x == 1"
+      }
+    ],
+    "decisions": [
+      {
+        "enclosing_span": [
+          16,
+          4,
+          19,
+          5
+        ],
+        "function": "method_case_one_pattern",
+        "kind": "case_dispatch",
+        "line": 16,
+        "members": [
+          "1",
+          "{}"
+        ],
+        "predicate": "x"
+      },
+      {
+        "enclosing_span": [
+          2,
+          4,
+          6,
+          5
+        ],
+        "function": "method_eight",
+        "kind": "case_dispatch",
+        "line": 2,
+        "members": [
+          "1",
+          "3"
+        ],
+        "predicate": "x"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32",
+        "params": [
+          "x"
+        ],
+        "visibility": "private"
+      },
+      {
+        "line": 15,
+        "name": "method_case_one_pattern",
+        "owner": "i32",
+        "params": [
+          "x"
+        ],
+        "visibility": "private"
+      },
+      {
+        "line": 9,
+        "name": "method_case_no_val",
+        "owner": "i32",
+        "params": [
+          "x"
+        ],
+        "visibility": "private"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "i32#method_case_no_val",
+        "score": 1.1,
+        "signals": {
+          "boolean_ops": 0,
+          "branches": 1
+        }
+      },
+      {
+        "id": "i32#method_case_one_pattern",
+        "score": 1.5,
+        "signals": {
+          "cases": 3
+        }
+      },
+      {
+        "id": "i32#method_eight",
+        "score": 2.0,
+        "signals": {
+          "cases": 4
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "i32#method_case_no_val",
+        "line": 9,
+        "local_contract_assignments": {},
+        "name": "method_case_no_val",
+        "owner": "i32",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 0,
+            "line": 10,
+            "reads": [
+              "x"
+            ],
+            "source": "if (x == 1) { action_one(); }",
+            "span": [
+              10,
+              4,
+              12,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "i32#method_case_one_pattern",
+        "line": 15,
+        "local_contract_assignments": {},
+        "name": "method_case_one_pattern",
+        "owner": "i32",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 19,
+            "index": 0,
+            "line": 16,
+            "reads": [
+              "x"
+            ],
+            "source": "switch (x) { 1 => action_one(), else => {}, }",
+            "span": [
+              16,
+              4,
+              19,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [],
+        "id": "i32#method_eight",
+        "line": 1,
+        "local_contract_assignments": {},
+        "name": "method_eight",
+        "owner": "i32",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 6,
+            "index": 0,
+            "line": 2,
+            "reads": [
+              "x"
+            ],
+            "source": "switch (x) { 1, 2 => action_one(), 3 => action_two(), else => action_three(), }",
+            "span": [
+              2,
+              4,
+              6,
+              5
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [],
+    "path_conditions": [],
+    "predicate_bodies": [
+      {
+        "body": "if (x == 1) { action_one(); }",
+        "line": 9,
+        "name": "method_case_no_val",
+        "owner": "i32"
+      }
+    ],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32"
+      },
+      {
+        "calls": [],
+        "line": 15,
+        "name": "method_case_one_pattern",
+        "owner": "i32"
+      },
+      {
+        "calls": [],
+        "line": 9,
+        "name": "method_case_no_val",
+        "owner": "i32"
+      },
+      {
+        "calls": [
+          {
+            "line": 11,
+            "mid": "action_one",
+            "span": [
+              11,
+              8,
+              11,
+              20
+            ]
+          }
+        ],
+        "line": 9,
+        "name": "method_case_no_val",
+        "owner": "i32"
+      },
+      {
+        "calls": [
+          {
+            "line": 17,
+            "mid": "action_one",
+            "span": [
+              17,
+              13,
+              17,
+              25
+            ]
+          }
+        ],
+        "line": 15,
+        "name": "method_case_one_pattern",
+        "owner": "i32"
+      },
+      {
+        "calls": [
+          {
+            "line": 3,
+            "mid": "action_one",
+            "span": [
+              3,
+              16,
+              3,
+              28
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32"
+      },
+      {
+        "calls": [
+          {
+            "line": 4,
+            "mid": "action_two",
+            "span": [
+              4,
+              13,
+              4,
+              25
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "action_three",
+            "span": [
+              5,
+              16,
+              5,
+              30
+            ]
+          }
+        ],
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 1,
+        "name": "method_eight",
+        "owner": "i32",
+        "reads": [
+          "action_one",
+          "action_three",
+          "action_two"
+        ],
+        "writes": []
+      },
+      {
+        "line": 15,
+        "name": "method_case_one_pattern",
+        "owner": "i32",
+        "reads": [
+          "action_one"
+        ],
+        "writes": []
+      },
+      {
+        "line": 9,
+        "name": "method_case_no_val",
+        "owner": "i32",
+        "reads": [
+          "action_one"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [
+      {
+        "field": "action_one",
+        "function": "method_case_no_val",
+        "line": 11,
+        "receiver": "self"
+      },
+      {
+        "field": "action_one",
+        "function": "method_case_one_pattern",
+        "line": 17,
+        "receiver": "self"
+      },
+      {
+        "field": "action_one",
+        "function": "method_eight",
+        "line": 3,
+        "receiver": "self"
+      },
+      {
+        "field": "action_three",
+        "function": "method_eight",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "action_two",
+        "function": "method_eight",
+        "line": 4,
+        "receiver": "self"
+      }
+    ],
+    "state_writes": []
+  }
 }

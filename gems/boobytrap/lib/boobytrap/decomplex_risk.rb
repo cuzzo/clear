@@ -124,6 +124,19 @@ module Boobytrap
       false
     end
 
+    def load_decomplex_source_filter
+      return true if defined?(Decomplex::SourceFilter)
+
+      require "espalier/type_profile"
+      true
+    rescue LoadError
+      sibling = ::File.expand_path("../../../espalier/lib/espalier/type_profile", __dir__)
+      return false unless ::File.file?("#{sibling}.rb")
+
+      require sibling
+      true
+    end
+
     def supported_exts
       %w[.rb .py .js .ts .go .rs .zig .c .cpp .cs .kt]
     end
@@ -138,9 +151,13 @@ module Boobytrap
     end
 
     def source_file?(file, root:, parser: nil, exclude: [])
-      # Simplified: just check if it exists and has supported ext
-      abs = ::File.expand_path(file.to_s.start_with?("/") ? file : ::File.join(root, file))
-      ::File.file?(abs) && %w[.rb .py .js .ts .go .rs .zig .c .cpp .cs .kt].include?(::File.extname(abs).downcase)
+      selected = parser || (tree_sitter? ? "tree_sitter" : "rubyvm")
+      if load_decomplex_source_filter
+        Decomplex::SourceFilter.source_file?(file, parser: selected, root: root, exclude: exclude)
+      else
+        abs = ::File.expand_path(file.to_s.start_with?("/") ? file : ::File.join(root, file))
+        ::File.file?(abs) && %w[.rb .py .js .ts .go .rs .zig .c .cpp .cs .kt].include?(::File.extname(abs).downcase)
+      end
     end
 
     def tree_sitter_supported_source?(file)
@@ -148,7 +165,11 @@ module Boobytrap
     end
 
     def excluded_path?(file, root:, exclude: [])
-      false
+      if load_decomplex_source_filter
+        Decomplex::SourceFilter.excluded_path?(file, root: root, exclude: exclude)
+      else
+        false
+      end
     end
 
     def relpath(file, root)

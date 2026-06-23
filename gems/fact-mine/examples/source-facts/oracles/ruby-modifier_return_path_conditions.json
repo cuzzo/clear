@@ -1,5 +1,671 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [
+        {
+          "after_index": 1,
+          "before_index": 0,
+          "kind": "blank"
+        }
+      ],
+      "method": "load",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "path"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "boundaries": [
+        {
+          "after_index": 2,
+          "before_index": 1,
+          "kind": "blank"
+        }
+      ],
+      "method": "risk_multiplier",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [
+            "killed"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [
+            [
+              "tests",
+              "types"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "tests",
+            "types"
+          ],
+          "writes": []
+        },
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [
+      {
+        "body": "return 0.55",
+        "decision_line": 11,
+        "function": "risk_multiplier",
+        "kind": "if",
+        "line": 11,
+        "member": "then",
+        "predicate": "killed >= 3"
+      },
+      {
+        "body": "return 0.80",
+        "decision_line": 12,
+        "function": "risk_multiplier",
+        "kind": "if",
+        "line": 12,
+        "member": "then",
+        "predicate": "tests >= 5 && types >= 2"
+      },
+      {
+        "body": "return empty",
+        "decision_line": 5,
+        "function": "load",
+        "kind": "if",
+        "line": 5,
+        "member": "then",
+        "predicate": "path && ::File.file?(path)"
+      }
+    ],
+    "branch_decisions": [
+      {
+        "function": "load",
+        "line": 5,
+        "predicate": "path && ::File.file?(path)",
+        "state_refs": [
+          "::File.file?"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [
+          "path"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "load",
+        "line": 7,
+        "message": "parse",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "path"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "load",
+        "line": 5,
+        "message": "file?",
+        "receiver": "::File",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "load",
+        "line": 5,
+        "message": "empty",
+        "receiver": "self",
+        "safe_navigation": false
+      }
+    ],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "and(call(lit id argument_list(lit)) call(lit id argument_list(lit)))"
+        ],
+        "child_masses": [
+          9
+        ],
+        "fingerprint": "if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit))))",
+        "line": 12,
+        "mass": 10,
+        "method_name": "risk_multiplier",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "and(id call<file?>(id colon2(id id) argument_list(id)))",
+          "return(id)"
+        ],
+        "child_masses": [
+          7,
+          2
+        ],
+        "fingerprint": "unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id))",
+        "line": 5,
+        "mass": 10,
+        "method_name": "load",
+        "node_name": "unless"
+      },
+      {
+        "child_fingerprints": [
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2
+        ],
+        "fingerprint": "call<parse>(id argument_list(id))",
+        "line": 7,
+        "mass": 3,
+        "method_name": "load",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))",
+          "call(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4,
+          4
+        ],
+        "fingerprint": "and(call(lit id argument_list(lit)) call(lit id argument_list(lit)))",
+        "line": 12,
+        "mass": 9,
+        "method_name": "risk_multiplier",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "call(lit id argument_list(lit))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "if(call(lit id argument_list(lit)))",
+        "line": 11,
+        "mass": 5,
+        "method_name": "risk_multiplier",
+        "node_name": "if"
+      },
+      {
+        "child_fingerprints": [
+          "colon2(id id)",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          2,
+          2
+        ],
+        "fingerprint": "call<file?>(id colon2(id id) argument_list(id))",
+        "line": 5,
+        "mass": 5,
+        "method_name": "load",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 11,
+        "mass": 4,
+        "method_name": "risk_multiplier",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 12,
+        "mass": 4,
+        "method_name": "risk_multiplier",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(lit))",
+        "line": 12,
+        "mass": 4,
+        "method_name": "risk_multiplier",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id",
+          "call<file?>(id colon2(id id) argument_list(id))"
+        ],
+        "child_masses": [
+          1,
+          5
+        ],
+        "fingerprint": "and(id call<file?>(id colon2(id id) argument_list(id)))",
+        "line": 5,
+        "mass": 7,
+        "method_name": "load",
+        "node_name": "and"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "load",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 7,
+        "mass": 2,
+        "method_name": "load",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "if(call(lit id argument_list(lit)))",
+          "if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit))))"
+        ],
+        "child_masses": [
+          5,
+          10
+        ],
+        "fingerprint": "body_statement(if(call(lit id argument_list(lit))) if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit)))))",
+        "line": 11,
+        "mass": 16,
+        "method_name": "risk_multiplier",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 11,
+        "mass": 2,
+        "method_name": "risk_multiplier",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "risk_multiplier",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 12,
+        "mass": 2,
+        "method_name": "risk_multiplier",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "method(id body(parameters(id) body_statement(unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id)) call<parse>(id argument_list(id)))))",
+          "method(id body(parameters(id id id) body_statement(if(call(lit id argument_list(lit))) if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit)))))))"
+        ],
+        "child_masses": [
+          18,
+          22
+        ],
+        "fingerprint": "body_statement(method(id body(parameters(id) body_statement(unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id)) call<parse>(id argument_list(id))))) method(id body(parameters(id id id) body_statement(if(call(lit id argument_list(lit))) if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit))))))))",
+        "line": 4,
+        "mass": 41,
+        "method_name": "(top-level)",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [
+          "unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id))",
+          "call<parse>(id argument_list(id))"
+        ],
+        "child_masses": [
+          10,
+          3
+        ],
+        "fingerprint": "body_statement(unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id)) call<parse>(id argument_list(id)))",
+        "line": 5,
+        "mass": 14,
+        "method_name": "load",
+        "node_name": "body_statement"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id id) body_statement(if(call(lit id argument_list(lit))) if(and(call(lit id argument_list(lit)) call(lit id argument_list(lit)))))))",
+        "line": 10,
+        "mass": 22,
+        "method_name": "risk_multiplier",
+        "node_name": "defn"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id) body_statement(unless(and(id call<file?>(id colon2(id id) argument_list(id))) return(id)) call<parse>(id argument_list(id)))))",
+        "line": 4,
+        "mass": 18,
+        "method_name": "load",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [
+      {
+        "canon_source": "killed >= 3",
+        "function": "risk_multiplier",
+        "line": 11,
+        "operator": ">=",
+        "raw": "killed >= 3",
+        "source": "killed >= 3"
+      },
+      {
+        "canon_source": "tests >= 5",
+        "function": "risk_multiplier",
+        "line": 12,
+        "operator": ">=",
+        "raw": "tests >= 5",
+        "source": "tests >= 5"
+      },
+      {
+        "canon_source": "types >= 2",
+        "function": "risk_multiplier",
+        "line": 12,
+        "operator": ">=",
+        "raw": "types >= 2",
+        "source": "types >= 2"
+      }
+    ],
+    "decisions": [
+      {
+        "enclosing_span": [
+          12,
+          19,
+          12,
+          43
+        ],
+        "function": "risk_multiplier",
+        "kind": "conjunction",
+        "line": 12,
+        "members": [
+          "tests >= 5",
+          "types >= 2"
+        ],
+        "predicate": "tests >= 5 && types >= 2"
+      },
+      {
+        "enclosing_span": [
+          5,
+          24,
+          5,
+          50
+        ],
+        "function": "load",
+        "kind": "conjunction",
+        "line": 5,
+        "members": [
+          "path",
+          "::File.file?(path)"
+        ],
+        "predicate": "path && ::File.file?(path)"
+      }
+    ],
+    "dispatch_sites": [],
+    "functions": [
+      {
+        "line": 10,
+        "name": "risk_multiplier",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "params": [
+          "tests",
+          "types",
+          "killed"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 4,
+        "name": "load",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "params": [
+          "path"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactModifierReturnPathConditions#load",
+        "score": 1.9,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 1
+        }
+      },
+      {
+        "id": "SourceFactModifierReturnPathConditions#risk_multiplier",
+        "score": 3.0,
+        "signals": {
+          "boolean_ops": 2,
+          "branches": 2
+        }
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [
+          {
+            "after_index": 1,
+            "before_index": 0,
+            "kind": "blank",
+            "line": 6,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactModifierReturnPathConditions#load",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "load",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "path"
+            ],
+            "source": "return empty unless path && ::File.file?(path)",
+            "span": [
+              5,
+              4,
+              5,
+              50
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 7,
+            "index": 1,
+            "line": 7,
+            "reads": [
+              "path"
+            ],
+            "source": "parse(path)",
+            "span": [
+              7,
+              4,
+              7,
+              15
+            ],
+            "writes": []
+          }
+        ]
+      },
+      {
+        "boundaries": [
+          {
+            "after_index": 2,
+            "before_index": 1,
+            "kind": "blank",
+            "line": 13,
+            "text": ""
+          }
+        ],
+        "id": "SourceFactModifierReturnPathConditions#risk_multiplier",
+        "line": 10,
+        "local_contract_assignments": {},
+        "name": "risk_multiplier",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 11,
+            "index": 0,
+            "line": 11,
+            "reads": [
+              "killed"
+            ],
+            "source": "return 0.55 if killed >= 3",
+            "span": [
+              11,
+              4,
+              11,
+              30
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [
+              [
+                "tests",
+                "types"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 12,
+            "index": 1,
+            "line": 12,
+            "reads": [
+              "tests",
+              "types"
+            ],
+            "source": "return 0.80 if tests >= 5 && types >= 2",
+            "span": [
+              12,
+              4,
+              12,
+              43
+            ],
+            "writes": []
+          },
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 14,
+            "index": 2,
+            "line": 14,
+            "reads": [],
+            "source": "0.98",
+            "span": [
+              14,
+              4,
+              14,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactModifierReturnPathConditions"
+      }
+    ],
     "path_conditions": [
       {
         "action": "empty",
@@ -10,6 +676,97 @@
         ],
         "line": 5
       }
-    ]
+    ],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 10,
+        "name": "risk_multiplier",
+        "owner": "SourceFactModifierReturnPathConditions"
+      },
+      {
+        "calls": [],
+        "line": 10,
+        "name": "risk_multiplier",
+        "owner": "SourceFactModifierReturnPathConditions"
+      },
+      {
+        "calls": [
+          {
+            "line": 5,
+            "mid": "empty",
+            "span": [
+              5,
+              11,
+              5,
+              16
+            ]
+          },
+          {
+            "line": 7,
+            "mid": "parse",
+            "span": [
+              7,
+              4,
+              7,
+              15
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "load",
+        "owner": "SourceFactModifierReturnPathConditions"
+      },
+      {
+        "calls": [
+          {
+            "line": 7,
+            "mid": "parse",
+            "span": [
+              7,
+              4,
+              7,
+              15
+            ]
+          }
+        ],
+        "line": 4,
+        "name": "load",
+        "owner": "SourceFactModifierReturnPathConditions"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 10,
+        "name": "risk_multiplier",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "reads": [],
+        "writes": []
+      },
+      {
+        "line": 4,
+        "name": "load",
+        "owner": "SourceFactModifierReturnPathConditions",
+        "reads": [
+          "empty",
+          "parse"
+        ],
+        "writes": []
+      }
+    ],
+    "redundant_nil_guards": [],
+    "semantic_effects": [
+      {
+        "detail": "File.file?",
+        "function": "load",
+        "kind": "hidden_io",
+        "line": 5
+      }
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
   }
 }
