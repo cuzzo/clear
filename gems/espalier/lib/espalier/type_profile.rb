@@ -517,12 +517,7 @@ module Decomplex
       patterns = exclude_patterns(exclude, include_defaults: include_defaults)
       return false if patterns.empty?
 
-      raw = path.to_s.tr("\\", "/")
-      expanded = expanded_path(path, root).tr("\\", "/")
-      rel = relative_path(expanded, root).tr("\\", "/")
-      base = File.basename(raw)
-      variants = [raw, expanded, rel, base].uniq
-
+      variants = path_variants(path, root)
       patterns.any? do |pattern|
         pat = pattern.to_s.tr("\\", "/")
         variants.any? do |candidate|
@@ -531,6 +526,14 @@ module Decomplex
             File.fnmatch?(pat, candidate, File::FNM_EXTGLOB)
         end
       end
+    end
+
+    def path_variants(path, root)
+      raw = path.to_s.tr("\\", "/")
+      expanded = expanded_path(path, root).tr("\\", "/")
+      rel = relative_path(expanded, root).tr("\\", "/")
+      base = File.basename(raw)
+      [raw, expanded, rel, base].uniq
     end
 
     def exclude_patterns(exclude, include_defaults: true)

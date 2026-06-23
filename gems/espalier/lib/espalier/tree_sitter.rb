@@ -41,12 +41,6 @@ module Espalier
                  else "tree-sitter-#{lang_name}"
                  end
 
-      roots = [
-        File.expand_path("../../../node_modules/#{pkg_name}", __dir__),
-        File.expand_path("../../../../node_modules/#{pkg_name}", __dir__),
-        File.expand_path("../../../../../node_modules/#{pkg_name}", __dir__)
-      ]
-
       os = case RbConfig::CONFIG["host_os"]
            when /linux/i then "linux"
            when /darwin/i then "darwin"
@@ -59,6 +53,12 @@ module Espalier
 
       stem = lang_name.tr("_", "-")
       
+      roots = [
+        File.expand_path("../../../node_modules/#{pkg_name}", __dir__),
+        File.expand_path("../../../../node_modules/#{pkg_name}", __dir__),
+        File.expand_path("../../../../../node_modules/#{pkg_name}", __dir__)
+      ]
+
       names = [
         "#{stem}.so", "tree-sitter-#{stem}.so", "libtree-sitter-#{stem}.so",
         "#{stem}.node", "tree-sitter-#{stem}.node",

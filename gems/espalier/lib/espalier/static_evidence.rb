@@ -51,8 +51,10 @@ module Espalier
 
       # Group fields by owner
       fields_by_owner = Hash.new { |h, k| h[k] = [] }
+      first_field_by_owner = {}
       Array(evidence["fields"]).each do |f|
         fields_by_owner[f["owner"]] << f["name"]
+        first_field_by_owner[f["owner"]] ||= f
       end
 
       # Index call graph edges (internal calls)
@@ -60,10 +62,10 @@ module Espalier
       Array(evidence.dig("facts", "call_graph_edges")).each do |edge|
         next unless edge["kind"] == "internal_call"
         if edge["source"] =~ /^fn:(.+)#(.+)$/
-          owner, func = $1, $2
+          edge_owner, func = $1, $2
           if edge["target"] =~ /^fn:.+#(.+)$/
             target_func = $1
-            internal_calls["#{owner}##{func}"] << {
+            internal_calls["#{edge_owner}##{func}"] << {
               receiver: "self",
               message: target_func,
               type: edge["conditional"] ? :conditional : :always
@@ -74,13 +76,13 @@ module Espalier
 
       # Map state protocols and param origins to reads/writes and delegations
       Array(evidence.dig("facts", "state_protocol_records")).each do |record|
-        owner = record["owner"]
+        p_owner = record["owner"]
         func = record["function"]
         field = record["field"]
         proto = record["protocol"]
 
-        meths = methods_by_owner[owner] || []
-        meth = meths.find { |m| m[:name] == func }
+        meths = methods_by_owner[p_owner] || []
+        meth = meths.find { |m_item| m_item[:name] == func }
         if meth
           meth[:effects][:reads].add(field)
           meth[:delegations] << {
@@ -92,21 +94,21 @@ module Espalier
       end
 
       Array(evidence.dig("facts", "state_param_origin_records")).each do |record|
-        owner = record["owner"]
+        o_owner = record["owner"]
         func = record["function"]
         field = record["field"]
 
-        meths = methods_by_owner[owner] || []
-        meth = meths.find { |m| m[:name] == func }
+        meths = methods_by_owner[o_owner] || []
+        meth = meths.find { |m_item| m_item[:name] == func }
         if meth
           meth[:effects][:writes].add(field)
         end
       end
 
       # Add internal call delegations
-      methods_by_owner.each do |owner, meths|
+      methods_by_owner.each do |m_owner, meths|
         meths.each do |meth|
-          key = "#{owner}##{meth[:name]}"
+          key = "#{m_owner}##{meth[:name]}"
           meth[:delegations].concat(internal_calls[key]) if internal_calls[key]
           meth[:delegations].uniq!
         end
@@ -115,25 +117,30 @@ module Espalier
       # Construct modules array
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
-        first_meth = methods_by_owner[owner]&.first
-        first_field = Array(evidence["fields"]).find { |f| f["owner"] == owner }
-
-        file = first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil)
-        language = first_meth ? first_meth[:language] : (first_field ? first_field["language"]&.to_sym : nil)
-
+        meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
         {
           type: :class,
           name: owner,
-          file: file,
-          line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
-          span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil),
-          language: language,
+          file: meta[:file],
+          line: meta[:line],
+          span: meta[:span],
+          language: meta[:language],
           states: fields_by_owner[owner].to_set,
           ivar_types: {},
           ivar_properties: {},
           methods: methods_by_owner[owner]
         }
       end
+    end
+
+    def self.module_metadata(owner, methods, first_field)
+      first_meth = methods&.first
+      {
+        file: first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil),
+        language: first_meth ? first_meth[:language] : (first_field ? first_field["language"]&.to_sym : nil),
+        line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
+        span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil)
+      }
     end
 
 
@@ -171,66 +178,74 @@ module Espalier
     private
 
     def build_from_rust_facts(facts_by_file, files)
-      methods = Array(facts_by_file["methods"])
-      fields = Array(facts_by_file["fields"])
-      state_types = facts_by_file["state_types"] || {}
-      struct_declarations = Array(facts_by_file["struct_declarations"])
-      state_type_records = Array(facts_by_file["state_type_records"])
-      state_protocols = facts_by_file["state_protocols"] || {}
-      state_param_origins_in = facts_by_file["state_param_origins"] || {}
-      state_protocol_records = Array(facts_by_file["state_protocol_records"])
-      state_param_origin_records = Array(facts_by_file["state_param_origin_records"])
-      signatures = facts_by_file["signatures"] || {}
-      type_definitions = Array(facts_by_file["type_definitions"])
-      hash_shapes = Array(facts_by_file["hash_shapes"])
-      array_shapes = Array(facts_by_file["array_shapes"])
-      collection_index_lookups = Array(facts_by_file["collection_index_lookups"])
-      hash_record_blockers = Array(facts_by_file["hash_record_blockers"])
-      tlet_sites = Array(facts_by_file["tlet_sites"])
-      dead_nil_checks = Array(facts_by_file["dead_nil_checks"])
-      deterministic_guards = Array(facts_by_file["deterministic_guards"])
-      return_origins = Array(facts_by_file["return_origins"])
-      noreturn_methods = Array(facts_by_file["noreturn_methods"])
-      hash_record_escape_sites = Array(facts_by_file["hash_record_escape_sites"])
+      raw_type_defs = Array(facts_by_file["type_definitions"])
+      raw_type_defs.concat(ruby_annotation_type_definitions(files)) if @include_annotations
 
-      type_definitions.concat(ruby_annotation_type_definitions(files)) if @include_annotations
+      state_protocols = normalize_state_protocols(facts_by_file)
+      state_param_origins = normalize_state_param_origins(facts_by_file)
 
+      deduped = deduplicate_facts(facts_by_file, raw_type_defs)
+      build_payload(facts_by_file, files, deduped, state_protocols, state_param_origins)
+    end
+
+    def normalize_state_protocols(facts)
+      state_protocols = facts["state_protocols"] || facts["ivar_protocols"] || {}
       state_protocols_map = Hash.new { |h, k| h[k] = Set.new }
       merge_set_map!(state_protocols_map, state_protocols)
-      state_protocols = stringify_set_map(state_protocols_map)
+      stringify_set_map(state_protocols_map)
+    end
 
+    def normalize_state_param_origins(facts)
+      state_param_origins_in = facts["state_param_origins"] || facts["ivar_param_origins"] || {}
       state_param_origins_map = Hash.new { |h, k| h[k] = Set.new }
       merge_set_map!(state_param_origins_map, state_param_origins_in)
-      state_param_origins = stringify_set_map(state_param_origins_map)
+      stringify_set_map(state_param_origins_map)
+    end
 
-      state_type_records = state_type_records.uniq do |record|
-        [record["language"], record["path"], record["owner"],
-          record["field"], record["declared_type"], record["line"]]
-      end
-      state_protocol_records = state_protocol_records.uniq do |record|
-        [record["language"], record["path"], record["owner"], record["function"],
-          record["field"], record["protocol"], record["line"]]
-      end
-      state_param_origin_records = state_param_origin_records.uniq do |record|
-        [record["language"], record["path"], record["owner"], record["function"],
-          record["field"], record["param"], record["line"]]
-      end
-      type_definitions = type_definitions.uniq do |definition|
-        [definition["language"], definition["path"], definition["owner"], definition["kind"],
-          definition["name"], definition["line"], definition["type_system"]]
-      end
-      alias_recommendations = AliasRecommendations.build(type_definitions: type_definitions)
-      typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
-      struct_declarations = struct_declarations.uniq do |decl|
-        [decl["path"], decl["class"], Array(decl["fields"])]
-      end
-      hash_shapes = hash_shapes.uniq do |shape|
-        [shape["path"], shape["line"], Array(shape["keys"]), Array(shape["value_types"])]
-      end
-      array_shapes = array_shapes.uniq do |shape|
-        [shape["path"], shape["line"], Array(shape["tuple_types"]), shape["size"]]
-      end
-      rbi_field_types = rbi_field_type_records(type_definitions)
+    def deduplicate_facts(facts, type_definitions)
+      {
+        state_type_records: Array(facts["state_type_records"]).uniq do |r|
+          [r["language"], r["path"], r["owner"], r["field"], r["declared_type"], r["line"]]
+        end,
+        state_protocol_records: Array(facts["state_protocol_records"]).uniq do |r|
+          [r["language"], r["path"], r["owner"], r["function"], r["field"], r["protocol"], r["line"]]
+        end,
+        state_param_origin_records: Array(facts["state_param_origin_records"]).uniq do |r|
+          [r["language"], r["path"], r["owner"], r["function"], r["field"], r["param"], r["line"]]
+        end,
+        type_definitions: type_definitions.uniq do |d|
+          [d["language"], d["path"], d["owner"], d["kind"], d["name"], d["line"], d["type_system"]]
+        end,
+        struct_declarations: Array(facts["struct_declarations"]).uniq do |d|
+          [d["path"], d["class"], Array(d["fields"])]
+        end,
+        hash_shapes: Array(facts["hash_shapes"]).uniq do |s|
+          [s["path"], s["line"], Array(s["keys"]), Array(s["value_types"])]
+        end,
+        array_shapes: Array(facts["array_shapes"]).uniq do |s|
+          [s["path"], s["line"], Array(s["tuple_types"]), s["size"]]
+        end
+      }
+    end
+
+    def build_payload(facts, files, deduped, state_protocols, state_param_origins)
+      methods = Array(facts["methods"])
+      fields = Array(facts["fields"])
+      state_types = facts["state_types"] || {}
+      signatures = facts["signatures"] || {}
+      collection_index_lookups = Array(facts["collection_index_lookups"])
+      hash_record_blockers = Array(facts["hash_record_blockers"])
+      tlet_sites = Array(facts["tlet_sites"])
+      dead_nil_checks = Array(facts["dead_nil_checks"])
+      deterministic_guards = Array(facts["deterministic_guards"])
+      return_origins = Array(facts["return_origins"])
+      noreturn_methods = Array(facts["noreturn_methods"])
+      hash_record_escape_sites = Array(facts["hash_record_escape_sites"])
+
+      type_defs = deduped[:type_definitions]
+      alias_recommendations = AliasRecommendations.build(type_definitions: type_defs)
+      typed_signature_count = type_defs.count { |definition| definition["kind"] == "method_signature" }
+      rbi_field_types = rbi_field_type_records(type_defs)
 
       {
         "version" => 2,
@@ -248,17 +263,17 @@ module Espalier
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "state_types" => Hash[state_types.sort],
-          "state_type_records" => state_type_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s] },
+          "state_type_records" => deduped[:state_type_records].sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s] },
           "state_protocols" => state_protocols,
           "state_param_origins" => state_param_origins,
-          "state_protocol_records" => state_protocol_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["protocol"].to_s] },
-          "state_param_origin_records" => state_param_origin_records.sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["param"].to_s] },
+          "state_protocol_records" => deduped[:state_protocol_records].sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["protocol"].to_s] },
+          "state_param_origin_records" => deduped[:state_param_origin_records].sort_by { |r| [r["language"].to_s, r["path"].to_s, r["owner"].to_s, r["field"].to_s, r["param"].to_s] },
           "signatures" => Hash[signatures.sort],
-          "type_definitions" => type_definitions.sort_by { |d| [d["path"].to_s, d["owner"].to_s, d["kind"].to_s, d["name"].to_s] },
+          "type_definitions" => type_defs.sort_by { |d| [d["path"].to_s, d["owner"].to_s, d["kind"].to_s, d["name"].to_s] },
           "alias_recommendations" => alias_recommendations,
-          "struct_declarations" => struct_declarations.sort_by { |decl| [decl["path"].to_s, decl["class"].to_s] },
-          "hash_shapes" => hash_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
-          "array_shapes" => array_shapes.sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
+          "struct_declarations" => deduped[:struct_declarations].sort_by { |decl| [decl["path"].to_s, decl["class"].to_s] },
+          "hash_shapes" => deduped[:hash_shapes].sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["keys"].to_s] },
+          "array_shapes" => deduped[:array_shapes].sort_by { |shape| [shape["path"].to_s, shape["line"].to_i, shape["tuple_types"].to_s] },
           "collection_index_lookups" => collection_index_lookups.sort_by { |l| [l["path"].to_s, l["line"].to_i, l["code"].to_s] },
           "hash_record_blockers" => hash_record_blockers.sort_by { |b| [b["path"].to_s, b["line"].to_i, b["kind"].to_s] },
           "tlet_sites" => tlet_sites.sort_by { |site| [site["path"].to_s, site["line"].to_i] },
@@ -278,16 +293,16 @@ module Espalier
           "fields" => fields.uniq { |field| field["id"] }.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
-          "state_type_records" => state_type_records.size,
+          "state_type_records" => deduped[:state_type_records].size,
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
-          "state_protocol_records" => state_protocol_records.size,
-          "state_param_origin_records" => state_param_origin_records.size,
-          "type_definitions" => type_definitions.size,
+          "state_protocol_records" => deduped[:state_protocol_records].size,
+          "state_param_origin_records" => deduped[:state_param_origin_records].size,
+          "type_definitions" => type_defs.size,
           "alias_recommendations" => alias_recommendations.size,
-          "struct_declarations" => struct_declarations.size,
-          "hash_shapes" => hash_shapes.size,
-          "array_shapes" => array_shapes.size,
+          "struct_declarations" => deduped[:struct_declarations].size,
+          "hash_shapes" => deduped[:hash_shapes].size,
+          "array_shapes" => deduped[:array_shapes].size,
           "collection_index_lookups" => collection_index_lookups.size,
           "hash_record_blockers" => hash_record_blockers.size,
           "tlet_sites" => tlet_sites.size,
@@ -455,11 +470,15 @@ module Espalier
       Dir.glob(File.join(@root, "sorbet", "rbi", "**", "*.rbi")).select { |path| File.file?(path) }.sort
     end
 
+    def ruby_rbi_definition?(definition)
+      definition["language"].to_s == "ruby" &&
+        definition["kind"].to_s == "method_signature" &&
+        definition["path"].to_s.end_with?(".rbi")
+    end
+
     def rbi_field_type_records(type_definitions)
       Array(type_definitions).filter_map do |definition|
-        next unless definition["language"].to_s == "ruby"
-        next unless definition["kind"].to_s == "method_signature"
-        next unless definition["path"].to_s.end_with?(".rbi")
+        next unless ruby_rbi_definition?(definition)
 
         type = definition["return_type"].to_s
         next if type.empty?
