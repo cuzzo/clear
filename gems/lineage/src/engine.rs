@@ -63,18 +63,43 @@ where
         let mut previous: HashMap<String, LogicalUnit> = HashMap::new();
         let mut aliases: HashMap<String, String> = HashMap::new();
         let mut stats = EngineStats::default();
+        let mut file_units: HashMap<String, Vec<LogicalUnit>> = HashMap::new();
+        let mut prev_commit_hash: Option<String> = None;
 
         for commit in commits {
             self.storage.insert_metadata(&commit)?;
             let mut current = HashMap::new();
             let mut claimed_moves = HashSet::new();
             let path_filter = |path: &str| self.extractor.supports_path(path);
-            let extracted_units = self
-                .provider
-                .files_at_commit(&commit.hash, &path_filter)?
+
+            let changes = self.provider.changes_at_commit(
+                prev_commit_hash.as_deref(),
+                &commit.hash,
+                &path_filter,
+            )?;
+
+            let parsed_units: Vec<(String, Vec<LogicalUnit>)> = changes.added_or_modified
                 .into_par_iter()
-                .flat_map(|file| self.extractor.extract_units(&file))
+                .map(|file| {
+                    let units = self.extractor.extract_units(&file);
+                    (file.path, units)
+                })
+                .collect();
+
+            for (path, units) in parsed_units {
+                file_units.insert(path, units);
+            }
+
+            for path in changes.deleted {
+                file_units.remove(&path);
+            }
+
+            let extracted_units = file_units
+                .values()
+                .flatten()
+                .cloned()
                 .collect::<Vec<_>>();
+
             let observed_current_ids = extracted_units
                 .iter()
                 .map(|unit| {
@@ -172,6 +197,7 @@ where
                 current.insert(unit.id.clone(), unit);
             }
             previous = current;
+            prev_commit_hash = Some(commit.hash.clone());
             stats.commits += 1;
         }
 

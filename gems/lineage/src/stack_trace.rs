@@ -83,10 +83,17 @@ impl LanguageNormalizer for RepoPathNormalizer {
             }
         }
         if path.starts_with('/') {
+            let mut best_match: Option<(usize, &str)> = None;
             for marker in ["/src/", "/gems/", "/zig/"] {
                 if let Some(index) = path.find(marker) {
-                    return path[index + 1..].to_string();
+                    let actual_idx = index + 1;
+                    if best_match.map_or(true, |(best_idx, _)| actual_idx < best_idx) {
+                        best_match = Some((actual_idx, marker));
+                    }
                 }
+            }
+            if let Some((idx, _)) = best_match {
+                return path[idx..].to_string();
             }
             path = path.trim_start_matches('/').to_string();
         }

@@ -463,16 +463,27 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
 
 fn normalize_path(path: &str) -> String {
     let trimmed = path.trim_start_matches("./");
+    let mut best_match: Option<(usize, &str)> = None;
+
     for root in RELATIVE_ROOTS {
         if trimmed.starts_with(root) {
-            return trimmed.to_string();
+            best_match = Some((0, root));
+            break;
         }
         let marker = format!("/{root}");
         if let Some(index) = trimmed.find(&marker) {
-            return trimmed[index + 1..].to_string();
+            let actual_idx = index + 1;
+            if best_match.map_or(true, |(best_idx, _)| actual_idx < best_idx) {
+                best_match = Some((actual_idx, root));
+            }
         }
     }
-    trimmed.trim_start_matches('/').to_string()
+
+    if let Some((idx, _)) = best_match {
+        trimmed[idx..].to_string()
+    } else {
+        trimmed.trim_start_matches('/').to_string()
+    }
 }
 
 pub fn coverage_records_to_test_exposure_json(

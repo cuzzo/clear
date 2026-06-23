@@ -3,7 +3,6 @@ use crate::git::GitProvider;
 use crate::model::{BlobFile, LogicalUnit, TestExposureEvent};
 use crate::stack_trace::LanguageNormalizer;
 use crate::storage::Storage;
-use crate::vcs::VcsProvider;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -342,9 +341,14 @@ fn function_aliases(function: &str) -> Vec<String> {
 }
 
 fn file_at_commit(git: &GitProvider, commit_hash: &str, path: &str) -> Result<Option<BlobFile>> {
-    let target = path.to_string();
-    let files = git.files_at_commit(commit_hash, &|candidate| candidate == target)?;
-    Ok(files.into_iter().next())
+    if let Some(contents) = git.file_contents_at_commit(commit_hash, path)? {
+        Ok(Some(BlobFile {
+            path: path.to_string(),
+            contents,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 fn verify_context_line(file: &BlobFile, line: u32, context_line: Option<&str>) -> bool {
