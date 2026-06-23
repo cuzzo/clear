@@ -420,7 +420,7 @@ impl<'a> LocalFlow<'a> {
     }
 
     fn method_name(&self, node: &Node) -> String {
-        if node.r#type == "DEFS" {
+        let name = if node.r#type == "DEFS" {
             let receiver = node.children.get(0).and_then(ast::node);
             let prefix = receiver
                 .map(|receiver| {
@@ -439,7 +439,8 @@ impl<'a> LocalFlow<'a> {
                 .and_then(symbol_child)
                 .unwrap_or("?")
                 .to_string()
-        }
+        };
+        self.behavior.clean_identifier(&name)
     }
 
     fn full_owner_name(&self, owners: &[String], node: &Node) -> String {

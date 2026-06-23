@@ -23,7 +23,9 @@ fn syntax_fact_examples_match_oracles() -> Result<()> {
             .with_context(|| format!("project {}", fixture.display()))?;
         let actual = project_expected_shape(&actual, &expected)?;
 
-        if actual != expected {
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            fs::write(&oracle_path, serde_json::to_string_pretty(&actual)?)?;
+        } else if actual != expected {
             failures.push(format!(
                 "{}\nexpected: {}\nactual:   {}",
                 fixture.display(),
@@ -78,7 +80,9 @@ fn source_fact_examples_match_oracles() -> Result<()> {
         }
 
         let actual = Value::Object(actual);
-        if actual != expected {
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            fs::write(&oracle_path, serde_json::to_string_pretty(&actual)?)?;
+        } else if actual != expected {
             failures.push(format!(
                 "{}\nexpected: {}\nactual:   {}",
                 fixture.display(),

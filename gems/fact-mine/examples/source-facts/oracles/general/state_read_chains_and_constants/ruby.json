@@ -2,18 +2,6 @@
   "syntax": {
     "state_reads": [
       {
-        "field": "@ranked",
-        "function": "results",
-        "line": 5,
-        "receiver": "self"
-      },
-      {
-        "field": "@top",
-        "function": "results",
-        "line": 5,
-        "receiver": "self"
-      },
-      {
         "field": "each_with_object",
         "function": "helper_result",
         "line": 19,
@@ -42,6 +30,18 @@
         "function": "provider_paths",
         "line": 15,
         "receiver": "provider"
+      },
+      {
+        "field": "ranked",
+        "function": "results",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "top",
+        "function": "results",
+        "line": 5,
+        "receiver": "self"
       }
     ]
   }

@@ -1,61 +1,5 @@
 {
   "detector": "state-branch-density",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/state_branch.rb",
-        "language": "ruby",
-        "source": "",
-        "lines": [],
-        "root": {
-          "kind": "program",
-          "text": "",
-          "span": [1, 0, 1, 0],
-          "named": true,
-          "field_name": null,
-          "children": []
-        },
-        "normalized_root": {
-          "type": "ROOT",
-          "children": [],
-          "first_lineno": 1,
-          "first_column": 0,
-          "last_lineno": 1,
-          "last_column": 0,
-          "text": ""
-        },
-        "function_defs": [],
-        "owner_defs": [],
-        "call_sites": [],
-        "state_reads": [],
-        "state_writes": [],
-        "decision_sites": [],
-        "branch_decisions": [
-          {
-            "file": "facts/state_branch.rb",
-            "function": "check",
-            "line": 2,
-            "span": [2, 2, 2, 20],
-            "predicate": "ready?",
-            "state_refs": ["ready"]
-          },
-          {
-            "file": "facts/state_branch.rb",
-            "function": "check",
-            "line": 6,
-            "span": [6, 0, 6, 20],
-            "predicate": "unless stale",
-            "state_refs": ["stale"]
-          }
-        ],
-        "dispatch_sites": [],
-        "semantic_effect_sites": [],
-        "local_complexity_scores": {},
-        "predicate_aliases": [],
-        "comparison_uses": []
-      }
-    ]
-  },
   "expected": [
     {
       "at": "facts/state_branch.rb:check:2",
@@ -69,10 +13,98 @@
         "facts/state_branch.rb:check:6"
       ],
       "spans": {
-        "facts/state_branch.rb:check:2": [2, 2, 2, 20],
-        "facts/state_branch.rb:check:6": [6, 0, 6, 20]
+        "facts/state_branch.rb:check:2": [
+          2,
+          2,
+          2,
+          20
+        ],
+        "facts/state_branch.rb:check:6": [
+          6,
+          0,
+          6,
+          20
+        ]
       },
-      "state_refs": ["ready", "stale"]
+      "state_refs": [
+        "ready",
+        "stale"
+      ]
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "branch_decisions": [
+          {
+            "file": "facts/state_branch.rb",
+            "function": "check",
+            "line": 2,
+            "predicate": "ready?",
+            "span": [
+              2,
+              2,
+              2,
+              20
+            ],
+            "state_refs": [
+              "ready"
+            ]
+          },
+          {
+            "file": "facts/state_branch.rb",
+            "function": "check",
+            "line": 6,
+            "predicate": "unless stale",
+            "span": [
+              6,
+              0,
+              6,
+              20
+            ],
+            "state_refs": [
+              "stale"
+            ]
+          }
+        ],
+        "call_sites": [],
+        "comparison_uses": [],
+        "decision_sites": [],
+        "dispatch_sites": [],
+        "file": "facts/state_branch.rb",
+        "function_defs": [],
+        "language": "ruby",
+        "lines": [],
+        "local_complexity_scores": {},
+        "normalized_root": {
+          "children": [],
+          "first_column": 0,
+          "first_lineno": 1,
+          "last_column": 0,
+          "last_lineno": 1,
+          "text": "",
+          "type": "ROOT"
+        },
+        "owner_defs": [],
+        "predicate_aliases": [],
+        "root": {
+          "children": [],
+          "field_name": null,
+          "kind": "program",
+          "named": true,
+          "span": [
+            1,
+            0,
+            1,
+            0
+          ],
+          "text": ""
+        },
+        "semantic_effect_sites": [],
+        "source": "",
+        "state_reads": [],
+        "state_writes": []
+      }
+    ]
+  }
 }

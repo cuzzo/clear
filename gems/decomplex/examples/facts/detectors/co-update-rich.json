@@ -1,23 +1,5 @@
 {
   "detector": "co-update",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/co_update.rb",
-        "language": "ruby",
-        "state_writes": [
-          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "create", "line": 1, "span": [1, 0, 1, 14], "owner": "Fixture"},
-          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "create", "line": 2, "span": [2, 0, 2, 15], "owner": "Fixture"},
-          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "replace", "line": 4, "span": [4, 0, 4, 14], "owner": "Fixture"},
-          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "replace", "line": 5, "span": [5, 0, 5, 15], "owner": "Fixture"},
-          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "restore", "line": 7, "span": [7, 0, 7, 14], "owner": "Fixture"},
-          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "restore", "line": 8, "span": [8, 0, 8, 15], "owner": "Fixture"},
-          {"field": "status", "receiver": "self", "file": "facts/co_update.rb", "function": "touch_status", "line": 10, "span": [10, 0, 10, 14], "owner": "Fixture"},
-          {"field": "version", "receiver": "self", "file": "facts/co_update.rb", "function": "touch_version", "line": 12, "span": [12, 0, 12, 15], "owner": "Fixture"}
-        ]
-      }
-    ]
-  },
   "expected": {
     "co_written_pairs": [
       {
@@ -44,7 +26,12 @@
         ],
         "recv": "self",
         "spans": {
-          "facts/co_update.rb:touch_status:10": [10, 0, 10, 14]
+          "facts/co_update.rb:touch_status:10": [
+            10,
+            0,
+            10,
+            14
+          ]
         },
         "support": 3
       },
@@ -58,9 +45,136 @@
         ],
         "recv": "self",
         "spans": {
-          "facts/co_update.rb:touch_version:12": [12, 0, 12, 15]
+          "facts/co_update.rb:touch_version:12": [
+            12,
+            0,
+            12,
+            15
+          ]
         },
         "support": 3
+      }
+    ]
+  },
+  "input": {
+    "documents": [
+      {
+        "file": "facts/co_update.rb",
+        "language": "ruby",
+        "state_writes": [
+          {
+            "field": "status",
+            "file": "facts/co_update.rb",
+            "function": "create",
+            "line": 1,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              1,
+              0,
+              1,
+              14
+            ]
+          },
+          {
+            "field": "version",
+            "file": "facts/co_update.rb",
+            "function": "create",
+            "line": 2,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              2,
+              0,
+              2,
+              15
+            ]
+          },
+          {
+            "field": "status",
+            "file": "facts/co_update.rb",
+            "function": "replace",
+            "line": 4,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              4,
+              0,
+              4,
+              14
+            ]
+          },
+          {
+            "field": "version",
+            "file": "facts/co_update.rb",
+            "function": "replace",
+            "line": 5,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              5,
+              0,
+              5,
+              15
+            ]
+          },
+          {
+            "field": "status",
+            "file": "facts/co_update.rb",
+            "function": "restore",
+            "line": 7,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              7,
+              0,
+              7,
+              14
+            ]
+          },
+          {
+            "field": "version",
+            "file": "facts/co_update.rb",
+            "function": "restore",
+            "line": 8,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              8,
+              0,
+              8,
+              15
+            ]
+          },
+          {
+            "field": "status",
+            "file": "facts/co_update.rb",
+            "function": "touch_status",
+            "line": 10,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              10,
+              0,
+              10,
+              14
+            ]
+          },
+          {
+            "field": "version",
+            "file": "facts/co_update.rb",
+            "function": "touch_version",
+            "line": 12,
+            "owner": "Fixture",
+            "receiver": "self",
+            "span": [
+              12,
+              0,
+              12,
+              15
+            ]
+          }
+        ]
       }
     ]
   }

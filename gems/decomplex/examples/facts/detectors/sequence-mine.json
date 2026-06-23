@@ -1,420 +1,5 @@
 {
   "detector": "sequence-mine",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/sequence.rb",
-        "language": "ruby",
-        "source": "",
-        "lines": [],
-        "root": {
-          "kind": "program",
-          "text": "",
-          "span": [
-            1,
-            0,
-            1,
-            0
-          ],
-          "named": true,
-          "field_name": null,
-          "children": []
-        },
-        "normalized_root": {
-          "type": "ROOT",
-          "children": [],
-          "first_lineno": 1,
-          "first_column": 0,
-          "last_lineno": 1,
-          "last_column": 0,
-          "text": ""
-        },
-        "function_defs": [],
-        "owner_defs": [],
-        "call_sites": [
-          {
-            "receiver": "",
-            "message": "acquire",
-            "file": "facts/sequence.rb",
-            "function": "paired_0",
-            "owner": "",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              1,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "release",
-            "file": "facts/sequence.rb",
-            "function": "paired_0",
-            "owner": "",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "acquire",
-            "file": "facts/sequence.rb",
-            "function": "paired_1",
-            "owner": "",
-            "line": 3,
-            "span": [
-              3,
-              0,
-              3,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "release",
-            "file": "facts/sequence.rb",
-            "function": "paired_1",
-            "owner": "",
-            "line": 4,
-            "span": [
-              4,
-              0,
-              4,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "acquire",
-            "file": "facts/sequence.rb",
-            "function": "paired_2",
-            "owner": "",
-            "line": 5,
-            "span": [
-              5,
-              0,
-              5,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "release",
-            "file": "facts/sequence.rb",
-            "function": "paired_2",
-            "owner": "",
-            "line": 6,
-            "span": [
-              6,
-              0,
-              6,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "acquire",
-            "file": "facts/sequence.rb",
-            "function": "paired_3",
-            "owner": "",
-            "line": 7,
-            "span": [
-              7,
-              0,
-              7,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "release",
-            "file": "facts/sequence.rb",
-            "function": "paired_3",
-            "owner": "",
-            "line": 8,
-            "span": [
-              8,
-              0,
-              8,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "acquire",
-            "file": "facts/sequence.rb",
-            "function": "missing_release",
-            "owner": "",
-            "line": 9,
-            "span": [
-              9,
-              0,
-              9,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "release",
-            "file": "facts/sequence.rb",
-            "function": "missing_acquire",
-            "owner": "",
-            "line": 10,
-            "span": [
-              10,
-              0,
-              10,
-              7
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          }
-        ],
-        "state_reads": [],
-        "state_writes": [],
-        "decision_sites": [],
-        "branch_decisions": [],
-        "dispatch_sites": [],
-        "semantic_effect_sites": [],
-        "local_complexity_scores": {},
-        "predicate_aliases": [],
-        "comparison_uses": [],
-        "protocol_call_paths": [
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "paired_0",
-            "line": 1,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_0",
-                "line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  7
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_0",
-                "line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  7
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "paired_1",
-            "line": 3,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_1",
-                "line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  7
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_1",
-                "line": 4,
-                "span": [
-                  4,
-                  0,
-                  4,
-                  7
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "paired_2",
-            "line": 5,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_2",
-                "line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  7
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_2",
-                "line": 6,
-                "span": [
-                  6,
-                  0,
-                  6,
-                  7
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "paired_3",
-            "line": 7,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_3",
-                "line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  7
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "paired_3",
-                "line": 8,
-                "span": [
-                  8,
-                  0,
-                  8,
-                  7
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "missing_release",
-            "line": 9,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "missing_release",
-                "line": 9,
-                "span": [
-                  9,
-                  0,
-                  9,
-                  7
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence.rb",
-            "owner": "",
-            "name": "missing_acquire",
-            "line": 10,
-            "calls": [
-              {
-                "mid": "release",
-                "file": "facts/sequence.rb",
-                "owner": "",
-                "defn": "missing_acquire",
-                "line": 10,
-                "span": [
-                  10,
-                  0,
-                  10,
-                  7
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": {
     "broken": [
       {
@@ -454,6 +39,421 @@
           ]
         },
         "support": 4
+      }
+    ]
+  },
+  "input": {
+    "documents": [
+      {
+        "branch_decisions": [],
+        "call_sites": [
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_0",
+            "line": 1,
+            "message": "acquire",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              1,
+              0,
+              1,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_0",
+            "line": 2,
+            "message": "release",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              2,
+              0,
+              2,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_1",
+            "line": 3,
+            "message": "acquire",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              3,
+              0,
+              3,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_1",
+            "line": 4,
+            "message": "release",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              4,
+              0,
+              4,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_2",
+            "line": 5,
+            "message": "acquire",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              5,
+              0,
+              5,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_2",
+            "line": 6,
+            "message": "release",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              6,
+              0,
+              6,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_3",
+            "line": 7,
+            "message": "acquire",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              7,
+              0,
+              7,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "paired_3",
+            "line": 8,
+            "message": "release",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              8,
+              0,
+              8,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "missing_release",
+            "line": 9,
+            "message": "acquire",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              9,
+              0,
+              9,
+              7
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence.rb",
+            "function": "missing_acquire",
+            "line": 10,
+            "message": "release",
+            "owner": "",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              10,
+              0,
+              10,
+              7
+            ]
+          }
+        ],
+        "comparison_uses": [],
+        "decision_sites": [],
+        "dispatch_sites": [],
+        "file": "facts/sequence.rb",
+        "function_defs": [],
+        "language": "ruby",
+        "lines": [],
+        "local_complexity_scores": {},
+        "normalized_root": {
+          "children": [],
+          "first_column": 0,
+          "first_lineno": 1,
+          "last_column": 0,
+          "last_lineno": 1,
+          "text": "",
+          "type": "ROOT"
+        },
+        "owner_defs": [],
+        "predicate_aliases": [],
+        "protocol_call_paths": [
+          {
+            "calls": [
+              {
+                "defn": "paired_0",
+                "file": "facts/sequence.rb",
+                "line": 1,
+                "mid": "acquire",
+                "owner": "",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  7
+                ]
+              },
+              {
+                "defn": "paired_0",
+                "file": "facts/sequence.rb",
+                "line": 2,
+                "mid": "release",
+                "owner": "",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 1,
+            "name": "paired_0",
+            "owner": ""
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence.rb",
+                "line": 3,
+                "mid": "acquire",
+                "owner": "",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  7
+                ]
+              },
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence.rb",
+                "line": 4,
+                "mid": "release",
+                "owner": "",
+                "span": [
+                  4,
+                  0,
+                  4,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 3,
+            "name": "paired_1",
+            "owner": ""
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence.rb",
+                "line": 5,
+                "mid": "acquire",
+                "owner": "",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  7
+                ]
+              },
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence.rb",
+                "line": 6,
+                "mid": "release",
+                "owner": "",
+                "span": [
+                  6,
+                  0,
+                  6,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 5,
+            "name": "paired_2",
+            "owner": ""
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence.rb",
+                "line": 7,
+                "mid": "acquire",
+                "owner": "",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  7
+                ]
+              },
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence.rb",
+                "line": 8,
+                "mid": "release",
+                "owner": "",
+                "span": [
+                  8,
+                  0,
+                  8,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 7,
+            "name": "paired_3",
+            "owner": ""
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_release",
+                "file": "facts/sequence.rb",
+                "line": 9,
+                "mid": "acquire",
+                "owner": "",
+                "span": [
+                  9,
+                  0,
+                  9,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 9,
+            "name": "missing_release",
+            "owner": ""
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_acquire",
+                "file": "facts/sequence.rb",
+                "line": 10,
+                "mid": "release",
+                "owner": "",
+                "span": [
+                  10,
+                  0,
+                  10,
+                  7
+                ]
+              }
+            ],
+            "file": "facts/sequence.rb",
+            "line": 10,
+            "name": "missing_acquire",
+            "owner": ""
+          }
+        ],
+        "root": {
+          "children": [],
+          "field_name": null,
+          "kind": "program",
+          "named": true,
+          "span": [
+            1,
+            0,
+            1,
+            0
+          ],
+          "text": ""
+        },
+        "semantic_effect_sites": [],
+        "source": "",
+        "state_reads": [],
+        "state_writes": []
       }
     ]
   }

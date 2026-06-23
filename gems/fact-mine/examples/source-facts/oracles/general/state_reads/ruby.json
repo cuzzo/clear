@@ -1,92 +1,92 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "initialize",
-        "owner": "SourceFactStateReads",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "user"
-        ]
-      },
-      {
-        "name": "inspect_profile",
-        "owner": "SourceFactStateReads",
-        "line": 9,
-        "visibility": "public",
-        "params": [
-          "account"
-        ]
-      }
-    ],
     "calls": [
       {
-        "receiver": "@user.profile",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "inspect_profile",
+        "line": 10,
         "message": "name",
-        "function": "inspect_profile",
-        "line": 10,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": true,
-        "block": false,
-        "arguments": []
+        "receiver": "user.profile",
+        "safe_navigation": true
       },
       {
-        "receiver": "@user",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "inspect_profile",
+        "line": 10,
         "message": "profile",
-        "function": "inspect_profile",
-        "line": 10,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "receiver": "user",
+        "safe_navigation": false
       },
       {
-        "receiver": "account",
-        "message": "active?",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "inspect_profile",
         "line": 12,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
+        "message": "active",
+        "receiver": "account",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "initialize",
+        "owner": "SourceFactStateReads",
+        "params": [
+          "user"
+        ],
+        "visibility": "public"
+      },
+      {
+        "line": 9,
+        "name": "inspect_profile",
+        "owner": "SourceFactStateReads",
+        "params": [
+          "account"
+        ],
+        "visibility": "public"
       }
     ],
     "state_reads": [
       {
-        "receiver": "self",
-        "field": "@status",
-        "function": "inspect_profile",
-        "line": 11
-      },
-      {
-        "receiver": "self",
-        "field": "@user",
-        "function": "inspect_profile",
-        "line": 10
-      },
-      {
-        "receiver": "account",
         "field": "active?",
         "function": "inspect_profile",
-        "line": 12
+        "line": 12,
+        "receiver": "account"
+      },
+      {
+        "field": "status",
+        "function": "inspect_profile",
+        "line": 11,
+        "receiver": "self"
+      },
+      {
+        "field": "user",
+        "function": "inspect_profile",
+        "line": 10,
+        "receiver": "self"
       }
     ],
     "state_writes": [
       {
-        "receiver": "self",
-        "field": "@status",
+        "field": "status",
         "function": "initialize",
-        "line": 6
+        "line": 6,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
-        "field": "@user",
+        "field": "user",
         "function": "initialize",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       }
     ]
   }

@@ -1,11 +1,10 @@
 {
   "detector": "inconsistent-rename-clone",
-  "options": {
-  },
   "expected": [
     {
-      "ref_name": "src",
-      "divergent_count": 2
+      "divergent_count": 2,
+      "ref_name": "src"
     }
-  ]
+  ],
+  "options": {}
 }

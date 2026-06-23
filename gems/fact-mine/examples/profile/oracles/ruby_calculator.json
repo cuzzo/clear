@@ -1,4 +1,25 @@
 {
+  "array_shapes": [],
+  "fields": [
+    {
+      "declared_type": null,
+      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000total",
+      "language": "ruby",
+      "line": 5,
+      "name": "total",
+      "owner": "Calculator",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "source": "syntax",
+      "span": [
+        5,
+        4,
+        5,
+        34
+      ],
+      "static_origin": "state_write"
+    }
+  ],
+  "hash_shapes": [],
   "methods": [
     {
       "key": [
@@ -6,23 +27,23 @@
         "add",
         "instance"
       ],
-      "owner": "Calculator",
-      "name": "add",
       "kind": "instance",
-      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "language": "ruby",
       "line": 4,
+      "name": "add",
+      "owner": "Calculator",
+      "params": [
+        "value"
+      ],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "signature": "",
+      "source": {},
       "span": [
         4,
         2,
         6,
         5
-      ],
-      "language": "ruby",
-      "signature": "",
-      "params": [
-        "value"
-      ],
-      "source": {}
+      ]
     },
     {
       "key": [
@@ -30,40 +51,26 @@
         "result",
         "instance"
       ],
-      "owner": "Calculator",
-      "name": "result",
       "kind": "instance",
-      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "language": "ruby",
       "line": 8,
+      "name": "result",
+      "owner": "Calculator",
+      "params": [],
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "signature": "",
+      "source": {},
       "span": [
         8,
         2,
         10,
         5
-      ],
-      "language": "ruby",
-      "signature": "",
-      "params": [],
-      "source": {}
+      ]
     }
   ],
-  "fields": [
-    {
-      "id": "ruby\u0000gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000@total",
-      "language": "ruby",
-      "path": "gems/fact-mine/examples/profile/ruby_calculator.rb",
-      "owner": "Calculator",
-      "name": "@total",
-      "line": 5,
-      "span": [
-        5,
-        4,
-        5,
-        34
-      ],
-      "declared_type": null,
-      "static_origin": "state_write",
-      "source": "syntax"
-    }
-  ]
+  "signatures": {},
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": []
 }

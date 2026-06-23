@@ -1,7 +1,5 @@
 {
   "detector": "decision-pressure",
-  "options": {
-  },
   "expected": [
     {
       "contract": ".symbol",
@@ -9,5 +7,6 @@
       "essential": 0,
       "methods": 1
     }
-  ]
+  ],
+  "options": {}
 }

@@ -1,129 +1,5 @@
 {
   "syntax": {
-    "functions": [
-      {
-        "name": "branch_refs",
-        "owner": "SourceFactImplicitSelfPredicateBranchRefs",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-          "mod",
-          "fn",
-          "calls"
-        ]
-      }
-    ],
-    "calls": [
-      {
-        "receiver": "self",
-        "message": "state_touch_count",
-        "function": "branch_refs",
-        "line": 6,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "fn"
-        ]
-      },
-      {
-        "receiver": "self",
-        "message": "internal_calls_for",
-        "function": "branch_refs",
-        "line": 7,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "fn"
-        ]
-      },
-      {
-        "receiver": "self",
-        "message": "states",
-        "function": "branch_refs",
-        "line": 5,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "mod"
-        ]
-      },
-      {
-        "receiver": "states(mod)",
-        "message": "empty?",
-        "function": "branch_refs",
-        "line": 5,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "state_touch_count(fn)",
-        "message": "positive?",
-        "function": "branch_refs",
-        "line": 6,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "calls",
-        "message": "empty?",
-        "function": "branch_refs",
-        "line": 7,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      },
-      {
-        "receiver": "internal_calls_for(fn)",
-        "message": "empty?",
-        "function": "branch_refs",
-        "line": 7,
-        "conditional": true,
-        "control": "conditional",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": []
-      }
-    ],
-    "state_reads": [
-      {
-        "receiver": "states(mod)",
-        "field": "empty?",
-        "function": "branch_refs",
-        "line": 5
-      },
-      {
-        "receiver": "calls",
-        "field": "empty?",
-        "function": "branch_refs",
-        "line": 7
-      },
-      {
-        "receiver": "internal_calls_for(fn)",
-        "field": "empty?",
-        "function": "branch_refs",
-        "line": 7
-      },
-      {
-        "receiver": "state_touch_count(fn)",
-        "field": "positive?",
-        "function": "branch_refs",
-        "line": 6
-      }
-    ],
     "branch_decisions": [
       {
         "function": "branch_refs",
@@ -149,6 +25,130 @@
           "calls.empty?",
           "internal_calls_for(fn).empty?"
         ]
+      }
+    ],
+    "calls": [
+      {
+        "arguments": [
+          "fn"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 6,
+        "message": "state_touch_count",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "fn"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 7,
+        "message": "internal_calls_for",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "mod"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 5,
+        "message": "states",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 5,
+        "message": "empty",
+        "receiver": "states(mod)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 6,
+        "message": "positive",
+        "receiver": "state_touch_count(fn)",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 7,
+        "message": "empty",
+        "receiver": "calls",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "branch_refs",
+        "line": 7,
+        "message": "empty",
+        "receiver": "internal_calls_for(fn)",
+        "safe_navigation": false
+      }
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "branch_refs",
+        "owner": "SourceFactImplicitSelfPredicateBranchRefs",
+        "params": [
+          "mod",
+          "fn",
+          "calls"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "state_reads": [
+      {
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 5,
+        "receiver": "states(mod)"
+      },
+      {
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 7,
+        "receiver": "calls"
+      },
+      {
+        "field": "empty?",
+        "function": "branch_refs",
+        "line": 7,
+        "receiver": "internal_calls_for(fn)"
+      },
+      {
+        "field": "positive?",
+        "function": "branch_refs",
+        "line": 6,
+        "receiver": "state_touch_count(fn)"
       }
     ]
   }

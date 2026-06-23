@@ -1,16 +1,15 @@
 {
   "detector": "sequence-mine",
-  "options": {
-  },
   "expected": [
     {
+      "has": "alloc_mark",
+      "missing": "cleanup",
       "pair": [
         "alloc_mark",
         "cleanup"
       ],
-      "support": 4,
-      "has": "alloc_mark",
-      "missing": "cleanup"
+      "support": 4
     }
-  ]
+  ],
+  "options": {}
 }

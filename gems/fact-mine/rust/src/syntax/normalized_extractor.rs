@@ -424,11 +424,14 @@ impl<'a> Extractor<'a> {
         let mut written_field: Option<String> = None;
         if let (Some(receiver), Some(field)) = (child_node(node, 0), child_symbol(node, 1)) {
             let field = field.trim_end_matches('=').to_string();
+            let field = self.behavior.clean_identifier(&field);
             if field != "[]" {
                 effect_detail = format!("{field}=");
-                let receiver_name = self.receiver_text(receiver);
+                let raw_receiver_name = self.receiver_text(receiver);
+                let receiver_name = self.behavior.clean_receiver(&raw_receiver_name);
                 if node.text.contains('[') {
-                    if let Some(indexed_field) = state_receiver_field(&receiver_name) {
+                    if let Some(indexed_field) = state_receiver_field(&raw_receiver_name) {
+                        let indexed_field = self.behavior.clean_identifier(&indexed_field);
                         effect_detail = "[]=".to_string();
                         self.record_state_write_target("self".to_string(), indexed_field, node);
                     } else {
@@ -460,6 +463,7 @@ impl<'a> Extractor<'a> {
             }
         } else if let Some(receiver) = child_node(node, 0).map(|node| self.receiver_text(node)) {
             if let Some(field) = state_receiver_field(&receiver) {
+                let field = self.behavior.clean_identifier(&field);
                 self.record_state_write_target("self".to_string(), field, node);
             }
         }
@@ -555,8 +559,8 @@ impl<'a> Extractor<'a> {
         }
 
         let call = CallSite {
-            receiver: projected.receiver.clone(),
-            message: projected.message.clone(),
+            receiver: self.behavior.clean_receiver(&projected.receiver),
+            message: self.behavior.clean_identifier(&projected.message),
             file: self.file.clone(),
             function: self.current_function(),
             owner: self.current_owner(),
@@ -597,8 +601,8 @@ impl<'a> Extractor<'a> {
         block: bool,
     ) {
         let call = CallSite {
-            receiver: projected.receiver,
-            message: projected.message,
+            receiver: self.behavior.clean_receiver(&projected.receiver),
+            message: self.behavior.clean_identifier(&projected.message),
             file: self.file.clone(),
             function: self.current_function(),
             owner: self.current_owner(),
@@ -624,6 +628,7 @@ impl<'a> Extractor<'a> {
 
     fn record_state_write(&mut self, node: &Node) {
         let field = first_string_or_symbol(node).unwrap_or_else(|| normalized_text(node));
+        let field = self.behavior.clean_identifier(&field);
         if node.r#type == "GASGN" {
             self.record_semantic_effect(node, "context_dependency", &field);
         }
@@ -635,9 +640,10 @@ impl<'a> Extractor<'a> {
 
     fn scan_local_assignment(&mut self, node: &Node) {
         let field = first_string_or_symbol(node);
+        let field_clean = field.as_deref().map(|f| self.behavior.clean_identifier(f));
         let writes = self
             .behavior
-            .local_assignment_writes(field.as_deref(), node, span(node));
+            .local_assignment_writes(field_clean.as_deref(), node, span(node));
         if !writes.is_empty() {
             for write in writes {
                 self.record_state_write_target_span(write.receiver, write.field, node, write.span);
@@ -651,10 +657,10 @@ impl<'a> Extractor<'a> {
         if self.behavior.implicit_owner_fields()
             && field
                 .as_deref()
-                .is_some_and(|field| self.owner_field(field))
+                .is_some_and(|field| self.owner_field(&self.behavior.clean_identifier(field)))
             && self.current_function() != "(top-level)"
         {
-            let field = field.unwrap();
+            let field = self.behavior.clean_identifier(&field.unwrap());
             self.record_state_write_target_span(
                 "self".to_string(),
                 field.clone(),
@@ -683,6 +689,8 @@ impl<'a> Extractor<'a> {
         node: &Node,
         write_span: Span,
     ) {
+        let receiver = self.behavior.clean_receiver(&receiver);
+        let field = self.behavior.clean_identifier(&field);
         let write = StateWrite {
             field,
             receiver,
@@ -707,6 +715,7 @@ impl<'a> Extractor<'a> {
 
     fn record_state_read_node(&mut self, node: &Node) {
         let field = first_string_or_symbol(node).unwrap_or_else(|| normalized_text(node));
+        let field = self.behavior.clean_identifier(&field);
         if node.r#type == "GVAR" {
             self.record_semantic_effect(node, "context_dependency", &field);
         }
@@ -724,6 +733,7 @@ impl<'a> Extractor<'a> {
 
     fn record_bare_state_read_node(&mut self, node: &Node) {
         let field = first_string_or_symbol(node).unwrap_or_else(|| normalized_text(node));
+        let field = self.behavior.clean_identifier(&field);
         if !self.behavior.implicit_owner_fields()
             || !self.owner_field(&field)
             || self.current_function() == "(top-level)"
@@ -786,9 +796,11 @@ impl<'a> Extractor<'a> {
     }
 
     fn push_behavior_read(&mut self, read: NormalizedStateRead, fallback_node: &Node) {
+        let receiver = self.behavior.clean_receiver(&read.receiver);
+        let field = self.behavior.clean_identifier(&read.field);
         self.push_state_read(StateRead {
-            field: read.field,
-            receiver: read.receiver,
+            field,
+            receiver,
             file: self.file.clone(),
             function: self.current_function(),
             line: read.line.unwrap_or(fallback_node.first_lineno),
@@ -1044,6 +1056,7 @@ impl<'a> Extractor<'a> {
         }
 
         if let Some(mut declaration) = self.behavior.state_declaration_from_node(node, owner) {
+            declaration.field = self.behavior.clean_identifier(&declaration.field);
             declaration.file = self.file.clone();
             declaration.owner = owner.to_string();
             declaration.line = node.first_lineno;
@@ -1061,6 +1074,7 @@ impl<'a> Extractor<'a> {
             "FIELD_DECLARATION" | "PROPERTY_DECLARATION" | "FIELD_DECLARATION_LIST"
         ) {
             if let Some(name) = self.behavior.field_name_from_declaration(node) {
+                let name = self.behavior.clean_identifier(&name);
                 self.push_owner_field(owner, name.clone());
                 // Also try to extract the type and emit a StateDeclaration
                 if let Some(ty) = extract_type_from_field_node(node, &name) {

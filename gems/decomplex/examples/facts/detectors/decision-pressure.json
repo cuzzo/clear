@@ -1,182 +1,5 @@
 {
   "detector": "decision-pressure",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/decision.rb",
-        "language": "ruby",
-        "local_contract_assignments": {
-          "check": {
-            "candidate": "input.user"
-          }
-        },
-        "local_methods": [
-          {
-            "id": "Fixture#check",
-            "owner": "Fixture",
-            "name": "check",
-            "file": "facts/decision.rb",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              20,
-              3
-            ],
-            "statements": [
-              {
-                "index": 0,
-                "line": 1,
-                "end_line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  22
-                ],
-                "source": "candidate = input.user",
-                "reads": [
-                  "input"
-                ],
-                "writes": [
-                  "candidate"
-                ],
-                "dependencies": [
-                  [
-                    "candidate",
-                    "input"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 1,
-                "line": 2,
-                "end_line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  25
-                ],
-                "source": "candidate.name rescue nil",
-                "reads": [
-                  "candidate"
-                ],
-                "writes": [
-
-                ],
-                "dependencies": [
-
-                ],
-                "co_uses": [
-
-                ]
-              }
-            ],
-            "boundaries": [
-
-            ]
-          }
-        ],
-        "call_sites": [
-          {
-            "receiver": "candidate",
-            "message": "nil?",
-            "file": "facts/decision.rb",
-            "function": "check",
-            "owner": "Fixture",
-            "line": 3,
-            "span": [
-              3,
-              2,
-              3,
-              16
-            ],
-            "conditional": false,
-            "arguments": [
-
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "candidate",
-            "message": "ready?",
-            "file": "facts/decision.rb",
-            "function": "check",
-            "owner": "Fixture",
-            "line": 4,
-            "span": [
-              4,
-              2,
-              4,
-              18
-            ],
-            "conditional": false,
-            "arguments": [
-
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "candidate",
-            "message": "name",
-            "file": "facts/decision.rb",
-            "function": "check",
-            "owner": "Fixture",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              20
-            ],
-            "conditional": false,
-            "arguments": [
-
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          }
-        ],
-        "semantic_effect_sites": [
-          {
-            "kind": "eliminable_guard",
-            "detail": "candidate.name",
-            "file": "facts/decision.rb",
-            "function": "check",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              25
-            ]
-          },
-          {
-            "kind": "eliminable_guard",
-            "detail": "candidate",
-            "file": "facts/decision.rb",
-            "function": "check",
-            "line": 3,
-            "span": [
-              3,
-              2,
-              3,
-              16
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": [
     {
       "contract": ".name",
@@ -212,5 +35,166 @@
         ]
       }
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "call_sites": [
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/decision.rb",
+            "function": "check",
+            "line": 3,
+            "message": "nil?",
+            "owner": "Fixture",
+            "receiver": "candidate",
+            "safe_navigation": false,
+            "span": [
+              3,
+              2,
+              3,
+              16
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/decision.rb",
+            "function": "check",
+            "line": 4,
+            "message": "ready?",
+            "owner": "Fixture",
+            "receiver": "candidate",
+            "safe_navigation": false,
+            "span": [
+              4,
+              2,
+              4,
+              18
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/decision.rb",
+            "function": "check",
+            "line": 2,
+            "message": "name",
+            "owner": "Fixture",
+            "receiver": "candidate",
+            "safe_navigation": false,
+            "span": [
+              2,
+              0,
+              2,
+              20
+            ]
+          }
+        ],
+        "file": "facts/decision.rb",
+        "language": "ruby",
+        "local_contract_assignments": {
+          "check": {
+            "candidate": "input.user"
+          }
+        },
+        "local_methods": [
+          {
+            "boundaries": [],
+            "file": "facts/decision.rb",
+            "id": "Fixture#check",
+            "line": 1,
+            "name": "check",
+            "owner": "Fixture",
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "candidate",
+                    "input"
+                  ]
+                ],
+                "end_line": 1,
+                "index": 0,
+                "line": 1,
+                "reads": [
+                  "input"
+                ],
+                "source": "candidate = input.user",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  22
+                ],
+                "writes": [
+                  "candidate"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [],
+                "end_line": 2,
+                "index": 1,
+                "line": 2,
+                "reads": [
+                  "candidate"
+                ],
+                "source": "candidate.name rescue nil",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  25
+                ],
+                "writes": []
+              }
+            ]
+          }
+        ],
+        "semantic_effect_sites": [
+          {
+            "detail": "candidate.name",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "kind": "eliminable_guard",
+            "line": 2,
+            "span": [
+              2,
+              0,
+              2,
+              25
+            ]
+          },
+          {
+            "detail": "candidate",
+            "file": "facts/decision.rb",
+            "function": "check",
+            "kind": "eliminable_guard",
+            "line": 3,
+            "span": [
+              3,
+              2,
+              3,
+              16
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

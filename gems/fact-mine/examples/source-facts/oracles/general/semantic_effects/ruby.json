@@ -2,197 +2,191 @@
   "syntax": {
     "calls": [
       {
-        "receiver": "Hash",
-        "message": "new",
-        "function": "shape_hash",
-        "line": 19,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           "0"
-        ]
-      },
-      {
-        "receiver": "self",
-        "message": "send",
-        "function": "perform",
-        "line": 7,
+        ],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
+        "function": "shape_hash",
+        "line": 19,
+        "message": "new",
+        "receiver": "Hash",
+        "safe_navigation": false
+      },
+      {
         "arguments": [
           ":audit",
           "name"
-        ]
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "perform",
+        "line": 7,
+        "message": "send",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "self",
-        "message": "puts",
+        "arguments": [
+          "name"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "perform",
         "line": 5,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "name"
-        ]
+        "message": "puts",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "callback",
-        "message": "call",
+        "arguments": [
+          "name"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "perform",
         "line": 6,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-          "name"
-        ]
+        "message": "call",
+        "receiver": "callback",
+        "safe_navigation": false
       },
       {
-        "receiver": "target",
-        "message": "items",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "mutate",
         "line": 13,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "message": "items",
+        "receiver": "target",
+        "safe_navigation": false
       },
       {
-        "receiver": "Hash",
-        "message": "new",
+        "arguments": [],
+        "block": true,
+        "conditional": false,
+        "control": "always",
         "function": "shape_hash",
         "line": 18,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": [
-
-        ]
+        "message": "new",
+        "receiver": "Hash",
+        "safe_navigation": false
       },
       {
-        "receiver": "data",
-        "message": "each",
-        "function": "shape_hash",
-        "line": 20,
+        "arguments": [],
+        "block": true,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": true,
-        "arguments": [
-
-        ]
+        "function": "shape_hash",
+        "line": 20,
+        "message": "each",
+        "receiver": "data",
+        "safe_navigation": false
       }
     ],
     "functions": [
       {
+        "line": 11,
         "name": "mutate",
         "owner": "SourceFactSemanticEffects",
-        "line": 11,
-        "visibility": "public",
         "params": [
           "target",
           "value"
-        ]
+        ],
+        "visibility": "public"
       },
       {
+        "line": 16,
         "name": "shape_hash",
         "owner": "SourceFactSemanticEffects",
-        "line": 16,
-        "visibility": "public",
         "params": [
           "data"
-        ]
+        ],
+        "visibility": "public"
       },
       {
+        "line": 4,
         "name": "perform",
         "owner": "SourceFactSemanticEffects",
-        "line": 4,
-        "visibility": "public",
         "params": [
           "callback",
           "name"
-        ]
+        ],
+        "visibility": "public"
       }
     ],
     "semantic_effects": [
       {
-        "kind": "context_dependency",
-        "detail": "$source_fact_seen",
-        "function": "perform",
-        "line": 8
-      },
-      {
-        "kind": "hidden_mutation",
         "detail": "<<",
         "function": "mutate",
+        "kind": "hidden_mutation",
         "line": 13
       },
       {
-        "kind": "hidden_mutation",
         "detail": "[]=",
         "function": "mutate",
+        "kind": "hidden_mutation",
         "line": 12
       },
       {
-        "kind": "hidden_mutation",
         "detail": "[]=",
         "function": "shape_hash",
+        "kind": "hidden_mutation",
         "line": 18
       },
       {
-        "kind": "dynamic_dispatch",
         "detail": "callback.call",
         "function": "perform",
+        "kind": "dynamic_dispatch",
         "line": 6
       },
       {
-        "kind": "hidden_mutation",
         "detail": "op-assign",
         "function": "shape_hash",
+        "kind": "hidden_mutation",
         "line": 20
       },
       {
-        "kind": "hidden_io",
         "detail": "puts",
         "function": "perform",
+        "kind": "hidden_io",
         "line": 5
       },
       {
-        "kind": "dynamic_dispatch",
         "detail": "send",
         "function": "perform",
+        "kind": "dynamic_dispatch",
         "line": 7
+      },
+      {
+        "detail": "source_fact_seen",
+        "function": "perform",
+        "kind": "context_dependency",
+        "line": 8
       }
     ],
     "state_reads": [
       {
-        "receiver": "self",
-        "field": "$source_fact_seen",
-        "function": "perform",
-        "line": 8
-      },
-      {
-        "receiver": "data",
         "field": "each",
         "function": "shape_hash",
-        "line": 20
+        "line": 20,
+        "receiver": "data"
       },
       {
-        "receiver": "target",
         "field": "items",
         "function": "mutate",
-        "line": 13
+        "line": 13,
+        "receiver": "target"
+      },
+      {
+        "field": "source_fact_seen",
+        "function": "perform",
+        "line": 8,
+        "receiver": "self"
       }
     ]
   }

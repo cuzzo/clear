@@ -220,7 +220,7 @@
         "line": 16
       },
       {
-        "detail": "File.file?",
+        "detail": "File.file",
         "function": "build",
         "kind": "hidden_io",
         "line": 6

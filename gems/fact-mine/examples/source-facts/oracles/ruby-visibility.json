@@ -2,94 +2,84 @@
   "syntax": {
     "calls": [
       {
-        "receiver": "self",
-        "message": "private",
-        "function": "(top-level)",
-        "line": 18,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
         "arguments": [
           ":inline_guard"
-        ]
-      },
-      {
-        "receiver": "self",
-        "message": "protected",
-        "function": "(top-level)",
-        "line": 14,
+        ],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
+        "function": "(top-level)",
+        "line": 18,
+        "message": "private",
+        "receiver": "self",
+        "safe_navigation": false
+      },
+      {
         "arguments": [
           "inline_guard",
           "true"
-        ]
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "(top-level)",
+        "line": 14,
+        "message": "protected",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "self",
-        "message": "private",
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
         "function": "(top-level)",
         "line": 8,
-        "conditional": false,
-        "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "message": "private",
+        "receiver": "self",
+        "safe_navigation": false
       },
       {
-        "receiver": "self",
-        "message": "prepare",
-        "function": "public_step",
-        "line": 5,
+        "arguments": [],
+        "block": false,
         "conditional": false,
         "control": "always",
-        "safe_navigation": false,
-        "block": false,
-        "arguments": [
-
-        ]
+        "function": "public_step",
+        "line": 5,
+        "message": "prepare",
+        "receiver": "self",
+        "safe_navigation": false
       }
     ],
     "functions": [
       {
+        "line": 10,
         "name": "prepare",
         "owner": "SourceFactVisibility",
-        "line": 10,
-        "visibility": "private",
-        "params": [
-
-        ]
+        "params": [],
+        "visibility": "private"
       },
       {
+        "line": 14,
         "name": "inline_guard",
         "owner": "SourceFactVisibility",
-        "line": 14,
-        "visibility": "private",
-        "params": [
-
-        ]
+        "params": [],
+        "visibility": "private"
       },
       {
+        "line": 4,
         "name": "public_step",
         "owner": "SourceFactVisibility",
-        "line": 4,
-        "visibility": "public",
-        "params": [
-
-        ]
+        "params": [],
+        "visibility": "public"
       }
     ],
     "state_writes": [
       {
-        "receiver": "self",
-        "field": "@ready",
+        "field": "ready",
         "function": "prepare",
-        "line": 11
+        "line": 11,
+        "receiver": "self"
       }
     ]
   }

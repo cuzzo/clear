@@ -1,68 +1,19 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/java/core.java",
-      "language": "java",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 12,
-          "name": "process",
-          "owner": "JavaSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 29,
+          "predicate": "(this.status == Status.IDLE && user.ready())",
           "span": [
-            12,
-            2,
-            41,
-            3
+            29,
+            4,
+            34,
+            5
           ],
-          "visibility": "public"
-        },
-        {
-          "line": 43,
-          "name": "audit",
-          "owner": "JavaSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
-          "span": [
-            43,
-            2,
-            47,
-            3
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 49,
-          "name": "ready",
-          "owner": "JavaSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            49,
-            2,
-            51,
-            3
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 3,
-          "name": "JavaSyntaxFactsCore",
-          "span": [
-            3,
-            0,
-            52,
-            1
+          "state_refs": [
+            "this.status"
           ]
         }
       ],
@@ -229,9 +180,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -249,9 +198,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -269,9 +216,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -289,9 +234,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -309,9 +252,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "conditional",
@@ -329,9 +270,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "conditional",
@@ -349,9 +288,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -366,6 +303,155 @@
             6,
             37,
             21
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            17,
+            4,
+            27,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 17,
+          "members": [
+            "case \"admin\"",
+            "case \"guest\"",
+            "case \"owner\""
+          ],
+          "predicate": "user.role()",
+          "span": [
+            17,
+            4,
+            27,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            29,
+            4,
+            34,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 29,
+          "members": [
+            "this.status == Status.IDLE",
+            "user.ready()"
+          ],
+          "predicate": "this.status == Status.IDLE && user.ready()",
+          "span": [
+            29,
+            8,
+            29,
+            50
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/java/core.java",
+      "functions": [
+        {
+          "line": 12,
+          "name": "process",
+          "owner": "JavaSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            12,
+            2,
+            41,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 43,
+          "name": "audit",
+          "owner": "JavaSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            43,
+            2,
+            47,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 49,
+          "name": "ready",
+          "owner": "JavaSyntaxFactsCore",
+          "params": [],
+          "span": [
+            49,
+            2,
+            51,
+            3
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "java",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 3,
+          "name": "JavaSyntaxFactsCore",
+          "span": [
+            3,
+            0,
+            52,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "System.err",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 33,
+          "span": [
+            33,
+            6,
+            33,
+            37
+          ]
+        },
+        {
+          "detail": "System.out",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 44,
+          "span": [
+            44,
+            4,
+            44,
+            28
+          ]
+        },
+        {
+          "detail": "callback.call",
+          "function": "process",
+          "kind": "dynamic_dispatch",
+          "line": 15,
+          "span": [
+            15,
+            4,
+            15,
+            26
           ]
         }
       ],
@@ -450,114 +536,8 @@
             24
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            17,
-            4,
-            27,
-            5
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 17,
-          "members": [
-            "case \"admin\"",
-            "case \"guest\"",
-            "case \"owner\""
-          ],
-          "predicate": "user.role()",
-          "span": [
-            17,
-            4,
-            27,
-            5
-          ]
-        },
-        {
-          "enclosing_span": [
-            29,
-            4,
-            34,
-            5
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 29,
-          "members": [
-            "this.status == Status.IDLE",
-            "user.ready()"
-          ],
-          "predicate": "this.status == Status.IDLE && user.ready()",
-          "span": [
-            29,
-            8,
-            29,
-            50
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 29,
-          "predicate": "(this.status == Status.IDLE && user.ready())",
-          "span": [
-            29,
-            4,
-            34,
-            5
-          ],
-          "state_refs": [
-            "this.status"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "System.err",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 33,
-          "span": [
-            33,
-            6,
-            33,
-            37
-          ]
-        },
-        {
-          "detail": "System.out",
-          "function": "audit",
-          "kind": "hidden_io",
-          "line": 44,
-          "span": [
-            44,
-            4,
-            44,
-            28
-          ]
-        },
-        {
-          "detail": "callback.call",
-          "function": "process",
-          "kind": "dynamic_dispatch",
-          "line": 15,
-          "span": [
-            15,
-            4,
-            15,
-            26
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

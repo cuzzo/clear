@@ -1,333 +1,5 @@
 {
   "detector": "sequence-mine",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/sequence_nested.rb",
-        "language": "ruby",
-        "lines": [
-          "sig { acquire release }",
-          "sig { acquire release }",
-          "sig { acquire release }",
-          "sig { acquire release }",
-          "sig { acquire }",
-          "sig { release }"
-        ],
-        "call_sites": [
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "paired_0",
-            "owner": "Fixture",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              1,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "paired_1",
-            "owner": "Fixture",
-            "line": 2,
-            "span": [
-              2,
-              0,
-              2,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "paired_2",
-            "owner": "Fixture",
-            "line": 3,
-            "span": [
-              3,
-              0,
-              3,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "paired_3",
-            "owner": "Fixture",
-            "line": 4,
-            "span": [
-              4,
-              0,
-              4,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "missing_release",
-            "owner": "Fixture",
-            "line": 5,
-            "span": [
-              5,
-              0,
-              5,
-              15
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_nested.rb",
-            "function": "missing_acquire",
-            "owner": "Fixture",
-            "line": 6,
-            "span": [
-              6,
-              0,
-              6,
-              15
-            ],
-            "conditional": false,
-            "arguments": [
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          }
-        ],
-        "protocol_call_paths": [
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "paired_0",
-            "line": 1,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_0",
-                "line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_0",
-                "line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "paired_1",
-            "line": 2,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_1",
-                "line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_1",
-                "line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "paired_2",
-            "line": 3,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_2",
-                "line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_2",
-                "line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "paired_3",
-            "line": 4,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_3",
-                "line": 4,
-                "span": [
-                  4,
-                  0,
-                  4,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "paired_3",
-                "line": 4,
-                "span": [
-                  4,
-                  0,
-                  4,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "missing_release",
-            "line": 5,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "missing_release",
-                "line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  15
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_nested.rb",
-            "owner": "Fixture",
-            "name": "missing_acquire",
-            "line": 6,
-            "calls": [
-              {
-                "mid": "release",
-                "file": "facts/sequence_nested.rb",
-                "owner": "Fixture",
-                "defn": "missing_acquire",
-                "line": 6,
-                "span": [
-                  6,
-                  0,
-                  6,
-                  15
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": {
     "broken": [
       {
@@ -367,6 +39,334 @@
           ]
         },
         "support": 4
+      }
+    ]
+  },
+  "input": {
+    "documents": [
+      {
+        "call_sites": [
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "paired_0",
+            "line": 1,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              1,
+              0,
+              1,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "paired_1",
+            "line": 2,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              2,
+              0,
+              2,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "paired_2",
+            "line": 3,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              3,
+              0,
+              3,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "paired_3",
+            "line": 4,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              4,
+              0,
+              4,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "missing_release",
+            "line": 5,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              5,
+              0,
+              5,
+              15
+            ]
+          },
+          {
+            "arguments": [
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_nested.rb",
+            "function": "missing_acquire",
+            "line": 6,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              6,
+              0,
+              6,
+              15
+            ]
+          }
+        ],
+        "file": "facts/sequence_nested.rb",
+        "language": "ruby",
+        "lines": [
+          "sig { acquire release }",
+          "sig { acquire release }",
+          "sig { acquire release }",
+          "sig { acquire release }",
+          "sig { acquire }",
+          "sig { release }"
+        ],
+        "protocol_call_paths": [
+          {
+            "calls": [
+              {
+                "defn": "paired_0",
+                "file": "facts/sequence_nested.rb",
+                "line": 1,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_0",
+                "file": "facts/sequence_nested.rb",
+                "line": 1,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 1,
+            "name": "paired_0",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence_nested.rb",
+                "line": 2,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence_nested.rb",
+                "line": 2,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 2,
+            "name": "paired_1",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence_nested.rb",
+                "line": 3,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence_nested.rb",
+                "line": 3,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 3,
+            "name": "paired_2",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence_nested.rb",
+                "line": 4,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  4,
+                  0,
+                  4,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence_nested.rb",
+                "line": 4,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  4,
+                  0,
+                  4,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 4,
+            "name": "paired_3",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_release",
+                "file": "facts/sequence_nested.rb",
+                "line": 5,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  15
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 5,
+            "name": "missing_release",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_acquire",
+                "file": "facts/sequence_nested.rb",
+                "line": 6,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  6,
+                  0,
+                  6,
+                  15
+                ]
+              }
+            ],
+            "file": "facts/sequence_nested.rb",
+            "line": 6,
+            "name": "missing_acquire",
+            "owner": "Fixture"
+          }
+        ]
       }
     ]
   }

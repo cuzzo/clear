@@ -1,84 +1,33 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/cpp/core.cpp",
-      "language": "cpp",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 15,
-          "name": "CppSyntaxFactsCore",
-          "owner": "CppSyntaxFactsCore",
-          "params": [
-            "status",
-            "sink"
-          ],
+          "function": "process",
+          "line": 23,
+          "predicate": "(user.role())",
           "span": [
-            15,
-            2,
-            16,
-            47
+            23,
+            4,
+            34,
+            5
           ],
-          "visibility": "public"
+          "state_refs": [
+            "user.role"
+          ]
         },
         {
-          "line": 18,
-          "name": "process",
-          "owner": "CppSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
+          "function": "process",
+          "line": 36,
+          "predicate": "(status == Status::Idle && user.ready())",
           "span": [
-            18,
-            2,
-            48,
-            3
+            36,
+            4,
+            41,
+            5
           ],
-          "visibility": "public"
-        },
-        {
-          "line": 51,
-          "name": "audit",
-          "owner": "CppSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
-          "span": [
-            51,
-            2,
-            55,
-            3
-          ],
-          "visibility": "private"
-        },
-        {
-          "line": 57,
-          "name": "ready",
-          "owner": "CppSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            57,
-            2,
-            59,
-            3
-          ],
-          "visibility": "private"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 9,
-          "name": "CppSyntaxFactsCore",
-          "span": [
-            9,
-            0,
-            60,
-            1
+          "state_refs": [
+            "user.ready"
           ]
         }
       ],
@@ -225,9 +174,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -245,9 +192,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -265,9 +210,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -285,9 +228,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "conditional",
@@ -305,9 +246,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "conditional",
@@ -325,9 +264,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -345,6 +282,156 @@
           ]
         }
       ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            23,
+            4,
+            34,
+            5
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 23,
+          "members": [
+            "Role::Admin",
+            "Role::Guest",
+            "Role::Owner"
+          ],
+          "predicate": "user.role()",
+          "span": [
+            23,
+            4,
+            34,
+            5
+          ]
+        },
+        {
+          "enclosing_span": [
+            36,
+            4,
+            41,
+            5
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 36,
+          "members": [
+            "status == Status::Idle",
+            "user.ready()"
+          ],
+          "predicate": "status == Status::Idle && user.ready()",
+          "span": [
+            36,
+            8,
+            36,
+            46
+          ]
+        }
+      ],
+      "dispatch_sites": [
+        {
+          "arm_members": {
+            "Role::Admin": [],
+            "Role::Guest": [],
+            "Role::Owner": []
+          },
+          "function": "process",
+          "line": 23,
+          "outside": [],
+          "span": [
+            23,
+            4,
+            34,
+            5
+          ],
+          "variant_set": [
+            "Role::Admin",
+            "Role::Guest",
+            "Role::Owner"
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/cpp/core.cpp",
+      "functions": [
+        {
+          "line": 15,
+          "name": "CppSyntaxFactsCore",
+          "owner": "CppSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            15,
+            2,
+            16,
+            47
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 18,
+          "name": "process",
+          "owner": "CppSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            18,
+            2,
+            48,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 51,
+          "name": "audit",
+          "owner": "CppSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            51,
+            2,
+            55,
+            3
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 57,
+          "name": "ready",
+          "owner": "CppSyntaxFactsCore",
+          "params": [],
+          "span": [
+            57,
+            2,
+            59,
+            3
+          ],
+          "visibility": "private"
+        }
+      ],
+      "language": "cpp",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 9,
+          "name": "CppSyntaxFactsCore",
+          "span": [
+            9,
+            0,
+            60,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [],
       "state_reads": [
         {
           "field": "active",
@@ -517,121 +604,8 @@
             11
           ]
         }
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            23,
-            4,
-            34,
-            5
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 23,
-          "members": [
-            "Role::Admin",
-            "Role::Guest",
-            "Role::Owner"
-          ],
-          "predicate": "user.role()",
-          "span": [
-            23,
-            4,
-            34,
-            5
-          ]
-        },
-        {
-          "enclosing_span": [
-            36,
-            4,
-            41,
-            5
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 36,
-          "members": [
-            "status == Status::Idle",
-            "user.ready()"
-          ],
-          "predicate": "status == Status::Idle && user.ready()",
-          "span": [
-            36,
-            8,
-            36,
-            46
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 23,
-          "predicate": "(user.role())",
-          "span": [
-            23,
-            4,
-            34,
-            5
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "process",
-          "line": 36,
-          "predicate": "(status == Status::Idle && user.ready())",
-          "span": [
-            36,
-            4,
-            41,
-            5
-          ],
-          "state_refs": [
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-        {
-          "arm_members": {
-            "Role::Admin": [
-
-            ],
-            "Role::Guest": [
-
-            ],
-            "Role::Owner": [
-
-            ]
-          },
-          "function": "process",
-          "line": 23,
-          "outside": [
-
-          ],
-          "span": [
-            23,
-            4,
-            34,
-            5
-          ],
-          "variant_set": [
-            "Role::Admin",
-            "Role::Guest",
-            "Role::Owner"
-          ]
-        }
-      ],
-      "semantic_effects": [
-
-      ],
-      "predicate_bodies": [
-
       ]
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

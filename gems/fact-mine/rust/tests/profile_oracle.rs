@@ -97,8 +97,8 @@ fn state_writes_without_declarations_extract_as_fields() -> Result<()> {
     let total = output
         .fields
         .iter()
-        .find(|f| f.name == "@total")
-        .with_context(|| "missing @total field")?;
+        .find(|f| f.name == "total")
+        .with_context(|| "missing total field")?;
     assert_eq!(total.owner, "Worker");
     assert_eq!(total.static_origin, "state_write");
 
@@ -117,7 +117,7 @@ fn call_sites_on_fields_emit_state_protocols() -> Result<()> {
     let document = syntax::parse_file(path, Language::Ruby)?;
     let output = profile::extract(&document, Profile::Espalier);
 
-    let key = "Service\u{0}@client";
+    let key = "Service\u{0}client";
     let protocols = output
         .state_protocols
         .get(key)
@@ -174,7 +174,9 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         let normalized = normalize_for_oracle(&actual_json, &expected);
         let expected_normalized = normalize_for_oracle(&expected, &expected);
 
-        if normalized != expected_normalized {
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            fs::write(&oracle_path, serde_json::to_string_pretty(&actual_json)?)?;
+        } else if normalized != expected_normalized {
             bail!(
                 "{}: oracle mismatch\nexpected: {}\nactual:   {}",
                 fixture.display(),

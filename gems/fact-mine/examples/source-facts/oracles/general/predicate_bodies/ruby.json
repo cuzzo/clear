@@ -2,10 +2,10 @@
   "syntax": {
     "predicate_bodies": [
       {
-        "name": "simple_predicate?",
-        "owner": "SourceFactPredicateBodies",
         "body": "value == false",
-        "line": 4
+        "line": 4,
+        "name": "simple_predicate?",
+        "owner": "SourceFactPredicateBodies"
       }
     ]
   }

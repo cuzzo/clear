@@ -91,7 +91,7 @@
         "control": "iterates",
         "function": "filtered",
         "line": 10,
-        "message": "ready?",
+        "message": "ready",
         "receiver": "item",
         "safe_navigation": false
       },
@@ -196,12 +196,6 @@
     ],
     "state_reads": [
       {
-        "field": "@nodes",
-        "function": "nodes",
-        "line": 22,
-        "receiver": "self"
-      },
-      {
         "field": "items",
         "function": "self.build",
         "line": 5,
@@ -218,6 +212,12 @@
         "function": "owner_nodes",
         "line": 14,
         "receiver": "node"
+      },
+      {
+        "field": "nodes",
+        "function": "nodes",
+        "line": 22,
+        "receiver": "self"
       },
       {
         "field": "ready?",

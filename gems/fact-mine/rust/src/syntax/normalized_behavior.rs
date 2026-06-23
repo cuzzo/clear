@@ -225,6 +225,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         text.to_string()
     }
 
+    fn clean_identifier(&self, token: &str) -> String {
+        token.strip_prefix("self.").unwrap_or(token).to_string()
+    }
+
+    fn clean_receiver(&self, receiver: &str) -> String {
+        receiver.to_string()
+    }
+
     fn source_message_text(&self, message: &str, _node: Option<&Node>) -> String {
         message.to_string()
     }

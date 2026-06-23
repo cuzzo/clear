@@ -1,197 +1,5 @@
 {
   "detector": "operational-discontinuity",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/operational.rb",
-        "language": "ruby",
-        "local_methods": [
-          {
-            "id": "Fixture#process",
-            "owner": "Fixture",
-            "name": "process",
-            "file": "facts/operational.rb",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              20,
-              3
-            ],
-            "statements": [
-              {
-                "index": 0,
-                "line": 1,
-                "end_line": 1,
-                "span": [
-                  1,
-                  0,
-                  1,
-                  9
-                ],
-                "source": "a = first",
-                "reads": [
-                  "first"
-                ],
-                "writes": [
-                  "a"
-                ],
-                "dependencies": [
-                  [
-                    "a",
-                    "first"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 1,
-                "line": 2,
-                "end_line": 2,
-                "span": [
-                  2,
-                  0,
-                  2,
-                  10
-                ],
-                "source": "b = second",
-                "reads": [
-                  "second"
-                ],
-                "writes": [
-                  "b"
-                ],
-                "dependencies": [
-                  [
-                    "b",
-                    "second"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 2,
-                "line": 3,
-                "end_line": 3,
-                "span": [
-                  3,
-                  0,
-                  3,
-                  9
-                ],
-                "source": "use(a, b)",
-                "reads": [
-                  "a",
-                  "b"
-                ],
-                "writes": [
-
-                ],
-                "dependencies": [
-
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 3,
-                "line": 7,
-                "end_line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  9
-                ],
-                "source": "c = third",
-                "reads": [
-                  "third"
-                ],
-                "writes": [
-                  "c"
-                ],
-                "dependencies": [
-                  [
-                    "c",
-                    "third"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 4,
-                "line": 8,
-                "end_line": 8,
-                "span": [
-                  8,
-                  0,
-                  8,
-                  10
-                ],
-                "source": "d = fourth",
-                "reads": [
-                  "fourth"
-                ],
-                "writes": [
-                  "d"
-                ],
-                "dependencies": [
-                  [
-                    "d",
-                    "fourth"
-                  ]
-                ],
-                "co_uses": [
-
-                ]
-              },
-              {
-                "index": 5,
-                "line": 9,
-                "end_line": 9,
-                "span": [
-                  9,
-                  0,
-                  9,
-                  9
-                ],
-                "source": "use(c, d)",
-                "reads": [
-                  "c",
-                  "d"
-                ],
-                "writes": [
-
-                ],
-                "dependencies": [
-
-                ],
-                "co_uses": [
-
-                ]
-              }
-            ],
-            "boundaries": [
-              {
-                "before_index": 2,
-                "after_index": 3,
-                "line": 6,
-                "kind": "comment",
-                "text": "# phase 2"
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": [
     {
       "at": "facts/operational.rb:process:1",
@@ -210,9 +18,7 @@
         {
           "after_statement": 3,
           "before_statement": 2,
-          "continuing": [
-
-          ],
+          "continuing": [],
           "dead": [
             "a",
             "b",
@@ -241,5 +47,177 @@
         ]
       }
     }
-  ]
+  ],
+  "input": {
+    "documents": [
+      {
+        "file": "facts/operational.rb",
+        "language": "ruby",
+        "local_methods": [
+          {
+            "boundaries": [
+              {
+                "after_index": 3,
+                "before_index": 2,
+                "kind": "comment",
+                "line": 6,
+                "text": "# phase 2"
+              }
+            ],
+            "file": "facts/operational.rb",
+            "id": "Fixture#process",
+            "line": 1,
+            "name": "process",
+            "owner": "Fixture",
+            "span": [
+              1,
+              0,
+              20,
+              3
+            ],
+            "statements": [
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "a",
+                    "first"
+                  ]
+                ],
+                "end_line": 1,
+                "index": 0,
+                "line": 1,
+                "reads": [
+                  "first"
+                ],
+                "source": "a = first",
+                "span": [
+                  1,
+                  0,
+                  1,
+                  9
+                ],
+                "writes": [
+                  "a"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "b",
+                    "second"
+                  ]
+                ],
+                "end_line": 2,
+                "index": 1,
+                "line": 2,
+                "reads": [
+                  "second"
+                ],
+                "source": "b = second",
+                "span": [
+                  2,
+                  0,
+                  2,
+                  10
+                ],
+                "writes": [
+                  "b"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [],
+                "end_line": 3,
+                "index": 2,
+                "line": 3,
+                "reads": [
+                  "a",
+                  "b"
+                ],
+                "source": "use(a, b)",
+                "span": [
+                  3,
+                  0,
+                  3,
+                  9
+                ],
+                "writes": []
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "c",
+                    "third"
+                  ]
+                ],
+                "end_line": 7,
+                "index": 3,
+                "line": 7,
+                "reads": [
+                  "third"
+                ],
+                "source": "c = third",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  9
+                ],
+                "writes": [
+                  "c"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [
+                  [
+                    "d",
+                    "fourth"
+                  ]
+                ],
+                "end_line": 8,
+                "index": 4,
+                "line": 8,
+                "reads": [
+                  "fourth"
+                ],
+                "source": "d = fourth",
+                "span": [
+                  8,
+                  0,
+                  8,
+                  10
+                ],
+                "writes": [
+                  "d"
+                ]
+              },
+              {
+                "co_uses": [],
+                "dependencies": [],
+                "end_line": 9,
+                "index": 5,
+                "line": 9,
+                "reads": [
+                  "c",
+                  "d"
+                ],
+                "source": "use(c, d)",
+                "span": [
+                  9,
+                  0,
+                  9,
+                  9
+                ],
+                "writes": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

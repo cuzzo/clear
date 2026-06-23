@@ -2,28 +2,28 @@
   "syntax": {
     "state_reads": [
       {
-        "receiver": "self",
-        "field": "@data",
+        "field": "data",
         "function": "label",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
-        "field": "@data",
+        "field": "data",
         "function": "label",
-        "line": 5
+        "line": 5,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
-        "field": "@lineage",
+        "field": "lineage",
         "function": "lineage_summary",
-        "line": 11
+        "line": 11,
+        "receiver": "self"
       },
       {
-        "receiver": "self",
-        "field": "@lineage",
+        "field": "lineage",
         "function": "lineage_summary",
-        "line": 12
+        "line": 12,
+        "receiver": "self"
       }
     ]
   }

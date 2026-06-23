@@ -210,6 +210,22 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         format!("self.{message}")
     }
 
+    fn clean_identifier(&self, token: &str) -> String {
+        let t = token.strip_prefix("self.").unwrap_or(token);
+        let t = t.strip_prefix('@').unwrap_or(t);
+        let t = t.strip_prefix('$').unwrap_or(t);
+        t.trim_end_matches(['!', '?', '=']).to_string()
+    }
+
+    fn clean_receiver(&self, receiver: &str) -> String {
+        let mut t = receiver.replace('@', "");
+        t = t.replace('$', "");
+        t.split('.')
+            .map(|part| part.trim_end_matches(['!', '?', '=']))
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
     fn emit_index_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
         true
     }
@@ -332,14 +348,14 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
-        (message == "nil?").then(|| NormalizedNilGuardFact {
+        (message == "nil").then(|| NormalizedNilGuardFact {
             local: subject.to_string(),
             non_nil_when_true: false,
         })
     }
 
     fn terminating_call_message(&self, message: &str) -> bool {
-        matches!(message, "raise" | "fail" | "abort" | "exit" | "exit!")
+        matches!(message, "raise" | "fail" | "abort" | "exit")
     }
 
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {

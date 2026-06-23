@@ -714,17 +714,26 @@ fn receiver_state_field(receiver: &str, document: &Document) -> Option<String> {
         return None;
     }
 
-    // @ivar style
+    // @ivar style or self.field style (fallback for uncleaned if any)
     if receiver.starts_with('@') {
         let field = receiver.split('.').next().unwrap_or(receiver);
-        return Some(field.to_string());
+        return Some(field.trim_start_matches('@').to_string());
     }
-
-    // self.field or this.field style
     for prefix in &["self.", "this."] {
         if let Some(field) = receiver.strip_prefix(*prefix) {
+            let field = field.split('.').next().unwrap_or(field);
             return Some(field.to_string());
         }
+    }
+
+    // For cleaned receivers: check if the first segment of receiver (e.g. "client" in "client.foo")
+    // is a known field (declared or read/written as a field on "self").
+    let field = receiver.split('.').next().unwrap_or(receiver).to_string();
+    let is_declared = document.state_declarations.iter().any(|d| d.field == field);
+    let is_read = document.state_reads.iter().any(|r| r.receiver == "self" && r.field == field);
+    let is_written = document.state_writes.iter().any(|w| w.receiver == "self" && w.field == field);
+    if is_declared || is_read || is_written {
+        return Some(field);
     }
 
     None

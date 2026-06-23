@@ -11,7 +11,7 @@
         "function": "owner_edges",
         "line": 5,
         "message": "||",
-        "receiver": "@owner_edges",
+        "receiver": "owner_edges",
         "safe_navigation": false
       },
       {
@@ -44,7 +44,7 @@
     ],
     "state_writes": [
       {
-        "field": "@owner_edges",
+        "field": "owner_edges",
         "function": "owner_edges",
         "line": 5,
         "receiver": "self"

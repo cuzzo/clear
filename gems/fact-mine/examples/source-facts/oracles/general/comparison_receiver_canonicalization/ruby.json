@@ -2,20 +2,20 @@
   "syntax": {
     "comparisons": [
       {
-        "source": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
-        "raw": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
         "canon_source": "fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
-        "operator": "==",
         "function": "tree_sitter?",
-        "line": 5
+        "line": 5,
+        "operator": "==",
+        "raw": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
+        "source": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\""
       },
       {
-        "source": "rule.fetch(\"id\") == rule_id",
-        "raw": "rule.fetch(\"id\") == rule_id",
         "canon_source": "fetch(\"id\") == rule_id",
-        "operator": "==",
         "function": "dark_arm_result",
-        "line": 9
+        "line": 9,
+        "operator": "==",
+        "raw": "rule.fetch(\"id\") == rule_id",
+        "source": "rule.fetch(\"id\") == rule_id"
       }
     ]
   }

@@ -69,6 +69,18 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         format!("self.{message}")
     }
 
+    fn clean_identifier(&self, token: &str) -> String {
+        token.strip_prefix("self.").unwrap_or(token).to_string()
+    }
+
+    fn clean_receiver(&self, receiver: &str) -> String {
+        if receiver.starts_with("self.") {
+            receiver["self.".len()..].to_string()
+        } else {
+            receiver.to_string()
+        }
+    }
+
     fn yield_semantic_effect(&self, _node: &Node) -> bool {
         false
     }

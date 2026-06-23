@@ -1,79 +1,33 @@
 {
-  "format": "decomplex.syntax-facts.v1",
   "documents": [
     {
-      "file": "gems/fact-mine/examples/syntax-facts/kotlin/core.kt",
-      "language": "kotlin",
-      "functions": [
+      "branch_decisions": [
         {
-          "line": 31,
-          "name": "audit",
-          "owner": "KotlinSyntaxFactsCore",
-          "params": [
-            "name"
-          ],
+          "function": "process",
+          "line": 11,
+          "predicate": "(user.role)",
           "span": [
-            31,
-            4,
-            35,
-            5
+            11,
+            8,
+            15,
+            9
           ],
-          "visibility": "private"
-        },
-        {
-          "line": 37,
-          "name": "ready",
-          "owner": "KotlinSyntaxFactsCore",
-          "params": [
-
-          ],
-          "span": [
-            37,
-            4,
-            39,
-            5
-          ],
-          "visibility": "public"
-        },
-        {
-          "line": 6,
-          "name": "process",
-          "owner": "KotlinSyntaxFactsCore",
-          "params": [
-            "user",
-            "items",
-            "callback"
-          ],
-          "span": [
-            6,
-            4,
-            29,
-            5
-          ],
-          "visibility": "public"
-        }
-      ],
-      "owners": [
-        {
-          "kind": "class",
-          "line": 3,
-          "name": "KotlinSyntaxFactsCore",
-          "span": [
-            3,
-            0,
-            40,
-            1
+          "state_refs": [
+            "user.role"
           ]
         },
         {
-          "kind": "class",
-          "line": 42,
-          "name": "Status",
+          "function": "process",
+          "line": 17,
+          "predicate": "status == Status.IDLE && user.ready",
           "span": [
-            42,
-            0,
-            45,
-            1
+            17,
+            8,
+            22,
+            9
+          ],
+          "state_refs": [
+            "user.ready"
           ]
         }
       ],
@@ -261,9 +215,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": true,
           "control": "iterates",
@@ -278,6 +230,154 @@
             12,
             25,
             25
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "enclosing_span": [
+            11,
+            8,
+            15,
+            9
+          ],
+          "function": "process",
+          "kind": "case_dispatch",
+          "line": 11,
+          "members": [
+            "\"admin\"",
+            "\"guest\"",
+            "\"owner\""
+          ],
+          "predicate": "user.role",
+          "span": [
+            11,
+            8,
+            15,
+            9
+          ]
+        },
+        {
+          "enclosing_span": [
+            17,
+            8,
+            22,
+            9
+          ],
+          "function": "process",
+          "kind": "conjunction",
+          "line": 17,
+          "members": [
+            "status == Status.IDLE",
+            "user.ready"
+          ],
+          "predicate": "status == Status.IDLE && user.ready",
+          "span": [
+            17,
+            12,
+            17,
+            47
+          ]
+        }
+      ],
+      "dispatch_sites": [],
+      "file": "gems/fact-mine/examples/syntax-facts/kotlin/core.kt",
+      "functions": [
+        {
+          "line": 31,
+          "name": "audit",
+          "owner": "KotlinSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            31,
+            4,
+            35,
+            5
+          ],
+          "visibility": "private"
+        },
+        {
+          "line": 37,
+          "name": "ready",
+          "owner": "KotlinSyntaxFactsCore",
+          "params": [],
+          "span": [
+            37,
+            4,
+            39,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 6,
+          "name": "process",
+          "owner": "KotlinSyntaxFactsCore",
+          "params": [
+            "user",
+            "items",
+            "callback"
+          ],
+          "span": [
+            6,
+            4,
+            29,
+            5
+          ],
+          "visibility": "public"
+        }
+      ],
+      "language": "kotlin",
+      "owners": [
+        {
+          "kind": "class",
+          "line": 3,
+          "name": "KotlinSyntaxFactsCore",
+          "span": [
+            3,
+            0,
+            40,
+            1
+          ]
+        },
+        {
+          "kind": "class",
+          "line": 42,
+          "name": "Status",
+          "span": [
+            42,
+            0,
+            45,
+            1
+          ]
+        }
+      ],
+      "predicate_bodies": [],
+      "semantic_effects": [
+        {
+          "detail": "println",
+          "function": "audit",
+          "kind": "hidden_io",
+          "line": 32,
+          "span": [
+            32,
+            8,
+            32,
+            21
+          ]
+        },
+        {
+          "detail": "println",
+          "function": "process",
+          "kind": "hidden_io",
+          "line": 21,
+          "span": [
+            21,
+            12,
+            21,
+            19
           ]
         }
       ],
@@ -374,118 +474,8 @@
           ]
         }
       ],
-      "state_writes": [
-
-      ],
-      "decisions": [
-        {
-          "enclosing_span": [
-            11,
-            8,
-            15,
-            9
-          ],
-          "function": "process",
-          "kind": "case_dispatch",
-          "line": 11,
-          "members": [
-            "\"admin\"",
-            "\"guest\"",
-            "\"owner\""
-          ],
-          "predicate": "user.role",
-          "span": [
-            11,
-            8,
-            15,
-            9
-          ]
-        },
-        {
-          "enclosing_span": [
-            17,
-            8,
-            22,
-            9
-          ],
-          "function": "process",
-          "kind": "conjunction",
-          "line": 17,
-          "members": [
-            "status == Status.IDLE",
-            "user.ready"
-          ],
-          "predicate": "status == Status.IDLE && user.ready",
-          "span": [
-            17,
-            12,
-            17,
-            47
-          ]
-        }
-      ],
-      "branch_decisions": [
-        {
-          "function": "process",
-          "line": 11,
-          "predicate": "(user.role)",
-          "span": [
-            11,
-            8,
-            15,
-            9
-          ],
-          "state_refs": [
-            "user.role"
-          ]
-        },
-        {
-          "function": "process",
-          "line": 17,
-          "predicate": "status == Status.IDLE && user.ready",
-          "span": [
-            17,
-            8,
-            22,
-            9
-          ],
-          "state_refs": [
-            "user.ready"
-          ]
-        }
-      ],
-      "dispatch_sites": [
-
-      ],
-      "semantic_effects": [
-        {
-          "detail": "println",
-          "function": "audit",
-          "kind": "hidden_io",
-          "line": 32,
-          "span": [
-            32,
-            8,
-            32,
-            21
-          ]
-        },
-        {
-          "detail": "println",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 21,
-          "span": [
-            21,
-            12,
-            21,
-            19
-          ]
-        }
-      ],
-      "predicate_bodies": [
-
-      ]
+      "state_writes": []
     }
-  ]
+  ],
+  "format": "decomplex.syntax-facts.v1"
 }

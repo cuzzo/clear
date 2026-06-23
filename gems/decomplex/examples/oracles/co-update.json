@@ -1,7 +1,5 @@
 {
   "detector": "co-update",
-  "options": {
-  },
   "expected": {
     "co_written_pairs": [
       {
@@ -14,14 +12,15 @@
     ],
     "neglected_updates": [
       {
+        "has": "storage",
+        "missing": "provenance",
         "pair": [
           "provenance",
           "storage"
         ],
-        "support": 3,
-        "has": "storage",
-        "missing": "provenance"
+        "support": 3
       }
     ]
-  }
+  },
+  "options": {}
 }

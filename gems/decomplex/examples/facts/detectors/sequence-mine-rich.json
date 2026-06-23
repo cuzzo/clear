@@ -1,428 +1,5 @@
 {
   "detector": "sequence-mine",
-  "input": {
-    "documents": [
-      {
-        "file": "facts/sequence_rich.rb",
-        "language": "ruby",
-        "lines": [
-          "sig {",
-          "  acquire",
-          "  release",
-          "}",
-          "sig { acquire release }",
-          "sig { acquire release }",
-          "sig { acquire release }",
-          "sig { acquire }",
-          "sig { release }",
-          "sig { Acquire release }",
-          "sig { acquire release$ }"
-        ],
-        "call_sites": [
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "paired_multiline",
-            "owner": "Fixture",
-            "line": 1,
-            "span": [
-              1,
-              0,
-              4,
-              1
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "paired_1",
-            "owner": "Fixture",
-            "line": 5,
-            "span": [
-              5,
-              0,
-              5,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "paired_2",
-            "owner": "Fixture",
-            "line": 6,
-            "span": [
-              6,
-              0,
-              6,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "paired_3",
-            "owner": "Fixture",
-            "line": 7,
-            "span": [
-              7,
-              0,
-              7,
-              23
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire",
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "missing_release",
-            "owner": "Fixture",
-            "line": 8,
-            "span": [
-              8,
-              0,
-              8,
-              15
-            ],
-            "conditional": false,
-            "arguments": [
-              "acquire"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "missing_acquire",
-            "owner": "Fixture",
-            "line": 9,
-            "span": [
-              9,
-              0,
-              9,
-              15
-            ],
-            "conditional": false,
-            "arguments": [
-              "release"
-            ],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "ignored_caps",
-            "owner": "Fixture",
-            "line": 10,
-            "span": [
-              10,
-              0,
-              10,
-              23
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          },
-          {
-            "receiver": "",
-            "message": "sig",
-            "file": "facts/sequence_rich.rb",
-            "function": "ignored_symbol",
-            "owner": "Fixture",
-            "line": 11,
-            "span": [
-              11,
-              0,
-              11,
-              24
-            ],
-            "conditional": false,
-            "arguments": [],
-            "control": null,
-            "safe_navigation": false,
-            "block": false
-          }
-        ],
-        "protocol_call_paths": [
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "paired_multiline",
-            "line": 1,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_multiline",
-                "line": 1,
-                "span": [
-                  1,
-                  0,
-                  4,
-                  1
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_multiline",
-                "line": 1,
-                "span": [
-                  1,
-                  0,
-                  4,
-                  1
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "paired_1",
-            "line": 5,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_1",
-                "line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_1",
-                "line": 5,
-                "span": [
-                  5,
-                  0,
-                  5,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "paired_2",
-            "line": 6,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_2",
-                "line": 6,
-                "span": [
-                  6,
-                  0,
-                  6,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_2",
-                "line": 6,
-                "span": [
-                  6,
-                  0,
-                  6,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "paired_3",
-            "line": 7,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_3",
-                "line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  23
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "paired_3",
-                "line": 7,
-                "span": [
-                  7,
-                  0,
-                  7,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "missing_release",
-            "line": 8,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "missing_release",
-                "line": 8,
-                "span": [
-                  8,
-                  0,
-                  8,
-                  15
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "missing_acquire",
-            "line": 9,
-            "calls": [
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "missing_acquire",
-                "line": 9,
-                "span": [
-                  9,
-                  0,
-                  9,
-                  15
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "ignored_caps",
-            "line": 10,
-            "calls": [
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "ignored_caps",
-                "line": 10,
-                "span": [
-                  10,
-                  0,
-                  10,
-                  23
-                ]
-              }
-            ]
-          },
-          {
-            "file": "facts/sequence_rich.rb",
-            "owner": "Fixture",
-            "name": "ignored_symbol",
-            "line": 11,
-            "calls": [
-              {
-                "mid": "acquire",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "ignored_symbol",
-                "line": 11,
-                "span": [
-                  11,
-                  0,
-                  11,
-                  24
-                ]
-              },
-              {
-                "mid": "release",
-                "file": "facts/sequence_rich.rb",
-                "owner": "Fixture",
-                "defn": "ignored_symbol",
-                "line": 11,
-                "span": [
-                  11,
-                  0,
-                  11,
-                  24
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "expected": {
     "broken": [
       {
@@ -443,6 +20,429 @@
           ]
         },
         "support": 5
+      }
+    ]
+  },
+  "input": {
+    "documents": [
+      {
+        "call_sites": [
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "paired_multiline",
+            "line": 1,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              1,
+              0,
+              4,
+              1
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "paired_1",
+            "line": 5,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              5,
+              0,
+              5,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "paired_2",
+            "line": 6,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              6,
+              0,
+              6,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire",
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "paired_3",
+            "line": 7,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              7,
+              0,
+              7,
+              23
+            ]
+          },
+          {
+            "arguments": [
+              "acquire"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "missing_release",
+            "line": 8,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              8,
+              0,
+              8,
+              15
+            ]
+          },
+          {
+            "arguments": [
+              "release"
+            ],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "missing_acquire",
+            "line": 9,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              9,
+              0,
+              9,
+              15
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "ignored_caps",
+            "line": 10,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              10,
+              0,
+              10,
+              23
+            ]
+          },
+          {
+            "arguments": [],
+            "block": false,
+            "conditional": false,
+            "control": null,
+            "file": "facts/sequence_rich.rb",
+            "function": "ignored_symbol",
+            "line": 11,
+            "message": "sig",
+            "owner": "Fixture",
+            "receiver": "",
+            "safe_navigation": false,
+            "span": [
+              11,
+              0,
+              11,
+              24
+            ]
+          }
+        ],
+        "file": "facts/sequence_rich.rb",
+        "language": "ruby",
+        "lines": [
+          "sig {",
+          "  acquire",
+          "  release",
+          "}",
+          "sig { acquire release }",
+          "sig { acquire release }",
+          "sig { acquire release }",
+          "sig { acquire }",
+          "sig { release }",
+          "sig { Acquire release }",
+          "sig { acquire release$ }"
+        ],
+        "protocol_call_paths": [
+          {
+            "calls": [
+              {
+                "defn": "paired_multiline",
+                "file": "facts/sequence_rich.rb",
+                "line": 1,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  1,
+                  0,
+                  4,
+                  1
+                ]
+              },
+              {
+                "defn": "paired_multiline",
+                "file": "facts/sequence_rich.rb",
+                "line": 1,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  1,
+                  0,
+                  4,
+                  1
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 1,
+            "name": "paired_multiline",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence_rich.rb",
+                "line": 5,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_1",
+                "file": "facts/sequence_rich.rb",
+                "line": 5,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  5,
+                  0,
+                  5,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 5,
+            "name": "paired_1",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence_rich.rb",
+                "line": 6,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  6,
+                  0,
+                  6,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_2",
+                "file": "facts/sequence_rich.rb",
+                "line": 6,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  6,
+                  0,
+                  6,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 6,
+            "name": "paired_2",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence_rich.rb",
+                "line": 7,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  23
+                ]
+              },
+              {
+                "defn": "paired_3",
+                "file": "facts/sequence_rich.rb",
+                "line": 7,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  7,
+                  0,
+                  7,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 7,
+            "name": "paired_3",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_release",
+                "file": "facts/sequence_rich.rb",
+                "line": 8,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  8,
+                  0,
+                  8,
+                  15
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 8,
+            "name": "missing_release",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "missing_acquire",
+                "file": "facts/sequence_rich.rb",
+                "line": 9,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  9,
+                  0,
+                  9,
+                  15
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 9,
+            "name": "missing_acquire",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "ignored_caps",
+                "file": "facts/sequence_rich.rb",
+                "line": 10,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  10,
+                  0,
+                  10,
+                  23
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 10,
+            "name": "ignored_caps",
+            "owner": "Fixture"
+          },
+          {
+            "calls": [
+              {
+                "defn": "ignored_symbol",
+                "file": "facts/sequence_rich.rb",
+                "line": 11,
+                "mid": "acquire",
+                "owner": "Fixture",
+                "span": [
+                  11,
+                  0,
+                  11,
+                  24
+                ]
+              },
+              {
+                "defn": "ignored_symbol",
+                "file": "facts/sequence_rich.rb",
+                "line": 11,
+                "mid": "release",
+                "owner": "Fixture",
+                "span": [
+                  11,
+                  0,
+                  11,
+                  24
+                ]
+              }
+            ],
+            "file": "facts/sequence_rich.rb",
+            "line": 11,
+            "name": "ignored_symbol",
+            "owner": "Fixture"
+          }
+        ]
       }
     ]
   }

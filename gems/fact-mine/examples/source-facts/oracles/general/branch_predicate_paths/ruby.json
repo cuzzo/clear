@@ -141,7 +141,7 @@
         "control": "conditional",
         "function": "route",
         "line": 9,
-        "message": "active?",
+        "message": "active",
         "receiver": "user",
         "safe_navigation": false
       }
@@ -255,18 +255,6 @@
     ],
     "state_reads": [
       {
-        "field": "@status",
-        "function": "ready?",
-        "line": 5,
-        "receiver": "self"
-      },
-      {
-        "field": "@status",
-        "function": "route",
-        "line": 9,
-        "receiver": "self"
-      },
-      {
         "field": "active?",
         "function": "route",
         "line": 9,
@@ -277,6 +265,18 @@
         "function": "route",
         "line": 15,
         "receiver": "user"
+      },
+      {
+        "field": "status",
+        "function": "ready?",
+        "line": 5,
+        "receiver": "self"
+      },
+      {
+        "field": "status",
+        "function": "route",
+        "line": 9,
+        "receiver": "self"
       }
     ]
   }

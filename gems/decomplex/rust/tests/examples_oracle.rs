@@ -47,7 +47,11 @@ fn shared_examples_match_oracles() -> Result<()> {
             .with_context(|| format!("{} {}", detector_name, fixture.display()))?;
         let projected = project_detector_output(&detector, actual);
 
-        if projected != expected {
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            let mut oracle: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+            oracle["expected"] = projected;
+            fs::write(&oracle_path, serde_json::to_string_pretty(&oracle)?)?;
+        } else if projected != expected {
             failures.push(format!(
                 "{} {}\nexpected: {}\nactual:   {}",
                 detector_name,
@@ -85,7 +89,11 @@ fn shared_detector_fact_examples_match_exact_oracles() -> Result<()> {
         let actual = run_detector_on_fact_input(detector, &input, &fixture_value)
             .with_context(|| format!("{} {}", detector, fixture.display()))?;
 
-        if actual != expected {
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            let mut fixture_val: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
+            fixture_val["expected"] = actual;
+            fs::write(&fixture, serde_json::to_string_pretty(&fixture_val)?)?;
+        } else if actual != expected {
             failures.push(format!(
                 "{} {}\nexpected: {}\nactual:   {}",
                 detector,
@@ -112,25 +120,40 @@ fn shared_local_flow_consumer_fact_examples_match_exact_oracles() -> Result<()> 
     let mut failures = Vec::new();
 
     for fixture in local_flow_fact_fixture_paths(&examples_root)? {
-        let fixture_value: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
-        let expected_by_detector = fixture_value
-            .get("expected")
-            .and_then(Value::as_object)
-            .with_context(|| format!("{} missing expected", fixture.display()))?;
+        let mut fixture_value: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
         let input = detector_fact_input(&fixture_value)
             .with_context(|| format!("{} input", fixture.display()))?;
 
-        for (detector, expected) in expected_by_detector {
-            let actual = run_detector_on_fact_input(detector, &input, &fixture_value)
-                .with_context(|| format!("{} {}", detector, fixture.display()))?;
-            if actual != *expected {
-                failures.push(format!(
-                    "{} {}\nexpected: {}\nactual:   {}",
-                    detector,
-                    fixture.display(),
-                    expected,
-                    actual
-                ));
+        let mut actuals = std::collections::BTreeMap::new();
+        if let Some(expected_by_detector) = fixture_value.get("expected").and_then(Value::as_object) {
+            for detector in expected_by_detector.keys() {
+                let actual = run_detector_on_fact_input(detector, &input, &fixture_value)
+                    .with_context(|| format!("{} {}", detector, fixture.display()))?;
+                actuals.insert(detector.clone(), actual);
+            }
+        }
+
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            if let Some(expected_by_detector) = fixture_value.get_mut("expected").and_then(Value::as_object_mut) {
+                for (detector, actual) in actuals {
+                    expected_by_detector.insert(detector, actual);
+                }
+            }
+            fs::write(&fixture, serde_json::to_string_pretty(&fixture_value)?)?;
+        } else {
+            if let Some(expected_by_detector) = fixture_value.get("expected").and_then(Value::as_object) {
+                for (detector, expected) in expected_by_detector {
+                    let actual = actuals.get(detector).unwrap();
+                    if *actual != *expected {
+                        failures.push(format!(
+                            "{} {}\nexpected: {}\nactual:   {}",
+                            detector,
+                            fixture.display(),
+                            expected,
+                            actual
+                        ));
+                    }
+                }
             }
         }
     }
@@ -167,22 +190,30 @@ fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
             .with_context(|| format!("failed to build report from {}", fixture.display()))?;
         let actual = project_report(&report);
 
-        if actual != expected {
-            failures.push(format!(
-                "{}\nexpected: {}\nactual:   {}",
-                fixture.display(),
-                expected,
-                actual
-            ));
-        }
-        let markdown = report.to_markdown().trim_end().to_string();
-        if markdown != expected_markdown {
-            failures.push(format!(
-                "{} markdown\nexpected: {}\nactual:   {}",
-                fixture.display(),
-                expected_markdown,
-                markdown
-            ));
+        if std::env::var("UPDATE_ORACLES").is_ok() {
+            let mut fixture_val: Value = serde_json::from_str(&fs::read_to_string(&fixture)?)?;
+            fixture_val["expected"] = actual;
+            fs::write(&fixture, serde_json::to_string_pretty(&fixture_val)?)?;
+            let markdown = report.to_markdown().trim_end().to_string();
+            fs::write(fixture.with_extension("md"), &markdown)?;
+        } else {
+            if actual != expected {
+                failures.push(format!(
+                    "{}\nexpected: {}\nactual:   {}",
+                    fixture.display(),
+                    expected,
+                    actual
+                ));
+            }
+            let markdown = report.to_markdown().trim_end().to_string();
+            if markdown != expected_markdown {
+                failures.push(format!(
+                    "{} markdown\nexpected: {}\nactual:   {}",
+                    fixture.display(),
+                    expected_markdown,
+                    markdown
+                ));
+            }
         }
     }
 

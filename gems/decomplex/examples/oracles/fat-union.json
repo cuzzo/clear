@@ -1,7 +1,5 @@
 {
   "detector": "fat-union",
-  "options": {
-  },
   "expected": [
     {
       "common": [
@@ -11,19 +9,20 @@
         "span",
         "ty"
       ],
+      "degenerate": false,
+      "scatter": 1,
+      "support": 1,
       "variant": [
         "name",
         "recv",
         "value"
       ],
-      "degenerate": false,
-      "support": 1,
-      "scatter": 1,
       "variant_set": [
         "AST.Call",
         "AST.Func",
         "AST.Lit"
       ]
     }
-  ]
+  ],
+  "options": {}
 }

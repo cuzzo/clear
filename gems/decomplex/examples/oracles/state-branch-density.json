@@ -1,7 +1,5 @@
 {
   "detector": "state-branch-density",
-  "options": {
-  },
   "expected": [
     {
       "decisions": 1,
@@ -10,5 +8,6 @@
         "checked"
       ]
     }
-  ]
+  ],
+  "options": {}
 }
