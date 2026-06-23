@@ -80,7 +80,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": "audit",
+          "function": "Status",
           "line": 53,
           "message": "send",
           "owner": "CppSyntaxFactsCore",
@@ -389,7 +389,7 @@
         },
         {
           "line": 51,
-          "name": "audit",
+          "name": "Status",
           "owner": "CppSyntaxFactsCore",
           "params": [
             "name"
@@ -539,7 +539,7 @@
         },
         {
           "field": "send",
-          "function": "audit",
+          "function": "Status",
           "line": 53,
           "owner": "CppSyntaxFactsCore",
           "receiver": "sink",
@@ -552,7 +552,7 @@
         },
         {
           "field": "sink",
-          "function": "audit",
+          "function": "Status",
           "line": 53,
           "owner": "CppSyntaxFactsCore",
           "receiver": "self",
@@ -565,7 +565,7 @@
         },
         {
           "field": "status",
-          "function": "audit",
+          "function": "Status",
           "line": 54,
           "owner": "CppSyntaxFactsCore",
           "receiver": "self",

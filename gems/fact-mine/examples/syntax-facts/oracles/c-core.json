@@ -121,7 +121,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": "CSyntaxFactsCore_audit",
+          "function": "Status",
           "line": 43,
           "message": "puts",
           "owner": "CSyntaxFactsCore",
@@ -227,7 +227,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": "CSyntaxFactsCore_audit",
+          "function": "Status",
           "line": 44,
           "message": "sink_send",
           "owner": "CSyntaxFactsCore",
@@ -334,7 +334,7 @@
         },
         {
           "line": 42,
-          "name": "CSyntaxFactsCore_audit",
+          "name": "Status",
           "owner": "CSyntaxFactsCore",
           "params": [
             "self",
@@ -394,7 +394,7 @@
         },
         {
           "detail": "puts",
-          "function": "CSyntaxFactsCore_audit",
+          "function": "Status",
           "kind": "hidden_io",
           "line": 43,
           "span": [
@@ -486,7 +486,7 @@
         },
         {
           "field": "sink",
-          "function": "CSyntaxFactsCore_audit",
+          "function": "Status",
           "line": 44,
           "owner": "CSyntaxFactsCore",
           "receiver": "self",
@@ -495,19 +495,6 @@
             12,
             44,
             22
-          ]
-        },
-        {
-          "field": "status",
-          "function": "CSyntaxFactsCore_audit",
-          "line": 45,
-          "owner": "CSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            45,
-            9,
-            45,
-            21
           ]
         },
         {
@@ -521,6 +508,19 @@
             6,
             30,
             18
+          ]
+        },
+        {
+          "field": "status",
+          "function": "Status",
+          "line": 45,
+          "owner": "CSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            45,
+            9,
+            45,
+            21
           ]
         }
       ],

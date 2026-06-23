@@ -29,6 +29,98 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 }
 
 pub(crate) trait AstNormalizationAdapter: Sync {
+    fn check_node_role(&self, node: TreeSitterNode<'_>, role: &str) -> bool {
+        let kind = node.kind();
+        match role {
+            "root" => kind == "program",
+            "function" => matches!(
+                kind,
+                "method"
+                    | "function_definition"
+                    | "function_declaration"
+                    | "method_definition"
+                    | "method_declaration"
+                    | "function_item"
+            ),
+            "subshell" => kind == "subshell",
+            "operator_assignment" => kind == "operator_assignment",
+            "assignment" => matches!(kind, "assignment" | "assignment_expression" | "assignment_statement"),
+            "variable_declarator" => kind == "variable_declarator",
+            "super" => kind == "super",
+            "return_or_break" => matches!(
+                kind,
+                "return"
+                    | "return_statement"
+                    | "return_expression"
+                    | "break"
+                    | "break_statement"
+                    | "break_expression"
+                    | "next"
+                    | "continue_statement"
+            ),
+            "nil" => matches!(kind, "nil" | "none" | "null"),
+            "true" => kind == "true",
+            "false" => kind == "false",
+            "identifier" => matches!(
+                kind,
+                "identifier"
+                    | "simple_identifier"
+                    | "property_identifier"
+                    | "field_identifier"
+                    | "shorthand_property_identifier"
+            ),
+            "self_or_this" => matches!(kind, "self" | "this"),
+            "array" => kind == "array",
+            "float" => matches!(kind, "float" | "float_literal"),
+            "pair" => kind == "pair",
+            "symbol" => matches!(kind, "simple_symbol" | "symbol"),
+            "argument_list" => kind == "argument_list" || kind == "arguments",
+            "call" => kind == "call",
+            "element_reference" => matches!(kind, "element_reference" | "subscript" | "subscript_expression" | "bracket_index_expression"),
+            "multiple_assignment_left" => kind == "left_assignment_list",
+            "exceptions" => kind == "exceptions",
+            "hash_key_symbol" => kind == "hash_key_symbol",
+            "body_statement" => kind == "body_statement",
+            "block_parameters" => kind == "block_parameters",
+            "destructured_parameter" => kind == "destructured_parameter",
+            "optional_or_keyword_parameter" => matches!(kind, "optional_parameter" | "keyword_parameter"),
+            "expression_list" => kind == "expression_list",
+            "short_var_declaration" => kind == "short_var_declaration",
+            "navigation_suffix" => kind == "navigation_suffix",
+            "match_block" => kind == "match_block",
+            "method_parameters" => kind == "method_parameters",
+            "parameter_child" => matches!(kind, "parameters" | "parameter_list" | "formal_parameters" | "function_value_parameters" | "method_parameters"),
+            "splat_or_rest" => matches!(kind, "splat" | "splat_parameter" | "rest_assignment"),
+            "constant" => matches!(kind, "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"),
+            "block_or_do_block" => matches!(kind, "block" | "do_block"),
+            "string_content_or_interpolation" => matches!(kind, "string_content" | "interpolation"),
+            "regex_or_literal" => matches!(kind, "regex" | "regex_literal"),
+            "assignment_or_augmented" => matches!(kind, "assignment" | "augmented_assignment"),
+            "unary" => kind == "unary",
+            "block_wrapper" => matches!(kind, "body_statement" | "block_body" | "statement" | "statement_block" | "block"),
+            "dotted_name" => kind == "dotted_name",
+            "type" => kind == "type",
+            "union_type" => kind == "union_type",
+            "generic_type" => kind == "generic_type",
+            "attribute" => kind == "attribute",
+            "string" => matches!(kind, "string" | "string_content" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"),
+            "list" => kind == "list",
+            "expression_statement" => kind == "expression_statement",
+            "else" => kind == "else",
+            "then" => kind == "then",
+            "if_statement" => kind == "if_statement",
+            "switch_default" => kind == "switch_default",
+            "scope_resolution_or_scoped_type" => matches!(kind, "scope_resolution" | "scoped_type_identifier"),
+            "field" => kind == "field",
+            "module" => kind == "module",
+            "yield" => kind == "yield",
+            "integer" => kind == "integer",
+            "block_child" => matches!(kind, "body_statement" | "block_body" | "block" | "do_block" | "class_body" | "compound_statement" | "declaration_list" | "function_body" | "match_block" | "statement_block" | "statement_list" | "statements" | "switch_body" | "then" | "control_structure_body"),
+            "type_leaf" => matches!(kind, "ellipsis" | "identifier" | "nil" | "none" | "null"),
+            _ => false,
+        }
+    }
+
     fn tracks_dynamic_local_scope(&self) -> bool {
         false
     }

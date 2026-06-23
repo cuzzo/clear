@@ -344,6 +344,18 @@
       "predicate_bodies": [],
       "semantic_effects": [
         {
+          "detail": "op-assign",
+          "function": "process",
+          "kind": "hidden_mutation",
+          "line": 19,
+          "span": [
+            19,
+            12,
+            19,
+            27
+          ]
+        },
+        {
           "detail": "open",
           "function": "process",
           "kind": "hidden_io",
@@ -526,19 +538,6 @@
             8,
             10,
             22
-          ]
-        },
-        {
-          "field": "count",
-          "function": "process",
-          "line": 19,
-          "owner": "PythonSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            19,
-            12,
-            19,
-            27
           ]
         },
         {
