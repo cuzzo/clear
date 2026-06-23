@@ -1171,6 +1171,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+          use-cache: false
       - name: Install kcov
         run: |
           sudo apt-get update
@@ -1211,6 +1212,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+          use-cache: false
       - name: Install kcov
         run: |
           sudo apt-get update
