@@ -137,10 +137,10 @@ jobs:
             tree-sitter-swift@0.7.1
       - uses: dtolnay/rust-toolchain@stable
       - name: Build fact-mine-rust binary
-        run: cargo build --release --manifest-path gems/fact-mine/rust/Cargo.toml
+        run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
       - run: bundle exec rspec gems/nil-kill/spec
         env:
-          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
 
   ruby-gems-coverage:
     name: Ruby gems coverage
@@ -178,11 +178,11 @@ jobs:
             tree-sitter-swift@0.7.1
       - uses: dtolnay/rust-toolchain@stable
       - name: Build fact-mine-rust binary
-        run: cargo build --release --manifest-path gems/fact-mine/rust/Cargo.toml
+        run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
-          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-gems
@@ -291,7 +291,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Run Rust Decomplex tests
-        run: cargo test --manifest-path gems/decomplex/rust/Cargo.toml
+        run: cargo test --manifest-path gems/decomplex/Cargo.toml
 
   fact-mine-rust-coverage:
     name: FactMine Rust coverage
@@ -317,7 +317,7 @@ jobs:
         run: |
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov \
-            --manifest-path gems/fact-mine/rust/Cargo.toml \
+            --manifest-path gems/fact-mine/Cargo.toml \
             --all-features \
             --cobertura \
             --output-path tmp/fact-mine-rust-coverage/cobertura.xml
@@ -357,7 +357,7 @@ jobs:
         run: |
           mkdir -p tmp/decomplex-rust-coverage
           cargo llvm-cov \
-            --manifest-path gems/decomplex/rust/Cargo.toml \
+            --manifest-path gems/decomplex/Cargo.toml \
             --all-features \
             --cobertura \
             --output-path tmp/decomplex-rust-coverage/cobertura.xml
@@ -1372,7 +1372,7 @@ jobs:
             tree-sitter-rust \
             @tree-sitter-grammars/tree-sitter-zig
       - name: Build Rust Decomplex binary
-        run: cargo build --release --manifest-path gems/decomplex/rust/Cargo.toml
+        run: cargo build --release --manifest-path gems/decomplex/Cargo.toml
       - name: Download Ruby coverage artifacts
         if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
         uses: actions/download-artifact@v4
@@ -1393,7 +1393,7 @@ jobs:
           path: tmp/generalized-gems-coverage/lineage-rust-coverage
       - name: Generate ordered SARIF reports
         env:
-          FACT_MINE_RUST_BINARY: ./gems/fact-mine/rust/target/release/fact-mine-rust
+          FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
         run: |
           git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
           mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif
@@ -1413,7 +1413,7 @@ jobs:
             --head=HEAD \
             --out-dir=tmp/generalized-gems-sarif \
             --top=80 \
-            --decomplex-binary=./gems/decomplex/rust/target/release/decomplex-rust \
+            --decomplex-binary=./gems/decomplex/target/release/decomplex-rust \
             "${coverage_args[@]}"
       - name: Upload Decomplex SARIF
         uses: github/codeql-action/upload-sarif@v3

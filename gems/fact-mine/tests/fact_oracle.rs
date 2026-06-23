@@ -100,7 +100,7 @@ fn source_fact_examples_match_oracles() -> Result<()> {
 }
 
 fn examples_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     fs::canonicalize(&root).unwrap_or(root)
 }
 

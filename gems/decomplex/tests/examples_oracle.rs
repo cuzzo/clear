@@ -231,7 +231,7 @@ fn shared_report_fact_examples_match_postprocess_oracles() -> Result<()> {
 }
 
 fn examples_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples")
 }
 
 fn fixture_paths(examples_root: &Path) -> Result<Vec<PathBuf>> {

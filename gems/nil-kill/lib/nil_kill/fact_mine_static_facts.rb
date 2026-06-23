@@ -11,7 +11,7 @@ module NilKill
   module FactMineStaticFacts
     FACT_MINE_RUST_BINARY = ENV.fetch(
       "FACT_MINE_RUST_BINARY",
-      File.join(NilKill::ROOT, "gems", "fact-mine", "rust", "target", "release", "fact-mine-rust")
+      File.join(NilKill::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
     module_function

@@ -8,8 +8,8 @@ ROOT = File.expand_path("..", __dir__)
 Dir.chdir(ROOT)
 
 PACKAGES = {
-  "decomplex-rust" => "gems/decomplex/rust",
-  "fact-mine-rust" => "gems/fact-mine/rust",
+  "decomplex-rust" => "gems/decomplex",
+  "fact-mine-rust" => "gems/fact-mine",
   "lineage" => "gems/lineage"
 }.freeze
 

@@ -10,7 +10,7 @@ module Boobytrap
 
     DECOMPLEX_RUST_BINARY = ENV.fetch(
       "DECOMPLEX_RUST_BINARY",
-      File.expand_path("../../../decomplex/rust/target/release/decomplex-rust", __dir__)
+      File.expand_path("../../../decomplex/target/release/decomplex-rust", __dir__)
     ).freeze
 
     module_function
@@ -190,7 +190,7 @@ module Decomplex
 
     def parse(file, parser: "tree_sitter", language: nil)
       lang = language || language_for(file)
-      bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("../../../fact-mine/rust/target/release/fact-mine-rust", __dir__))
+      bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("../../../fact-mine/target/release/fact-mine-rust", __dir__))
       return Document.new([], lang) unless File.executable?(bin)
 
       require "open3"

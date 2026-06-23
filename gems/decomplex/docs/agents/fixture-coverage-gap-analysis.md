@@ -7,7 +7,7 @@ Date: 2026-06-20
 The shared detector examples now run in both places:
 
 - Ruby: `gems/decomplex/test/examples_oracle_test.rb`
-- Rust: `gems/decomplex/rust/tests/examples_oracle.rs`
+- Rust: `gems/decomplex/tests/examples_oracle.rs`
 
 Current shared fixture grid:
 

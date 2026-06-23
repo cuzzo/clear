@@ -21,7 +21,7 @@ module Espalier
   class StaticEvidence
     FACT_MINE_RUST_BINARY = ENV.fetch(
       "FACT_MINE_RUST_BINARY",
-      File.join(Espalier::ROOT, "gems", "fact-mine", "rust", "target", "release", "fact-mine-rust")
+      File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
     def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
@@ -241,6 +241,54 @@ module Espalier
       return_origins = Array(facts["return_origins"])
       noreturn_methods = Array(facts["noreturn_methods"])
       hash_record_escape_sites = Array(facts["hash_record_escape_sites"])
+
+      # Collect languages of owners to know if they need @ prepended for fields
+      owner_languages = {}
+      fields.each do |f|
+        owner_languages[f["owner"]] = f["language"] if f["owner"] && f["language"]
+      end
+      methods.each do |m|
+        owner_languages[m["owner"]] = m["language"] if m["owner"] && m["language"]
+      end
+
+      # Homogeneous project language default
+      project_languages = files.map { |f| normalize_language(TreeSitter.language_for(f)) }.compact.uniq
+      default_lang = project_languages.size == 1 ? project_languages.first.to_s : nil
+
+      normalize_key = ->(key) do
+        klass, field = key.split("\u0000", 2)
+        if klass && field && !field.start_with?("@")
+          lang = owner_languages[klass] || default_lang
+          if %w[ruby python javascript typescript].include?(lang.to_s)
+            "#{klass}\u0000@#{field}"
+          else
+            key
+          end
+        else
+          key
+        end
+      end
+
+      # Normalize state_types keys
+      normalized_state_types = {}
+      state_types.each do |key, val|
+        normalized_state_types[normalize_key.call(key)] = val
+      end
+      state_types = normalized_state_types
+
+      # Normalize state_protocols keys
+      normalized_state_protocols = {}
+      state_protocols.each do |key, val|
+        normalized_state_protocols[normalize_key.call(key)] = val
+      end
+      state_protocols = normalized_state_protocols
+
+      # Normalize state_param_origins keys
+      normalized_state_param_origins = {}
+      state_param_origins.each do |key, val|
+        normalized_state_param_origins[normalize_key.call(key)] = val
+      end
+      state_param_origins = normalized_state_param_origins
 
       type_defs = deduped[:type_definitions]
       alias_recommendations = AliasRecommendations.build(type_definitions: type_defs)

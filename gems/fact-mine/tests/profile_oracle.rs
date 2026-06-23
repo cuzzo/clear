@@ -7,8 +7,6 @@ use std::path::PathBuf;
 
 fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
         .join("examples")
         .join("profile")
 }
