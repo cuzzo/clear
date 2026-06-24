@@ -72,8 +72,6 @@ module NilKill
     end
 
     class Context
-      EMPTY_SET = Set.new.freeze
-
       attr_reader :source, :root, :path
 
       def initialize(source, root, path)
@@ -81,26 +79,18 @@ module NilKill
         @root = root
         @path = path
         @cache = {}
-<<<<<<< HEAD
-=======
-        @node_class_cache = {}
->>>>>>> origin/nil-kill-rust
         @children_cache = {}
         @named_children_cache = {}
         @named_field_cache = {}
         @locals_by_scope = {}
-        @scope_parent = {}
-        @scope_for_node = {}
-        @effective_locals_by_scope = {}
-        scan_scopes(root, [])
-        build_effective_locals!
+        scan_scopes(root)
       end
 
       def wrap(raw, force: nil)
         return nil unless raw
         return nil if raw.respond_to?(:named?) && !raw.named? && force.nil?
 
-        klass = force || cached_node_class(raw)
+        klass = force || node_class(raw)
         return nil unless klass
 
         key = [raw.start_byte, raw.end_byte, raw.kind, klass.name]
@@ -123,11 +113,7 @@ module NilKill
       end
 
       def named_field(raw, name)
-<<<<<<< HEAD
         key = [raw_key(raw), name.to_s]
-=======
-        key = [scope_key(raw), name]
->>>>>>> origin/nil-kill-rust
         return @named_field_cache[key] if @named_field_cache.key?(key)
 
         @named_field_cache[key] = raw.child_by_field_name(name)
@@ -136,7 +122,6 @@ module NilKill
       end
 
       def children(raw)
-<<<<<<< HEAD
         key = raw_key(raw)
         @children_cache.fetch(key) do
           @children_cache[key] = Array(raw.children)
@@ -152,19 +137,6 @@ module NilKill
         end
       rescue StandardError
         []
-=======
-        key = scope_key(raw)
-        return @children_cache[key] if @children_cache.key?(key)
-
-        @children_cache[key] = Array(raw.children)
-      end
-
-      def named_children(raw)
-        key = scope_key(raw)
-        return @named_children_cache[key] if @named_children_cache.key?(key)
-
-        @named_children_cache[key] = Array(raw.named_children)
->>>>>>> origin/nil-kill-rust
       end
 
       def child_token(raw, text)
@@ -201,18 +173,24 @@ module NilKill
       end
 
       def scope_locals_for(raw)
-        scope = @scope_for_node[scope_key(raw)]
-        scope ? @effective_locals_by_scope.fetch(scope, EMPTY_SET) : EMPTY_SET
+        locals = Set.new
+        @locals_by_scope.each do |(start_byte, end_byte, _kind), scope_locals|
+          locals.merge(scope_locals) if raw.start_byte >= start_byte && raw.end_byte <= end_byte
+        end
+
+        node = raw
+        seen = Set.new
+        while node
+          key = scope_key(node)
+          break if seen.include?(key)
+          seen.add(key)
+          locals.merge(@locals_by_scope[key]) if @locals_by_scope.key?(key)
+          node = node.parent
+        end
+        locals
       end
 
       private
-
-      def cached_node_class(raw)
-        key = scope_key(raw)
-        return @node_class_cache[key] if @node_class_cache.key?(key)
-
-        @node_class_cache[key] = node_class(raw)
-      end
 
       def node_class(raw)
         return nil if raw.kind == "comment"
@@ -283,14 +261,14 @@ module NilKill
       end
 
       def string_class(raw)
-        named_children(raw).any? { |child| child.kind == "interpolation" } ? InterpolatedStringNode : StringNode
+        raw.named_children.any? { |child| child.kind == "interpolation" } ? InterpolatedStringNode : StringNode
       end
 
       def assignment_class(raw)
-        lhs = named_field(raw, "left") || named_children(raw).first
+        lhs = named_field(raw, "left") || raw.named_children.first
         if lhs&.kind == "element_reference"
-          return IndexOrWriteNode if raw.kind == "operator_assignment" && children(raw).any? { |child| child.text.to_s == "||=" }
-          return IndexAndWriteNode if raw.kind == "operator_assignment" && children(raw).any? { |child| child.text.to_s == "&&=" }
+          return IndexOrWriteNode if raw.kind == "operator_assignment" && raw.children.any? { |child| child.text.to_s == "||=" }
+          return IndexAndWriteNode if raw.kind == "operator_assignment" && raw.children.any? { |child| child.text.to_s == "&&=" }
           return IndexOperatorWriteNode if raw.kind == "operator_assignment"
 
           return CallNode
@@ -309,7 +287,7 @@ module NilKill
       end
 
       def binary_class(raw)
-        op = children(raw).find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s
+        op = raw.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s
         %w[|| or].include?(op) ? OrNode : CallNode
       end
 
@@ -326,7 +304,7 @@ module NilKill
 
       def method_body_statement?(raw)
         return false unless raw.kind == "body_statement"
-        return true if children(raw).first&.kind == "def"
+        return true if raw.children.first&.kind == "def"
 
         modifier_def_container(raw)
       end
@@ -334,15 +312,15 @@ module NilKill
       def modifier_def_container(raw)
         return nil unless %w[body_statement call].include?(raw.kind)
 
-        named_children(raw).find { |child| child.kind == "argument_list" && children(child).first&.kind == "def" }
+        raw.named_children.find { |child| child.kind == "argument_list" && child.children.first&.kind == "def" }
       end
 
       def hidden_def_container(raw)
-        children(raw).first&.kind == "def" ? raw : modifier_def_container(raw)
+        raw.children.first&.kind == "def" ? raw : modifier_def_container(raw)
       end
 
       def hidden_method_definition?(raw)
-        return true if raw.kind == "body_statement" && children(raw).first&.kind == "def"
+        return true if raw.kind == "body_statement" && raw.children.first&.kind == "def"
         return true if modifier_def_container(raw)
 
         false
@@ -350,28 +328,28 @@ module NilKill
 
       def return_body_statement?(raw)
         return false unless %w[body_statement block_body then].include?(raw.kind)
-        return false unless children(raw).first&.kind == "return"
-        return false if %w[block_body then].include?(raw.kind) && named_children(raw).any? { |child| child.kind == "return" }
+        return false unless raw.children.first&.kind == "return"
+        return false if %w[block_body then].include?(raw.kind) && raw.named_children.any? { |child| child.kind == "return" }
 
         true
       end
 
       def singleton_class_body_statement?(raw)
         raw.kind == "body_statement" &&
-          children(raw).first&.kind == "class" &&
-          !children(raw).first.named? &&
-          children(raw).any? { |child| !child.named? && child.text.to_s == "<<" }
+          raw.children.first&.kind == "class" &&
+          !raw.children.first.named? &&
+          raw.children.any? { |child| !child.named? && child.text.to_s == "<<" }
       end
 
       def class_body_statement?(raw)
         raw.kind == "body_statement" &&
-          children(raw).first&.kind == "class" &&
-          !children(raw).first.named? &&
+          raw.children.first&.kind == "class" &&
+          !raw.children.first.named? &&
           !singleton_class_body_statement?(raw)
       end
 
       def module_body_statement?(raw)
-        raw.kind == "body_statement" && children(raw).first&.kind == "module" && !children(raw).first.named?
+        raw.kind == "body_statement" && raw.children.first&.kind == "module" && !raw.children.first.named?
       end
 
       def control_body_statement?(raw)
@@ -382,7 +360,7 @@ module NilKill
         return nil unless raw.kind == "body_statement"
         return nil if wrapped_control_statement_list?(raw)
 
-        case children(raw).first&.kind
+        case raw.children.first&.kind
         when "if" then IfNode
         when "unless" then UnlessNode
         when "while" then WhileNode
@@ -395,27 +373,19 @@ module NilKill
 
       def wrapped_control_statement_list?(raw)
         return false unless raw.kind == "body_statement"
-        return false unless %w[if unless while until case begin].include?(children(raw).first&.kind)
+        return false unless %w[if unless while until case begin].include?(raw.children.first&.kind)
 
-        first_named = named_children(raw).first
-        %w[body_statement if unless while until case begin].include?(first_named&.kind) && named_children(raw).size > 1
+        first_named = raw.named_children.first
+        %w[body_statement if unless while until case begin].include?(first_named&.kind) && raw.named_children.size > 1
       end
 
-      def scan_scopes(raw, scope_stack)
+      def scan_scopes(raw)
         return unless raw
 
-        entered_scope = false
         if scope_boundary?(raw)
-          key = scope_key(raw)
-          @locals_by_scope[key] = collect_locals(raw)
-          @scope_parent[key] = scope_stack.last
-          scope_stack.push(key)
-          entered_scope = true
+          @locals_by_scope[scope_key(raw)] = collect_locals(raw)
         end
-        @scope_for_node[scope_key(raw)] = scope_stack.last
-        children(raw).each { |child| scan_scopes(child, scope_stack) }
-      ensure
-        scope_stack.pop if entered_scope
+        raw.children.each { |child| scan_scopes(child) }
       end
 
       def scope_boundary?(raw)
@@ -433,13 +403,13 @@ module NilKill
           return if node != scope && %w[method singleton_method class module singleton_class lambda].include?(node.kind)
 
           if %w[assignment operator_assignment].include?(node.kind)
-            lhs = named_field(node, "left") || named_children(node).first
+            lhs = named_field(node, "left") || node.named_children.first
             locals << lhs.text.to_s if lhs&.kind == "identifier"
           elsif node.kind == "rescue"
             variable = named_field(node, "variable")
-            named_children(variable).each { |child| locals << child.text.to_s if child.kind == "identifier" } if variable
+            variable&.named_children&.each { |child| locals << child.text.to_s if child.kind == "identifier" }
           end
-          children(node).each { |child| walk.call(child) }
+          node.children.each { |child| walk.call(child) }
         end
         walk.call(scope)
         locals
@@ -450,34 +420,18 @@ module NilKill
           if %w[method singleton_method].include?(scope.kind)
             named_field(scope, "parameters")
           elsif hidden_method_definition?(scope)
-            container = hidden_def_container(scope)
-            container && named_children(container).find { |child| child.kind == "method_parameters" }
+            hidden_def_container(scope)&.named_children&.find { |child| child.kind == "method_parameters" }
           elsif %w[block do_block].include?(scope.kind)
             named_field(scope, "parameters")
-        end
+          end
         return unless params
 
-        named_children(params).each do |param|
+        params.named_children.each do |param|
           name = named_field(param, "name") ||
-                 named_children(param).find { |child| child.kind == "identifier" } ||
+                 param.named_children.find { |child| child.kind == "identifier" } ||
                  (param.kind == "identifier" ? param : nil)
           locals << name.text.to_s if name
         end
-      end
-
-      def build_effective_locals!
-        @locals_by_scope.each_key { |scope| effective_locals_for(scope, Set.new) }
-      end
-
-      def effective_locals_for(scope, seen)
-        return @effective_locals_by_scope[scope] if @effective_locals_by_scope.key?(scope)
-        return EMPTY_SET if scope.nil? || seen.include?(scope)
-
-        seen.add(scope)
-        parent = @scope_parent[scope]
-        locals = parent ? effective_locals_for(parent, seen).dup : Set.new
-        locals.merge(@locals_by_scope.fetch(scope, EMPTY_SET))
-        @effective_locals_by_scope[scope] = locals.freeze
       end
     end
 
@@ -511,18 +465,6 @@ module NilKill
 
       private
 
-      def children(node = raw)
-        return [] unless node
-
-        context.children(node)
-      end
-
-      def named_children(node = raw)
-        return [] unless node
-
-        context.named_children(node)
-      end
-
       def statement_node(node)
         return nil unless node
         if %w[body_statement block_body then].include?(node.kind)
@@ -535,10 +477,10 @@ module NilKill
 
     class ProgramNode < Node
       def statements
-        if children.first&.text.to_s == "{" && children.last&.text.to_s == "}"
+        if raw.children.first&.text.to_s == "{" && raw.children.last&.text.to_s == "}"
           return @statements ||= StatementsNode.synthetic(context, raw, [context.wrap(raw, force: HiddenHashNode)].compact)
         end
-        if children.first&.text.to_s == "[" && children.last&.text.to_s == "]"
+        if raw.children.first&.text.to_s == "[" && raw.children.last&.text.to_s == "]"
           return @statements ||= StatementsNode.synthetic(context, raw, [context.wrap(raw, force: HiddenArrayNode)].compact)
         end
 
@@ -575,8 +517,7 @@ module NilKill
       end
 
       def initialize(context, raw, children = nil)
-        super(context, raw, children || [])
-        @children = statement_children(context, raw) unless children
+        super(context, raw, children || statement_children(context, raw))
       end
 
       def body
@@ -600,7 +541,7 @@ module NilKill
 
         if expression_container?(raw) && expression_body_statement?(raw)
           if simple_child_expression?(raw)
-            return [context.wrap(named_children(raw).first)].compact
+            return [context.wrap(raw.named_children.first)].compact
           end
 
           return [context.wrap(raw, force: expression_class(context, raw))].compact
@@ -614,26 +555,26 @@ module NilKill
       end
 
       def hidden_def_statement?(raw)
-        raw.kind == "body_statement" && (children(raw).first&.kind == "def" ||
-          named_children(raw).any? { |child| child.kind == "argument_list" && children(child).first&.kind == "def" })
+        raw.kind == "body_statement" && (raw.children.first&.kind == "def" ||
+          raw.named_children.any? { |child| child.kind == "argument_list" && child.children.first&.kind == "def" })
       end
 
       def return_body_statement?(raw)
         return false unless %w[body_statement block_body then].include?(raw.kind)
-        return false unless children(raw).first&.kind == "return"
-        return false if %w[block_body then].include?(raw.kind) && named_children(raw).any? { |child| child.kind == "return" }
+        return false unless raw.children.first&.kind == "return"
+        return false if %w[block_body then].include?(raw.kind) && raw.named_children.any? { |child| child.kind == "return" }
 
         true
       end
 
       def control_body_statement?(raw)
         raw.kind == "body_statement" &&
-          %w[if unless while until case begin].include?(children(raw).first&.kind) &&
+          %w[if unless while until case begin].include?(raw.children.first&.kind) &&
           !wrapped_control_statement_list?(raw)
       end
 
       def control_body_statement_class(raw)
-        case children(raw).first&.kind
+        case raw.children.first&.kind
         when "if" then IfNode
         when "unless" then UnlessNode
         when "while" then WhileNode
@@ -644,14 +585,14 @@ module NilKill
       end
 
       def wrapped_control_statement_list?(raw)
-        first_named = named_children(raw).first
-        %w[body_statement if unless while until case begin].include?(first_named&.kind) && named_children(raw).size > 1
+        first_named = raw.named_children.first
+        %w[body_statement if unless while until case begin].include?(first_named&.kind) && raw.named_children.size > 1
       end
 
       def expression_body_statement?(raw)
-        first = children(raw).first
+        first = raw.children.first
         return false if first && %w[def class module if unless while until case begin rescue ensure].include?(first.kind)
-        return false if named_children(raw).any? { |child| %w[method singleton_method class module].include?(child.kind) }
+        return false if raw.named_children.any? { |child| %w[method singleton_method class module].include?(child.kind) }
         return false if top_level_statement_list?(raw)
 
         true
@@ -659,42 +600,42 @@ module NilKill
 
       def top_level_statement_list?(raw)
         return false unless %w[body_statement block_body then].include?(raw.kind)
-        return false if named_children(raw).size <= 1
+        return false if raw.named_children.size <= 1
         return false if direct_token?(raw, ".") || direct_token?(raw, "&.")
         return false if direct_token?(raw, "[") || direct_token?(raw, "]")
-        return false if children(raw).first&.text.to_s == "["
-        return false if children(raw).first&.text.to_s == "{"
+        return false if raw.children.first&.text.to_s == "["
+        return false if raw.children.first&.text.to_s == "{"
         return false if direct_token?(raw, "=")
         return false if direct_token?(raw, "rescue")
         return false if direct_token?(raw, "?") && direct_token?(raw, ":")
-        return false if children(raw).any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\.\.\.?|\+|-|\*|\/|%|\|\||&&|or|and)\z/) }
-        return false if named_children(raw).any? { |child| %w[argument_list block do_block].include?(child.kind) }
+        return false if raw.children.any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\.\.\.?|\+|-|\*|\/|%|\|\||&&|or|and)\z/) }
+        return false if raw.named_children.any? { |child| %w[argument_list block do_block].include?(child.kind) }
 
         true
       end
 
       def simple_child_expression?(raw)
-        named_children(raw).size == 1 &&
-          !children(raw).any? { |child| !child.named? && %w[. &. [ ] " ' ! not].include?(child.text.to_s) } &&
-          !children(raw).any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\.\.\.?|\+|-|\*|\/|%|\|\||&&|or|and)\z/) }
+        raw.named_children.size == 1 &&
+          !raw.children.any? { |child| !child.named? && %w[. &. [ ] " ' ! not].include?(child.text.to_s) } &&
+          !raw.children.any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\.\.\.?|\+|-|\*|\/|%|\|\||&&|or|and)\z/) }
       end
 
       def expression_class(parse_context, raw)
-        texts = children(raw).map { |child| child.text.to_s }
-        return HiddenArrayNode if children(raw).first&.text.to_s == "[" && texts.include?("]")
-        return HiddenHashNode if children(raw).first&.text.to_s == "{" && texts.include?("}")
+        texts = raw.children.map { |child| child.text.to_s }
+        return HiddenArrayNode if raw.children.first&.text.to_s == "[" && texts.include?("]")
+        return HiddenHashNode if raw.children.first&.text.to_s == "{" && texts.include?("}")
         if (assignment_class = hidden_assignment_class(raw))
           return assignment_class
         end
         return RescueModifierNode if texts.include?("rescue")
-        return HiddenUnaryNode if %w[! not].include?(children(raw).first&.text.to_s)
+        return HiddenUnaryNode if %w[! not].include?(raw.children.first&.text.to_s)
         return HiddenElementReferenceNode if texts.include?("[") && texts.include?("]")
         if (texts & %w[|| or]).any?
           return HiddenOrNode
         end
         return RangeNode if (texts & %w[.. ...]).any?
-        return HiddenBinaryNode if children(raw).any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\+|-|\*|\/|%)\z/) }
-        return HiddenCallNode if texts.include?(".") || children(raw).any? { |child| %w[argument_list block do_block].include?(child.kind) }
+        return HiddenBinaryNode if raw.children.any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\+|-|\*|\/|%)\z/) }
+        return HiddenCallNode if texts.include?(".") || raw.children.any? { |child| %w[argument_list block do_block].include?(child.kind) }
         return StringNode if texts.first == "\"" || texts.first == "'"
         return SymbolNode if raw.text.to_s.start_with?(":")
         return IntegerNode if raw.text.to_s.match?(/\A\s*-?\d+\s*\z/)
@@ -706,12 +647,12 @@ module NilKill
           return parse_context.local_name?(raw) ? LocalVariableReadNode : CallNode
         end
 
-        child = named_children(raw).first
+        child = raw.named_children.first
         return ConstantReadNode if child&.kind == "constant"
         return InstanceVariableReadNode if child&.kind == "instance_variable"
         return ClassVariableReadNode if child&.kind == "class_variable"
         return GlobalVariableReadNode if child&.kind == "global_variable"
-        if named_children(raw).empty?
+        if raw.named_children.empty?
           text = raw.text.to_s.strip
           return ClassVariableReadNode if text.start_with?("@@")
           return InstanceVariableReadNode if text.start_with?("@")
@@ -722,14 +663,14 @@ module NilKill
       end
 
       def direct_token?(raw, text)
-        children(raw).any? { |child| !child.named? && child.text.to_s == text }
+        raw.children.any? { |child| !child.named? && child.text.to_s == text }
       end
 
       def hidden_assignment_class(raw)
         return false unless direct_token?(raw, "=")
-        return false if children(raw).any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
+        return false if raw.children.any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
 
-        lhs = named_children(raw).first
+        lhs = raw.named_children.first
         case lhs&.kind
         when "call", "element_reference" then HiddenSetterCallNode
         when "identifier" then LocalVariableWriteNode
@@ -748,12 +689,12 @@ module NilKill
 
     class ClassNode < Node
       def constant_path
-        context.wrap(context.named_field(raw, "name") || named_children.first, force: ConstantReadNode)
+        context.wrap(context.named_field(raw, "name") || raw.named_children.first, force: ConstantReadNode)
       end
 
       def body
         body_raw = context.named_field(raw, "body") ||
-                   (raw.kind == "body_statement" ? named_children.find { |child| child.kind == "body_statement" } : nil)
+                   (raw.kind == "body_statement" ? raw.named_children.find { |child| child.kind == "body_statement" } : nil)
         return nil unless body_raw
         if hidden_class_or_module_statement?(body_raw) || hidden_singleton_class_statement?(body_raw)
           return StatementsNode.synthetic(context, body_raw, [context.wrap(body_raw)].compact)
@@ -770,16 +711,16 @@ module NilKill
 
       def hidden_class_or_module_statement?(node)
         node.kind == "body_statement" &&
-          %w[class module].include?(children(node).first&.kind) &&
-          !children(node).first.named? &&
-          !children(node).any? { |child| !child.named? && child.text.to_s == "<<" }
+          %w[class module].include?(node.children.first&.kind) &&
+          !node.children.first.named? &&
+          !node.children.any? { |child| !child.named? && child.text.to_s == "<<" }
       end
 
       def hidden_singleton_class_statement?(node)
         node.kind == "body_statement" &&
-          children(node).first&.kind == "class" &&
-          !children(node).first.named? &&
-          children(node).any? { |child| !child.named? && child.text.to_s == "<<" }
+          node.children.first&.kind == "class" &&
+          !node.children.first.named? &&
+          node.children.any? { |child| !child.named? && child.text.to_s == "<<" }
       end
     end
 
@@ -787,11 +728,11 @@ module NilKill
 
     class SingletonClassNode < Node
       def expression
-        context.wrap(context.named_field(raw, "value") || named_children.first)
+        context.wrap(context.named_field(raw, "value") || raw.named_children.first)
       end
 
       def body
-        body_raw = context.named_field(raw, "body") || named_children.last
+        body_raw = context.named_field(raw, "body") || raw.named_children.last
         body_raw ? context.wrap(body_raw, force: StatementsNode) : nil
       end
 
@@ -803,19 +744,19 @@ module NilKill
     class DefNode < Node
       def name
         if hidden_body_statement_def?
-          named_children(hidden_def_container).find { |child| child.kind == "identifier" }&.text.to_s.to_sym
+          hidden_def_container.named_children.find { |child| child.kind == "identifier" }&.text.to_s.to_sym
         else
-          (context.named_field(raw, "name") || named_children.find { |child| child.kind == "identifier" })&.text.to_s.to_sym
+          (context.named_field(raw, "name") || raw.named_children.find { |child| child.kind == "identifier" })&.text.to_s.to_sym
         end
       end
 
       def receiver
         if hidden_body_statement_def?
           container = hidden_def_container
-          dot = children(container).index { |child| !child.named? && child.text.to_s == "." }
+          dot = container.children.index { |child| !child.named? && child.text.to_s == "." }
           return nil unless dot
 
-          return context.wrap(children(container)[dot - 1]) if dot.positive?
+          return context.wrap(container.children[dot - 1]) if dot.positive?
         end
 
         context.wrap(context.named_field(raw, "object"))
@@ -823,7 +764,7 @@ module NilKill
 
       def parameters
         node = if hidden_body_statement_def?
-                 named_children(hidden_def_container).find { |child| child.kind == "method_parameters" }
+                 hidden_def_container.named_children.find { |child| child.kind == "method_parameters" }
                else
                  context.named_field(raw, "parameters")
                end
@@ -832,19 +773,19 @@ module NilKill
 
       def body
         body_raw = if hidden_body_statement_def?
-                     named_children(hidden_def_container).reverse.find { |child| child.kind == "body_statement" || !%w[identifier method_parameters self].include?(child.kind) }
+                     hidden_def_container.named_children.reverse.find { |child| child.kind == "body_statement" || !%w[identifier method_parameters self].include?(child.kind) }
                    else
-                     context.named_field(raw, "body") || named_children.reverse.find { |child| child.kind != "method_parameters" && child.kind != "identifier" && child.kind != "self" }
+                     context.named_field(raw, "body") || raw.named_children.reverse.find { |child| child.kind != "method_parameters" && child.kind != "identifier" && child.kind != "self" }
                    end
         return nil unless body_raw
-        return begin_body(body_raw) if body_raw.kind == "body_statement" && named_children(body_raw).any? { |child| %w[rescue ensure].include?(child.kind) }
+        return begin_body(body_raw) if body_raw.kind == "body_statement" && body_raw.named_children.any? { |child| %w[rescue ensure].include?(child.kind) }
 
         statement_node(body_raw)
       end
 
       def name_loc
         node = if hidden_body_statement_def?
-                 named_children(hidden_def_container).find { |child| child.kind == "identifier" }
+                 hidden_def_container.named_children.find { |child| child.kind == "identifier" }
                else
                  context.named_field(raw, "name")
                end
@@ -852,12 +793,12 @@ module NilKill
       end
 
       def rparen_loc
-        token = hidden_body_statement_def? ? children(hidden_def_container).find { |child| child.text.to_s == ")" } : children.find { |child| child.text.to_s == ")" }
+        token = hidden_body_statement_def? ? hidden_def_container.children.find { |child| child.text.to_s == ")" } : raw.children.find { |child| child.text.to_s == ")" }
         token && context.location(token)
       end
 
       def end_keyword_loc
-        token = hidden_body_statement_def? ? children(hidden_def_container).reverse.find { |child| child.text.to_s == "end" } : children.reverse.find { |child| child.text.to_s == "end" }
+        token = hidden_body_statement_def? ? hidden_def_container.children.reverse.find { |child| child.text.to_s == "end" } : raw.children.reverse.find { |child| child.text.to_s == "end" }
         token && context.location(token)
       end
 
@@ -876,9 +817,9 @@ module NilKill
       end
 
       def hidden_def_container
-        return raw if children.first&.kind == "def"
+        return raw if raw.children.first&.kind == "def"
 
-        named_children.find { |child| child.kind == "argument_list" && children(child).first&.kind == "def" }
+        raw.named_children.find { |child| child.kind == "argument_list" && child.children.first&.kind == "def" }
       end
     end
 
@@ -893,7 +834,7 @@ module NilKill
         @rest = nil
         @keyword_rest = nil
         @block = nil
-        named_children.each do |child|
+        raw.named_children.each do |child|
           param = ParameterNode.new(context, child)
           case child.kind
           when "optional_parameter"
@@ -932,13 +873,13 @@ module NilKill
     class ParameterNode < Node
       def name
         node = context.named_field(raw, "name") ||
-               named_children.find { |child| child.kind == "identifier" } ||
+               raw.named_children.find { |child| child.kind == "identifier" } ||
                (raw.kind == "identifier" ? raw : nil)
         node&.text&.to_sym
       end
 
       def value
-        node = context.named_field(raw, "value") || named_children.find { |child| child != context.named_field(raw, "name") && child.kind != "identifier" }
+        node = context.named_field(raw, "value") || raw.named_children.find { |child| child != context.named_field(raw, "name") && child.kind != "identifier" }
         context.wrap(node)
       end
     end
@@ -950,7 +891,7 @@ module NilKill
       end
 
       def body
-        node = context.named_field(raw, "body") || named_children.reject { |child| child.kind == "block_parameters" }.last
+        node = context.named_field(raw, "body") || raw.named_children.reject { |child| child.kind == "block_parameters" }.last
         statement_node(node)
       end
 
@@ -980,7 +921,7 @@ module NilKill
 
     class WriteNode < VariableNode
       def target
-        context.named_field(raw, "left") || named_children.first
+        context.named_field(raw, "left") || raw.named_children.first
       end
 
       def name
@@ -988,7 +929,7 @@ module NilKill
       end
 
       def value
-        context.wrap(context.named_field(raw, "right") || context.named_field(raw, "value") || named_children[1])
+        context.wrap(context.named_field(raw, "right") || context.named_field(raw, "value") || raw.named_children[1])
       end
 
       def child_nodes
@@ -1004,19 +945,19 @@ module NilKill
 
     class ConstantPathWriteNode < WriteNode
       def target
-        context.named_field(raw, "left") || named_children.first
+        context.named_field(raw, "left") || raw.named_children.first
       end
     end
 
     class CallNode < Node
       def receiver
         if raw.kind == "element_reference"
-          context.wrap(context.named_field(raw, "object") || named_children.first)
+          context.wrap(context.named_field(raw, "object") || raw.named_children.first)
         elsif %w[assignment operator_assignment].include?(raw.kind)
-          lhs = context.named_field(raw, "left") || named_children.first
-          context.wrap(context.named_field(lhs, "object") || (lhs ? named_children(lhs).first : nil))
+          lhs = context.named_field(raw, "left") || raw.named_children.first
+          context.wrap(context.named_field(lhs, "object") || lhs&.named_children&.first)
         elsif raw.kind == "binary"
-          context.wrap(named_children.first)
+          context.wrap(raw.named_children.first)
         elsif raw.kind == "unary"
           nil
         elsif raw.kind == "argument_list"
@@ -1036,7 +977,7 @@ module NilKill
         elsif raw.kind == "binary"
           operator_token&.text.to_s.to_sym
         elsif raw.kind == "unary"
-          children.find { |child| !child.named? }&.text.to_s.to_sym
+          raw.children.find { |child| !child.named? }&.text.to_s.to_sym
         elsif raw.kind == "argument_list"
           text = raw.text.to_s.strip
           return text.to_sym if text.match?(/\A[a-z_]\w*[!?=]?\z/)
@@ -1045,7 +986,7 @@ module NilKill
         elsif raw.kind == "identifier"
           raw.text.to_s.to_sym
         else
-          node = context.named_field(raw, "method") || method_after_dot || named_children.find { |child| child.kind == "identifier" }
+          node = context.named_field(raw, "method") || method_after_dot || raw.named_children.find { |child| child.kind == "identifier" }
           return node.text.to_s.to_sym if node
           return raw.text.to_s.strip.to_sym if %w[body_statement block_body then].include?(raw.kind) && raw.text.to_s.strip.match?(/\A[a-z_]\w*[!?=]?\z/)
 
@@ -1056,16 +997,16 @@ module NilKill
       def arguments
         args =
           if raw.kind == "element_reference"
-            named_children.drop(1)
+            raw.named_children.drop(1)
           elsif %w[assignment operator_assignment].include?(raw.kind)
-            lhs = context.named_field(raw, "left") || named_children.first
-            lhs_args = lhs ? named_children(lhs).drop(1) : []
-            lhs_args + [context.named_field(raw, "right") || named_children[1]].compact
+            lhs = context.named_field(raw, "left") || raw.named_children.first
+            lhs_args = lhs ? lhs.named_children.drop(1) : []
+            lhs_args + [context.named_field(raw, "right") || raw.named_children[1]].compact
           elsif raw.kind == "binary"
-            [named_children[1]].compact
+            [raw.named_children[1]].compact
           else
             arg_raw = context.named_field(raw, "arguments")
-            arg_raw ||= named_children.find { |child| child.kind == "argument_list" }
+            arg_raw ||= raw.named_children.find { |child| child.kind == "argument_list" }
             return context.wrap(arg_raw, force: ArgumentsNode) if arg_raw
 
             []
@@ -1074,12 +1015,12 @@ module NilKill
       end
 
       def block
-        node = context.named_field(raw, "block") || named_children.find { |child| %w[block do_block].include?(child.kind) }
+        node = context.named_field(raw, "block") || raw.named_children.find { |child| %w[block do_block].include?(child.kind) }
         context.wrap(node, force: BlockNode)
       end
 
       def safe_navigation?
-        children.any? { |child| child.text.to_s == "&." }
+        raw.children.any? { |child| child.text.to_s == "&." }
       end
 
       def child_nodes
@@ -1089,25 +1030,25 @@ module NilKill
       private
 
       def operator_token
-        children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }
+        raw.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }
       end
 
       def dot_index
-        children.index { |child| !child.named? && %w[. &.].include?(child.text.to_s) }
+        raw.children.index { |child| !child.named? && %w[. &.].include?(child.text.to_s) }
       end
 
       def receiver_before_dot
         idx = dot_index
         return nil unless idx
 
-        children[0...idx].reverse.find(&:named?)
+        raw.children[0...idx].reverse.find(&:named?)
       end
 
       def method_after_dot
         idx = dot_index
         return nil unless idx
 
-        children[(idx + 1)..].to_a.find { |child| child.named? && child.kind == "identifier" }
+        raw.children[(idx + 1)..].to_a.find { |child| child.named? && child.kind == "identifier" }
       end
     end
 
@@ -1115,46 +1056,46 @@ module NilKill
       def receiver
         return nil unless dot_index
 
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def name
         if (idx = dot_named_index)
-          named_children[idx]&.text.to_s.to_sym
+          raw.named_children[idx]&.text.to_s.to_sym
         else
-          named_children.first&.text.to_s.to_sym
+          raw.named_children.first&.text.to_s.to_sym
         end
       end
 
       def arguments
-        if (arg_raw = named_children.find { |child| child.kind == "argument_list" })
+        if (arg_raw = raw.named_children.find { |child| child.kind == "argument_list" })
           return context.wrap(arg_raw, force: ArgumentsNode)
         end
 
         start = dot_named_index ? dot_named_index + 1 : 1
-        args = named_children[start..].to_a.reject { |child| %w[block do_block].include?(child.kind) }
+        args = raw.named_children[start..].to_a.reject { |child| %w[block do_block].include?(child.kind) }
         ArgumentsNode.synthetic(context, raw, args.filter_map { |child| context.wrap(child) })
       end
 
       def block
-        node = named_children.find { |child| %w[block do_block].include?(child.kind) }
+        node = raw.named_children.find { |child| %w[block do_block].include?(child.kind) }
         context.wrap(node, force: BlockNode)
       end
 
       def safe_navigation?
-        children.any? { |child| child.text.to_s == "&." }
+        raw.children.any? { |child| child.text.to_s == "&." }
       end
 
       private
 
       def dot_index
-        @dot_index ||= children.index { |child| !child.named? && %w[. &.].include?(child.text.to_s) }
+        @dot_index ||= raw.children.index { |child| !child.named? && %w[. &.].include?(child.text.to_s) }
       end
 
       def dot_named_index
         return nil unless dot_index
 
-        named_children.index { |child| child.start_byte > children[dot_index].start_byte }
+        raw.named_children.index { |child| child.start_byte > raw.children[dot_index].start_byte }
       end
     end
 
@@ -1164,17 +1105,17 @@ module NilKill
       end
 
       def name
-        children.first&.text.to_s.to_sym
+        raw.children.first&.text.to_s.to_sym
       end
 
       def arguments
-        ArgumentsNode.synthetic(context, raw, named_children.first(1).filter_map { |child| context.wrap(child) })
+        ArgumentsNode.synthetic(context, raw, raw.named_children.first(1).filter_map { |child| context.wrap(child) })
       end
     end
 
     class HiddenElementReferenceNode < CallNode
       def receiver
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def name
@@ -1182,7 +1123,7 @@ module NilKill
       end
 
       def arguments
-        ArgumentsNode.synthetic(context, raw, named_children.drop(1).filter_map { |child| context.wrap(child) })
+        ArgumentsNode.synthetic(context, raw, raw.named_children.drop(1).filter_map { |child| context.wrap(child) })
       end
     end
 
@@ -1200,10 +1141,10 @@ module NilKill
       def arguments
         args =
           if lhs_element_reference?
-            lhs = context.wrap(named_children.first, force: HiddenElementReferenceNode)
-            (lhs.arguments&.arguments || []) + [context.wrap(named_children[1])].compact
+            lhs = context.wrap(raw.named_children.first, force: HiddenElementReferenceNode)
+            (lhs.arguments&.arguments || []) + [context.wrap(raw.named_children[1])].compact
           else
-            [context.wrap(named_children[1])].compact
+            [context.wrap(raw.named_children[1])].compact
           end
         ArgumentsNode.synthetic(context, raw, args)
       end
@@ -1211,25 +1152,25 @@ module NilKill
       private
 
       def lhs_element_reference?
-        named_children.first&.kind == "element_reference"
+        raw.named_children.first&.kind == "element_reference"
       end
 
       def lhs_call
-        @lhs_call ||= context.wrap(named_children.first)
+        @lhs_call ||= context.wrap(raw.named_children.first)
       end
     end
 
     class HiddenBinaryNode < CallNode
       def receiver
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def name
-        children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s.to_sym
+        raw.children.find { |child| !child.named? && !%w[( )].include?(child.text.to_s) }&.text.to_s.to_sym
       end
 
       def arguments
-        ArgumentsNode.synthetic(context, raw, [context.wrap(named_children[1])].compact)
+        ArgumentsNode.synthetic(context, raw, [context.wrap(raw.named_children[1])].compact)
       end
     end
 
@@ -1239,8 +1180,7 @@ module NilKill
       end
 
       def initialize(context, raw, children = nil)
-        super(context, raw, children || [])
-        @children = build_arguments(context, raw) unless children
+        super(context, raw, children || build_arguments(context, raw))
       end
 
       def arguments
@@ -1251,7 +1191,7 @@ module NilKill
 
       def build_arguments(context, raw)
         if quoted_argument_list?(raw)
-          klass = named_children(raw).any? { |child| child.kind == "interpolation" } ? InterpolatedStringNode : StringNode
+          klass = raw.named_children.any? { |child| child.kind == "interpolation" } ? InterpolatedStringNode : StringNode
           return [context.wrap(raw, force: klass)].compact
         end
         if (klass = scalar_expression_argument_list_class(context, raw))
@@ -1305,8 +1245,8 @@ module NilKill
       def quoted_argument_list?(raw)
         return false unless raw.kind == "argument_list"
 
-        first = children(raw).first&.text.to_s
-        last = children(raw).last&.text.to_s
+        first = raw.children.first&.text.to_s
+        last = raw.children.last&.text.to_s
         %w[" '].include?(first) && first == last
       end
 
@@ -1314,7 +1254,7 @@ module NilKill
         return nil unless raw.kind == "argument_list"
         return nil if parenthesized_argument_list?(raw)
 
-        texts = children(raw).map { |child| child.text.to_s }
+        texts = raw.children.map { |child| child.text.to_s }
         first = texts.first
         return HiddenArrayNode if first == "[" && texts.include?("]")
         return HiddenHashNode if first == "{" && texts.include?("}")
@@ -1322,14 +1262,14 @@ module NilKill
         return HiddenElementReferenceNode if texts.include?("[") && texts.include?("]")
         return HiddenOrNode if (texts & %w[|| or]).any?
         return RangeNode if (texts & %w[.. ...]).any?
-        return HiddenBinaryNode if children(raw).any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\+|-|\*|\/|%)\z/) }
-        return HiddenCallNode if texts.include?(".") || named_children(raw).any? { |child| %w[argument_list block do_block].include?(child.kind) }
+        return HiddenBinaryNode if raw.children.any? { |child| !child.named? && child.text.to_s.match?(/\A(?:==|!=|===|<=>|<=|>=|<<|>>|<|>|\+|-|\*|\/|%)\z/) }
+        return HiddenCallNode if texts.include?(".") || raw.named_children.any? { |child| %w[argument_list block do_block].include?(child.kind) }
 
         scalar_argument_class(context, raw)
       end
 
       def parenthesized_argument_list?(raw)
-        children(raw).first&.text.to_s == "(" && children(raw).last&.text.to_s == ")"
+        raw.children.first&.text.to_s == "(" && raw.children.last&.text.to_s == ")"
       end
     end
 
@@ -1369,17 +1309,11 @@ module NilKill
 
     class AssocNode < Node
       def key
-        context.wrap(context.named_field(raw, "key") || named_children.first)
+        context.wrap(context.named_field(raw, "key") || raw.named_children.first)
       end
 
       def value
-        value_raw = context.named_field(raw, "value") || named_children[1]
-        return context.wrap(value_raw) if value_raw
-
-        key_raw = context.named_field(raw, "key") || named_children.first
-        if key_raw && context.local_name?(key_raw)
-          context.wrap(key_raw, force: LocalVariableReadNode)
-        end
+        context.wrap(context.named_field(raw, "value") || raw.named_children[1])
       end
 
       def child_nodes
@@ -1433,7 +1367,7 @@ module NilKill
 
     class ReturnNode < Node
       def arguments
-        args = named_children.flat_map do |child|
+        args = raw.named_children.flat_map do |child|
           node = context.wrap(child)
           node.is_a?(ArgumentsNode) ? node.arguments : [node].compact
         end
@@ -1447,7 +1381,7 @@ module NilKill
 
     class ParenthesesNode < Node
       def body
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def child_nodes
@@ -1457,20 +1391,20 @@ module NilKill
 
     class IfNode < Node
       def predicate
-        context.wrap(context.named_field(raw, "condition") || named_children.first)
+        context.wrap(context.named_field(raw, "condition") || raw.named_children.first)
       end
 
       def statements
         node = context.named_field(raw, "consequence") ||
-               named_children.find { |child| child.kind == "then" } ||
-               named_children[1]
+               raw.named_children.find { |child| child.kind == "then" } ||
+               raw.named_children[1]
         statement_node(node)
       end
 
       def subsequent
         node = context.named_field(raw, "alternative") ||
-               named_children.find { |child| %w[else elsif].include?(child.kind) } ||
-               named_children[2]
+               raw.named_children.find { |child| %w[else elsif].include?(child.kind) } ||
+               raw.named_children[2]
         context.wrap(node)
       end
 
@@ -1481,20 +1415,20 @@ module NilKill
 
     class UnlessNode < Node
       def predicate
-        context.wrap(context.named_field(raw, "condition") || named_children.first)
+        context.wrap(context.named_field(raw, "condition") || raw.named_children.first)
       end
 
       def statements
         node = context.named_field(raw, "consequence") ||
-               named_children.find { |child| child.kind == "then" } ||
-               named_children[1]
+               raw.named_children.find { |child| child.kind == "then" } ||
+               raw.named_children[1]
         statement_node(node)
       end
 
       def subsequent
         node = context.named_field(raw, "alternative") ||
-               named_children.find { |child| %w[else elsif].include?(child.kind) } ||
-               named_children[2]
+               raw.named_children.find { |child| %w[else elsif].include?(child.kind) } ||
+               raw.named_children[2]
         context.wrap(node)
       end
 
@@ -1509,13 +1443,13 @@ module NilKill
 
     class WhileNode < Node
       def predicate
-        context.wrap(context.named_field(raw, "condition") || named_children.first)
+        context.wrap(context.named_field(raw, "condition") || raw.named_children.first)
       end
 
       def statements
         node = context.named_field(raw, "body") ||
-               named_children.find { |child| child.kind == "then" } ||
-               named_children[1]
+               raw.named_children.find { |child| child.kind == "then" } ||
+               raw.named_children[1]
         statement_node(node)
       end
 
@@ -1532,15 +1466,15 @@ module NilKill
 
     class CaseNode < Node
       def predicate
-        context.wrap(context.named_field(raw, "value") || named_children.first)
+        context.wrap(context.named_field(raw, "value") || raw.named_children.first)
       end
 
       def conditions
-        named_children.select { |child| child.kind == "when" }.filter_map { |child| context.wrap(child, force: WhenNode) }
+        raw.named_children.select { |child| child.kind == "when" }.filter_map { |child| context.wrap(child, force: WhenNode) }
       end
 
       def else_clause
-        node = named_children.find { |child| child.kind == "else" }
+        node = raw.named_children.find { |child| child.kind == "else" }
         context.wrap(node, force: ElseNode)
       end
 
@@ -1551,12 +1485,12 @@ module NilKill
 
     class WhenNode < Node
       def conditions
-        nodes = named_children.take_while { |child| child.kind != "then" }
+        nodes = raw.named_children.take_while { |child| child.kind != "then" }
         nodes.filter_map { |child| context.wrap(child) }
       end
 
       def statements
-        body = context.named_field(raw, "body") || named_children.find { |child| child.kind == "then" }
+        body = context.named_field(raw, "body") || raw.named_children.find { |child| child.kind == "then" }
         statement_node(body)
       end
 
@@ -1578,22 +1512,22 @@ module NilKill
 
     class BeginNode < Node
       def statements
-        body_children = named_children.reject { |child| %w[rescue ensure else].include?(child.kind) }
+        body_children = raw.named_children.reject { |child| %w[rescue ensure else].include?(child.kind) }
         StatementsNode.synthetic(context, raw, body_children.filter_map { |child| context.wrap(child) })
       end
 
       def rescue_clause
-        node = named_children.find { |child| child.kind == "rescue" }
+        node = raw.named_children.find { |child| child.kind == "rescue" }
         context.wrap(node, force: RescueNode)
       end
 
       def else_clause
-        node = named_children.find { |child| child.kind == "else" }
+        node = raw.named_children.find { |child| child.kind == "else" }
         context.wrap(node, force: ElseNode)
       end
 
       def ensure_clause
-        node = named_children.find { |child| child.kind == "ensure" }
+        node = raw.named_children.find { |child| child.kind == "ensure" }
         context.wrap(node, force: EnsureNode)
       end
 
@@ -1604,21 +1538,21 @@ module NilKill
 
     class RescueNode < Node
       def exceptions
-        node = context.named_field(raw, "exceptions") || named_children.find { |child| child.kind == "exceptions" }
-        node ? named_children(node).filter_map { |child| context.wrap(child) } : []
+        node = context.named_field(raw, "exceptions") || raw.named_children.find { |child| child.kind == "exceptions" }
+        node ? node.named_children.filter_map { |child| context.wrap(child) } : []
       end
 
       def statements
-        body = context.named_field(raw, "body") || named_children.find { |child| child.kind == "then" }
+        body = context.named_field(raw, "body") || raw.named_children.find { |child| child.kind == "then" }
         statement_node(body)
       end
 
       def subsequent
-        body = context.named_field(raw, "body") || named_children.find { |child| child.kind == "then" }
+        body = context.named_field(raw, "body") || raw.named_children.find { |child| child.kind == "then" }
         return nil unless body
 
         seen_body = false
-        node = named_children.find do |child|
+        node = raw.named_children.find do |child|
           if seen_body && child.kind == "rescue"
             true
           else
@@ -1656,11 +1590,11 @@ module NilKill
 
     class RescueModifierNode < Node
       def expression
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def rescue_expression
-        context.wrap(named_children[1])
+        context.wrap(raw.named_children[1])
       end
 
       def child_nodes
@@ -1681,11 +1615,11 @@ module NilKill
 
     class OrNode < Node
       def left
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def right
-        context.wrap(named_children[1])
+        context.wrap(raw.named_children[1])
       end
 
       def child_nodes
@@ -1695,11 +1629,11 @@ module NilKill
 
     class HiddenOrNode < OrNode
       def left
-        context.wrap(named_children.first)
+        context.wrap(raw.named_children.first)
       end
 
       def right
-        context.wrap(named_children[1])
+        context.wrap(raw.named_children[1])
       end
     end
   end
