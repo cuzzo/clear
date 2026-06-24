@@ -7,7 +7,7 @@
         "dst",
         "src"
       ],
-      "ref_at": "/home/yahn/litedb/gems/decomplex/examples/ruby/inconsistent-rename-clone-edge.rb:original:4",
+      "ref_at": "gems/decomplex/examples/ruby/inconsistent-rename-clone-edge.rb:original:4",
       "ref_name": "src"
     },
     {
@@ -16,7 +16,7 @@
         "b",
         "a"
       ],
-      "ref_at": "/home/yahn/litedb/gems/decomplex/examples/ruby/inconsistent-rename-clone-edge.rb:original_two:18",
+      "ref_at": "gems/decomplex/examples/ruby/inconsistent-rename-clone-edge.rb:original_two:18",
       "ref_name": "a"
     }
   ],

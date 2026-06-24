@@ -283,7 +283,7 @@ jobs:
             --manifest-path gems/lineage/Cargo.toml \
             --all-features \
             --cobertura \
-            --output-path tmp/lineage-rust-coverage/cobertura.xml
+            --output-path ${{ github.workspace }}/tmp/lineage-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
         with:
           name: lineage-rust-coverage
@@ -334,7 +334,7 @@ jobs:
             --manifest-path gems/fact-mine/Cargo.toml \
             --all-features \
             --cobertura \
-            --output-path tmp/fact-mine-rust-coverage/cobertura.xml
+            --output-path ${{ github.workspace }}/tmp/fact-mine-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
         with:
           name: fact-mine-rust-coverage
@@ -374,7 +374,7 @@ jobs:
             --manifest-path gems/decomplex/Cargo.toml \
             --all-features \
             --cobertura \
-            --output-path tmp/decomplex-rust-coverage/cobertura.xml
+            --output-path ${{ github.workspace }}/tmp/decomplex-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
         with:
           name: decomplex-rust-coverage
