@@ -6325,7 +6325,13 @@ fn block_comment_markers(language: SyntaxLanguage) -> &'static [(&'static str, &
         | SyntaxLanguage::Go
         | SyntaxLanguage::Rust
         | SyntaxLanguage::Zig
-        | SyntaxLanguage::C => &[("/*", "*/")],
+        | SyntaxLanguage::C
+        | SyntaxLanguage::Cpp
+        | SyntaxLanguage::Java
+        | SyntaxLanguage::Kotlin
+        | SyntaxLanguage::Swift
+        | SyntaxLanguage::CSharp
+        | SyntaxLanguage::Php => &[("/*", "*/")],
         SyntaxLanguage::Plain => &[],
     }
 }
@@ -6343,7 +6349,13 @@ fn is_line_comment_line(line: &str, language: SyntaxLanguage) -> bool {
         | SyntaxLanguage::Go
         | SyntaxLanguage::Rust
         | SyntaxLanguage::Zig
-        | SyntaxLanguage::C => trimmed.starts_with("//"),
+        | SyntaxLanguage::C
+        | SyntaxLanguage::Cpp
+        | SyntaxLanguage::Java
+        | SyntaxLanguage::Kotlin
+        | SyntaxLanguage::Swift
+        | SyntaxLanguage::CSharp
+        | SyntaxLanguage::Php => trimmed.starts_with("//"),
         SyntaxLanguage::Plain => false,
     }
 }
@@ -6954,6 +6966,12 @@ enum SyntaxLanguage {
     Lua,
     Zig,
     C,
+    Cpp,
+    Java,
+    Kotlin,
+    Swift,
+    CSharp,
+    Php,
     Plain,
 }
 
@@ -7147,7 +7165,13 @@ fn syntax_language(path: &str) -> SyntaxLanguage {
         Some("rs") => SyntaxLanguage::Rust,
         Some("lua") => SyntaxLanguage::Lua,
         Some("zig") => SyntaxLanguage::Zig,
-        Some("c" | "h" | "cc" | "cpp" | "cxx" | "hpp") => SyntaxLanguage::C,
+        Some("c" | "h") => SyntaxLanguage::C,
+        Some("cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx") => SyntaxLanguage::Cpp,
+        Some("java") => SyntaxLanguage::Java,
+        Some("kt" | "kts") => SyntaxLanguage::Kotlin,
+        Some("swift") => SyntaxLanguage::Swift,
+        Some("cs") => SyntaxLanguage::CSharp,
+        Some("php") => SyntaxLanguage::Php,
         _ => SyntaxLanguage::Plain,
     }
 }
@@ -7161,7 +7185,13 @@ fn comment_prefix(language: SyntaxLanguage) -> Option<&'static str> {
         | SyntaxLanguage::Go
         | SyntaxLanguage::Rust
         | SyntaxLanguage::Zig
-        | SyntaxLanguage::C => Some("//"),
+        | SyntaxLanguage::C
+        | SyntaxLanguage::Cpp
+        | SyntaxLanguage::Java
+        | SyntaxLanguage::Kotlin
+        | SyntaxLanguage::Swift
+        | SyntaxLanguage::CSharp
+        | SyntaxLanguage::Php => Some("//"),
         SyntaxLanguage::Plain => None,
     }
 }
@@ -7372,6 +7402,57 @@ fn keywords(language: SyntaxLanguage) -> &'static [&'static str] {
             "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline", "int",
             "long", "NULL", "register", "restrict", "return", "short", "signed", "sizeof", "static",
             "struct", "switch", "true", "typedef", "union", "unsigned", "void", "volatile", "while",
+        ],
+        SyntaxLanguage::Cpp => &[
+            "auto", "bool", "break", "case", "char", "class", "const", "continue", "default", "delete",
+            "do", "double", "else", "enum", "explicit", "export", "extern", "false", "float", "for",
+            "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "operator",
+            "private", "protected", "public", "register", "reinterpret_cast", "return", "short",
+            "signed", "sizeof", "static", "struct", "switch", "template", "this", "throw", "true",
+            "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void",
+            "volatile", "wchar_t", "while",
+        ],
+        SyntaxLanguage::Java => &[
+            "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+            "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+            "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+            "new", "null", "package", "private", "protected", "public", "return", "short", "static",
+            "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true",
+            "try", "void", "volatile", "while",
+        ],
+        SyntaxLanguage::Kotlin => &[
+            "as", "as?", "break", "class", "val", "var", "fun", "for", "if", "else", "while", "do",
+            "return", "this", "super", "try", "catch", "finally", "throw", "package", "import", "object",
+            "interface", "typealias", "typeof", "when", "is", "!is", "in", "!in", "true", "false", "null",
+        ],
+        SyntaxLanguage::Swift => &[
+            "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import",
+            "init", "inout", "internal", "let", "open", "operator", "private", "protocol", "public",
+            "rethrows", "static", "struct", "subscript", "typealias", "var", "break", "case", "continue",
+            "default", "defer", "do", "else", "fallthrough", "for", "guard", "if", "in", "repeat",
+            "return", "switch", "where", "while", "as", "any", "false", "is", "nil", "self", "super",
+            "true", "try",
+        ],
+        SyntaxLanguage::CSharp => &[
+            "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
+            "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
+            "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
+            "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
+            "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
+            "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
+            "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
+            "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
+            "void", "volatile", "while",
+        ],
+        SyntaxLanguage::Php => &[
+            "__halt_compiler", "abstract", "and", "array", "as", "break", "callable", "case", "catch",
+            "class", "clone", "const", "continue", "declare", "default", "die", "do", "echo", "else",
+            "elsif", "empty", "enddeclare", "endfor", "endforeach", "endif", "endswitch", "endwhile",
+            "eval", "exit", "extends", "final", "finally", "fn", "for", "foreach", "function", "global",
+            "goto", "if", "implements", "include", "include_once", "instanceof", "insteadof",
+            "interface", "isset", "list", "match", "namespace", "new", "or", "print", "private",
+            "protected", "public", "readonly", "require", "require_once", "return", "static", "switch",
+            "throw", "trait", "try", "unset", "use", "var", "while", "xor", "yield",
         ],
         SyntaxLanguage::Plain => &[],
     }
