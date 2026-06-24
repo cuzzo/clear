@@ -26,7 +26,7 @@ pub struct LineageEngine<P, E> {
 
 impl<P, E> LineageEngine<P, E>
 where
-    P: VcsProvider,
+    P: VcsProvider + Sync,
     E: BoundaryExtractor + Sync,
 {
     pub fn new(provider: P, extractor: E, storage: Storage) -> Self {
@@ -63,18 +63,27 @@ where
         let mut aliases: HashMap<String, String> = HashMap::new();
         let mut stats = EngineStats::default();
         let mut file_units: HashMap<String, Vec<LogicalUnit>> = HashMap::new();
-        let mut prev_commit_hash: Option<String> = None;
-        let mut commits_changes = Vec::new();
-        for commit in &commits {
-            let path_filter = |path: &str| self.extractor.supports_path(path);
-            let changes = self.provider.changes_at_commit(
-                prev_commit_hash.as_deref(),
-                &commit.hash,
-                &path_filter,
-            )?;
-            prev_commit_hash = Some(commit.hash.clone());
-            commits_changes.push(changes);
-        }
+
+        let provider = &self.provider;
+        let extractor = &self.extractor;
+        let commits_changes: Result<Vec<_>> = (0..commits.len())
+            .into_par_iter()
+            .map(|idx| {
+                let commit = &commits[idx];
+                let prev_commit_hash = if idx == 0 {
+                    None
+                } else {
+                    Some(commits[idx - 1].hash.as_str())
+                };
+                let path_filter = |path: &str| extractor.supports_path(path);
+                provider.changes_at_commit(
+                    prev_commit_hash,
+                    &commit.hash,
+                    &path_filter,
+                )
+            })
+            .collect();
+        let commits_changes = commits_changes?;
 
         let extractor = &self.extractor;
         let parsed_commits_units: Vec<Vec<Vec<LogicalUnit>>> = commits_changes
