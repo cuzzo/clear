@@ -4,7 +4,7 @@ use crate::model::{
 };
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub struct Storage {
@@ -574,10 +574,44 @@ impl Storage {
         Ok(())
     }
 
-    pub fn find_definitions(&self, name: &str) -> Result<Vec<(String, u32)>> {
+    pub fn find_definitions(
+        &self,
+        name: &str,
+        commit_hash: Option<&str>,
+        current_path: Option<&str>,
+    ) -> Result<Vec<(String, u32)>> {
+        let target_commit = match commit_hash {
+            Some(hash) => Some(hash.to_string()),
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT commit_hash FROM metadata ORDER BY timestamp DESC LIMIT 1"
+                )?;
+                let mut rows = stmt.query([])?;
+                rows.next()?.map(|row| row.get::<_, String>(0)).transpose()?
+            }
+        };
+
+        let active_ids = if let Some(ref hash) = target_commit {
+            if let Ok(Some(state_json)) = self.load_engine_state(hash) {
+                if let Ok(state) = serde_json::from_str::<serde_json::Value>(&state_json) {
+                    if let Some(previous) = state.get("previous").and_then(|p| p.as_object()) {
+                        Some(previous.keys().cloned().collect::<HashSet<_>>())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut stmt = self.conn.prepare(
             r#"
-            SELECT DISTINCT
+            SELECT u.id,
               COALESCE((
                 SELECT latest.path
                 FROM events latest
@@ -594,16 +628,57 @@ impl Storage {
               ), u.start_line) AS start_line
             FROM logical_units u
             WHERE u.name = ?1
-            LIMIT 10
+               OR u.name LIKE '%.' || ?1
+               OR u.name LIKE '%::' || ?1
+               OR u.name LIKE '%#' || ?1
+            LIMIT 100
             "#,
         )?;
         let rows = stmt.query_map(params![name], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, u32>(2)?))
         })?;
         let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (id, path, line) = row?;
+            if let Some(ref active) = active_ids {
+                if active.contains(&id) {
+                    results.push((path, line));
+                }
+            } else {
+                results.push((path, line));
+            }
         }
+
+        // Sort results to prioritize proximity to current_path if provided
+        if let Some(cur_path) = current_path {
+            let normalized_cur = cur_path.trim().trim_start_matches("./").trim_matches('/');
+            let cur_dir = if let Some(idx) = normalized_cur.rfind('/') {
+                &normalized_cur[..idx]
+            } else {
+                ""
+            };
+            results.sort_by(|a, b| {
+                let a_norm = a.0.trim().trim_start_matches("./").trim_matches('/');
+                let b_norm = b.0.trim().trim_start_matches("./").trim_matches('/');
+                
+                let a_exact = a_norm == normalized_cur;
+                let b_exact = b_norm == normalized_cur;
+                if a_exact != b_exact {
+                    return b_exact.cmp(&a_exact); // exact match first
+                }
+                
+                let a_in_dir = !cur_dir.is_empty() && a_norm.starts_with(&format!("{}/", cur_dir));
+                let b_in_dir = !cur_dir.is_empty() && b_norm.starts_with(&format!("{}/", cur_dir));
+                if a_in_dir != b_in_dir {
+                    return b_in_dir.cmp(&a_in_dir); // same directory first
+                }
+                
+                a.0.cmp(&b.0).then(a.1.cmp(&b.1))
+            });
+        } else {
+            results.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        }
+
         Ok(results)
     }
 
@@ -2480,7 +2555,7 @@ mod tests {
         storage.upsert_logical_unit(&unit, 10).unwrap();
 
         // Check finding it before move/events
-        let defs = storage.find_definitions("my_test_func").unwrap();
+        let defs = storage.find_definitions("my_test_func", None, None).unwrap();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].0, "src/a.rb");
         assert_eq!(defs[0].1, 10);
@@ -2510,7 +2585,7 @@ mod tests {
             .unwrap();
 
         // Check finding it after move event
-        let defs_after = storage.find_definitions("my_test_func").unwrap();
+        let defs_after = storage.find_definitions("my_test_func", None, None).unwrap();
         assert_eq!(defs_after.len(), 1);
         assert_eq!(defs_after[0].0, "src/b.rb");
         assert_eq!(defs_after[0].1, 15);
