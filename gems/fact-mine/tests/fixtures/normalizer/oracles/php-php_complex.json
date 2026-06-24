@@ -1,0 +1,497 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 5,
+        "last_lineno": 1,
+        "text": "<?php",
+        "type": "PHP_TAG"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "Exception"
+                                  }
+                                ],
+                                "first_column": 14,
+                                "first_lineno": 3,
+                                "last_column": 23,
+                                "last_lineno": 3,
+                                "text": "Exception",
+                                "type": "CONST"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "Error"
+                                                    }
+                                                  ],
+                                                  "first_column": 25,
+                                                  "first_lineno": 3,
+                                                  "last_column": 30,
+                                                  "last_lineno": 3,
+                                                  "text": "Error",
+                                                  "type": "STR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 24,
+                                            "first_lineno": 3,
+                                            "last_column": 31,
+                                            "last_lineno": 3,
+                                            "text": "\"Error\"",
+                                            "type": "ENCAPSED_STRING"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 24,
+                                      "first_lineno": 3,
+                                      "last_column": 31,
+                                      "last_lineno": 3,
+                                      "text": "\"Error\"",
+                                      "type": "ARGUMENT"
+                                    }
+                                  }
+                                ],
+                                "first_column": 23,
+                                "first_lineno": 3,
+                                "last_column": 32,
+                                "last_lineno": 3,
+                                "text": "(\"Error\")",
+                                "type": "ARGUMENTS"
+                              }
+                            }
+                          ],
+                          "first_column": 10,
+                          "first_lineno": 3,
+                          "last_column": 32,
+                          "last_lineno": 3,
+                          "text": "new Exception(\"Error\")",
+                          "type": "OBJECT_CREATION_EXPRESSION"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 3,
+                    "last_column": 32,
+                    "last_lineno": 3,
+                    "text": "throw new Exception(\"Error\")",
+                    "type": "THROW_EXPRESSION"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 2,
+              "last_column": 1,
+              "last_lineno": 4,
+              "text": "{\n    throw new Exception(\"Error\");\n}",
+              "type": "BLOCK"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "Exception"
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 4,
+                                "last_column": 18,
+                                "last_lineno": 4,
+                                "text": "Exception",
+                                "type": "CONST"
+                              }
+                            }
+                          ],
+                          "first_column": 9,
+                          "first_lineno": 4,
+                          "last_column": 18,
+                          "last_lineno": 4,
+                          "text": "Exception",
+                          "type": "NAMED_TYPE"
+                        }
+                      }
+                    ],
+                    "first_column": 9,
+                    "first_lineno": 4,
+                    "last_column": 18,
+                    "last_lineno": 4,
+                    "text": "Exception",
+                    "type": "TYPE_LIST"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "e"
+                      }
+                    ],
+                    "first_column": 19,
+                    "first_lineno": 4,
+                    "last_column": 21,
+                    "last_lineno": 4,
+                    "text": "e",
+                    "type": "LVAR"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "e"
+                                        }
+                                      ],
+                                      "first_column": 9,
+                                      "first_lineno": 5,
+                                      "last_column": 11,
+                                      "last_lineno": 5,
+                                      "text": "e",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "getMessage"
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 5,
+                                "last_column": 25,
+                                "last_lineno": 5,
+                                "text": "e.getMessage()",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 5,
+                          "last_column": 26,
+                          "last_lineno": 5,
+                          "text": "echo e.getMessage();",
+                          "type": "ECHO_STATEMENT"
+                        }
+                      }
+                    ],
+                    "first_column": 23,
+                    "first_lineno": 4,
+                    "last_column": 1,
+                    "last_lineno": 6,
+                    "text": "{\n    echo e.getMessage();\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 4,
+              "last_column": 1,
+              "last_lineno": 6,
+              "text": "catch (Exception e) {\n    echo e.getMessage();\n}",
+              "type": "CATCH_CLAUSE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "Done"
+                                        }
+                                      ],
+                                      "first_column": 10,
+                                      "first_lineno": 7,
+                                      "last_column": 14,
+                                      "last_lineno": 7,
+                                      "text": "Done",
+                                      "type": "STR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 7,
+                                "last_column": 15,
+                                "last_lineno": 7,
+                                "text": "\"Done\"",
+                                "type": "ENCAPSED_STRING"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 7,
+                          "last_column": 16,
+                          "last_lineno": 7,
+                          "text": "echo \"Done\";",
+                          "type": "ECHO_STATEMENT"
+                        }
+                      }
+                    ],
+                    "first_column": 10,
+                    "first_lineno": 6,
+                    "last_column": 1,
+                    "last_lineno": 8,
+                    "text": "{\n    echo \"Done\";\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 6,
+              "last_column": 1,
+              "last_lineno": 8,
+              "text": "finally {\n    echo \"Done\";\n}",
+              "type": "FINALLY_CLAUSE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 2,
+        "last_column": 1,
+        "last_lineno": 8,
+        "text": "try {\n    throw new Exception(\"Error\");\n} catch (Exception e) {\n    echo e.getMessage();\n} finally {\n    echo \"Done\";\n}",
+        "type": "TRY_STATEMENT"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "String": "a"
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "b"
+                      }
+                    ],
+                    "first_column": 5,
+                    "first_lineno": 10,
+                    "last_column": 7,
+                    "last_lineno": 10,
+                    "text": "b",
+                    "type": "LVAR"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "c"
+                      }
+                    ],
+                    "first_column": 11,
+                    "first_lineno": 10,
+                    "last_column": 13,
+                    "last_lineno": 10,
+                    "text": "c",
+                    "type": "LVAR"
+                  }
+                }
+              ],
+              "first_column": 5,
+              "first_lineno": 10,
+              "last_column": 13,
+              "last_lineno": 10,
+              "text": "b ?: c",
+              "type": "CONDITIONAL_EXPRESSION"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 10,
+        "last_column": 13,
+        "last_lineno": 10,
+        "text": "a = b ?: c",
+        "type": "LASGN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "String": "d"
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "e"
+                      }
+                    ],
+                    "first_column": 5,
+                    "first_lineno": 11,
+                    "last_column": 7,
+                    "last_lineno": 11,
+                    "text": "e",
+                    "type": "LVAR"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "f"
+                      }
+                    ],
+                    "first_column": 11,
+                    "first_lineno": 11,
+                    "last_column": 13,
+                    "last_lineno": 11,
+                    "text": "f",
+                    "type": "LVAR"
+                  }
+                }
+              ],
+              "first_column": 5,
+              "first_lineno": 11,
+              "last_column": 13,
+              "last_lineno": 11,
+              "text": "e ?? f",
+              "type": "BINARY_EXPRESSION"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 11,
+        "last_column": 13,
+        "last_lineno": 11,
+        "text": "d = e ?? f",
+        "type": "LASGN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "foo"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 10,
+                                "first_lineno": 14,
+                                "last_column": 11,
+                                "last_lineno": 14,
+                                "text": "1",
+                                "type": "INTEGER"
+                              }
+                            }
+                          ],
+                          "first_column": 10,
+                          "first_lineno": 14,
+                          "last_column": 11,
+                          "last_lineno": 14,
+                          "text": "1",
+                          "type": "ARRAY_ELEMENT_INITIALIZER"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 14,
+                    "last_column": 11,
+                    "last_lineno": 14,
+                    "text": "yield 1",
+                    "type": "YIELD_EXPRESSION"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 14,
+              "last_column": 11,
+              "last_lineno": 14,
+              "text": "yield 1",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 13,
+        "last_column": 1,
+        "last_lineno": 15,
+        "text": "function foo() {\n    yield 1;\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 16,
+  "text": "<?php\ntry {\n    throw new Exception(\"Error\");\n} catch (Exception e) {\n    echo e.getMessage();\n} finally {\n    echo \"Done\";\n}\n\na = b ?: c;\nd = e ?? f;\n\nfunction foo() {\n    yield 1;\n}\n",
+  "type": "ROOT"
+}

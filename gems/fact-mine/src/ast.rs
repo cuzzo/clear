@@ -641,6 +641,11 @@ pub(crate) mod tests {
     use super::*;
     use tree_sitter::Parser;
 
+    #[cfg(test)]
+    mod normalizer_oracle_test {
+        include!("ast/normalizer_oracle_test.rs");
+    }
+
     pub(crate) fn test_ast_helpers_impl() {
         // 1. parse and parse_with_language
         let file_path = std::env::temp_dir().join(format!(

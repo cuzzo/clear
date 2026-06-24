@@ -1,0 +1,1030 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "complex_rescue"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 8,
+                                                  "first_lineno": 2,
+                                                  "last_column": 9,
+                                                  "last_lineno": 2,
+                                                  "text": "1",
+                                                  "type": "INTEGER"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 11,
+                                                  "first_lineno": 2,
+                                                  "last_column": 12,
+                                                  "last_lineno": 2,
+                                                  "text": "2",
+                                                  "type": "INTEGER"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 2,
+                                            "last_column": 12,
+                                            "last_lineno": 2,
+                                            "text": "1, 2",
+                                            "type": "LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 2,
+                                      "last_column": 12,
+                                      "last_lineno": 2,
+                                      "text": "yield 1, 2",
+                                      "type": "YIELD"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil"
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 3,
+                                      "last_column": 7,
+                                      "last_lineno": 3,
+                                      "text": "yield",
+                                      "type": "YIELD"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 2,
+                                "last_column": 16,
+                                "last_lineno": 11,
+                                "text": "yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e\nelse\n  puts \"No error\"\nensure\n  puts \"Finally\"",
+                                "type": "BLOCK"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "Exception"
+                                              }
+                                            ],
+                                            "first_column": 7,
+                                            "first_lineno": 4,
+                                            "last_column": 16,
+                                            "last_lineno": 4,
+                                            "text": "Exception",
+                                            "type": "CONST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 7,
+                                      "first_lineno": 4,
+                                      "last_column": 16,
+                                      "last_lineno": 4,
+                                      "text": "Exception",
+                                      "type": "LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "e"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 17,
+                                                  "first_lineno": 4,
+                                                  "last_column": 21,
+                                                  "last_lineno": 4,
+                                                  "text": "=> e",
+                                                  "type": "ERRINFO"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 17,
+                                            "first_lineno": 4,
+                                            "last_column": 21,
+                                            "last_lineno": 4,
+                                            "text": "=> e",
+                                            "type": "LASGN"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "puts"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "e"
+                                                          }
+                                                        ],
+                                                        "first_column": 7,
+                                                        "first_lineno": 5,
+                                                        "last_column": 8,
+                                                        "last_lineno": 5,
+                                                        "text": "e",
+                                                        "type": "LVAR"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 2,
+                                                  "first_lineno": 5,
+                                                  "last_column": 8,
+                                                  "last_lineno": 5,
+                                                  "text": "puts e",
+                                                  "type": "LIST"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 2,
+                                            "first_lineno": 5,
+                                            "last_column": 8,
+                                            "last_lineno": 5,
+                                            "text": "puts e",
+                                            "type": "FCALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 17,
+                                      "first_lineno": 4,
+                                      "last_column": 8,
+                                      "last_lineno": 5,
+                                      "text": "=> e\n  puts e",
+                                      "type": "BLOCK"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil",
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "e"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 7,
+                                                        "first_lineno": 6,
+                                                        "last_column": 11,
+                                                        "last_lineno": 6,
+                                                        "text": "=> e",
+                                                        "type": "ERRINFO"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 7,
+                                                  "first_lineno": 6,
+                                                  "last_column": 11,
+                                                  "last_lineno": 6,
+                                                  "text": "=> e",
+                                                  "type": "LASGN"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Symbol": "puts"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "String": "e"
+                                                                }
+                                                              ],
+                                                              "first_column": 7,
+                                                              "first_lineno": 7,
+                                                              "last_column": 8,
+                                                              "last_lineno": 7,
+                                                              "text": "e",
+                                                              "type": "LVAR"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 2,
+                                                        "first_lineno": 7,
+                                                        "last_column": 8,
+                                                        "last_lineno": 7,
+                                                        "text": "puts e",
+                                                        "type": "LIST"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 2,
+                                                  "first_lineno": 7,
+                                                  "last_column": 8,
+                                                  "last_lineno": 7,
+                                                  "text": "puts e",
+                                                  "type": "FCALL"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 7,
+                                            "first_lineno": 6,
+                                            "last_column": 8,
+                                            "last_lineno": 7,
+                                            "text": "=> e\n  puts e",
+                                            "type": "BLOCK"
+                                          }
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 0,
+                                      "first_lineno": 6,
+                                      "last_column": 8,
+                                      "last_lineno": 7,
+                                      "text": "rescue => e\n  puts e",
+                                      "type": "RESBODY"
+                                    }
+                                  }
+                                ],
+                                "first_column": 0,
+                                "first_lineno": 4,
+                                "last_column": 8,
+                                "last_lineno": 5,
+                                "text": "rescue Exception => e\n  puts e",
+                                "type": "RESBODY"
+                              }
+                            },
+                            "Nil"
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 2,
+                          "last_column": 8,
+                          "last_lineno": 7,
+                          "text": "yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e",
+                          "type": "RESCUE"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "puts"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "\"Finally\""
+                                        }
+                                      ],
+                                      "first_column": 7,
+                                      "first_lineno": 11,
+                                      "last_column": 16,
+                                      "last_lineno": 11,
+                                      "text": "\"Finally\"",
+                                      "type": "STR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 11,
+                                "last_column": 16,
+                                "last_lineno": 11,
+                                "text": "puts \"Finally\"",
+                                "type": "LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 2,
+                          "first_lineno": 11,
+                          "last_column": 16,
+                          "last_lineno": 11,
+                          "text": "puts \"Finally\"",
+                          "type": "FCALL"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 2,
+                    "last_column": 8,
+                    "last_lineno": 7,
+                    "text": "yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e",
+                    "type": "ENSURE"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 2,
+              "last_column": 8,
+              "last_lineno": 7,
+              "text": "yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 3,
+        "last_lineno": 12,
+        "text": "def complex_rescue\n  yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e\nelse\n  puts \"No error\"\nensure\n  puts \"Finally\"\nend",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "y"
+                }
+              ],
+              "first_column": 9,
+              "first_lineno": 14,
+              "last_column": 10,
+              "last_lineno": 14,
+              "text": "y",
+              "type": "LVAR"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "x"
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 4,
+                    "first_lineno": 14,
+                    "last_column": 5,
+                    "last_lineno": 14,
+                    "text": "1",
+                    "type": "INTEGER"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 14,
+              "last_column": 5,
+              "last_lineno": 14,
+              "text": "x = 1",
+              "type": "LASGN"
+            }
+          },
+          "Nil"
+        ],
+        "first_column": 0,
+        "first_lineno": 14,
+        "last_column": 10,
+        "last_lineno": 14,
+        "text": "x = 1 if y",
+        "type": "IF"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "x"
+                }
+              ],
+              "first_column": 13,
+              "first_lineno": 15,
+              "last_column": 14,
+              "last_lineno": 15,
+              "text": "x",
+              "type": "LVAR"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "y"
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 4,
+                    "first_lineno": 15,
+                    "last_column": 5,
+                    "last_lineno": 15,
+                    "text": "2",
+                    "type": "INTEGER"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 15,
+              "last_column": 5,
+              "last_lineno": 15,
+              "text": "y = 2",
+              "type": "LASGN"
+            }
+          },
+          "Nil"
+        ],
+        "first_column": 0,
+        "first_lineno": 15,
+        "last_column": 14,
+        "last_lineno": 15,
+        "text": "y = 2 unless x",
+        "type": "UNLESS"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [],
+              "first_column": 12,
+              "first_lineno": 16,
+              "last_column": 17,
+              "last_lineno": 16,
+              "text": "false",
+              "type": "FALSE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "z"
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 4,
+                    "first_lineno": 16,
+                    "last_column": 5,
+                    "last_lineno": 16,
+                    "text": "3",
+                    "type": "INTEGER"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 16,
+              "last_column": 5,
+              "last_lineno": 16,
+              "text": "z = 3",
+              "type": "LASGN"
+            }
+          },
+          {
+            "Bool": true
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 16,
+        "last_column": 17,
+        "last_lineno": 16,
+        "text": "z = 3 while false",
+        "type": "WHILE"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [],
+              "first_column": 12,
+              "first_lineno": 17,
+              "last_column": 16,
+              "last_lineno": 17,
+              "text": "true",
+              "type": "TRUE"
+            }
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "String": "a"
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 4,
+                    "first_lineno": 17,
+                    "last_column": 5,
+                    "last_lineno": 17,
+                    "text": "4",
+                    "type": "INTEGER"
+                  }
+                }
+              ],
+              "first_column": 0,
+              "first_lineno": 17,
+              "last_column": 5,
+              "last_lineno": 17,
+              "text": "a = 4",
+              "type": "LASGN"
+            }
+          },
+          {
+            "Bool": true
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 17,
+        "last_column": 16,
+        "last_lineno": 17,
+        "text": "a = 4 until true",
+        "type": "UNTIL"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "String": "text"
+          },
+          {
+            "Node": {
+              "children": [],
+              "first_column": 7,
+              "first_lineno": 19,
+              "last_column": 14,
+              "last_lineno": 19,
+              "text": "<<-HTML",
+              "type": "DSTR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 19,
+        "last_column": 14,
+        "last_lineno": 19,
+        "text": "text = <<-HTML",
+        "type": "LASGN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "String": "str"
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "Value: "
+                      }
+                    ],
+                    "first_column": 7,
+                    "first_lineno": 23,
+                    "last_column": 14,
+                    "last_lineno": 23,
+                    "text": "Value: ",
+                    "type": "STR"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "x"
+                            }
+                          ],
+                          "first_column": 16,
+                          "first_lineno": 23,
+                          "last_column": 17,
+                          "last_lineno": 23,
+                          "text": "x",
+                          "type": "LVAR"
+                        }
+                      }
+                    ],
+                    "first_column": 14,
+                    "first_lineno": 23,
+                    "last_column": 18,
+                    "last_lineno": 23,
+                    "text": "#{x}",
+                    "type": "EVSTR"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 23,
+              "last_column": 19,
+              "last_lineno": 23,
+              "text": "\"Value: #{x}\"",
+              "type": "DSTR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 23,
+        "last_column": 19,
+        "last_lineno": 23,
+        "text": "str = \"Value: #{x}\"",
+        "type": "LASGN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "String": "chained"
+          },
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "\"a\""
+                      }
+                    ],
+                    "first_column": 10,
+                    "first_lineno": 24,
+                    "last_column": 13,
+                    "last_lineno": 24,
+                    "text": "\"a\"",
+                    "type": "STR"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "String": "\"b\""
+                      }
+                    ],
+                    "first_column": 14,
+                    "first_lineno": 24,
+                    "last_column": 17,
+                    "last_lineno": 24,
+                    "text": "\"b\"",
+                    "type": "STR"
+                  }
+                }
+              ],
+              "first_column": 10,
+              "first_lineno": 24,
+              "last_column": 13,
+              "last_lineno": 24,
+              "text": "\"a\"",
+              "type": "DSTR"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 24,
+        "last_column": 17,
+        "last_lineno": 24,
+        "text": "chained = \"a\" \"b\"",
+        "type": "LASGN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "A"
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 26,
+              "last_column": 7,
+              "last_lineno": 26,
+              "text": "A",
+              "type": "CONST"
+            }
+          },
+          "Nil",
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [],
+                          "first_column": 11,
+                          "first_lineno": 27,
+                          "last_column": 15,
+                          "last_lineno": 27,
+                          "text": "self",
+                          "type": "SELF"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            "Nil",
+                            "Nil",
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Symbol": "foo"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil",
+                                        "Nil",
+                                        "Nil"
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 28,
+                                      "last_column": 7,
+                                      "last_lineno": 29,
+                                      "text": "def foo\n    end",
+                                      "type": "SCOPE"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 28,
+                                "last_column": 7,
+                                "last_lineno": 29,
+                                "text": "def foo\n    end",
+                                "type": "DEFN"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 28,
+                          "last_column": 7,
+                          "last_lineno": 29,
+                          "text": "def foo\n    end",
+                          "type": "SCOPE"
+                        }
+                      }
+                    ],
+                    "first_column": 2,
+                    "first_lineno": 27,
+                    "last_column": 5,
+                    "last_lineno": 30,
+                    "text": "class << self\n    def foo\n    end\n  end",
+                    "type": "SCLASS"
+                  }
+                }
+              ],
+              "first_column": 2,
+              "first_lineno": 27,
+              "last_column": 5,
+              "last_lineno": 30,
+              "text": "class << self\n    def foo\n    end\n  end",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 26,
+        "last_column": 3,
+        "last_lineno": 31,
+        "text": "class A\n  class << self\n    def foo\n    end\n  end\nend",
+        "type": "CLASS"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 6,
+                    "first_lineno": 33,
+                    "last_column": 7,
+                    "last_lineno": 33,
+                    "text": "1",
+                    "type": "INTEGER"
+                  }
+                },
+                {
+                  "Node": {
+                    "children": [],
+                    "first_column": 9,
+                    "first_lineno": 33,
+                    "last_column": 10,
+                    "last_lineno": 33,
+                    "text": "2",
+                    "type": "INTEGER"
+                  }
+                }
+              ],
+              "first_column": 5,
+              "first_lineno": 33,
+              "last_column": 11,
+              "last_lineno": 33,
+              "text": "(1, 2)",
+              "type": "LIST"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 33,
+        "last_column": 11,
+        "last_lineno": 33,
+        "text": "super(1, 2)",
+        "type": "SUPER"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          "Nil"
+        ],
+        "first_column": 0,
+        "first_lineno": 34,
+        "last_column": 5,
+        "last_lineno": 34,
+        "text": "super",
+        "type": "SUPER"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "puts"
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "\"begin\""
+                            }
+                          ],
+                          "first_column": 13,
+                          "first_lineno": 36,
+                          "last_column": 20,
+                          "last_lineno": 36,
+                          "text": "\"begin\"",
+                          "type": "STR"
+                        }
+                      }
+                    ],
+                    "first_column": 8,
+                    "first_lineno": 36,
+                    "last_column": 20,
+                    "last_lineno": 36,
+                    "text": "puts \"begin\"",
+                    "type": "LIST"
+                  }
+                }
+              ],
+              "first_column": 8,
+              "first_lineno": 36,
+              "last_column": 20,
+              "last_lineno": 36,
+              "text": "puts \"begin\"",
+              "type": "FCALL"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 36,
+        "last_column": 22,
+        "last_lineno": 36,
+        "text": "BEGIN { puts \"begin\" }",
+        "type": "BEGIN_BLOCK"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "puts"
+                },
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "\"end\""
+                            }
+                          ],
+                          "first_column": 11,
+                          "first_lineno": 37,
+                          "last_column": 16,
+                          "last_lineno": 37,
+                          "text": "\"end\"",
+                          "type": "STR"
+                        }
+                      }
+                    ],
+                    "first_column": 6,
+                    "first_lineno": 37,
+                    "last_column": 16,
+                    "last_lineno": 37,
+                    "text": "puts \"end\"",
+                    "type": "LIST"
+                  }
+                }
+              ],
+              "first_column": 6,
+              "first_lineno": 37,
+              "last_column": 16,
+              "last_lineno": 37,
+              "text": "puts \"end\"",
+              "type": "FCALL"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 37,
+        "last_column": 18,
+        "last_lineno": 37,
+        "text": "END { puts \"end\" }",
+        "type": "END_BLOCK"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 38,
+  "text": "def complex_rescue\n  yield 1, 2\n  yield\nrescue Exception => e\n  puts e\nrescue => e\n  puts e\nelse\n  puts \"No error\"\nensure\n  puts \"Finally\"\nend\n\nx = 1 if y\ny = 2 unless x\nz = 3 while false\na = 4 until true\n\ntext = <<-HTML\n  <div>Hello</div>\nHTML\n\nstr = \"Value: #{x}\"\nchained = \"a\" \"b\"\n\nclass A\n  class << self\n    def foo\n    end\n  end\nend\n\nsuper(1, 2)\nsuper\n\nBEGIN { puts \"begin\" }\nEND { puts \"end\" }\n",
+  "type": "ROOT"
+}
