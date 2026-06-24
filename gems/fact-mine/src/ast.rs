@@ -812,5 +812,9 @@ pub fn run_normalizer_uncovered_paths_tests() {
     normalizer::run_normalizer_uncovered_paths_tests();
 }
 
+#[cfg(test)]
+#[path = "ast-test.rs"]
+mod ast_test;
+
 
 
