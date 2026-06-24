@@ -108,11 +108,15 @@ impl VcsProvider for GitProvider {
             let prev_tree = prev_commit.tree()?;
 
             let mut diff_options = git2::DiffOptions::new();
-            let diff = self.repo.diff_tree_to_tree(
+            let mut diff = self.repo.diff_tree_to_tree(
                 Some(&prev_tree),
                 Some(&current_tree),
                 Some(&mut diff_options),
             )?;
+            let mut find_options = git2::DiffFindOptions::new();
+            find_options.renames(true);
+            find_options.copies(true);
+            diff.find_similar(Some(&mut find_options))?;
 
             let mut added_or_modified = Vec::new();
             let mut deleted = Vec::new();
@@ -256,3 +260,227 @@ fn collect_tree(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs;
+    use crate::storage::Storage;
+
+    fn create_commit(
+        repo: &Repository,
+        message: &str,
+        files: &[(&str, &str)],
+    ) -> Result<String> {
+        let mut index = repo.index()?;
+        let workdir = repo.workdir().ok_or_else(|| anyhow::anyhow!("no workdir"))?;
+        for (path, content) in files {
+            let file_path = workdir.join(path);
+            if let Some(parent_dir) = file_path.parent() {
+                fs::create_dir_all(parent_dir)?;
+            }
+            fs::write(&file_path, content)?;
+            index.add_path(Path::new(path))?;
+        }
+        index.write()?;
+        let tree_oid = index.write_tree()?;
+        let tree = repo.find_tree(tree_oid)?;
+        
+        let signature = git2::Signature::now("Test User", "test@example.com")?;
+        
+        let parent = match repo.head() {
+            Ok(head_ref) => {
+                let target = head_ref.target().unwrap();
+                Some(repo.find_commit(target)?)
+            }
+            Err(_) => None,
+        };
+        
+        let mut parents = Vec::new();
+        if let Some(ref p) = parent {
+            parents.push(p);
+        }
+        
+        let oid = repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
+        )?;
+        Ok(oid.to_string())
+    }
+
+    #[test]
+    fn test_git_provider_flow() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        
+        // 1. Initial commit
+        let c1 = create_commit(
+            &repo,
+            "initial commit",
+            &[("src/main.rs", "fn main() {\n    println!(\"hello\");\n}\n")],
+        )?;
+        
+        // 2. Add second file, modify first
+        let c2 = create_commit(
+            &repo,
+            "add helper",
+            &[
+                ("src/main.rs", "fn main() {\n    println!(\"hello world\");\n}\n"),
+                ("src/helper.rs", "fn help() {}\n"),
+            ],
+        )?;
+
+        // 3. Rename/move helper, add binary file
+        let workdir = repo.workdir().unwrap();
+        fs::remove_file(workdir.join("src/helper.rs"))?;
+        let mut index = repo.index()?;
+        index.remove_path(Path::new("src/helper.rs"))?;
+        index.write()?;
+        
+        let c3 = create_commit(
+            &repo,
+            "rename helper and add binary",
+            &[
+                ("src/utils.rs", "fn help() {}\n"),
+                ("bin/binary.dat", "\u{0}\u{1}\u{2}\u{3}"), // binary content
+            ],
+        )?;
+
+        // 4. Delete utils.rs (without adding anything similar)
+        fs::remove_file(workdir.join("src/utils.rs"))?;
+        let mut index = repo.index()?;
+        index.remove_path(Path::new("src/utils.rs"))?;
+        index.write()?;
+        
+        let c4 = create_commit(
+            &repo,
+            "delete utils",
+            &[],
+        )?;
+
+        // Open provider
+        let provider = GitProvider::open(dir.path())?;
+        
+        // Test list_commits
+        let commits = provider.list_commits()?;
+        assert_eq!(commits.len(), 4);
+        assert_eq!(commits[0].hash, c1);
+        assert_eq!(commits[0].message, "initial commit");
+        assert_eq!(commits[1].hash, c2);
+        assert_eq!(commits[2].hash, c3);
+        assert_eq!(commits[3].hash, c4);
+        
+        // Test files_at_commit
+        let filter_all = |_path: &str| true;
+        let files = provider.files_at_commit(&c1, &filter_all)?;
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "src/main.rs");
+        assert_eq!(files[0].contents, "fn main() {\n    println!(\"hello\");\n}\n");
+
+        let files3 = provider.files_at_commit(&c3, &filter_all)?;
+        assert_eq!(files3.len(), 2);
+        assert!(files3.iter().any(|f| f.path == "src/main.rs"));
+        assert!(files3.iter().any(|f| f.path == "src/utils.rs"));
+        
+        // Test files_at_commit with a filter that filters out some files
+        let filter_main = |path: &str| path.contains("main");
+        let files3_filtered = provider.files_at_commit(&c3, &filter_main)?;
+        assert_eq!(files3_filtered.len(), 1);
+        assert_eq!(files3_filtered[0].path, "src/main.rs");
+
+        // Test file_contents_at_commit uncached
+        let contents_init = provider.file_contents_at_commit(&c1, "src/main.rs")?;
+        assert_eq!(contents_init, Some("fn main() {\n    println!(\"hello\");\n}\n".to_string()));
+
+        // Test file_contents_at_commit cached
+        let contents = provider.file_contents_at_commit(&c2, "src/main.rs")?;
+        assert_eq!(contents, Some("fn main() {\n    println!(\"hello world\");\n}\n".to_string()));
+        
+        // Hit cache
+        let contents_cached = provider.file_contents_at_commit(&c2, "src/main.rs")?;
+        assert_eq!(contents_cached, Some("fn main() {\n    println!(\"hello world\");\n}\n".to_string()));
+
+        // Non-existent file
+        let no_file = provider.file_contents_at_commit(&c2, "src/nonexistent.rs")?;
+        assert_eq!(no_file, None);
+
+        // Binary file ignored or returns None
+        let binary_file = provider.file_contents_at_commit(&c3, "bin/binary.dat")?;
+        assert_eq!(binary_file, None);
+
+        // Test changes_at_commit with no previous commit
+        let changes_c1 = provider.changes_at_commit(None, &c1, &filter_all)?;
+        assert_eq!(changes_c1.added_or_modified.len(), 1);
+        assert_eq!(changes_c1.added_or_modified[0].path, "src/main.rs");
+        assert!(changes_c1.deleted.is_empty());
+
+        // Test changes_at_commit with previous commit
+        let changes_c2 = provider.changes_at_commit(Some(&c1), &c2, &filter_all)?;
+        assert_eq!(changes_c2.added_or_modified.len(), 2);
+        assert!(changes_c2.added_or_modified.iter().any(|f| f.path == "src/main.rs"));
+        assert!(changes_c2.added_or_modified.iter().any(|f| f.path == "src/helper.rs"));
+        assert!(changes_c2.deleted.is_empty());
+
+        // Test changes_at_commit for c3 (rename helper to utils, add binary)
+        let changes_c3 = provider.changes_at_commit(Some(&c2), &c3, &filter_all)?;
+        assert_eq!(changes_c3.deleted, vec!["src/helper.rs".to_string()]);
+        assert_eq!(changes_c3.added_or_modified.len(), 1);
+        assert_eq!(changes_c3.added_or_modified[0].path, "src/utils.rs");
+
+        // Test changes_at_commit for c4 (delete utils.rs)
+        let changes_c4 = provider.changes_at_commit(Some(&c3), &c4, &filter_all)?;
+        assert_eq!(changes_c4.deleted, vec!["src/utils.rs".to_string()]);
+        assert!(changes_c4.added_or_modified.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lineage_engine_with_git_provider() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        
+        // Commit 1: Initial unit
+        let _c1 = create_commit(
+            &repo,
+            "add main fn",
+            &[("src/main.rs", "fn main() {\n    let x = 1;\n}\n")],
+        )?;
+        
+        // Commit 2: Move/rename main fn to helper fn in another file
+        let workdir = repo.workdir().unwrap();
+        fs::remove_file(workdir.join("src/main.rs"))?;
+        let mut index = repo.index()?;
+        index.remove_path(Path::new("src/main.rs"))?;
+        index.write()?;
+
+        let _c2 = create_commit(
+            &repo,
+            "move main fn to helper",
+            &[("src/helper.rs", "fn main() {\n    let x = 1;\n}\n")],
+        )?;
+
+        let provider = GitProvider::open(dir.path())?;
+        let storage = Storage::open_memory()?;
+        let mut engine = crate::LineageEngine::new(
+            provider,
+            crate::HeuristicExtractor::default(),
+            storage,
+        );
+        let stats = engine.run(None)?;
+        
+        assert_eq!(stats.commits, 2);
+        assert_eq!(stats.events, 1);
+        assert_eq!(stats.moves, 1);
+        assert_eq!(stats.fixes, 0);
+        assert_eq!(stats.changes, 0);
+
+        Ok(())
+    }
+}
+

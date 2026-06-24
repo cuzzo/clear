@@ -535,4 +535,92 @@ mod tests {
         assert_eq!(stats.findings, 1);
         assert_eq!(storage.count_rows("sarif_findings").unwrap(), 1);
     }
+
+    #[test]
+    fn test_sarif_ingest_edge_cases() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        
+        let sarif1 = sub.join("report1.sarif");
+        fs::write(&sarif1, "{}").unwrap();
+        let json1 = sub.join("report2.json");
+        fs::write(&json1, "{}").unwrap();
+        let txt1 = sub.join("report3.txt");
+        fs::write(&txt1, "{}").unwrap();
+        
+        let bad_path = dir.path().join("does_not_exist");
+        
+        let stats = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sub.clone(), bad_path],
+            "test_source",
+            "abc",
+            None,
+            false,
+        ).unwrap();
+        
+        assert_eq!(stats.skipped_files, 2); 
+        
+        let invalid_json = sub.join("invalid.json");
+        fs::write(&invalid_json, "invalid JSON content").unwrap();
+        let stats2 = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[invalid_json],
+            "test_source",
+            "abc",
+            None,
+            false,
+        ).unwrap();
+        assert_eq!(stats2.skipped_files, 1);
+
+        let rule_json = dir.path().join("rule_test.sarif");
+        fs::write(
+            &rule_json,
+            r#"{
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"SlopCop"}},
+                "results":[{
+                  "ruleId":"rules.test",
+                  "level":"warning",
+                  "message":{"text":"test message"},
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"file:///app/src/demo.rb"}
+                    }
+                  }],
+                  "properties":{"arm_category":"arm_type","dark_arm":false},
+                  "partialFingerprints":{"key1":"val1"}
+                }, {
+                  "ruleId":"rules.dark_arm",
+                  "level":"error",
+                  "locations":[{
+                    "physicalLocation":{
+                      "artifactLocation":{"uri":"src/demo.rb"}
+                    }
+                  }],
+                  "properties":{"kind":"safety"}
+                }]
+              }]
+            }"#,
+        ).unwrap();
+        
+        let stats3 = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[rule_json],
+            "test_source",
+            "abc",
+            None,
+            false,
+        ).unwrap();
+        
+        assert_eq!(stats3.artifacts, 1);
+        assert_eq!(stats3.findings, 2);
+    }
 }

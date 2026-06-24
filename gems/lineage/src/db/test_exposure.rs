@@ -493,4 +493,232 @@ mod tests {
         assert!(function_aliases("Type::with").contains(&"with".to_string()));
         assert!(function_aliases("mod.fn").contains(&"fn".to_string()));
     }
+
+    use tempfile::tempdir;
+    use crate::storage::Storage;
+    use crate::git::GitProvider;
+    use crate::extract::HeuristicExtractor;
+    use crate::stack_trace::RepoPathNormalizer;
+    use std::fs;
+    use std::path::Path;
+
+    fn create_commit(
+        repo: &git2::Repository,
+        message: &str,
+        files: &[(&str, &str)],
+    ) -> Result<String, git2::Error> {
+        let mut index = repo.index()?;
+        let workdir = repo.workdir().ok_or_else(|| git2::Error::from_str("no workdir"))?;
+        for (path, content) in files {
+            let file_path = workdir.join(path);
+            if let Some(parent_dir) = file_path.parent() {
+                fs::create_dir_all(parent_dir).unwrap();
+            }
+            fs::write(&file_path, content).unwrap();
+            index.add_path(Path::new(path))?;
+        }
+        index.write()?;
+        let tree_oid = index.write_tree()?;
+        let tree = repo.find_tree(tree_oid)?;
+        
+        let signature = git2::Signature::now("Test User", "test@example.com")?;
+        
+        let parent = match repo.head() {
+            Ok(head_ref) => {
+                let target = head_ref.target().unwrap();
+                Some(repo.find_commit(target)?)
+            }
+            Err(_) => None,
+        };
+        
+        let mut parents = Vec::new();
+        if let Some(ref p) = parent {
+            parents.push(p);
+        }
+        
+        let oid = repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
+        )?;
+        Ok(oid.to_string())
+    }
+
+    #[test]
+    fn test_ingest_test_exposure_json_flow() {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        
+        // Write file and commit
+        let content = "def foo\n  puts 'hello'\nend\n";
+        let c1 = create_commit(&repo, "init", &[("src/foo.rb", content)]).unwrap();
+        
+        let storage = Storage::open_memory().unwrap();
+        
+        let provider = GitProvider::open(dir.path()).unwrap();
+        let normalizer = RepoPathNormalizer::new(dir.path());
+        let extractor = HeuristicExtractor::default();
+        
+        let input_json = json!({
+            "hits": [{
+                "file": "src/foo.rb",
+                "function": "foo",
+                "test_id": "some_test",
+                "test_type": "unit",
+            }]
+        });
+        
+        let err = ingest_test_exposure_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            &input_json.to_string(),
+            &c1,
+            None,
+        );
+        assert!(err.is_err());
+        
+        storage.insert_metadata(&crate::model::CommitMetadata {
+            hash: c1.clone(),
+            message: "init".to_string(),
+            timestamp: 123456,
+        }).unwrap();
+        
+        let units = extractor.extract_units(&crate::model::BlobFile {
+            path: "src/foo.rb".to_string(),
+            contents: content.to_string(),
+        });
+        for unit in &units {
+            storage.upsert_logical_unit(unit, 123456).unwrap();
+        }
+        
+        let stats = ingest_test_exposure_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            &input_json.to_string(),
+            &c1,
+            None,
+        ).unwrap();
+        
+        assert_eq!(stats.records, 1);
+        assert_eq!(stats.events, 1);
+        
+        let err_json = ingest_test_exposure_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            "invalid json",
+            &c1,
+            None,
+        );
+        assert!(err_json.is_err());
+
+        let empty_json = json!({ "hits": [] });
+        let err_empty = ingest_test_exposure_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            &empty_json.to_string(),
+            &c1,
+            None,
+        );
+        assert!(err_empty.is_err());
+    }
+
+    #[test]
+    fn test_ingest_test_exposure_nested_flow() {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        
+        let content = "def foo\n  puts 'hello'\nend\n";
+        let c1 = create_commit(&repo, "init", &[("src/foo.rb", content)]).unwrap();
+        
+        let storage = Storage::open_memory().unwrap();
+        storage.insert_metadata(&crate::model::CommitMetadata {
+            hash: c1.clone(),
+            message: "init".to_string(),
+            timestamp: 123456,
+        }).unwrap();
+        
+        let provider = GitProvider::open(dir.path()).unwrap();
+        let normalizer = RepoPathNormalizer::new(dir.path());
+        let extractor = HeuristicExtractor::default();
+        
+        let units = extractor.extract_units(&crate::model::BlobFile {
+            path: "src/foo.rb".to_string(),
+            contents: content.to_string(),
+        });
+        for unit in &units {
+            storage.upsert_logical_unit(unit, 123456).unwrap();
+        }
+
+        // Nested file format JSON with context line matching & mismatching
+        let nested_json = json!({
+            "files": [{
+                "file": "src/foo.rb",
+                "functions": [{
+                    "name": "foo",
+                    "line": 1,
+                    "context_line": "def foo",
+                    "tests": [{
+                        "id": "my_test_fuzz",
+                        "type": "property-based",
+                        "mutation_status": "killed",
+                        "mutation_kind": "fuzz"
+                    }, {
+                        "id": "my_test_random",
+                        "type": "unit",
+                        "mutation_status": "survived",
+                        "mutation_kind": "random"
+                    }]
+                }],
+                "lines": [{
+                    "line": 2,
+                    "context_line": "  puts 'hello'",
+                    "tests": [{
+                        "id": "my_line_test",
+                        "type": "integration",
+                    }]
+                }, {
+                    "line": 2,
+                    "context_line": "wrong context line",
+                    "tests": [{
+                        "id": "my_mismatch_test",
+                        "type": "integration",
+                    }]
+                }],
+                "branches": [{
+                    "branch_id": "b1",
+                    "line": 2,
+                    "tests": [{
+                        "id": "my_branch_test",
+                        "type": "integration",
+                    }]
+                }]
+            }]
+        });
+
+        let stats = ingest_test_exposure_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            &nested_json.to_string(),
+            &c1,
+            None,
+        ).unwrap();
+
+        assert_eq!(stats.records, 5);
+        assert_eq!(stats.events, 5);
+        assert_eq!(stats.mutation_records, 2);
+        assert_eq!(stats.unverified, 1); // 1 mismatched context line
+    }
 }

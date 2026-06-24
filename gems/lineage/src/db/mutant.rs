@@ -1018,4 +1018,83 @@ mod tests {
         assert_eq!(stats.units, 1);
         assert_eq!(stats.skipped_facts, 0);
     }
+
+    #[test]
+    fn test_mutant_ingest_edge_cases() {
+        let storage = Storage::open_memory().unwrap();
+        let extractor = HeuristicExtractor::default();
+        let normalizer = RepoPathNormalizer::new(".");
+        
+        let provider = MemoryProvider {
+            files: vec![BlobFile {
+                path: "src/loader.rb".to_string(),
+                contents: "class Loader\n  def run\n  end\nend".to_string(),
+            }],
+        };
+
+        let err = ingest_mutant_facts_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            "{}",
+            "nonexistent_commit",
+            None,
+            "unit",
+        );
+        assert!(err.is_err());
+
+        storage.insert_metadata(&CommitMetadata {
+            hash: "abc".into(),
+            message: "coverage".into(),
+            timestamp: 10,
+        }).unwrap();
+        let loader_file = BlobFile {
+            path: "src/loader.rb".to_string(),
+            contents: "class Loader\n  def run\n  end\nend".to_string(),
+        };
+        let units = extractor.extract_units(&loader_file);
+        for unit in units {
+            storage.upsert_logical_unit(&unit, 10).unwrap();
+        }
+
+        let payload = json!({
+            "schema": "mutant-facts/v1",
+            "subjects": [{
+                "file": "src/loader.rb",
+                "method": "Loader#*",
+                "kill_rate": 0.0,
+                "mutations": 1,
+                "killed": 0,
+                "alive": 1,
+            }, {
+                "file": "src/loader.rb",
+                "method": "Loader#run",
+                "kill_rate": 0.0,
+                "mutations": 1,
+                "killed": 0,
+                "alive": 0,
+            }, {
+                "file": "src/loader.rb",
+                "method": "run",
+                "kill_rate": 0.0,
+                "mutations": 0,
+                "gate_status": "none",
+            }]
+        });
+
+        let stats = ingest_mutant_facts_json(
+            &storage,
+            &normalizer,
+            &provider,
+            &extractor,
+            &payload.to_string(),
+            "abc",
+            None,
+            "unit",
+        ).unwrap();
+
+        assert_eq!(stats.facts, 3);
+        assert_eq!(stats.units, 3);
+    }
 }

@@ -1019,4 +1019,77 @@ mod tests {
             .unwrap();
         assert_eq!(source, "coverage:unit");
     }
+
+    #[test]
+    fn test_quality_ingest_edge_cases() {
+        let storage = Storage::open_memory().unwrap();
+        let payload_generic = json!({
+            "files": [{
+                "path": "src/demo.rb",
+                "coverage": 50.0,
+                "is_hard_gated": true,
+                "line_hits": [3, 4]
+            }]
+        });
+
+        let err = ingest_coverage_json(&storage, &payload_generic.to_string(), "generic", "nonexistent", None, false);
+        assert!(err.is_err());
+
+        let err_format = ingest_coverage_json(&storage, "{}", "bad_format", "abc", None, false);
+        assert!(err_format.is_err());
+
+        storage.insert_metadata(&CommitMetadata {
+            hash: "abc".into(),
+            message: "coverage".into(),
+            timestamp: 10,
+        }).unwrap();
+
+        let stats_skipped = ingest_coverage_json(&storage, &payload_generic.to_string(), "generic", "abc", None, false).unwrap();
+        assert_eq!(stats_skipped.skipped_files, 1);
+
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+
+        let options = CoverageIngestOptions {
+            line_source: "custom_source".to_string(),
+        };
+        let stats = ingest_coverage_json_with_options(
+            &storage,
+            &payload_generic.to_string(),
+            "generic",
+            "abc",
+            None,
+            true,
+            &options,
+        ).unwrap();
+        assert_eq!(stats.files, 1);
+        assert_eq!(stats.line_events, 2);
+
+        let xml_payload = r#"
+          <coverage>
+            <sources>
+              <source>/app/</source>
+            </sources>
+            <packages><package><classes>
+              <class filename="src/demo.rb" line-rate="1.0">
+                <lines>
+                  <line number="1" hits="5"/>
+                </lines>
+              </class>
+            </classes></package></packages>
+          </coverage>
+        "#;
+        let stats_xml = ingest_coverage_json(&storage, xml_payload, "cobertura", "abc", None, false).unwrap();
+        assert_eq!(stats_xml.files, 1);
+        assert_eq!(stats_xml.line_events, 1);
+    }
 }
