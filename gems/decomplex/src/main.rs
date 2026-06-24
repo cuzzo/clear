@@ -1218,6 +1218,17 @@ fn read_facts(input: Option<&PathBuf>, from_stdin: bool) -> Result<serde_json::V
 }
 
 fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBuf>) -> Result<()> {
+    let mut temp_facts;
+    let facts = if facts.is_object() && facts.get("input").is_some() && facts.get("detectors").is_none() {
+        if let Some(input_val) = facts.get("input") {
+            temp_facts = input_val.clone();
+            &temp_facts
+        } else {
+            facts
+        }
+    } else {
+        facts
+    };
     let report = Report::from_facts(facts)?;
     let text = match format {
         "markdown" | "md" => report.to_markdown(),
