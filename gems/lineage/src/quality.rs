@@ -417,9 +417,34 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
     .context("parse Cobertura XML")?;
     let mut records = Vec::new();
 
+    let mut sources = Vec::new();
+    for source in document.descendants().filter(|node| node.has_tag_name("source")) {
+        if let Some(text) = source.text() {
+            let t = text.trim();
+            if !t.is_empty() {
+                sources.push(t);
+            }
+        }
+    }
+
     for class in document.descendants().filter(|node| node.has_tag_name("class")) {
-        let Some(path) = class.attribute("filename").map(normalize_path) else {
+        let Some(raw_filename) = class.attribute("filename") else {
             continue;
+        };
+        let path = if !sources.is_empty() {
+            let mut resolved = String::new();
+            for source in &sources {
+                let combined = if source.ends_with('/') || raw_filename.starts_with('/') {
+                    format!("{}{}", source, raw_filename)
+                } else {
+                    format!("{}/{}", source, raw_filename)
+                };
+                resolved = combined;
+                break;
+            }
+            normalize_path(&resolved)
+        } else {
+            normalize_path(raw_filename)
         };
         if path.is_empty() {
             continue;
