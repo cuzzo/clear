@@ -201,7 +201,7 @@ module NilKill
       return if nested_method_boundary?(node)
 
       case node
-      when Syntax::BeginNode
+      when Syntax::BeginNode, Syntax::BodyStatementNode
         collect_begin_node(node, current_method_id, current_handler_id)
       when Syntax::RescueModifierNode
         collect_rescue_modifier(node, current_method_id, current_handler_id)
@@ -290,13 +290,16 @@ module NilKill
 
     def fixable_error_call?(node)
       return false unless node.name == :fixable!
-      (node.arguments&.arguments || []).grep(Syntax::KeywordHashNode).any? do |kw|
-        kw.elements.any? do |assoc|
-          assoc.respond_to?(:key) && assoc.respond_to?(:value) &&
-            hash_key_name(assoc.key) == "level" &&
-            assoc.value.is_a?(Syntax::SymbolNode) &&
-            assoc.value.unescaped == "error"
-        end
+      args = node.arguments&.arguments || []
+      direct_elements = args.select { |a| a.is_a?(Syntax::AssocNode) }
+      nested_elements = args.grep(Syntax::KeywordHashNode).flat_map(&:elements) +
+                        args.select { |a| a.is_a?(Syntax::HashNode) }.flat_map(&:elements)
+      all_elements = direct_elements + nested_elements
+      all_elements.any? do |assoc|
+        assoc.respond_to?(:key) && assoc.respond_to?(:value) &&
+          hash_key_name(assoc.key) == "level" &&
+          assoc.value.is_a?(Syntax::SymbolNode) &&
+          assoc.value.unescaped == "error"
       end
     end
 

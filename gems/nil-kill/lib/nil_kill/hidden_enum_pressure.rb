@@ -124,31 +124,10 @@ module NilKill
 
     def interesting_node(raw, syntax_context)
       case raw.kind
-      when "body_statement"
-        first = raw_children(syntax_context, raw).first
-        return syntax_context.wrap(raw, force: Syntax::CaseNode) if first&.kind == "case"
-        assignment_class = body_statement_assignment_class(raw, syntax_context)
-        return syntax_context.wrap(raw, force: assignment_class) if assignment_class && body_statement_assignment?(raw, syntax_context)
       when "case"
         syntax_context.wrap(raw, force: Syntax::CaseNode)
       when "call", "binary", "assignment", "operator_assignment", "element_reference"
         syntax_context.wrap(raw)
-      end
-    end
-
-    def body_statement_assignment?(raw, syntax_context)
-      children = raw_children(syntax_context, raw)
-      !body_statement_assignment_class(raw, syntax_context).nil? &&
-        children.any? { |child| !child.named? && child.text.to_s == "=" } &&
-        !children.any? { |child| !child.named? && %w[== != <= >= ===].include?(child.text.to_s) }
-    end
-
-    def body_statement_assignment_class(raw, syntax_context)
-      case raw_named_children(syntax_context, raw).first&.kind
-      when "identifier" then Syntax::LocalVariableWriteNode
-      when "instance_variable" then Syntax::InstanceVariableWriteNode
-      when "class_variable" then Syntax::ClassVariableWriteNode
-      when "global_variable" then Syntax::GlobalVariableWriteNode
       end
     end
 

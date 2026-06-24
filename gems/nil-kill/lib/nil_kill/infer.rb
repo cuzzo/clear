@@ -28,12 +28,12 @@ module NilKill
     end
 
     def index_sources
-      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "ruby") == "rust"
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "static_analysis") == "rust"
         index_sources_from_native_bundle
         return
       end
 
-      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "ruby") == "static_analysis"
+      if ENV.fetch("NIL_KILL_SOURCE_INDEX_ENGINE", "static_analysis") == "static_analysis"
         StaticAnalysis.index_store(store: @store, targets: NilKill.target_dirs, root: ROOT)
         return
       end
@@ -1099,6 +1099,8 @@ module NilKill
       case node
       when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
+      when Syntax::BodyStatementNode, Syntax::BeginNode
+        mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
       when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|

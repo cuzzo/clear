@@ -10,6 +10,7 @@ require "pathname"
 require "set"
 require "shellwords"
 require "time"
+require "sorbet-runtime"
 
 module NilKill
   ROOT = File.expand_path("../../..", __dir__)
@@ -22,7 +23,11 @@ module NilKill
   SORBET_PAYLOAD_DIR = File.join(TMP_DIR, "sorbet-payload")
 end
 
-require_relative "nil_kill/syntax"
+require_relative "nil_kill/tree_sitter_adapter"
+module NilKill
+  Syntax = TreeSitterAdapter
+end
+
 require_relative "nil_kill/util"
 require_relative "nil_kill/alias_recommendations"
 require_relative "nil_kill/schema/runtime_type"
