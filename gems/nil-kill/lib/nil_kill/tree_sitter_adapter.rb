@@ -524,6 +524,10 @@ module NilKill
         end
       end
 
+      def safe_navigation?
+        @raw.children.any? { |c| c.type == "&." }
+      end
+
       def arguments
         case @raw.type
         when "assignment", "operator_assignment"

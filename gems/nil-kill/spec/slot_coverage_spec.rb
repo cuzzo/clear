@@ -3,7 +3,7 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::SlotCoverage do
-  skip "does not assign built-in types from repeated project slot names" do
+  it "does not assign built-in types from repeated project slot names" do
     path, = repo_tmp_file("slot_coverage_names_fixture.rb", <<~RUBY)
       class SlotCoverageNamesFixture
         Record = Struct.new(:name, :line, :body)
@@ -15,7 +15,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(summary.fetch("struct_fields")).to include("total" => 3, "strong" => 0, "weak" => 0, "untyped" => 3)
   end
 
-  skip "applies explicit slot type override rules when a project opts in" do
+  it "applies explicit slot type override rules when a project opts in" do
     path, = repo_tmp_file("slot_coverage_override_fixture.rb", <<~RUBY)
       class SlotCoverageOverrideFixture
         Record = Struct.new(:payload)
@@ -38,7 +38,7 @@ RSpec.describe NilKill::SlotCoverage do
     end
   end
 
-  skip "reports static type distributions for repeated untyped slot names" do
+  it "reports static type distributions for repeated untyped slot names" do
     path, = repo_tmp_file("slot_coverage_hint_fixture.rb", <<~RUBY)
       class SlotCoverageHintFixture
         sig { params(node: AST::Node, payload: Alpha).void }
@@ -75,7 +75,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(payload).not_to have_key("typed_hints")
   end
 
-  skip "includes repeated untyped hash fields in slot-name pressure" do
+  it "includes repeated untyped hash fields in slot-name pressure" do
     path, = repo_tmp_file("slot_coverage_hash_field_fixture.rb", <<~RUBY)
       class SlotCoverageHashFieldFixture
         def first
@@ -97,7 +97,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(token.fetch("typed_total")).to eq(0)
   end
 
-  skip "does not report hash fields whose literal values have typed shapes" do
+  it "does not report hash fields whose literal values have typed shapes" do
     path, = repo_tmp_file("slot_coverage_typed_hash_field_fixture.rb", <<~RUBY)
       class SlotCoverageTypedHashFieldFixture
         ERROR_ID = 12
@@ -117,7 +117,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(rows.map { |row| row["name"] }).not_to include("codes", "id", "col", "name")
   end
 
-  skip "credits typed accessors from included modules to Ruby struct fields" do
+  it "credits typed accessors from included modules to Ruby struct fields" do
     path, = repo_tmp_file("slot_coverage_included_accessor_fixture.rb", <<~RUBY)
       module IncludedAccessorFixture
         module DropField
@@ -142,7 +142,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(rows.map { |row| row["name"] }).not_to include("drops")
   end
 
-  skip "qualifies Ruby struct owners under modules without popping on method ends" do
+  it "qualifies Ruby struct owners under modules without popping on method ends" do
     path, = repo_tmp_file("slot_coverage_nested_structs.rb", <<~RUBY)
       module Sample
         def self.helper
@@ -214,7 +214,7 @@ RSpec.describe NilKill::SlotCoverage do
     ))
   end
 
-  skip "counts typed, weak, and untyped slots per file without regex source scanning" do
+  it "counts typed, weak, and untyped slots per file without regex source scanning" do
     path, rel = repo_tmp_file("slot_coverage_fixture.rb", <<~RUBY)
       class CoverageFixture
         Pair = Struct.new(:left, :right)
@@ -257,7 +257,7 @@ RSpec.describe NilKill::SlotCoverage do
     expect(summary.fetch("typed_percent")).to eq(40.0)
   end
 
-  skip "rolls up totals across files" do
+  it "rolls up totals across files" do
     first, = repo_tmp_file("slot_coverage_first.rb", <<~RUBY)
       class FirstCoverageFixture
         sig { returns(String) }
@@ -273,8 +273,66 @@ RSpec.describe NilKill::SlotCoverage do
     summaries = described_class.new([first, second]).summaries
     total = described_class.totals(summaries)
 
-    byebug
     expect(total.fetch("structural")).to include("total" => 2, "strong" => 1, "weak" => 0, "untyped" => 1)
     expect(total.fetch("typed_percent")).to eq(50.0)
+  end
+
+  it "normalizes slot types" do
+    sc = described_class.new([])
+    expect(sc.send(:normalize_slot_type, "Array")).to eq("T::Array[T.untyped]")
+    expect(sc.send(:normalize_slot_type, "Hash")).to eq("T::Hash[T.untyped, T.untyped]")
+    expect(sc.send(:normalize_slot_type, "Set")).to eq("T::Set[T.untyped]")
+    expect(sc.send(:normalize_slot_type, "Any")).to eq("T.untyped")
+    expect(sc.send(:strip_nilable_type, "T.nilable(String)")).to eq("String")
+    expect(sc.send(:strip_nilable_type, "Optional[Integer]")).to eq("Integer")
+  end
+
+  it "exercises class-level entrypoints" do
+    target = "gems/nil-kill/lib/nil_kill/slot_coverage.rb"
+    expect(described_class.files_for([target])).to be_an(Array)
+    expect(described_class.scan([target])).to be_an(Array)
+    expect(described_class.analyze([target])).to be_a(Hash)
+  end
+
+  it "raises errors on invalid overrides configuration" do
+    config1, = repo_tmp_file("slot_coverage_invalid.json", "{invalid json")
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config1) do
+      expect { described_class.new([]) }.to raise_error(ArgumentError, /invalid NIL_KILL_SLOT_TYPE_OVERRIDES/)
+    end
+
+    config2, = repo_tmp_file("slot_coverage_invalid2.json", JSON.generate({ "owner_aliases" => ["not a hash"] }))
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config2) do
+      expect { described_class.new([]) }.to raise_error(ArgumentError, /expected object/)
+    end
+
+    config3, = repo_tmp_file("slot_coverage_invalid3.json", JSON.generate({ "owner_aliases" => [{}] }))
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config3) do
+      expect { described_class.new([]) }.to raise_error(ArgumentError, /owner and qualified_owner are required/)
+    end
+
+    config4, = repo_tmp_file("slot_coverage_invalid4.json", JSON.generate({ "owner_aliases" => [{ "owner" => "[invalid regex", "qualified_owner" => "A" }] }))
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config4) do
+      expect { described_class.new([]) }.to raise_error(ArgumentError, /invalid owner pattern/)
+    end
+
+    config5, = repo_tmp_file("slot_coverage_invalid5.json", JSON.generate({ "slot_types" => [{}] }))
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config5) do
+      expect { described_class.new([]) }.to raise_error(ArgumentError, /name and type are required/)
+    end
+  end
+
+  it "applies owner aliases rules" do
+    config, = repo_tmp_file("slot_coverage_aliases.json", JSON.generate({
+      "owner_aliases" => [
+        {
+          "owner" => "\\AUnqualified\\z",
+          "qualified_owner" => "Qualified::Owner"
+        }
+      ]
+    }))
+    isolated_env("NIL_KILL_SLOT_TYPE_OVERRIDES" => config) do
+      sc = described_class.new([])
+      expect(sc.send(:qualified_owner, "path.rb", "Unqualified")).to eq("Qualified::Owner")
+    end
   end
 end

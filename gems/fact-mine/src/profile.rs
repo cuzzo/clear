@@ -1446,11 +1446,17 @@ fn infer_literal_type(value: &str) -> String {
     if value.parse::<f64>().is_ok() {
         return "Float".to_string();
     }
-    if value.starts_with('[') {
+    if value.starts_with('[') || value.starts_with("%i") || value.starts_with("%I") || value.starts_with("%w") || value.starts_with("%W") {
         return "T::Array[T.untyped]".to_string();
     }
     if value.starts_with('{') {
         return "T::Hash[T.untyped, T.untyped]".to_string();
+    }
+    if value.starts_with("%q") || value.starts_with("%Q") {
+        return "String".to_string();
+    }
+    if value.starts_with("%s") {
+        return "Symbol".to_string();
     }
     if value.chars().next().map_or(false, |c| c.is_uppercase()) {
         return value.to_string();

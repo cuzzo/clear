@@ -87,7 +87,7 @@ module NilKill
           next unless accepts_method?(method)
           next if annotation_path?(method["path"])
 
-          source = legacy_method_record(method, method_type_definitions[method_definition_key(method)])
+          source = legacy_method_record(method, find_definition_for(method, method_type_definitions))
           target = source["has_sig"] ? "existing_sigs" : "unsigned_methods"
           store.facts[target] << source
           rec = store.method_record([source["class"], source["method"], source["kind"], File.expand_path(source["path"], root), source["line"]])
@@ -121,6 +121,30 @@ module NilKill
           normalized_method_name(method["name"]),
           method["line"].to_i,
         ]
+      end
+
+      def find_definition_for(method, method_type_definitions)
+        key = method_definition_key(method)
+        candidates = [
+          key,
+          [key[0], key[1], key[2], key[3], 0],
+          [key[0], key[1], "", key[3], 0],
+          [key[0], key[1], "", key[3], key[4]],
+        ].uniq.map { |k| method_type_definitions[k] }.compact
+
+        return nil if candidates.empty?
+
+        merged = {}
+        candidates.each do |cand|
+          merged.merge!(cand) do |field_name, old_val, new_val|
+            if field_name == "params"
+              (Array(old_val) + Array(new_val)).uniq { |p| p["name"] }
+            else
+              new_val || old_val
+            end
+          end
+        end
+        merged
       end
 
       def legacy_method_record(method, definition)

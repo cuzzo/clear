@@ -84,6 +84,7 @@ module NilKill
 
     def build_analysis
       evidence = StaticEvidence.build(@targets, root: ROOT)
+      relativize_paths!(evidence, ROOT)
       summaries = evidence.fetch("files", []).to_h do |file|
         [file.fetch("path"), self.class.empty_summary(file.fetch("path"))]
       end
@@ -583,6 +584,41 @@ module NilKill
         source.include?("T.untyped") ||
         source.match?(/\b(?:Any|any|unknown|object)\b/) ||
         source.match?(/\A(?:Array|Hash|Set|list|dict|List|Dict)\s*(?:\[\s*\]|\[\s*(?:Any|any|unknown|T\.untyped))/)
+    end
+
+    def relativize_paths!(evidence, root)
+      rel_fn = ->(p) {
+        next p if p.nil?
+        begin
+          Pathname.new(p).relative_path_from(Pathname.new(root)).to_s
+        rescue StandardError
+          p.to_s
+        end
+      }
+
+      Array(evidence["files"]).each { |f| f["path"] = rel_fn.call(f["path"]) }
+      Array(evidence["methods"]).each { |m| m["path"] = rel_fn.call(m["path"]) }
+      Array(evidence["fields"]).each do |f|
+        f["path"] = rel_fn.call(f["path"])
+        if f["language"] == "ruby" && f["name"] && !f["name"].start_with?("@")
+          f["name"] = "@#{f["name"]}"
+        end
+      end
+
+      if (facts = evidence["facts"])
+        Array(facts["type_definitions"]).each { |d| d["path"] = rel_fn.call(d["path"]) }
+        Array(facts["struct_declarations"]).each { |d| d["path"] = rel_fn.call(d["path"]) }
+        Array(facts["hash_shapes"]).each { |s| s["path"] = rel_fn.call(s["path"]) }
+        Array(facts["array_shapes"]).each { |s| s["path"] = rel_fn.call(s["path"]) }
+        Array(facts["collection_index_lookups"]).each { |l| l["path"] = rel_fn.call(l["path"]) }
+        Array(facts["hash_record_blockers"]).each { |b| b["path"] = rel_fn.call(b["path"]) }
+        Array(facts["tlet_sites"]).each { |s| s["path"] = rel_fn.call(s["path"]) }
+        Array(facts["dead_nil_checks"]).each { |c| c["path"] = rel_fn.call(c["path"]) }
+        Array(facts["deterministic_guards"]).each { |g| g["path"] = rel_fn.call(g["path"]) }
+        Array(facts["return_origins"]).each { |o| o["path"] = rel_fn.call(o["path"]) }
+        Array(facts["noreturn_methods"]).each { |m| m["path"] = rel_fn.call(m["path"]) }
+        Array(facts["hash_record_escape_sites"]).each { |s| s["path"] = rel_fn.call(s["path"]) }
+      end
     end
   end
 end
