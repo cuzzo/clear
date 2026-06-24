@@ -193,10 +193,9 @@ impl Report {
         for (ref_name, positions) in self.ref_classes(ref_block) {
             let mut spellings = Vec::new();
             for pos in positions {
-                if let Some(name) = candidate.names.get(pos) {
-                    if !spellings.contains(name) {
-                        spellings.push(name.clone());
-                    }
+                let name = &candidate.names[pos];
+                if !spellings.contains(name) {
+                    spellings.push(name.clone());
                 }
             }
             if spellings.len() < 2 {
@@ -344,5 +343,53 @@ mod tests {
         assert_eq!(report.len(), 1);
         assert_eq!(report[0].ref_name, "a");
         assert_eq!(report[0].divergent, vec!["b", "c"]);
+
+        // Test float with two dots (should not be numeric)
+        assert!(!numeric_token("1.2.3"));
+
+        // Test method with too few tokens
+        let doc_small: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "methods": [
+                {
+                    "id": "m_small", "owner": "Class", "name": "small_method", "file": "foo.rb", "line": 50, "span": [50, 1, 54, 1],
+                    "statements": [
+                        { "index": 0, "line": 50, "end_line": 50, "span": [50, 1, 50, 10], "source": "a = 1", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 1, "line": 51, "end_line": 51, "span": [51, 1, 51, 10], "source": "b = 2", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 2, "line": 52, "end_line": 52, "span": [52, 1, 52, 10], "source": "c = 3", "reads": [], "writes": [], "dependencies": [], "co_uses": [] }
+                    ],
+                    "boundaries": []
+                }
+            ]
+        })).unwrap();
+        assert!(scan_documents(&[doc_small]).is_empty());
+
+        // Test units.len() < 2 (only clones within same unit)
+        let doc_same_unit_only: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "methods": [
+                {
+                    "id": "m_ref", "owner": "Class", "name": "ref_method", "file": "foo.rb", "line": 10, "span": [10, 1, 14, 1],
+                    "statements": [
+                        { "index": 0, "line": 10, "end_line": 10, "span": [10, 1, 10, 10], "source": "a = a", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 1, "line": 11, "end_line": 11, "span": [11, 1, 11, 10], "source": "a = a", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 2, "line": 12, "end_line": 12, "span": [12, 1, 12, 10], "source": "a = a", "reads": [], "writes": [], "dependencies": [], "co_uses": [] }
+                    ],
+                    "boundaries": []
+                },
+                {
+                    "id": "m_cand", "owner": "Class", "name": "ref_method", "file": "foo.rb", "line": 20, "span": [20, 1, 24, 1],
+                    "statements": [
+                        { "index": 0, "line": 20, "end_line": 20, "span": [20, 1, 20, 10], "source": "b = b", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 1, "line": 21, "end_line": 21, "span": [21, 1, 21, 10], "source": "b = c", "reads": [], "writes": [], "dependencies": [], "co_uses": [] },
+                        { "index": 2, "line": 22, "end_line": 22, "span": [22, 1, 22, 10], "source": "b = b", "reads": [], "writes": [], "dependencies": [], "co_uses": [] }
+                    ],
+                    "boundaries": []
+                }
+            ]
+        })).unwrap();
+        assert!(scan_documents(&[doc_same_unit_only]).is_empty());
     }
 }

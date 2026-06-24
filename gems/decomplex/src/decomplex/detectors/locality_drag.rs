@@ -636,6 +636,22 @@ mod tests {
             vec![],
         );
 
+        let method_low_score = make_method_json(
+            "method_low_score",
+            "foo_low",
+            "a_file.rb",
+            1,
+            vec![
+                make_stmt_json(0, 10, "x = 1", &[], &["x"], &[]),
+                make_stmt_json(1, 11, "a = 1", &[], &["a"], &[]),
+                make_stmt_json(2, 12, "b = 1", &[], &["b"], &[]),
+                make_stmt_json(3, 13, "c = 1", &[], &["c"], &[]),
+                make_stmt_json(4, 14, "d = 1", &[], &["d"], &[]),
+                make_stmt_json(5, 18, "use(x)", &["x"], &[], &[]),
+            ],
+            vec![],
+        );
+
         let method_2 = make_method_json(
             "method_2",
             "bar",
@@ -872,6 +888,7 @@ mod tests {
                 ("method_2", 15.0),
                 ("method_2b", 15.0),
                 ("method_3", 15.0),
+                ("method_low_score", 5.0),
                 ("method_4", 25.0),
                 ("method_4b", 25.0),
                 ("method_5", 15.0),
@@ -886,6 +903,7 @@ mod tests {
                 method_2,
                 method_2b,
                 method_3,
+                method_low_score,
                 method_4,
                 method_4b,
                 method_5,

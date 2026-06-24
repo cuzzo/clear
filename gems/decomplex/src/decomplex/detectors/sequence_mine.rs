@@ -107,26 +107,20 @@ impl Report {
                         continue;
                     };
                 let denominator = *self.support.get(&has).unwrap_or(&0);
-                if denominator == 0 {
-                    continue;
-                }
                 let confidence = pair.support as f64 / denominator as f64;
                 if confidence < min_confidence {
                     continue;
                 }
-                let Some(has_call) =
-                    calls
-                        .iter()
-                        .filter(|call| call.mid == has)
-                        .min_by(|left, right| {
-                            left.line
-                                .cmp(&right.line)
-                                .then_with(|| left.span.cmp(&right.span))
-                                .then_with(|| left.mid.cmp(&right.mid))
-                        })
-                else {
-                    continue;
-                };
+                let has_call = calls
+                    .iter()
+                    .filter(|call| call.mid == has)
+                    .min_by(|left, right| {
+                        left.line
+                            .cmp(&right.line)
+                            .then_with(|| left.span.cmp(&right.span))
+                            .then_with(|| left.mid.cmp(&right.mid))
+                    })
+                    .unwrap();
                 let loc = format!("{}:{}:{}", file, defn, has_call.line);
                 let mut spans = BTreeMap::new();
                 spans.insert(loc.clone(), has_call.span);
@@ -245,7 +239,9 @@ mod tests {
                     "name": "u5",
                     "line": 5,
                     "calls": [
-                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u5", "line": 10, "span": [10, 11, 12, 13] }
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u5", "line": 10, "span": [10, 11, 12, 13] },
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u5", "line": 10, "span": [10, 10, 12, 13] },
+                        { "mid": "a", "file": "foo.rb", "owner": "Class", "defn": "u5", "line": 11, "span": [11, 11, 12, 13] }
                     ]
                 }
             ]
