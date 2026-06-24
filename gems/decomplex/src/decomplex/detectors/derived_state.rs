@@ -172,6 +172,14 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 continue;
             }
 
+            // Is the derived variable b read at or after a's reassignment?
+            let is_read_after_reasn = method.statements.iter().any(|stmt| {
+                stmt.index >= reasn.statement_index && stmt.reads.contains(&b.name)
+            });
+            if !is_read_after_reasn {
+                continue;
+            }
+
             // Check if b and reasn are in sibling blocks
             let mut path_b = Vec::new();
             let mut path_reasn = Vec::new();
@@ -260,7 +268,8 @@ mod tests {
             "id": "1", "owner": "T", "name": "m1", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -268,7 +277,8 @@ mod tests {
             "id": "2", "owner": "T", "name": "m1", "file": "a.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 14, "end_line": 14, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -276,7 +286,8 @@ mod tests {
             "id": "3", "owner": "T", "name": "m2", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 10, "end_line": 10, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -284,7 +295,8 @@ mod tests {
             "id": "4", "owner": "T", "name": "m3", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a", "reads": [], "writes": ["b"], "dependencies": [["b", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -292,7 +304,8 @@ mod tests {
             "id": "5", "owner": "T", "name": "m4", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "c = a", "reads": [], "writes": ["c"], "dependencies": [["c", "a"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2", "reads": [], "writes": ["a"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(c)", "reads": ["c"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
@@ -300,7 +313,8 @@ mod tests {
             "id": "6", "owner": "T", "name": "m5", "file": "b.rb", "line": 1, "span": [1,2,3,4],
             "statements": [
                 { "index": 0, "line": 11, "end_line": 11, "span": [1,2,3,4], "source": "b = a; b = c", "reads": [], "writes": ["b"], "dependencies": [["b", "a"], ["b", "c"]], "co_uses": [] },
-                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2; c = 2", "reads": [], "writes": ["a", "c"], "dependencies": [], "co_uses": [] }
+                { "index": 1, "line": 15, "end_line": 15, "span": [1,2,3,4], "source": "a = 2; c = 2", "reads": [], "writes": ["a", "c"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 20, "end_line": 20, "span": [1,2,3,4], "source": "use(b)", "reads": ["b"], "writes": [], "dependencies": [], "co_uses": [] }
             ], "boundaries": []
         })).unwrap();
 
