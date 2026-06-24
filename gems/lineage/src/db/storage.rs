@@ -591,6 +591,65 @@ impl Storage {
             }
         };
 
+        // Try to load engine state first for exact current paths and lines
+        if let Some(ref hash) = target_commit {
+            if let Ok(Some(state_json)) = self.load_engine_state(hash) {
+                if let Ok(state) = serde_json::from_str::<serde_json::Value>(&state_json) {
+                    if let Some(previous) = state.get("previous").and_then(|p| p.as_object()) {
+                        let mut results = Vec::new();
+                        for (_id, val) in previous {
+                            let Some(uname) = val.get("name").and_then(|n| n.as_str()) else { continue; };
+                            
+                            // Check if name matches (exactly or qualified suffix)
+                            let name_matches = uname == name
+                                || uname.ends_with(&format!(".{name}"))
+                                || uname.ends_with(&format!("::{name}"))
+                                || uname.ends_with(&format!("#{name}"));
+                                
+                            if name_matches {
+                                let Some(upath) = val.get("path").and_then(|p| p.as_str()) else { continue; };
+                                let Some(ustart) = val.get("start_line").and_then(|l| l.as_u64()) else { continue; };
+                                results.push((upath.to_string(), ustart as u32));
+                            }
+                        }
+                        
+                        if !results.is_empty() {
+                            // Sort results to prioritize proximity to current_path if provided
+                            if let Some(cur_path) = current_path {
+                                let normalized_cur = cur_path.trim().trim_start_matches("./").trim_matches('/');
+                                let cur_dir = if let Some(idx) = normalized_cur.rfind('/') {
+                                    &normalized_cur[..idx]
+                                } else {
+                                    ""
+                                };
+                                results.sort_by(|a, b| {
+                                    let a_norm = a.0.trim().trim_start_matches("./").trim_matches('/');
+                                    let b_norm = b.0.trim().trim_start_matches("./").trim_matches('/');
+                                    
+                                    let a_exact = a_norm == normalized_cur;
+                                    let b_exact = b_norm == normalized_cur;
+                                    if a_exact != b_exact {
+                                        return b_exact.cmp(&a_exact);
+                                    }
+                                    
+                                    let a_in_dir = !cur_dir.is_empty() && a_norm.starts_with(&format!("{}/", cur_dir));
+                                    let b_in_dir = !cur_dir.is_empty() && b_norm.starts_with(&format!("{}/", cur_dir));
+                                    if a_in_dir != b_in_dir {
+                                        return b_in_dir.cmp(&a_in_dir);
+                                    }
+                                    
+                                    a.0.cmp(&b.0).then(a.1.cmp(&b.1))
+                                });
+                            } else {
+                                results.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+                            }
+                            return Ok(results);
+                        }
+                    }
+                }
+            }
+        }
+
         let active_ids = if let Some(ref hash) = target_commit {
             if let Ok(Some(state_json)) = self.load_engine_state(hash) {
                 if let Ok(state) = serde_json::from_str::<serde_json::Value>(&state_json) {
@@ -2589,5 +2648,44 @@ mod tests {
         assert_eq!(defs_after.len(), 1);
         assert_eq!(defs_after[0].0, "src/b.rb");
         assert_eq!(defs_after[0].1, 15);
+    }
+
+    #[test]
+    fn test_find_definitions_from_engine_state() {
+        let storage = Storage::open_memory().unwrap();
+        
+        // Save engine state for commit "c1"
+        let state_json = r#"{
+            "previous": {
+                "u1": {
+                    "id": "u1",
+                    "name": "MyClass.my_method",
+                    "kind": "Function",
+                    "path": "src/my_class.rb",
+                    "start_line": 42,
+                    "end_line": 50,
+                    "normalized_hash": "abc",
+                    "signature": "def my_method"
+                }
+            }
+        }"#;
+        storage.save_engine_state("c1", state_json).unwrap();
+        
+        // Query definitions with different names
+        // Exact name
+        let defs_exact = storage.find_definitions("MyClass.my_method", Some("c1"), None).unwrap();
+        assert_eq!(defs_exact.len(), 1);
+        assert_eq!(defs_exact[0].0, "src/my_class.rb");
+        assert_eq!(defs_exact[0].1, 42);
+        
+        // Short name suffix
+        let defs_suffix = storage.find_definitions("my_method", Some("c1"), None).unwrap();
+        assert_eq!(defs_suffix.len(), 1);
+        assert_eq!(defs_suffix[0].0, "src/my_class.rb");
+        assert_eq!(defs_suffix[0].1, 42);
+        
+        // Different suffix separator or non-matching name
+        let defs_non_match = storage.find_definitions("other_method", Some("c1"), None).unwrap();
+        assert!(defs_non_match.is_empty());
     }
 }
