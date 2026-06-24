@@ -9,9 +9,6 @@ license = "PolyForm-Noncommercial-1.0.0"
 name = "fact-mine-rust"
 path = "src/main.rs"
 
-[[bin]]
-name = "print-python-ast"
-path = "/home/yahn/.gemini/antigravity-cli/brain/54483762-e89f-40d9-8f92-e002d7f60d07/scratch/print_python_ast.rs"
 
 [dependencies]
 anyhow = "1.0"
