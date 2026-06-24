@@ -1,2 +1,2 @@
 [general]
-dirs = ["ui/templates"]
+dirs = ["src/ui/templates"]

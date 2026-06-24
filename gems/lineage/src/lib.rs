@@ -11,7 +11,7 @@ pub mod extract;
 pub mod git;
 #[path = "db/hazard.rs"]
 pub mod hazard;
-#[path = "../ui/lsp.rs"]
+#[path = "ui/lsp.rs"]
 pub mod lsp;
 #[path = "db/model.rs"]
 pub mod model;
@@ -27,7 +27,7 @@ pub mod stack_trace;
 pub mod storage;
 #[path = "db/test_exposure.rs"]
 pub mod test_exposure;
-#[path = "../ui/ui.rs"]
+#[path = "ui/ui.rs"]
 pub mod ui;
 #[path = "db/vcs.rs"]
 pub mod vcs;

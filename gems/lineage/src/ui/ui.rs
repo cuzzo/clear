@@ -485,7 +485,7 @@ pub struct UiOverlays {
 }
 
 #[derive(RustEmbed)]
-#[folder = "ui/"]
+#[folder = "src/ui/"]
 struct EmbeddedUi;
 
 #[derive(Template)]
@@ -7434,7 +7434,7 @@ fn date_utc(timestamp: i64) -> String {
 }
 
 #[cfg(test)]
-const STYLE: &str = include_str!("../ui/assets/app.css");
+const STYLE: &str = include_str!("assets/app.css");
 
 #[cfg(test)]
 mod tests {
@@ -8642,7 +8642,7 @@ mod tests {
             label: "Mutation verification is missing".to_string(),
             detail: "7 covered units have no mutant-verified test exposure.".to_string(),
         }]);
-        let js = include_str!("../ui/assets/app.js");
+        let js = include_str!("assets/app.js");
 
         assert!(html.contains("data-dismiss-key=\"lineage.warning."));
         assert!(html.contains("class=\"warning-dismiss-toggle\""));
