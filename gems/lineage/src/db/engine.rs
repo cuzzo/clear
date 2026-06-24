@@ -1,5 +1,5 @@
 use crate::extract::BoundaryExtractor;
-use crate::model::{Event, EventType, LogicalUnit};
+use crate::model::{Event, EventType, LogicalUnit, UnitKind};
 use crate::storage::Storage;
 use crate::vcs::VcsProvider;
 use anyhow::Result;
@@ -60,6 +60,7 @@ where
         }
 
         let mut previous: HashMap<String, LogicalUnit> = HashMap::new();
+        let mut previous_by_name: HashMap<(UnitKind, String), Vec<String>> = HashMap::new();
         let mut aliases: HashMap<String, String> = HashMap::new();
         let mut stats = EngineStats::default();
         let mut file_units: HashMap<String, Vec<LogicalUnit>> = HashMap::new();
@@ -162,7 +163,7 @@ where
                         }
                     }
                 } else if let Some(prev) =
-                    find_moved_unit(&previous, &claimed_moves, &observed_current_ids, &unit)
+                    find_moved_unit(&previous, &previous_by_name, &claimed_moves, &observed_current_ids, &unit)
                 {
                     let previous_id = prev.id.clone();
                     let semantic_change = prev.normalized_hash != unit.normalized_hash;
@@ -222,6 +223,13 @@ where
                 current.insert(unit.id.clone(), unit);
             }
             previous = current;
+            previous_by_name.clear();
+            for unit in previous.values() {
+                previous_by_name
+                    .entry((unit.kind, unit.name.clone()))
+                    .or_default()
+                    .push(unit.id.clone());
+            }
             stats.commits += 1;
         }
 
@@ -231,17 +239,18 @@ where
 
 fn find_moved_unit<'a>(
     previous: &'a HashMap<String, LogicalUnit>,
+    previous_by_name: &'a HashMap<(UnitKind, String), Vec<String>>,
     claimed_moves: &HashSet<String>,
     observed_current_ids: &HashSet<String>,
     current: &LogicalUnit,
 ) -> Option<&'a LogicalUnit> {
-    previous
-        .values()
+    let candidates = previous_by_name.get(&(current.kind, current.name.clone()))?;
+    candidates
+        .iter()
+        .filter_map(|id| previous.get(id))
         .filter(|prev| {
             !claimed_moves.contains(&prev.id)
                 && !observed_current_ids.contains(&prev.id)
-                && prev.kind == current.kind
-                && prev.name == current.name
                 && prev.path != current.path
                 && size_ratio(prev, current) >= MOVE_SIZE_RATIO_FLOOR
                 && is_valid_cross_file_move(prev, current)
