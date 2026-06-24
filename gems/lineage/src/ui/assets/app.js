@@ -128,6 +128,56 @@
     });
   };
 
+  const definitionPromises = new Map(); // name -> Promise<boolean>
+
+  const checkClickable = (name) => {
+    if (definitionPromises.has(name)) {
+      return definitionPromises.get(name);
+    }
+    const promise = (async () => {
+      try {
+        const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}`);
+        if (res.ok) {
+          const data = await res.json();
+          return data && data.length > 0;
+        }
+      } catch (_e) {}
+      return false;
+    })();
+    definitionPromises.set(name, promise);
+    return promise;
+  };
+
+  const setupClickableTokens = () => {
+    const tokens = document.querySelectorAll(".tok-function, .tok-type");
+    tokens.forEach((token) => {
+      const name = token.textContent.trim();
+      if (!name) return;
+
+      token.addEventListener("mouseenter", async () => {
+        const isClickable = await checkClickable(name);
+        if (isClickable) {
+          token.classList.add("clickable");
+        }
+      });
+
+      token.addEventListener("click", async () => {
+        const isClickable = await checkClickable(name);
+        if (!isClickable) return;
+        try {
+          const res = await fetch(`/api/definition?name=${encodeURIComponent(name)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.length > 0) {
+              const match = data[0];
+              window.location.href = `/index.html?path=${encodeURIComponent(match.path)}#L${match.line}`;
+            }
+          }
+        } catch (_e) {}
+      });
+    });
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     document
       .querySelectorAll("input[data-persist-key]:not(.comment-fold-toggle)")
@@ -137,5 +187,6 @@
     document.querySelectorAll(".layers-panel label[for]").forEach(bindLayerLabel);
     document.querySelectorAll(".line-toggle").forEach(bindLineToggle);
     document.querySelectorAll(".gutter .line-icon[for]").forEach(bindLineToggleLabel);
+    setupClickableTokens();
   });
 })();

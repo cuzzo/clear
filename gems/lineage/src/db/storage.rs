@@ -82,6 +82,7 @@ impl Storage {
               type TEXT NOT NULL,
               original_path TEXT NOT NULL,
               created_at INTEGER NOT NULL,
+              start_line INTEGER DEFAULT 1,
               current_line_cov REAL DEFAULT 0.0,
               current_integration_cov REAL DEFAULT 0.0,
               current_mutant_cov REAL DEFAULT 0.0,
@@ -542,13 +543,46 @@ impl Storage {
     pub fn upsert_logical_unit(&self, unit: &LogicalUnit, created_at: i64) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO logical_units (id, name, type, original_path, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO logical_units (id, name, type, original_path, created_at, start_line)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ON CONFLICT(id) DO NOTHING
             "#,
-            params![unit.id, unit.name, unit.kind.as_str(), unit.path, created_at],
+            params![unit.id, unit.name, unit.kind.as_str(), unit.path, created_at, unit.start_line],
         )?;
         Ok(())
+    }
+
+    pub fn find_definitions(&self, name: &str) -> Result<Vec<(String, u32)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT DISTINCT
+              COALESCE((
+                SELECT latest.path
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+              ), u.original_path) AS path,
+              COALESCE((
+                SELECT latest.start_line
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+              ), u.start_line) AS start_line
+            FROM logical_units u
+            WHERE u.name = ?1
+            LIMIT 10
+            "#,
+        )?;
+        let rows = stmt.query_map(params![name], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     }
 
     pub fn insert_event(&self, event: &Event) -> Result<()> {
@@ -2406,5 +2440,57 @@ mod tests {
         assert_eq!(top[0].verification_stale_seconds, 20);
         assert!(top[0].verification_staleness_score > 0.0);
         assert_eq!(top[0].reopened_count, 1);
+    }
+
+    #[test]
+    fn test_find_definitions() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "my_test_func",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            10,
+            20,
+            "def my_test_func",
+            "def my_test_func\n  1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+
+        // Check finding it before move/events
+        let defs = storage.find_definitions("my_test_func").unwrap();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].0, "src/a.rb");
+        assert_eq!(defs[0].1, 10);
+
+        // Record a move event
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "c2".into(),
+                message: "move it".into(),
+                timestamp: 20,
+            })
+            .unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id,
+                commit_hash: "c2".into(),
+                event_type: EventType::Move,
+                path: "src/b.rb".into(),
+                name: "my_test_func".into(),
+                start_line: 15,
+                end_line: 25,
+                semantic_change: false,
+                lines_added: 0,
+                lines_removed: 0,
+                timestamp: 20,
+            })
+            .unwrap();
+
+        // Check finding it after move event
+        let defs_after = storage.find_definitions("my_test_func").unwrap();
+        assert_eq!(defs_after.len(), 1);
+        assert_eq!(defs_after[0].0, "src/b.rb");
+        assert_eq!(defs_after[0].1, 15);
     }
 }
