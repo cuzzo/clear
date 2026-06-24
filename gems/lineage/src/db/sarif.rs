@@ -541,6 +541,29 @@ mod tests {
         let dir = tempdir().unwrap();
         let storage = Storage::open_memory().unwrap();
         
+        let u1 = LogicalUnit::new(
+            "U1".to_string(),
+            UnitKind::Function,
+            "src/demo.rb".to_string(),
+            1,
+            5,
+            10,
+            "def foo".to_string(),
+            "",
+        );
+        let u2 = LogicalUnit::new(
+            "U2".to_string(),
+            UnitKind::Function,
+            "src/demo.rb".to_string(),
+            1,
+            1,
+            4,
+            "def bar".to_string(),
+            "",
+        );
+        storage.upsert_logical_unit(&u1, 10).unwrap();
+        storage.upsert_logical_unit(&u2, 10).unwrap();
+
         let sub = dir.path().join("sub");
         fs::create_dir(&sub).unwrap();
         

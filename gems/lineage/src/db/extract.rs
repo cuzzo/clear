@@ -435,6 +435,7 @@ fn python_candidate_for_node(node: Node<'_>, source: &str, lines: &[&str]) -> Op
         }
         "type_alias_statement" => {
             let name = field_text(node, "name", source)
+                .or_else(|| field_text(node, "left", source))
                 .or_else(|| first_identifier_child(node, source))?;
             Some(tree_sitter_candidate(
                 node,
@@ -1566,6 +1567,7 @@ export class Worker {
 
     #[test]
     fn tree_sitter_extraction_ignores_strings_comments_and_parse_errors() {
+        std::env::set_var("LINEAGE_DEBUG_EXTRACT", "1");
         let ruby = BlobFile {
             path: "src/demo.rb".into(),
             contents: "class Real\n  TEXT = \"def fake\\nend\"\n  # def also_fake\n  def run\n  end\nend\n".into(),
@@ -1586,6 +1588,7 @@ export class Worker {
         assert!(!ruby_names.contains(&"fake".to_string()));
         assert!(!ruby_names.contains(&"also_fake".to_string()));
         assert!(extractor.extract_units(&invalid_go).is_empty());
+        std::env::remove_var("LINEAGE_DEBUG_EXTRACT");
     }
 
     #[test]
@@ -1626,6 +1629,13 @@ export class Worker {
         assert!(is_test_source_path("transpile-tests/check.rb"));
         assert!(is_test_source_path("tools/fuzz/driver.rb"));
         assert!(is_test_source_path("src/foo/conftest.py"));
+        assert!(is_test_source_path("src/foo-tests/bar.rb"));
+        assert!(is_test_source_path("src/foo_tests/bar.rb"));
+        assert!(is_test_source_path("src/foo.test.rb"));
+        assert!(is_test_source_path("src/foo.spec.rb"));
+        assert!(is_test_source_path("src/foo_spec.rb"));
+        assert!(is_test_source_path("src/foo-test.rb"));
+        assert!(is_test_source_path("src/test_foo.py"));
 
         assert!(is_production_source_path("src/ast/type.rb"));
         assert!(is_production_source_path("gems/decomplex/lib/decomplex/report.rb"));
@@ -1707,5 +1717,291 @@ export class Worker {
         assert_eq!(runs[0].ordinal, 1);
         assert_eq!(runs[1].ordinal, 2);
         assert_ne!(runs[0].id, runs[1].id);
+    }
+
+    #[test]
+    fn test_tree_sitter_additional_scenarios() {
+        std::env::set_var("LINEAGE_DEBUG_EXTRACT", "1");
+        
+        // 1. Python type alias
+        let py_file = BlobFile {
+            path: "demo.py".into(),
+            contents: "type TypeAlias = int\n".into(),
+        };
+        let py_units = HeuristicExtractor::default().extract_units(&py_file);
+        assert!(py_units.iter().any(|u| u.name == "TypeAlias"));
+
+        // 2. JavaScript / TS callables
+        let js_file = BlobFile {
+            path: "demo.js".into(),
+            contents: r#"
+                const my_arrow = () => { return 1; };
+                let my_let = function() {};
+                var my_generator = function* () {};
+                class MyClass {
+                    my_method() {}
+                }
+                function normal_func() {}
+                function* normal_gen() {}
+                let my_class_var = class MyClassVar {};
+            "#.into(),
+        };
+        let js_units = HeuristicExtractor::default().extract_units(&js_file);
+        let js_names: Vec<_> = js_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(js_names.contains(&"my_arrow"));
+        assert!(js_names.contains(&"my_let"));
+        assert!(js_names.contains(&"my_generator"));
+        assert!(js_names.contains(&"MyClass"));
+        assert!(js_names.contains(&"MyClass.my_method"));
+        assert!(js_names.contains(&"normal_func"));
+        assert!(js_names.contains(&"normal_gen"));
+        assert!(js_names.contains(&"my_class_var"));
+
+        // 3. TS public fields & constructors
+        let ts_file = BlobFile {
+            path: "demo.ts".into(),
+            contents: r#"
+                class Parser {
+                    public my_field_arrow = (v) => { return v; };
+                    public my_val = 1;
+                }
+            "#.into(),
+        };
+        let ts_units = HeuristicExtractor::default().extract_units(&ts_file);
+        let ts_names: Vec<_> = ts_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(ts_names.contains(&"Parser"));
+        assert!(ts_names.contains(&"Parser.my_field_arrow"));
+
+        // 4. Go method receivers (pointers, slices, brackets, etc.)
+        let go_file = BlobFile {
+            path: "demo.go".into(),
+            contents: r#"
+                type MyType struct {}
+                func (w *MyType) PointerRec() {}
+                func (w MyType) ValueRec() {}
+                type Alias = int
+            "#.into(),
+        };
+        let go_units = HeuristicExtractor::default().extract_units(&go_file);
+        let go_names: Vec<_> = go_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(go_names.contains(&"MyType"));
+        assert!(go_names.contains(&"MyType.PointerRec"));
+        assert!(go_names.contains(&"MyType.ValueRec"));
+        assert!(go_names.contains(&"Alias"));
+
+        // 5. C/C++ typedefs, structs, unions, enums, namespaces
+        let cpp_file = BlobFile {
+            path: "demo.cpp".into(),
+            contents: r#"
+                namespace MyNamespace {
+                    typedef struct { int x; } Point;
+                    union Data { int i; float f; };
+                    enum Color { RED, GREEN };
+                }
+            "#.into(),
+        };
+        let cpp_units = HeuristicExtractor::default().extract_units(&cpp_file);
+        let cpp_names: Vec<_> = cpp_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(cpp_names.contains(&"MyNamespace"));
+        assert!(cpp_names.contains(&"Point"));
+        assert!(cpp_names.contains(&"Data"));
+        assert!(cpp_names.contains(&"Color"));
+
+        // 6. C# constructor resolution fallback
+        let cs_file = BlobFile {
+            path: "demo.cs".into(),
+            contents: r#"
+                namespace MyNs {
+                    class Calculator {
+                        public Calculator() {}
+                    }
+                }
+            "#.into(),
+        };
+        let cs_units = HeuristicExtractor::default().extract_units(&cs_file);
+        let cs_names: Vec<_> = cs_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(cs_names.contains(&"MyNs.Calculator.Calculator"));
+
+        // 7. Rust extra items (enum, trait, union, type)
+        let rs_file = BlobFile {
+            path: "demo.rs".into(),
+            contents: r#"
+                enum Option { None, Some }
+                trait Show { fn show(&self); }
+                union Maybe { x: i32 }
+                type Number = i64;
+            "#.into(),
+        };
+        let rs_units = HeuristicExtractor::default().extract_units(&rs_file);
+        let rs_names: Vec<_> = rs_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(rs_names.contains(&"Option"));
+        assert!(rs_names.contains(&"Show"));
+        assert!(rs_names.contains(&"Maybe"));
+        assert!(rs_names.contains(&"Number"));
+
+        // 8. Zig extra items (enum, union)
+        let zig_file = BlobFile {
+            path: "demo.zig".into(),
+            contents: r#"
+                const Direction = enum { north, south };
+                const Payload = union { integer: i32, boolean: bool };
+            "#.into(),
+        };
+        let zig_units = HeuristicExtractor::default().extract_units(&zig_file);
+        let zig_names: Vec<_> = zig_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(zig_names.contains(&"Direction"));
+        assert!(zig_names.contains(&"Payload"));
+
+        // 9. Empty tree-sitter candidates output debug printing
+        let py_empty = BlobFile {
+            path: "empty.py".into(),
+            contents: "print('hello')\n".into(),
+        };
+        let py_empty_units = HeuristicExtractor::default().extract_units(&py_empty);
+        assert!(py_empty_units.is_empty());
+
+        // 10. TSX file support
+        let tsx_file = BlobFile {
+            path: "demo.tsx".into(),
+            contents: r#"
+                const Component = () => {
+                    return <div />;
+                };
+            "#.into(),
+        };
+        let tsx_units = HeuristicExtractor::default().extract_units(&tsx_file);
+        let tsx_names: Vec<_> = tsx_units.iter().map(|u| u.name.as_str()).collect();
+        assert!(tsx_names.contains(&"Component"));
+
+        // 11. Unsupported path/extension checks
+        let unsupported_file = BlobFile {
+            path: "demo.unsupported".into(),
+            contents: "def foo\nend\n".into(),
+        };
+        assert!(HeuristicExtractor::default().extract_units(&unsupported_file).is_empty());
+        
+        std::env::remove_var("LINEAGE_DEBUG_EXTRACT");
+    }
+
+    #[test]
+    fn test_heuristic_additional_scenarios() {
+        // Ruby/Python def modifiers and declarations in heuristics
+        let rb_cand = detect_ruby_python("private def helper", 1).unwrap();
+        assert_eq!(rb_cand.name, "helper");
+        let rb_class = detect_ruby_python("class Worker", 2).unwrap();
+        assert_eq!(rb_class.name, "Worker");
+        let rb_module = detect_ruby_python("module Helper", 3).unwrap();
+        assert_eq!(rb_module.name, "Helper");
+
+        // JS/TS variable arrow callable heuristics, interface, class, type
+        let js_cand = detect_javascript_typescript("const helper = () => {}", 1).unwrap();
+        assert_eq!(js_cand.name, "helper");
+        let ts_cand = detect_javascript_typescript("let another: () => void = () => {}", 2).unwrap();
+        assert_eq!(ts_cand.name, "another");
+        let js_class = detect_javascript_typescript("class MyClass", 3).unwrap();
+        assert_eq!(js_class.name, "MyClass");
+        let ts_interface = detect_javascript_typescript("interface IMyInterface", 4).unwrap();
+        assert_eq!(ts_interface.name, "IMyInterface");
+        let ts_type = detect_javascript_typescript("type MyType = void", 5).unwrap();
+        assert_eq!(ts_type.name, "MyType");
+        let ts_cand2 = detect_javascript_typescript("const helper: (x: number) => number = x => x", 6).unwrap();
+        assert_eq!(ts_cand2.name, "helper");
+        let ts_cand3 = detect_javascript_typescript("let another: (x: number) => void", 7).unwrap();
+        assert_eq!(ts_cand3.name, "another");
+        let ts_cand4 = detect_javascript_typescript("var my_func: (Option)", 8).unwrap();
+        assert_eq!(ts_cand4.name, "my_func");
+
+        // Lua heuristics
+        let lua_cand = detect_lua("function global_fn()", 1).unwrap();
+        assert_eq!(lua_cand.name, "global_fn");
+
+        // C heuristics - invalid matching control keywords
+        let c_cand = detect_c_family("if (x == 1) {", 1);
+        assert!(c_cand.is_none());
+
+        // Swift heuristics with extra modifiers and actor/protocol
+        let swift_cand1 = detect_swift("protocol Proto", 1).unwrap();
+        assert_eq!(swift_cand1.name, "Proto");
+        let swift_cand2 = detect_swift("actor Account", 2).unwrap();
+        assert_eq!(swift_cand2.name, "Account");
+        let swift_cand3 = detect_swift("fileprivate mutating func run()", 3).unwrap();
+        assert_eq!(swift_cand3.name, "run");
+        let swift_class = detect_swift("class App", 4).unwrap();
+        assert_eq!(swift_class.name, "App");
+        let swift_struct = detect_swift("struct State", 5).unwrap();
+        assert_eq!(swift_struct.name, "State");
+        let swift_enum = detect_swift("enum Kind", 6).unwrap();
+        assert_eq!(swift_enum.name, "Kind");
+
+        // Kotlin heuristics with object, enum, sealed class, suspend/override fun
+        let kt_cand1 = detect_kotlin("object Database", 1).unwrap();
+        assert_eq!(kt_cand1.name, "Database");
+        let kt_cand2 = detect_kotlin("enum class State", 2).unwrap();
+        assert_eq!(kt_cand2.name, "State");
+        let kt_cand3 = detect_kotlin("sealed class Result", 3).unwrap();
+        assert_eq!(kt_cand3.name, "Result");
+        let kt_cand4 = detect_kotlin("internal suspend fun perform()", 4).unwrap();
+        assert_eq!(kt_cand4.name, "perform");
+        let kt_class = detect_kotlin("class Box", 5).unwrap();
+        assert_eq!(kt_class.name, "Box");
+        let kt_interface = detect_kotlin("interface Handler", 6).unwrap();
+        assert_eq!(kt_interface.name, "Handler");
+
+        // Assembly heuristics - invalid labels & valid label
+        let asm_cand1 = detect_assembly(".local_label:", 1);
+        assert!(asm_cand1.is_none());
+        let asm_cand2 = detect_assembly("label with spaces:", 2);
+        assert!(asm_cand2.is_none());
+        let asm_cand3 = detect_assembly("label:", 3).unwrap();
+        assert_eq!(asm_cand3.name, "label");
+
+        // Rust/Zig heuristics with modifiers
+        let rs_cand = detect_rust_or_zig("pub(crate) unsafe extern fn execute()", 1).unwrap();
+        assert_eq!(rs_cand.name, "execute");
+
+        // Go heuristics basic receiver
+        let go_cand1 = detect_go("func global_fn()", 1).unwrap();
+        assert_eq!(go_cand1.name, "global_fn");
+
+        // Csharp heuristics type rest
+        let c_class = detect_csharp_java("class Worker", 1).unwrap();
+        assert_eq!(c_class.name, "Worker");
+        let c_struct = detect_csharp_java("struct Data", 2).unwrap();
+        assert_eq!(c_struct.name, "Data");
+        let c_enum = detect_csharp_java("enum Color", 3).unwrap();
+        assert_eq!(c_enum.name, "Color");
+        let cs_record = detect_csharp_java("record Value", 4).unwrap();
+        assert_eq!(cs_record.name, "Value");
+
+        // SourceFilter custom constructor
+        let custom_filter = SourceFilter::with_extensions(vec!["rs", "zig"]);
+        assert!(custom_filter.supports_path("src/lib.rs"));
+        assert!(!custom_filter.supports_path("src/lib.py"));
+
+        // is_test_source_path empty check
+        assert!(!is_test_source_path(""));
+
+        // detect_candidate empty/comment lines and invalid extensions
+        assert!(detect_candidate("", 1, Some("rb")).is_none());
+        assert!(detect_candidate("# comment", 1, Some("rb")).is_none());
+        assert!(detect_candidate("def foo", 1, None).is_none());
+        assert!(detect_candidate("def foo", 1, Some("unsupported")).is_none());
+        assert!(detect_candidate("const helper = () => {}", 1, Some("js")).is_some());
+
+        // identifier check
+        assert_eq!(identifier("x"), Some("x"));
+
+        // Tree-sitter C declarator fallbacks
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
+        let tree = parser.parse("typedef int (*FuncPtr)(int); typedef int IntArray[10];", None).unwrap();
+        let candidates = tree_sitter_candidates(
+            &BlobFile { path: "demo.c".into(), contents: "typedef int (*FuncPtr)(int); typedef int IntArray[10];".into() },
+            "c",
+            &["typedef int (*FuncPtr)(int);", "typedef int IntArray[10];"]
+        ).unwrap();
+        let cand_names: Vec<_> = candidates.iter().map(|c| c.name.as_str()).collect();
+        assert!(cand_names.contains(&"FuncPtr"));
+        assert!(cand_names.contains(&"IntArray"));
     }
 }

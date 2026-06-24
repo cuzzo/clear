@@ -1272,6 +1272,282 @@ mod tests {
         assert!(sites.is_empty());
     }
 
+    #[test]
+    fn test_unsupported_language_bail() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let stats = ingest_hazards(&storage, dir.path(), "unsupported_lang", "abc", Some(10));
+        assert!(stats.is_err());
+        assert!(stats.unwrap_err().to_string().contains("unsupported hazard provider"));
+    }
+
+    #[test]
+    fn test_zig_scanners_loom_and_vopr_exclusions() {
+        let zig_code = r#"
+            // LOOM-EXCLUDE-BEGIN
+            value.store(1, .release);
+            // LOOM-EXCLUDE-END
+            value.store(2, .release); // should be captured
+
+            // VOPR-EXCLUDE-BEGIN
+            _ = std.time.milliTimestamp();
+            // VOPR-EXCLUDE-END
+            _ = std.time.milliTimestamp(); // should be captured
+            
+            // VOPR-START-RETRY
+            some_retry_call();
+            // VOPR-END-RETRY
+            
+            // VOPR-RETRY
+        "#;
+        
+        let sites = scan_zig_sites("test.zig", zig_code);
+        let types = hazard_types(sites);
+        
+        assert_eq!(types.iter().filter(|t| *t == "zig_loom_atomic").count(), 1);
+        assert_eq!(types.iter().filter(|t| *t == "zig_vopr_time").count(), 1);
+        assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry").count(), 2);
+        assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry_body").count(), 1);
+    }
+
+    #[test]
+    fn test_zig_vopr_categories() {
+        let codes_and_cats = vec![
+            ("std.time.milliTimestamp()", "zig_vopr_time"),
+            ("std.time.nanoTimestamp()", "zig_vopr_time"),
+            ("std.time.microTimestamp()", "zig_vopr_time"),
+            ("std.time.Instant.now()", "zig_vopr_time"),
+            ("std.time.Timer", "zig_vopr_time"),
+            ("clock_gettime()", "zig_vopr_time"),
+            ("milliTimestamp()", "zig_vopr_time"),
+            ("nanoTimestamp()", "zig_vopr_time"),
+            
+            ("std.crypto.random", "zig_vopr_random"),
+            ("std.Random", "zig_vopr_random"),
+            ("std.rand", "zig_vopr_random"),
+            ("getrandom()", "zig_vopr_random"),
+            ("Random.DefaultPrng", "zig_vopr_random"),
+            
+            ("posix.recv()", "zig_vopr_net_io"),
+            ("posix.send()", "zig_vopr_net_io"),
+            ("posix.connect()", "zig_vopr_net_io"),
+            ("posix.accept()", "zig_vopr_net_io"),
+            ("posix.bind()", "zig_vopr_net_io"),
+            ("posix.listen()", "zig_vopr_net_io"),
+            ("posix.socket()", "zig_vopr_net_io"),
+            ("std.posix.recv()", "zig_vopr_net_io"),
+            ("std.posix.send()", "zig_vopr_net_io"),
+            ("std.posix.connect()", "zig_vopr_net_io"),
+            ("std.posix.accept()", "zig_vopr_net_io"),
+            ("std.net.Stream", "zig_vopr_net_io"),
+            ("linux.IoUring.recv()", "zig_vopr_net_io"),
+            ("linux.IoUring.send()", "zig_vopr_net_io"),
+            ("linux.IoUring.accept()", "zig_vopr_net_io"),
+            ("linux.IoUring.connect()", "zig_vopr_net_io"),
+            
+            ("posix.open()", "zig_vopr_fs_io"),
+            ("posix.openat()", "zig_vopr_fs_io"),
+            ("posix.read()", "zig_vopr_fs_io"),
+            ("posix.write()", "zig_vopr_fs_io"),
+            ("posix.close()", "zig_vopr_fs_io"),
+            ("posix.fsync()", "zig_vopr_fs_io"),
+            ("std.posix.open()", "zig_vopr_fs_io"),
+            ("std.posix.openat()", "zig_vopr_fs_io"),
+            ("std.posix.read()", "zig_vopr_fs_io"),
+            ("std.posix.write()", "zig_vopr_fs_io"),
+            ("std.posix.close()", "zig_vopr_fs_io"),
+            ("std.fs.File", "zig_vopr_fs_io"),
+            ("linux.IoUring.read()", "zig_vopr_fs_io"),
+            ("linux.IoUring.write()", "zig_vopr_fs_io"),
+            ("linux.IoUring.fsync()", "zig_vopr_fs_io"),
+            ("linux.IoUring.openat()", "zig_vopr_fs_io"),
+            ("linux.IoUring.close()", "zig_vopr_fs_io"),
+            
+            ("self.ring.read()", "zig_vopr_ring_io"),
+            ("self.ring.write()", "zig_vopr_ring_io"),
+            ("self.ring.recv()", "zig_vopr_ring_io"),
+            ("self.ring.send()", "zig_vopr_ring_io"),
+            ("self.ring.accept()", "zig_vopr_ring_io"),
+            ("self.ring.connect()", "zig_vopr_ring_io"),
+            ("self.ring.fsync()", "zig_vopr_ring_io"),
+            ("self.ring.poll_add()", "zig_vopr_ring_io"),
+            ("self.ring.poll_remove()", "zig_vopr_ring_io"),
+            ("self.ring.cancel()", "zig_vopr_ring_io"),
+            ("ring.read()", "zig_vopr_ring_io"),
+            ("ring.write()", "zig_vopr_ring_io"),
+            ("ring.recv()", "zig_vopr_ring_io"),
+            ("ring.send()", "zig_vopr_ring_io"),
+            ("ring.accept()", "zig_vopr_ring_io"),
+            ("ring.connect()", "zig_vopr_ring_io"),
+        ];
+        
+        for (code, expected_type) in codes_and_cats {
+            let sites = scan_zig_sites("test.zig", code);
+            assert!(
+                !sites.is_empty(),
+                "Expected sites for: {}, found none",
+                code
+            );
+            assert_eq!(
+                sites[0].hazard_type, expected_type,
+                "Expected {} for {}, got {}",
+                expected_type, code, sites[0].hazard_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_rust_unsafe_block_tracking() {
+        let rust_code = r#"
+            // unsafe implementation check
+            unsafe impl Send for MyStruct {}
+            
+            // unsafe fn check
+            unsafe fn raw_call() {}
+            
+            fn normal_fn() {
+                unsafe {
+                    let val = *raw_ptr; // unsafe operation inside unsafe block
+                    if val > 0 {
+                        let nested = 42;
+                    }
+                }
+                // outside unsafe block, no unsafe operation
+            }
+        "#;
+        
+        let sites = scan_rust_sites("src/lib.rs", rust_code);
+        let types = hazard_types(sites);
+        
+        assert!(types.contains(&"rust_unsafe_impl".to_string()));
+        assert!(types.contains(&"rust_unsafe_fn".to_string()));
+        assert!(types.contains(&"rust_unsafe_block".to_string()));
+        assert!(types.contains(&"rust_unsafe_operation".to_string()));
+    }
+
+    #[test]
+    fn test_excluded_common_directories_and_files() {
+        let dir = tempdir().unwrap();
+        
+        // Excluded folders: vendor, third_party,cmake-build-debug, etc.
+        let excluded_dirs = vec![
+            "vendor",
+            "third_party",
+            "node_modules",
+            "tmp",
+            "dist",
+            "build",
+            "target",
+            "bin",
+            "obj",
+            "packages",
+            "cmake-build-debug",
+            "cmake-build-release",
+            "tests",
+            "test",
+            "benches",
+            "examples",
+            ".hidden_dir",
+        ];
+        
+        for d in excluded_dirs {
+            let path = dir.path().join(d);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("lib.rs"), "unsafe fn foo() {}").unwrap();
+        }
+        
+        // Included folders
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "unsafe fn foo() {}",
+        ).unwrap();
+        
+        let storage = Storage::open_memory().unwrap();
+        let stats = ingest_hazards(&storage, dir.path(), "rust", "abc", Some(10)).unwrap();
+        
+        // Only src/lib.rs should be scanned
+        assert_eq!(stats.scanned_files, 1);
+        assert_eq!(stats.hazards, 1);
+    }
+
+    #[test]
+    fn test_excluded_go_directories_and_files() {
+        let dir = tempdir().unwrap();
+        
+        let excluded_go_dirs = vec![
+            "vendor",
+            "testdata",
+            "node_modules",
+            "tmp",
+            "dist",
+            ".hidden_dir",
+        ];
+        
+        for d in excluded_go_dirs {
+            let path = dir.path().join(d);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("file.go"), "package foo\nfunc run() { go bar() }").unwrap();
+        }
+        
+        // Excluded file pattern: _test.go
+        fs::create_dir_all(dir.path().join("pkg")).unwrap();
+        fs::write(
+            dir.path().join("pkg/helper_test.go"),
+            "package pkg\nfunc run() { go bar() }",
+        ).unwrap();
+        
+        // Valid go files
+        fs::write(
+            dir.path().join("pkg/helper.go"),
+            "package pkg\nfunc run() {\n    go bar()\n}",
+        ).unwrap();
+        
+        let storage = Storage::open_memory().unwrap();
+        let stats = ingest_hazards(&storage, dir.path(), "go", "abc", Some(10)).unwrap();
+        
+        assert_eq!(stats.scanned_files, 1);
+        assert_eq!(stats.hazards, 1);
+    }
+
+    #[test]
+    fn test_excluded_zig_files() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("zig/runtime")).unwrap();
+        
+        let excluded_names = vec![
+            "foo-test.zig",
+            "foo-vopr.zig",
+            "foo-loom.zig",
+            "foo-bench.zig",
+            "vopr-foo.zig",
+            "loom-foo.zig",
+            "all-tests.zig",
+            "all-fuzz.zig",
+            "size_check.zig",
+            "runtime-header.zig",
+        ];
+        
+        for name in excluded_names {
+            fs::write(
+                dir.path().join("zig/runtime").join(name),
+                "fn run() void { @cmpxchgStrong(i32, &x, 0, 1, .seq_cst, .seq_cst); }",
+            ).unwrap();
+        }
+        
+        // Valid zig file
+        fs::write(
+            dir.path().join("zig/runtime/valid.zig"),
+            "fn run() void { @cmpxchgStrong(i32, &x, 0, 1, .seq_cst, .seq_cst); }",
+        ).unwrap();
+        
+        let storage = Storage::open_memory().unwrap();
+        let stats = ingest_hazards(&storage, dir.path(), "zig", "abc", Some(10)).unwrap();
+        
+        assert_eq!(stats.scanned_files, 1);
+        assert_eq!(stats.hazards, 1);
+    }
+
     fn hazard_types(sites: Vec<HazardSite>) -> Vec<String> {
         sites.into_iter().map(|site| site.hazard_type).collect()
     }
