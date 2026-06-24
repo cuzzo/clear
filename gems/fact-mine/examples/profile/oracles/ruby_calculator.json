@@ -69,7 +69,29 @@
     }
   ],
   "signatures": {},
-  "state_param_origins": {},
+  "state_param_origin_records": [
+    {
+      "field": "@total",
+      "function": "add",
+      "key": "Calculator\u0000@total",
+      "language": "ruby",
+      "line": 5,
+      "owner": "Calculator",
+      "param": "value",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "span": [
+        5,
+        4,
+        5,
+        34
+      ]
+    }
+  ],
+  "state_param_origins": {
+    "Calculator\u0000@total": [
+      "value"
+    ]
+  },
   "state_protocols": {},
   "state_types": {},
   "type_definitions": []

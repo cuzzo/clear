@@ -66,7 +66,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
-        (node.r#type == "CLASS").then_some(default_span)
+        (node.r#type == "CLASS" || node.r#type == "INTERFACE_DECLARATION").then_some(default_span)
     }
 
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
@@ -136,11 +136,18 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         });
 
         if in_method {
+            if node.r#type != "ATTRASGN" && node.r#type != "IASGN" {
+                return None;
+            }
             let starts_with_this = node.children.first().and_then(|c| match c {
                 Child::Node(n) => Some(n.text.trim().starts_with("this.")),
                 _ => None,
             }).unwrap_or(false);
             if !has_modifier && !starts_with_this {
+                return None;
+            }
+        } else {
+            if node.r#type != "PUBLIC_FIELD_DEFINITION" && node.r#type != "PROPERTY_SIGNATURE" {
                 return None;
             }
         }
@@ -180,7 +187,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                 if type_text.starts_with(':') {
                     type_text = type_text[1..].trim().to_string();
                 }
-                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
+                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') && !type_text.starts_with('(') {
                     return Some(StateDeclaration {
                         field: name.to_string(),
                         owner: String::new(),
@@ -223,7 +230,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
             if is_simple_name(name) {
                 let type_text = rest.split('=').next().unwrap_or(rest).trim()
                     .trim_end_matches(',').trim_end_matches(';').to_string();
-                if !type_text.is_empty() && type_text != ":" {
+                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('(') {
                     return Some(StateDeclaration {
                         field: name.to_string(),
                         owner: String::new(),

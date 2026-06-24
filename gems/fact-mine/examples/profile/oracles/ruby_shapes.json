@@ -21,13 +21,21 @@
       "code": "MY_CONST = {     :sym => :symbol,     \"str\" => \"string\",     123 => 1.5,     true => false,     nil => nil,     CustomClass => nil   }",
       "keys": [
         "sym",
-        "str"
+        "str",
+        "123",
+        "true",
+        "nil",
+        "CustomClass"
       ],
       "line": 4,
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "value_types": [
         "Symbol",
-        "String"
+        "T.untyped",
+        "T.untyped",
+        "T.untyped",
+        "T.untyped",
+        "T.untyped"
       ]
     }
   ],

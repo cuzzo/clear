@@ -105,10 +105,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn field_name_from_declaration(&self, node: &Node) -> Option<String> {
-        if node.r#type != "FIELD_DECLARATION" {
+        if node.r#type != "FIELD_DECLARATION" && node.r#type != "PROPERTY_DECLARATION" {
             return None;
         }
-        node.text
+        let decl_part = node.text.split('{').next().unwrap_or(&node.text);
+        decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
             .filter(|part| !part.is_empty())

@@ -165,14 +165,16 @@ module Espalier
       tmp = Tempfile.new(["espalier-rust-facts", ".json"])
       tmp.close
 
-      args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path, *files]
+      args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
+      args.concat(["--language", @language.to_s]) if @language
+      args.concat(files)
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok
 
       facts_by_file = JSON.parse(File.read(tmp.path))
       build_from_rust_facts(facts_by_file, files)
     ensure
-      tmp.unlink if tmp
+      tmp&.unlink
     end
 
     private

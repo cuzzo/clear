@@ -20,10 +20,27 @@
     },
     {
       "declared_type": null,
-      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000_db",
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000field\u0000@port",
+      "language": "python",
+      "line": 5,
+      "name": "@port",
+      "owner": "Database",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "source": "syntax",
+      "span": [
+        5,
+        8,
+        5,
+        29
+      ],
+      "static_origin": "state_write"
+    },
+    {
+      "declared_type": null,
+      "id": "python\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000field\u0000@_db",
       "language": "python",
       "line": 9,
-      "name": "_db",
+      "name": "@_db",
       "owner": "Greeter",
       "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
       "source": "syntax",
@@ -127,7 +144,29 @@
     "Greeter\u0000__init__": "def __init__(self, db: Database):",
     "Greeter\u0000hello": "def hello(self, name: str) -> str:"
   },
-  "state_param_origins": {},
+  "state_param_origin_records": [
+    {
+      "field": "@_db",
+      "function": "__init__",
+      "key": "Greeter\u0000@_db",
+      "language": "python",
+      "line": 9,
+      "owner": "Greeter",
+      "param": "db",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/python_sample.py",
+      "span": [
+        9,
+        8,
+        9,
+        21
+      ]
+    }
+  ],
+  "state_param_origins": {
+    "Greeter\u0000@_db": [
+      "db"
+    ]
+  },
   "state_protocols": {},
   "state_type_records": [
     {

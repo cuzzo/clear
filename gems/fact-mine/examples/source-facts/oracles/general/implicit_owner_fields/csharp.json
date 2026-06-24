@@ -128,7 +128,14 @@
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],
-    "state_declarations": [],
+    "state_declarations": [
+      {
+        "field": "field",
+        "line": 2,
+        "owner": "MyClass",
+        "type": "int"
+      }
+    ],
     "state_param_origins": [],
     "state_reads": [],
     "state_writes": [

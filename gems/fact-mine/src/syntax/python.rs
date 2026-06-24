@@ -215,6 +215,9 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         if !node.text.contains(':') {
             return None;
         }
+        if !matches!(node.r#type.as_str(), "expression_statement" | "annotated_assignment" | "assignment" | "IASGN" | "ASSIGN" | "LASGN") {
+            return None;
+        }
         if in_method && !node.text.trim().starts_with("self.") {
             return None;
         }

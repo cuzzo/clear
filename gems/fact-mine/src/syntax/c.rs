@@ -206,59 +206,20 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         text.to_ascii_lowercase().contains("null")
     }
 
-    fn state_declaration_from_node(
-        &self,
-        node: &Node,
-        _owner: &str,
-        in_method: bool,
-    ) -> Option<StateDeclaration> {
-        if in_method {
+    fn implicit_owner_fields(&self) -> bool {
+        true
+    }
+
+    fn field_name_from_declaration(&self, node: &Node) -> Option<String> {
+        if node.r#type != "FIELD_DECLARATION" {
             return None;
         }
-        // Try structured children first: [name, type?, value?]
-        let child_nodes: Vec<&Node> = node.children.iter().filter_map(|c| match c {
-            Child::Node(n) => Some(n.as_ref()),
-            _ => None,
-        }).collect();
-        if child_nodes.len() >= 2 {
-            let name = child_nodes[0].text.trim();
-            if is_simple_name(name) {
-                let type_text = child_nodes[1].text.trim().to_string();
-                if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
-                    return Some(StateDeclaration {
-                        field: name.to_string(),
-                        owner: String::new(),
-                        r#type: Some(type_text),
-                        file: String::new(),
-                        line: node.first_lineno,
-                        span: span(node),
-                    });
-                }
-            }
-        }
-        let text = node.text.trim();
-        // C struct field: `Type name;`
-        let parts: Vec<&str> = text.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let name = parts.last().unwrap().trim_end_matches(';');
-            if !name.is_empty() && !name.contains('.') && !name.contains('(')
-                && name.chars().next().map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-                && name.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-            {
-                let type_text = parts[..parts.len()-1].join(" ");
-                if !type_text.contains('(') && !type_text.is_empty() {
-                    return Some(StateDeclaration {
-                        field: name.to_string(),
-                        owner: String::new(),
-                        r#type: Some(type_text),
-                        file: String::new(),
-                        line: node.first_lineno,
-                        span: span(node),
-                    });
-                }
-            }
-        }
-        None
+        node.text
+            .trim_end_matches(';')
+            .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .filter(|part| simple_identifier(part))
+            .next_back()
+            .map(str::to_string)
     }
 }
 

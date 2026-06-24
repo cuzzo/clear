@@ -357,7 +357,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
         "language" => "lua",
         "owner" => "Worker",
         "name" => "push",
-        "kind" => "method"
+        "kind" => "instance"
       ))
       expect(evidence["fields"]).to include(a_hash_including(
         "language" => "lua",

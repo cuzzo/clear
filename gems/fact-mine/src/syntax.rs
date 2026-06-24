@@ -99,7 +99,7 @@ impl Language {
     pub fn for_extension(extension: &str) -> Option<Self> {
         match extension {
             "rb" => Some(Self::Ruby),
-            "py" => Some(Self::Python),
+            "py" | "pyi" => Some(Self::Python),
             "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
             "java" => Some(Self::Java),
             "ts" | "tsx" => Some(Self::TypeScript),

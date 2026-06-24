@@ -371,15 +371,10 @@ module NilKill
       def load_legacy_coverage!(store, runtime_dir)
         cov = Hash.new { |h, k| h[k] = [] }
         Dir.glob(File.join(runtime_dir, "coverage-*.jsonl")).each do |file|
-          dataset = Boobytrap::CoverageProviders.load(file, root: @root)
-          dataset.files.each do |abs_path, coverage|
-            next unless NilKill.target_path?(abs_path)
-            rel = NilKill.rel(abs_path)
-            hit_lines = []
-            coverage.lines.each_with_index do |hits, idx|
-              hit_lines << (idx + 1) if hits && hits.to_i > 0
-            end
-            cov[rel].concat(hit_lines)
+          File.foreach(file) do |line|
+            obs = JSON.parse(line)
+            next unless NilKill.target_path?(obs["path"])
+            cov[NilKill.rel(obs["path"])].concat(Array(obs["lines"]))
           end
         end
         store.facts["collect_coverage"] = cov.transform_values { |ls| ls.uniq.sort } unless cov.empty?

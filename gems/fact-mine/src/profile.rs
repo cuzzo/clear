@@ -3,6 +3,7 @@
 
 use crate::syntax::{self, Document};
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which fact-set to produce.
@@ -240,6 +241,44 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let state_type_edges = extract_state_type_edges(document, &language, &path);
     let call_graph_edges = extract_call_graph_edges(document);
 
+    let mut tlet_sites = Vec::new();
+    let mut dead_nil_checks = Vec::new();
+    let mut deterministic_guards = Vec::new();
+    let mut return_origins = Vec::new();
+    let mut noreturn_methods = Vec::new();
+    let mut collection_index_lookups = Vec::new();
+
+    if nil_kill {
+        collection_index_lookups = extract_collection_index_lookups(&lines, document, &path);
+        let file_path = std::path::Path::new(&path);
+        if let Ok((root_node, _)) = crate::ast::parse(file_path) {
+            let mut ivar_tlet_types = BTreeMap::new();
+            collect_prepass_facts(&root_node, &mut Vec::new(), &mut ivar_tlet_types);
+            let signatures_map = extract_signatures(&lines, document);
+            let mut visitor = NilKillVisitor {
+                document,
+                lines: &lines,
+                path: &path,
+                current_owners: Vec::new(),
+                current_method: None,
+                current_method_kind: String::new(),
+                current_method_line: 0,
+                current_method_end_line: 0,
+                current_params: Vec::new(),
+                param_types: BTreeMap::new(),
+                local_types: BTreeMap::new(),
+                ivar_tlet_types,
+                signatures: signatures_map,
+                tlet_sites: &mut tlet_sites,
+                dead_nil_checks: &mut dead_nil_checks,
+                deterministic_guards: &mut deterministic_guards,
+                return_origins: &mut return_origins,
+                noreturn_methods: &mut noreturn_methods,
+            };
+            visitor.visit(&root_node);
+        }
+    }
+
     ProfileOutput {
         methods,
         fields,
@@ -256,13 +295,13 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         array_shapes,
         state_type_edges,
         call_graph_edges,
-        collection_index_lookups: if nil_kill { extract_collection_index_lookups(&lines, document, &path) } else { Vec::new() },
+        collection_index_lookups,
         hash_record_blockers: Vec::new(),
-        tlet_sites: if nil_kill { Vec::new() } else { Vec::new() },
-        dead_nil_checks: if nil_kill { Vec::new() } else { Vec::new() },
-        deterministic_guards: if nil_kill { Vec::new() } else { Vec::new() },
-        return_origins: if nil_kill { Vec::new() } else { Vec::new() },
-        noreturn_methods: if nil_kill { Vec::new() } else { Vec::new() },
+        tlet_sites,
+        dead_nil_checks,
+        deterministic_guards,
+        return_origins,
+        noreturn_methods,
     }
 }
 
@@ -754,7 +793,12 @@ fn extract_state_param_origins(
     let mut origins: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut records = Vec::new();
 
-    for origin in &document.state_param_origins {
+    let mut origins_list = document.state_param_origins.clone();
+    if origins_list.is_empty() {
+        origins_list = find_state_param_origins(document);
+    }
+
+    for origin in &origins_list {
         let key = state_key(&origin.owner, &origin.field);
         origins
             .entry(key.clone())
@@ -1077,7 +1121,16 @@ fn parse_python_signature(
     let return_type = sig[paren_close + 1..]
         .trim()
         .strip_prefix("->")
-        .map(|s| s.trim().trim_end_matches(':').trim().to_string());
+        .map(|s| {
+            let mut cleaned = s.trim();
+            if cleaned.ends_with(": ...") {
+                cleaned = cleaned[..cleaned.len() - 5].trim();
+            }
+            if cleaned.ends_with(':') {
+                cleaned = cleaned[..cleaned.len() - 1].trim();
+            }
+            cleaned.to_string()
+        });
 
     let params: Vec<BTreeMap<String, String>> = params_str
         .split(',')
@@ -1329,13 +1382,13 @@ fn type_reference_candidates(type_text: &str) -> Vec<String> {
 // Hash shapes (Phase 2c)
 // ---------------------------------------------------------------------------
 
-fn extract_hash_shapes(lines: &[String], _language: &str, path: &str) -> Vec<HashShape> {
+fn extract_hash_shapes(lines: &[String], language: &str, path: &str) -> Vec<HashShape> {
     let mut shapes = Vec::new();
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i].trim();
         if is_hash_literal_start(line) {
-            if let Some(shape) = try_extract_hash_shape(lines, i, path) {
+            if let Some(shape) = try_extract_hash_shape(lines, i, path, language) {
                 i = shape.line + count_lines(lines, shape.line, &shape.code) - 1;
                 shapes.push(shape);
             }
@@ -1351,14 +1404,14 @@ fn is_hash_literal_start(line: &str) -> bool {
         && !line.contains("#{")
 }
 
-fn try_extract_hash_shape(lines: &[String], start: usize, path: &str) -> Option<HashShape> {
+fn try_extract_hash_shape(lines: &[String], start: usize, path: &str, language: &str) -> Option<HashShape> {
     let (code, _end_line) = collect_braced_block(lines, start)?;
     let pairs = extract_hash_pairs(&code);
     if pairs.is_empty() {
         return None;
     }
     let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
-    let value_types: Vec<String> = pairs.iter().map(|(_, v)| infer_literal_type(v)).collect();
+    let value_types: Vec<String> = pairs.iter().map(|(_, v)| infer_literal_type(v, language)).collect();
     Some(HashShape {
         path: path.to_string(),
         line: start + 1, // 1-indexed
@@ -1424,10 +1477,24 @@ fn extract_hash_pairs(code: &str) -> Vec<(String, String)> {
 fn parse_hash_pair(part: &str) -> Option<(String, String)> {
     let part = part.trim();
     // Ruby symbol key: name: value or name: Type
+    // Or TS/JS/Python/JSON key:value
     if let Some((key, rest)) = part.split_once(':') {
         let key = key.trim();
-        if key.chars().all(|c| c.is_alphanumeric() || c == '_') && !key.is_empty() {
-            return Some((key.to_string(), rest.trim().to_string()));
+        let key_stripped = key.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
+            .or_else(|| key.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+            .unwrap_or(key);
+        if key_stripped.chars().all(|c| c.is_alphanumeric() || c == '_') && !key_stripped.is_empty() {
+            return Some((key_stripped.to_string(), rest.trim().to_string()));
+        }
+    }
+    // Lua or Python/JS assignment style: key = value
+    if let Some((key, rest)) = part.split_once('=') {
+        let key = key.trim();
+        let key_stripped = key.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
+            .or_else(|| key.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+            .unwrap_or(key);
+        if key_stripped.chars().all(|c| c.is_alphanumeric() || c == '_') && !key_stripped.is_empty() {
+            return Some((key_stripped.to_string(), rest.trim().to_string()));
         }
     }
     // String key: "key" => value
@@ -1490,7 +1557,7 @@ fn count_lines(_lines: &[String], _start_line: usize, code: &str) -> usize {
     newlines + 1
 }
 
-fn infer_literal_type(value: &str) -> String {
+fn infer_literal_type(value: &str, language: &str) -> String {
     let value = value.trim();
     if value.is_empty() {
         return "T.untyped".to_string();
@@ -1502,16 +1569,27 @@ fn infer_literal_type(value: &str) -> String {
         return "Symbol".to_string();
     }
     if value == "true" || value == "false" {
-        return "T::Boolean".to_string();
+        return if language == "javascript" || language == "typescript" {
+            "boolean".to_string()
+        } else {
+            "T::Boolean".to_string()
+        };
     }
     if value == "nil" || value == "null" || value == "None" {
-        return "NilClass".to_string();
+        return if language == "javascript" || language == "typescript" {
+            "null".to_string()
+        } else {
+            "NilClass".to_string()
+        };
     }
-    if value.parse::<i64>().is_ok() {
-        return "Integer".to_string();
-    }
-    if value.parse::<f64>().is_ok() {
-        return "Float".to_string();
+    if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
+        return if language == "javascript" || language == "typescript" || language == "lua" {
+            "number".to_string()
+        } else if value.parse::<i64>().is_ok() {
+            "Integer".to_string()
+        } else {
+            "Float".to_string()
+        };
     }
     if value.starts_with('[') || value.starts_with("%i") || value.starts_with("%I") || value.starts_with("%w") || value.starts_with("%W") {
         return "T::Array[T.untyped]".to_string();
@@ -1535,7 +1613,7 @@ fn infer_literal_type(value: &str) -> String {
 // Array shapes (Phase 2c)
 // ---------------------------------------------------------------------------
 
-fn extract_array_shapes(lines: &[String], _language: &str, path: &str) -> Vec<ArrayShape> {
+fn extract_array_shapes(lines: &[String], language: &str, path: &str) -> Vec<ArrayShape> {
     let mut shapes = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let line = line.trim();
@@ -1543,7 +1621,7 @@ fn extract_array_shapes(lines: &[String], _language: &str, path: &str) -> Vec<Ar
             let inner = &line[1..line.len() - 1];
             let types: Vec<String> = inner
                 .split(',')
-                .map(|e| infer_literal_type(e.trim()))
+                .map(|e| infer_literal_type(e.trim(), language))
                 .collect();
             if types.len() >= 2 {
                 shapes.push(ArrayShape {
@@ -2176,13 +2254,13 @@ def py_fn(a: int) -> str:
         assert!(extract_hash_pairs("{}").is_empty());
         assert!(extract_hash_pairs("no brace").is_empty());
         assert!(parse_hash_pair("invalid_pattern").is_none());
-        assert!(parse_hash_pair("\"key\" : value").is_none());
+        assert_eq!(parse_hash_pair("\"key\" : value"), Some(("key".to_string(), "value".to_string())));
         assert!(parse_hash_pair(":key : value").is_none());
 
-        assert_eq!(infer_literal_type(""), "T.untyped");
-        assert_eq!(infer_literal_type(":sym"), "Symbol");
-        assert_eq!(infer_literal_type("[]"), "T::Array[T.untyped]");
-        assert_eq!(infer_literal_type("{a: 1}"), "T::Hash[T.untyped, T.untyped]");
+        assert_eq!(infer_literal_type("", "ruby"), "T.untyped");
+        assert_eq!(infer_literal_type(":sym", "ruby"), "Symbol");
+        assert_eq!(infer_literal_type("[]", "ruby"), "T::Array[T.untyped]");
+        assert_eq!(infer_literal_type("{a: 1}", "ruby"), "T::Hash[T.untyped, T.untyped]");
     }
 
     pub(crate) fn test_language_type_system_impl() {
@@ -2480,4 +2558,1456 @@ fn extract_collection_index_lookups(lines: &[String], document: &Document, path:
     }
     
     lookups
+}
+
+fn child_nodes(node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
+    node.children.iter().filter_map(|c| match c {
+        crate::ast::Child::Node(n) => Some(n.as_ref()),
+        _ => None,
+    }).collect()
+}
+
+fn child_symbol(node: &crate::ast::Node, index: usize) -> Option<String> {
+    match node.children.get(index)? {
+        crate::ast::Child::Symbol(value) | crate::ast::Child::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn owner_name(node: &crate::ast::Node) -> Option<String> {
+    node.children.first().and_then(|c| match c {
+        crate::ast::Child::Node(n) => Some(n.text.clone()),
+        crate::ast::Child::String(s) | crate::ast::Child::Symbol(s) => Some(s.clone()),
+        _ => None,
+    })
+}
+
+fn get_receiver_alias(text: &str) -> Option<String> {
+    let t = text.trim_start();
+    if let Some(rest) = t.strip_prefix("func") {
+        let rest = rest.trim_start();
+        if rest.starts_with('(') {
+            if let Some((receiver_part, _)) = rest[1..].split_once(')') {
+                let parts: Vec<&str> = receiver_part.split_whitespace().collect();
+                if !parts.is_empty() {
+                    let r = parts[0].trim_start_matches('*').to_string();
+                    if !r.is_empty() && r != "mut" {
+                        return Some(r);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_state_param_origins(document: &Document) -> Vec<crate::syntax::StateParamOrigin> {
+    let mut origins = Vec::new();
+    let file_path = std::path::Path::new(&document.file);
+    if let Ok((root_node, _)) = crate::ast::parse(file_path) {
+        let mut visitor = StateParamVisitor {
+            document,
+            current_owners: Vec::new(),
+            current_receiver_alias: None,
+            origins: &mut origins,
+        };
+        visitor.visit(&root_node);
+    }
+    origins
+}
+
+fn find_param_ref(node: &crate::ast::Node, params: &[String]) -> Option<String> {
+    if node.r#type == "LVAR" || node.r#type == "FIELD_EXPRESSION" || node.r#type == "RAW_ARGUMENT" {
+        let name = node.text.trim().to_string();
+        if params.contains(&name) {
+            return Some(name);
+        }
+    }
+    if node.children.is_empty() {
+        let name = node.text.trim().to_string();
+        if params.contains(&name) {
+            return Some(name);
+        }
+    }
+    for child in &node.children {
+        if let crate::ast::Child::Node(child_node) = child {
+            if let Some(param) = find_param_ref(child_node, params) {
+                return Some(param);
+            }
+        }
+    }
+    None
+}
+
+struct StateParamVisitor<'a> {
+    document: &'a Document,
+    current_owners: Vec<String>,
+    current_receiver_alias: Option<String>,
+    origins: &'a mut Vec<crate::syntax::StateParamOrigin>,
+}
+
+impl<'a> StateParamVisitor<'a> {
+    fn visit(&mut self, node: &crate::ast::Node) {
+        eprintln!("VISIT: type={}, text={}", node.r#type, node.text.replace('\n', " "));
+        match node.r#type.as_str() {
+            "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
+                let name = owner_name(node)
+                    .unwrap_or_else(|| "(anonymous)".to_string());
+                let qualified = if self.current_owners.is_empty() {
+                    name
+                } else {
+                    format!("{}::{name}", self.current_owners.join("::"))
+                };
+                self.current_owners.push(qualified);
+                for child in &node.children {
+                    if let crate::ast::Child::Node(child_node) = child {
+                        self.visit(child_node);
+                    }
+                }
+                self.current_owners.pop();
+            }
+            "DEFN" | "DEFS" | "METHOD_SIGNATURE" => {
+                let name_symbol = if node.r#type == "DEFS" {
+                    child_symbol(node, 1)
+                } else {
+                    child_symbol(node, 0)
+                };
+                if let Some(func_name) = name_symbol {
+                    let mut owner = self.current_owners.last().cloned().unwrap_or_default();
+                    let mut final_func_name = func_name.clone();
+                    if owner.is_empty() {
+                        if let Some(pos) = func_name.rfind(|c| c == ':' || c == '.') {
+                            owner = func_name[..pos].to_string();
+                            final_func_name = func_name[pos + 1..].to_string();
+                        }
+                    }
+                    eprintln!("DEFN name={}, owner={}, line={}", final_func_name, owner, node.first_lineno);
+                    if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
+                        fd.name == final_func_name && (fd.line == node.first_lineno || fd.owner == owner)
+                    }) {
+                        let old_alias = self.current_receiver_alias.clone();
+                        self.current_receiver_alias = get_receiver_alias(&node.text);
+                        eprintln!("  Mapped receiver alias: {:?}", self.current_receiver_alias);
+                        let body_nodes = crate::ast::body_stmts(node);
+                        for body_node in body_nodes {
+                            self.collect_origins_from_stmt(body_node, fn_def);
+                        }
+                        self.current_receiver_alias = old_alias;
+                    } else {
+                        eprintln!("  No matching FunctionDef found!");
+                    }
+                }
+                for child in &node.children {
+                    if let crate::ast::Child::Node(child_node) = child {
+                        self.visit(child_node);
+                    }
+                }
+            }
+            _ => {
+                for child in &node.children {
+                    if let crate::ast::Child::Node(child_node) = child {
+                        self.visit(child_node);
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_origins_from_stmt(&mut self, node: &crate::ast::Node, fn_def: &crate::syntax::FunctionDef) {
+        if node.r#type == "IASGN" {
+            if let Some(field_name) = child_symbol(node, 0) {
+                if let Some(val_node) = node.children.get(1).and_then(|c| match c {
+                    crate::ast::Child::Node(n) => Some(n.as_ref()),
+                    _ => None,
+                }) {
+                    if let Some(param_name) = find_param_ref(val_node, &fn_def.params) {
+                        self.origins.push(crate::syntax::StateParamOrigin {
+                            field: field_name,
+                            receiver: "self".to_string(),
+                            owner: fn_def.owner.clone(),
+                            param: param_name,
+                            file: self.document.file.clone(),
+                            function: fn_def.name.clone(),
+                            line: node.first_lineno,
+                            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                        });
+                    }
+                }
+            }
+        } else if node.r#type == "LASGN" {
+            if let Some(var_name) = child_symbol(node, 0) {
+                if let Some(field_name) = var_name.strip_prefix("self.").or_else(|| var_name.strip_prefix("this.")) {
+                    let field_name_clean = if let Some(bracket_pos) = field_name.find('[') {
+                        &field_name[..bracket_pos]
+                    } else {
+                        field_name
+                    };
+                    if let Some(val_node) = node.children.get(1).and_then(|c| match c {
+                        crate::ast::Child::Node(n) => Some(n.as_ref()),
+                        _ => None,
+                    }) {
+                        if let Some(param_name) = find_param_ref(val_node, &fn_def.params) {
+                            self.origins.push(crate::syntax::StateParamOrigin {
+                                field: field_name_clean.to_string(),
+                                receiver: "self".to_string(),
+                                owner: fn_def.owner.clone(),
+                                param: param_name,
+                                file: self.document.file.clone(),
+                                function: fn_def.name.clone(),
+                                line: node.first_lineno,
+                                span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                            });
+                        }
+                    }
+                }
+            }
+        } else if node.r#type == "ATTRASGN" {
+            eprintln!("ATTRASGN children: {:?}", node.children);
+            if let (Some(crate::ast::Child::Node(receiver_node)), Some(field_symbol), Some(crate::ast::Child::Node(args_node))) = (
+                node.children.get(0),
+                child_symbol(node, 1),
+                node.children.get(2),
+            ) {
+                let field_symbol = field_symbol.trim().trim_end_matches('=').to_string();
+                let receiver_text = receiver_node.text.trim();
+                
+                let is_self = receiver_text == "self"
+                    || receiver_text == "this"
+                    || self.current_receiver_alias.as_deref() == Some(receiver_text);
+                
+                let field_name = if is_self {
+                    Some(field_symbol.clone())
+                } else {
+                    receiver_state_field(receiver_text, self.document)
+                };
+                eprintln!("  field_symbol={}, receiver_text={}, is_self={}, field_name={:?}, params={:?}, args_node={}", field_symbol, receiver_text, is_self, field_name, fn_def.params, args_node.text);
+                
+                if let Some(field) = field_name {
+                    let arg_children = child_nodes(args_node);
+                    let val_node = arg_children.last().map(|n| *n).unwrap_or(args_node.as_ref());
+                    if let Some(param_name) = find_param_ref(val_node, &fn_def.params) {
+                        self.origins.push(crate::syntax::StateParamOrigin {
+                            field,
+                            receiver: "self".to_string(),
+                            owner: fn_def.owner.clone(),
+                            param: param_name,
+                            file: self.document.file.clone(),
+                            function: fn_def.name.clone(),
+                            line: node.first_lineno,
+                            span: [node.first_lineno, node.first_column, node.last_lineno, node.last_column],
+                        });
+                    }
+                }
+            }
+        }
+        for child in &node.children {
+            if let crate::ast::Child::Node(child_node) = child {
+                self.collect_origins_from_stmt(child_node, fn_def);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NilKill Static Analysis / Profiler Integration
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum LiteralStaticValue {
+    String(String),
+    Symbol(String),
+    Integer(i64),
+    Float(String),
+    Bool(bool),
+    Nil,
+    Unknown,
+}
+
+fn unquote(s: &str) -> String {
+    let s = s.trim();
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        if s.len() >= 2 {
+            s[1..s.len() - 1].to_string()
+        } else {
+            s.to_string()
+        }
+    } else {
+        s.to_string()
+    }
+}
+
+fn is_non_nil_type(t: &str) -> bool {
+    !t.is_empty() && t != "T.untyped" && t != "NilClass" && !t.contains("T.nilable")
+}
+
+fn useful_type(t: &str) -> bool {
+    !t.is_empty() && t != "T.untyped"
+}
+
+fn weak_type(t: &str) -> bool {
+    t.contains("T.untyped") || t.contains("[T.untyped") || t.contains(", T.untyped")
+}
+
+fn strip_nilable_type(type_text: &str) -> String {
+    let text = type_text.trim();
+    if text.starts_with("T.nilable(") && text.ends_with(')') {
+        extract_call_args(text, "T.nilable").unwrap_or_else(|| text.to_string())
+    } else {
+        text.to_string()
+    }
+}
+
+fn extract_return_type(sig: &str) -> Option<String> {
+    extract_call_args(sig, "returns").map(|t| t.trim().to_string())
+}
+
+fn extract_call_args(source: &str, name: &str) -> Option<String> {
+    let marker = format!("{name}(");
+    let idx = source.find(&marker)?;
+    let start = idx + marker.len();
+    let mut depth = 1i32;
+    for (offset, ch) in source[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(source[start..start + offset].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn static_sorbet_type(types: &[String]) -> String {
+    let mut has_nil = false;
+    let mut others = BTreeSet::new();
+    for ty in types.iter().filter(|ty| !ty.is_empty()) {
+        if ty == "NilClass" {
+            has_nil = true;
+        } else if ty.starts_with("T.nilable(") && ty.ends_with(')') {
+            has_nil = true;
+            others.insert(strip_nilable_type(ty));
+        } else {
+            others.insert(normalize_static_sorbet_type(ty));
+        }
+    }
+    if others.contains("T.noreturn") {
+        if others.len() == 1 {
+            return if has_nil { "NilClass".to_string() } else { "T.noreturn".to_string() };
+        }
+        others.remove("T.noreturn");
+    }
+    if others.is_empty() && has_nil {
+        return "NilClass".to_string();
+    }
+    if others.is_empty() {
+        return "T.untyped".to_string();
+    }
+    let base = if others
+        .iter()
+        .all(|ty| matches!(ty.as_str(), "TrueClass" | "FalseClass" | "T::Boolean"))
+    {
+        "T::Boolean".to_string()
+    } else if others.len() == 1 {
+        others.into_iter().next().unwrap()
+    } else {
+        "T.untyped".to_string()
+    };
+    if base == "T.untyped" {
+        return base;
+    }
+    if has_nil {
+        format!("T.nilable({base})")
+    } else {
+        base
+    }
+}
+
+fn normalize_static_sorbet_type(type_text: &str) -> String {
+    match type_text {
+        "Array" => "T::Array[T.untyped]".to_string(),
+        "Hash" => "T::Hash[T.untyped, T.untyped]".to_string(),
+        "Set" => "T::Set[T.untyped]".to_string(),
+        _ => type_text.to_string(),
+    }
+}
+
+fn match_call<'a>(node: &'a crate::ast::Node) -> Option<(&'a crate::ast::Node, String, &'a crate::ast::Node)> {
+    if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL" {
+        let receiver = match node.children.get(0)? {
+            crate::ast::Child::Node(n) => n.as_ref(),
+            _ => return None,
+        };
+        let method = match node.children.get(1)? {
+            crate::ast::Child::Symbol(s) | crate::ast::Child::String(s) => s.clone(),
+            _ => return None,
+        };
+        let args = match node.children.get(2)? {
+            crate::ast::Child::Node(n) => n.as_ref(),
+            _ => return None,
+        };
+        Some((receiver, method, args))
+    } else {
+        None
+    }
+}
+
+fn child_node(node: &crate::ast::Node, index: usize) -> Option<&crate::ast::Node> {
+    node.children.get(index).and_then(crate::ast::node)
+}
+
+fn node_symbol(node: &crate::ast::Node) -> Option<String> {
+    node.children.iter().find_map(|child| match child {
+        crate::ast::Child::Symbol(value) | crate::ast::Child::String(value) => Some(value.clone()),
+        _ => None,
+    })
+}
+
+fn implicit_return_expression(node: &crate::ast::Node) -> Option<&crate::ast::Node> {
+    match node.r#type.as_str() {
+        "BLOCK" | "STATEMENTS" | "BEGIN" | "ELSE" | "PAREN" | "SCOPE" | "ROOT" => {
+            let ns = child_nodes(node);
+            ns.last().copied()
+        }
+        _ => Some(node),
+    }
+}
+
+fn collect_explicit_returns<'a>(node: &'a crate::ast::Node, results: &mut Vec<&'a crate::ast::Node>) {
+    if matches!(node.r#type.as_str(), "CLASS" | "MODULE" | "INTERFACE_DECLARATION" | "DEFN" | "DEFS" | "LAMBDA" | "ITER" | "METHOD_SIGNATURE") {
+        return;
+    }
+    if node.r#type == "RETURN" {
+        if let Some(arg) = child_node(node, 0) {
+            results.push(arg);
+        } else {
+            results.push(node);
+        }
+        return;
+    }
+    for child in child_nodes(node) {
+        collect_explicit_returns(child, results);
+    }
+}
+
+fn return_control_shape(
+    explicit: &[&crate::ast::Node],
+    implicit: Option<&crate::ast::Node>,
+    implicit_present: bool,
+) -> &'static str {
+    if explicit.len() > 1 || (!explicit.is_empty() && implicit_present) {
+        return "branching";
+    }
+    if explicit.iter().any(|expr| branching_return_expression(*expr)) {
+        return "branching";
+    }
+    if implicit_present && implicit.is_some_and(|expr| branching_return_expression(expr)) {
+        return "branching";
+    }
+    "branchless"
+}
+
+fn branching_return_expression(node: &crate::ast::Node) -> bool {
+    if matches!(node.r#type.as_str(), "IF" | "UNLESS" | "CASE" | "CASE2" | "RESCUE") {
+        return true;
+    }
+    child_nodes(node)
+        .into_iter()
+        .any(|child| branching_return_expression(child))
+}
+
+fn return_syntax(explicit_empty: bool, implicit_present: bool) -> &'static str {
+    if !explicit_empty && implicit_present {
+        "mixed"
+    } else if !explicit_empty {
+        "explicit"
+    } else {
+        "implicit"
+    }
+}
+
+fn collect_prepass_facts(
+    node: &crate::ast::Node,
+    current_owners: &mut Vec<String>,
+    ivar_tlet_types: &mut BTreeMap<(String, String), String>,
+) {
+    match node.r#type.as_str() {
+        "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
+            let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
+            let qualified = if current_owners.is_empty() {
+                name
+            } else {
+                format!("{}::{name}", current_owners.join("::"))
+            };
+            current_owners.push(qualified);
+            for child in child_nodes(node) {
+                collect_prepass_facts(child, current_owners, ivar_tlet_types);
+            }
+            current_owners.pop();
+        }
+        "IASGN" => {
+            if let Some(ivar_name) = node_symbol(node) {
+                if let Some(val_node) = child_node(node, 1) {
+                    if let Some((receiver, method, args_node)) = match_call(val_node) {
+                        if method == "let" && receiver.text == "T" {
+                            let arg_nodes = child_nodes(args_node);
+                            if let Some(type_node) = arg_nodes.get(1) {
+                                let type_text = type_node.text.trim().to_string();
+                                if !type_text.is_empty() && type_text != "T.untyped" {
+                                    if let Some(class_name) = current_owners.last() {
+                                        ivar_tlet_types.insert((class_name.clone(), ivar_name), type_text);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for child in child_nodes(node) {
+                collect_prepass_facts(child, current_owners, ivar_tlet_types);
+            }
+        }
+        _ => {
+            for child in child_nodes(node) {
+                collect_prepass_facts(child, current_owners, ivar_tlet_types);
+            }
+        }
+    }
+}
+
+struct NilKillVisitor<'a> {
+    document: &'a Document,
+    lines: &'a [String],
+    path: &'a str,
+    current_owners: Vec<String>,
+    current_method: Option<String>,
+    current_method_kind: String,
+    current_method_line: usize,
+    current_method_end_line: usize,
+    current_params: Vec<String>,
+    param_types: BTreeMap<String, String>,
+    local_types: BTreeMap<String, String>,
+    ivar_tlet_types: BTreeMap<(String, String), String>,
+    signatures: BTreeMap<String, String>,
+    tlet_sites: &'a mut Vec<serde_json::Value>,
+    dead_nil_checks: &'a mut Vec<serde_json::Value>,
+    deterministic_guards: &'a mut Vec<serde_json::Value>,
+    return_origins: &'a mut Vec<serde_json::Value>,
+    noreturn_methods: &'a mut Vec<serde_json::Value>,
+}
+
+const CORE_RUNTIME_GUARD_CLASSES: &[&str] = &[
+    "Array",
+    "Hash",
+    "Set",
+    "String",
+    "Symbol",
+    "Integer",
+    "Float",
+    "NilClass",
+    "TrueClass",
+    "FalseClass",
+    "Numeric",
+    "Range",
+    "Regexp",
+    "Time",
+];
+
+const CORE_CLASS_CONSTANTS: &[&str] = &[
+    "Array",
+    "BasicObject",
+    "Class",
+    "Complex",
+    "Encoding",
+    "Enumerator",
+    "Exception",
+    "FalseClass",
+    "Fiber",
+    "Float",
+    "Hash",
+    "Integer",
+    "Module",
+    "NilClass",
+    "Numeric",
+    "Object",
+    "Proc",
+    "Range",
+    "Rational",
+    "Regexp",
+    "String",
+    "Struct",
+    "Symbol",
+    "Thread",
+    "Time",
+    "TrueClass",
+];
+
+impl<'a> NilKillVisitor<'a> {
+    fn visit(&mut self, node: &crate::ast::Node) {
+        match node.r#type.as_str() {
+            "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
+                let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
+                let qualified = if self.current_owners.is_empty() {
+                    name
+                } else {
+                    format!("{}::{name}", self.current_owners.join("::"))
+                };
+                self.current_owners.push(qualified);
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+                self.current_owners.pop();
+            }
+            "DEFN" | "DEFS" | "METHOD_SIGNATURE" => {
+                let name_symbol = if node.r#type == "DEFS" {
+                    child_symbol(node, 1)
+                } else {
+                    child_symbol(node, 0)
+                };
+                if let Some(func_name) = name_symbol {
+                    let owner = self.current_owners.last().cloned().unwrap_or_default();
+                    let kind = if node.r#type == "DEFS" {
+                        "class".to_string()
+                    } else if !owner.is_empty() {
+                        "instance".to_string()
+                    } else {
+                        "top".to_string()
+                    };
+                    
+                    if let Some(fn_def) = self.document.function_defs.iter().find(|fd| {
+                        fd.name == func_name && (fd.line == node.first_lineno || fd.owner == owner)
+                    }) {
+                        let old_method = self.current_method.clone();
+                        let old_method_kind = self.current_method_kind.clone();
+                        let old_method_line = self.current_method_line;
+                        let old_method_end_line = self.current_method_end_line;
+                        let old_params = self.current_params.clone();
+                        let old_param_types = self.param_types.clone();
+                        let old_local_types = self.local_types.clone();
+
+                        self.current_method = Some(func_name.clone());
+                        self.current_method_kind = kind.clone();
+                        self.current_method_line = node.first_lineno;
+                        self.current_method_end_line = node.last_lineno;
+                        self.current_params = fn_def.params.clone();
+
+                        let fn_key = format!("{}\u{0}{}", owner, func_name);
+                        let types_opt = self.document.method_param_types.get(&fn_key)
+                            .or_else(|| self.document.method_param_types.get(&func_name));
+                        if let Some(types) = types_opt {
+                            for (pname, ptype) in types {
+                                if useful_type(ptype) {
+                                    self.param_types.insert(pname.clone(), ptype.clone());
+                                }
+                            }
+                        }
+
+                        let body = child_node(node, if node.r#type == "DEFS" { 2 } else { 1 });
+                        if let Some(body_node) = body {
+                            self.visit(body_node);
+                        }
+
+                        let explicit = body.map(|b| {
+                            let mut exp = Vec::new();
+                            collect_explicit_returns(b, &mut exp);
+                            exp
+                        }).unwrap_or_default();
+                        
+                        let implicit_expr = body.and_then(implicit_return_expression);
+                        let implicit_present = implicit_expr.map(|expr| expr.r#type != "RETURN").unwrap_or(false);
+                        
+                        let mut expressions = explicit.clone();
+                        if implicit_present {
+                            if let Some(expr) = implicit_expr {
+                                expressions.push(expr);
+                            }
+                        }
+
+                        let mut sources = Vec::new();
+                        let mut blockers = BTreeSet::new();
+                        for expr in &expressions {
+                            sources.extend(self.return_sources_for(expr, &mut blockers));
+                        }
+                        if expressions.is_empty() || sources.is_empty() {
+                            blockers.insert("no return expression found".to_string());
+                        }
+
+                        let source_types = sources
+                            .iter()
+                            .filter_map(|s| s.get("type").and_then(Value::as_str).map(ToString::to_string))
+                            .collect::<Vec<_>>();
+                        
+                        let mut candidate = static_sorbet_type(&source_types);
+                        if candidate == "NilClass" && sources.iter().any(|s| {
+                            matches!(s.get("kind").and_then(Value::as_str), Some("call_untyped" | "unknown"))
+                        }) {
+                            candidate = "T.untyped".to_string();
+                        }
+                        let useful = useful_type(&candidate);
+                        let has_untyped_call = sources.iter().any(|s| s.get("kind").and_then(Value::as_str) == Some("call_untyped"));
+                        let confidence = if useful && !weak_type(&candidate) && blockers.is_empty() && !has_untyped_call {
+                            "strong"
+                        } else if useful {
+                            "weak"
+                        } else {
+                            "blocked"
+                        };
+
+                        self.return_origins.push(json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "end_line": node.last_lineno,
+                            "class": owner,
+                            "method": func_name,
+                            "kind": kind,
+                            "implicit": explicit.is_empty(),
+                            "return_syntax": return_syntax(explicit.is_empty(), implicit_present),
+                            "control_shape": return_control_shape(&explicit, implicit_expr, implicit_present),
+                            "candidate_type": if useful { &candidate } else { "T.untyped" },
+                            "confidence": confidence,
+                            "sources": sources,
+                            "blockers": blockers.into_iter().collect::<Vec<_>>(),
+                            "hash_shape": Value::Null,
+                            "array_element_shape": Value::Null,
+                        }));
+
+                        let is_noreturn = !self.has_explicit_return(body) && body.is_some_and(|b| self.noreturn_body(b));
+                        if is_noreturn {
+                            self.noreturn_methods.push(json!({
+                                "name": func_name,
+                                "path": self.path,
+                                "line": node.first_lineno,
+                                "class": owner,
+                                "kind": kind,
+                            }));
+                        }
+
+                        self.current_method = old_method;
+                        self.current_method_kind = old_method_kind;
+                        self.current_method_line = old_method_line;
+                        self.current_method_end_line = old_method_end_line;
+                        self.current_params = old_params;
+                        self.param_types = old_param_types;
+                        self.local_types = old_local_types;
+                    }
+                }
+            }
+            "IF" | "UNLESS" => {
+                self.inspect_branch_guard(node, node.r#type == "UNLESS");
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+            }
+            "CALL" | "QCALL" | "FCALL" | "VCALL" => {
+                self.inspect_call_node(node);
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+            }
+            "LASGN" | "DASGN" => {
+                if let Some(var_name) = node_symbol(node) {
+                    if let Some(val_node) = child_node(node, 1) {
+                        let mut resolved_type = None;
+                        if let Some((receiver, method, args_node)) = match_call(val_node) {
+                            if method == "let" && receiver.text == "T" {
+                                let arg_nodes = child_nodes(args_node);
+                                if let Some(type_node) = arg_nodes.get(1) {
+                                    resolved_type = Some(type_node.text.trim().to_string());
+                                }
+                            }
+                        }
+                        if resolved_type.is_none() {
+                            resolved_type = self.expression_type(val_node);
+                        }
+                        if let Some(ty) = resolved_type {
+                            if useful_type(&ty) {
+                                self.local_types.insert(var_name, ty);
+                            }
+                        }
+                    }
+                }
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+            }
+            _ => {
+                for child in child_nodes(node) {
+                    self.visit(child);
+                }
+            }
+        }
+    }
+
+    fn has_explicit_return(&self, body: Option<&crate::ast::Node>) -> bool {
+        let Some(b) = body else { return false };
+        let mut exp = Vec::new();
+        collect_explicit_returns(b, &mut exp);
+        !exp.is_empty()
+    }
+
+    fn inspect_call_node(&mut self, node: &crate::ast::Node) {
+        if node.r#type == "CALL" || node.r#type == "QCALL" {
+            if let Some((receiver, method, args_node)) = match_call(node) {
+                if method == "let" && receiver.text == "T" {
+                    let arg_nodes = child_nodes(args_node);
+                    self.tlet_sites.push(json!({
+                        "path": self.path,
+                        "line": node.first_lineno,
+                        "tlet": true,
+                        "type": arg_nodes.get(1).map(|arg| arg.text.clone()),
+                    }));
+                } else if node.r#type == "QCALL" {
+                    if self.provably_non_nil(receiver) {
+                        self.dead_nil_checks.push(json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "kind": "safe_nav",
+                            "code": node.text.clone(),
+                            "reason": format!("{} is provably non-nil", receiver.text),
+                        }));
+                    }
+                } else if method == "nil?" {
+                    if self.provably_non_nil(receiver) {
+                        self.dead_nil_checks.push(json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "kind": "nil_check",
+                            "code": node.text.clone(),
+                            "reason": format!("{} is provably non-nil; .nil? is always false", receiver.text),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    fn provably_non_nil(&self, node: &crate::ast::Node) -> bool {
+        if node.r#type == "SELF" {
+            return true;
+        }
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                if let Some(name) = node_symbol(node) {
+                    if let Some(t) = self.param_types.get(&name).or_else(|| self.local_types.get(&name)) {
+                        return is_non_nil_type(t);
+                    }
+                }
+            }
+            _ => {
+                if let Some(ty) = self.static_expression_type(node) {
+                    return is_non_nil_type(&ty);
+                }
+            }
+        }
+        false
+    }
+
+    fn inspect_branch_guard(&mut self, node: &crate::ast::Node, inverted: bool) {
+        let Some(predicate) = child_node(node, 0) else { return };
+        let Some(result) = self.deterministic_predicate_result(predicate) else { return };
+
+        let truth = result.get("truth_value").and_then(Value::as_bool).unwrap_or(false);
+        let taken = if inverted { !truth } else { truth };
+        let current_class = self.current_owners.last().cloned().unwrap_or_default();
+        let current_method = self.current_method.clone().unwrap_or_default();
+        
+        self.deterministic_guards.push(json!({
+            "path": self.path,
+            "line": predicate.first_lineno,
+            "class": current_class,
+            "method": current_method,
+            "code": predicate.text.chars().take(160).collect::<String>(),
+            "branch_kind": if inverted { "unless" } else { "if" },
+            "truth_value": truth,
+            "taken_branch": if taken { "body" } else { "else" },
+            "proof_tier": result.get("proof_tier").cloned().unwrap_or_else(|| json!("static_proven")),
+            "predicate_kind": result.get("predicate_kind").cloned().unwrap_or(Value::Null),
+            "reason": result.get("reason").cloned().unwrap_or(Value::Null),
+            "origin_kind": result.get("origin_kind").cloned().unwrap_or(Value::Null),
+            "origin_name": result.get("origin_name").cloned().unwrap_or(Value::Null),
+        }));
+    }
+
+    fn deterministic_predicate_result(&self, node: &crate::ast::Node) -> Option<Value> {
+        let node = if node.r#type == "PAREN" {
+            child_node(node, 0).unwrap_or(node)
+        } else {
+            node
+        };
+        if let Some(literal) = self.literal_truth_value(node) {
+            return Some(self.deterministic_guard_result(
+                literal,
+                "literal",
+                format!("{} is a boolean literal", node.text),
+                None,
+                None,
+            ));
+        }
+        if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL" {
+            if let Some(result) = self.deterministic_nil_predicate_result(node) {
+                return Some(result);
+            }
+            if let Some(result) = self.deterministic_class_predicate_result(node) {
+                return Some(result);
+            }
+            return self.deterministic_literal_comparison_result(node);
+        }
+        None
+    }
+
+    fn deterministic_guard_result(
+        &self,
+        truth_value: bool,
+        predicate_kind: &str,
+        reason: String,
+        origin_kind: Option<String>,
+        origin_name: Option<String>,
+    ) -> Value {
+        json!({
+            "truth_value": truth_value,
+            "proof_tier": "static_proven",
+            "predicate_kind": predicate_kind,
+            "reason": reason,
+            "origin_kind": origin_kind,
+            "origin_name": origin_name,
+        })
+    }
+
+    fn literal_truth_value(&self, node: &crate::ast::Node) -> Option<bool> {
+        match node.r#type.as_str() {
+            "TRUE" => Some(true),
+            "FALSE" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn deterministic_nil_predicate_result(&self, node: &crate::ast::Node) -> Option<Value> {
+        let (receiver, method, _) = match_call(node)?;
+        if method != "nil?" {
+            return None;
+        }
+        let (origin_kind, origin_name) = self.predicate_origin(receiver);
+        let receiver_type = self.deterministic_guard_subject_type(receiver)?;
+        if receiver_type != "NilClass" && !receiver_type.starts_with("T.nilable(") {
+            return Some(self.deterministic_guard_result(
+                false,
+                "nil_check",
+                format!(
+                    "{} has static type {}; .nil? is always false",
+                    receiver.text,
+                    receiver_type
+                ),
+                origin_kind,
+                origin_name,
+            ));
+        }
+        if receiver_type == "NilClass" {
+            return Some(self.deterministic_guard_result(
+                true,
+                "nil_check",
+                format!(
+                    "{} has static type NilClass; .nil? is always true",
+                    receiver.text
+                ),
+                origin_kind,
+                origin_name,
+            ));
+        }
+        None
+    }
+
+    fn deterministic_class_predicate_result(&self, node: &crate::ast::Node) -> Option<Value> {
+        let (receiver, method, args_node) = match_call(node)?;
+        if !matches!(method.as_str(), "is_a?" | "kind_of?" | "instance_of?") {
+            return None;
+        }
+        let arg_nodes = child_nodes(args_node);
+        if arg_nodes.len() != 1 {
+            return None;
+        }
+        let arg = arg_nodes[0];
+        let class_name = arg.text.trim().to_string();
+        if class_name.is_empty() {
+            return None;
+        }
+        let receiver_type = self.deterministic_guard_subject_type(receiver)?;
+        let truth = self.class_guard_truth(&receiver_type, &class_name, method == "instance_of?")?;
+        let (origin_kind, origin_name) = self.predicate_origin(receiver);
+        Some(self.deterministic_guard_result(
+            truth,
+            "class_guard",
+            format!(
+                "{} has static type {}; {}({}) is always {}",
+                receiver.text,
+                receiver_type,
+                method,
+                class_name,
+                truth
+            ),
+            origin_kind,
+            origin_name,
+        ))
+    }
+
+    fn class_guard_truth(&self, receiver_type: &str, class_name: &str, exact: bool) -> Option<bool> {
+        let raw = receiver_type.trim();
+        if raw.is_empty() || raw == "T.untyped" || raw.contains("T.any(") || raw.starts_with("T.nilable(") {
+            return None;
+        }
+        let normalized = strip_nilable_type(raw);
+        if normalized.is_empty() {
+            return None;
+        }
+        let bare = self.bare_class_name(&normalized);
+        let wanted = self.bare_class_name(class_name);
+        if exact && self.known_disjoint_guard_classes(&bare, &wanted) {
+            return Some(false);
+        }
+        if exact {
+            return None;
+        }
+        if bare == wanted || self.known_guard_subclass(&bare, &wanted) {
+            return Some(true);
+        }
+        if self.known_disjoint_guard_classes(&bare, &wanted) {
+            return Some(false);
+        }
+        None
+    }
+
+    fn bare_class_name(&self, type_text: &str) -> String {
+        let raw = type_text.trim();
+        if raw.starts_with("T::Array") || raw.starts_with("Array") {
+            "Array".to_string()
+        } else if raw.starts_with("T::Hash") || raw.starts_with("Hash") {
+            "Hash".to_string()
+        } else if raw.starts_with("T::Set") || raw.starts_with("Set") {
+            "Set".to_string()
+        } else if raw == "T::Boolean" {
+            "T::Boolean".to_string()
+        } else {
+            raw.trim_start_matches("::").rsplit("::").next().unwrap_or(raw).to_string()
+        }
+    }
+
+    fn known_guard_subclass(&self, bare: &str, wanted: &str) -> bool {
+        (wanted == "Numeric" && matches!(bare, "Integer" | "Float"))
+            || (wanted == "T::Boolean" && matches!(bare, "TrueClass" | "FalseClass"))
+    }
+
+    fn known_disjoint_guard_classes(&self, bare: &str, wanted: &str) -> bool {
+        if bare == wanted {
+            return false;
+        }
+        if self.known_guard_subclass(bare, wanted) || self.known_guard_subclass(wanted, bare) {
+            return false;
+        }
+        if bare == "T::Boolean" && matches!(wanted, "TrueClass" | "FalseClass") {
+            return false;
+        }
+        if wanted == "T::Boolean" && matches!(bare, "TrueClass" | "FalseClass") {
+            return false;
+        }
+        if bare == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.contains(&wanted) {
+            return true;
+        }
+        if wanted == "T::Boolean" && CORE_RUNTIME_GUARD_CLASSES.contains(&bare) {
+            return true;
+        }
+        CORE_RUNTIME_GUARD_CLASSES.contains(&bare) && CORE_RUNTIME_GUARD_CLASSES.contains(&wanted)
+    }
+
+    fn deterministic_literal_comparison_result(&self, node: &crate::ast::Node) -> Option<Value> {
+        let (receiver, method, args_node) = match_call(node)?;
+        if !matches!(method.as_str(), "==" | "!=" | ">" | ">=" | "<" | "<=") {
+            return None;
+        }
+        let arg_nodes = child_nodes(args_node);
+        if arg_nodes.len() != 1 {
+            return None;
+        }
+        let left = self.literal_static_value(receiver);
+        let right = self.literal_static_value(arg_nodes[0]);
+        if matches!(left, LiteralStaticValue::Unknown) || matches!(right, LiteralStaticValue::Unknown) {
+            return None;
+        }
+        let truth = self.compare_literal_values(&left, &right, &method)?;
+        Some(self.deterministic_guard_result(
+            truth,
+            "literal_comparison",
+            format!(
+                "{} {} {} is always {}",
+                receiver.text,
+                method,
+                arg_nodes[0].text,
+                truth
+            ),
+            None,
+            None,
+        ))
+    }
+
+    fn deterministic_guard_subject_type(&self, node: &crate::ast::Node) -> Option<String> {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(node)?;
+                self.param_types
+                    .get(&name)
+                    .cloned()
+                    .or_else(|| self.local_types.get(&name).cloned())
+            }
+            "IVAR" => {
+                let name = node_symbol(node)?;
+                self.ivar_expression_type(&name)
+            }
+            _ => self.static_expression_type(node),
+        }
+    }
+
+    fn literal_static_value(&self, node: &crate::ast::Node) -> LiteralStaticValue {
+        match node.r#type.as_str() {
+            "STR" | "STRING" | "STRING_LITERAL" => LiteralStaticValue::String(unquote(&node.text)),
+            "SYM" | "SYMBOL" => LiteralStaticValue::Symbol(node.text.trim_start_matches(':').to_string()),
+            "INT" | "INTEGER" | "NUM" | "NUMBER" => node.text
+                .parse::<i64>()
+                .map(LiteralStaticValue::Integer)
+                .unwrap_or(LiteralStaticValue::Unknown),
+            "FLOAT" => LiteralStaticValue::Float(node.text.clone()),
+            "TRUE" => LiteralStaticValue::Bool(true),
+            "FALSE" => LiteralStaticValue::Bool(false),
+            "NIL" => LiteralStaticValue::Nil,
+            _ => LiteralStaticValue::Unknown,
+        }
+    }
+
+    fn compare_literal_values(&self, left: &LiteralStaticValue, right: &LiteralStaticValue, op: &str) -> Option<bool> {
+        match op {
+            "==" => Some(self.literal_values_equal(left, right)),
+            "!=" => Some(!self.literal_values_equal(left, right)),
+            ">" | ">=" | "<" | "<=" => {
+                let left = self.literal_numeric_value(left)?;
+                let right = self.literal_numeric_value(right)?;
+                match op {
+                    ">" => Some(left > right),
+                    ">=" => Some(left >= right),
+                    "<" => Some(left < right),
+                    "<=" => Some(left <= right),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn predicate_origin(&self, node: &crate::ast::Node) -> (Option<String>, Option<String>) {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(node).unwrap_or_default();
+                if self.current_params.contains(&name) {
+                    return (Some("param".to_string()), Some(name));
+                }
+                return (Some("local".to_string()), Some(name));
+            }
+            "IVAR" => return (Some("ivar".to_string()), Some(node_symbol(node).unwrap_or_default())),
+            "CALL" | "QCALL" => {
+                let (_, method, args_node) = match_call(node).unwrap_or((node, String::new(), node));
+                let arg_nodes = child_nodes(args_node);
+                if arg_nodes.is_empty() {
+                    return (Some("attr".to_string()), Some(method));
+                }
+                return (Some("call".to_string()), Some(method));
+            }
+            "VCALL" => {
+                let name = node_symbol(node).unwrap_or_default();
+                return (Some("attr".to_string()), Some(name));
+            }
+            "FCALL" => {
+                let name = node_symbol(node).unwrap_or_default();
+                return (Some("call".to_string()), Some(name));
+            }
+            _ => {}
+        }
+        (None, None)
+    }
+
+    fn literal_values_equal(&self, left: &LiteralStaticValue, right: &LiteralStaticValue) -> bool {
+        match (left, right) {
+            (LiteralStaticValue::String(left), LiteralStaticValue::String(right)) => left == right,
+            (LiteralStaticValue::Symbol(left), LiteralStaticValue::Symbol(right)) => left == right,
+            (LiteralStaticValue::Integer(left), LiteralStaticValue::Integer(right)) => left == right,
+            (LiteralStaticValue::Float(left), LiteralStaticValue::Float(right)) => left == right,
+            (LiteralStaticValue::Bool(left), LiteralStaticValue::Bool(right)) => left == right,
+            (LiteralStaticValue::Nil, LiteralStaticValue::Nil) => true,
+            _ => false,
+        }
+    }
+
+    fn literal_numeric_value(&self, value: &LiteralStaticValue) -> Option<f64> {
+        match value {
+            LiteralStaticValue::Integer(value) => Some(*value as f64),
+            LiteralStaticValue::Float(value) => value.parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(node)?;
+                self.param_types.get(&name)
+                    .or_else(|| self.local_types.get(&name))
+                    .cloned()
+            }
+            "IVAR" => {
+                let name = node_symbol(node)?;
+                self.ivar_expression_type(&name)
+            }
+            _ => self.static_expression_type(node),
+        }
+    }
+
+    fn ivar_expression_type(&self, name: &str) -> Option<String> {
+        let current_class = self.current_owners.last()?;
+        let mut class_chain = current_class.split("::").collect::<Vec<_>>();
+        while !class_chain.is_empty() {
+            let candidate = class_chain.join("::");
+            if let Some(type_text) = self.ivar_tlet_types.get(&(candidate, name.to_string())) {
+                if useful_type(type_text) {
+                    return Some(type_text.clone());
+                }
+            }
+            class_chain.pop();
+        }
+        None
+    }
+
+    fn static_expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+        self.constant_expression_type(node)
+            .or_else(|| self.literal_type(node))
+    }
+
+    fn constant_expression_type(&self, node: &crate::ast::Node) -> Option<String> {
+        if node.r#type == "CONST" || node.r#type == "COLON2" || node.r#type == "COLON3" {
+            let name = node.text.trim().to_string();
+            if !name.is_empty() {
+                let bare = name.trim_start_matches("::").to_string();
+                if CORE_CLASS_CONSTANTS.contains(&bare.as_str()) || self.document.type_aliases.contains_key(&bare) {
+                    return Some(format!("T.class_of({name})"));
+                }
+            }
+        }
+        None
+    }
+
+    fn literal_type(&self, node: &crate::ast::Node) -> Option<String> {
+        match node.r#type.as_str() {
+            "STR" | "DSTR" | "STRING" | "STRING_LITERAL" => Some("String".to_string()),
+            "SYM" | "SYMBOL" => Some("Symbol".to_string()),
+            "INT" | "INTEGER" | "NUM" | "NUMBER" => Some("Integer".to_string()),
+            "FLOAT" => Some("Float".to_string()),
+            "TRUE" | "FALSE" => Some("T::Boolean".to_string()),
+            "NIL" => Some("NilClass".to_string()),
+            "RANGE" | "DOT2" | "DOT3" => Some("Range".to_string()),
+            "ARRAY" | "LIST" => Some("T::Array[T.untyped]".to_string()),
+            "HASH" => Some("T::Hash[T.untyped, T.untyped]".to_string()),
+            "CALL" | "QCALL" => {
+                if let Some((receiver, method, _)) = match_call(node) {
+                    if method == "new" {
+                        return Some(receiver.text.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn known_return_type(&self, name: &str) -> Option<String> {
+        let suffix = format!("\u{0}{}", name);
+        for (key, sig) in &self.signatures {
+            if key.ends_with(&suffix) {
+                if let Some(ret) = extract_return_type(sig) {
+                    return Some(ret);
+                }
+            }
+        }
+        None
+    }
+
+    fn noreturn_body(&self, node: &crate::ast::Node) -> bool {
+        match node.r#type.as_str() {
+            "BLOCK" | "STATEMENTS" | "BEGIN" | "ELSE" | "PAREN" | "SCOPE" | "ROOT" => {
+                implicit_return_expression(node).map(|inner| self.noreturn_body(inner)).unwrap_or(false)
+            }
+            "IF" | "UNLESS" => {
+                let then_br = child_node(node, 1).and_then(implicit_return_expression);
+                let else_br = child_node(node, 2).and_then(implicit_return_expression);
+                then_br.map(|inner| self.noreturn_body(inner)).unwrap_or(false)
+                    && else_br.map(|inner| self.noreturn_body(inner)).unwrap_or(false)
+            }
+            "CASE" | "CASE2" => {
+                let when_arms = node.children.iter().filter_map(crate::ast::node)
+                    .filter(|child| child.r#type == "WHEN" || child.r#type == "IN");
+                let mut all_noreturn = true;
+                let mut has_when = false;
+                for arm in when_arms {
+                    has_when = true;
+                    let arm_body = child_node(arm, 1).and_then(implicit_return_expression);
+                    if !arm_body.map(|inner| self.noreturn_body(inner)).unwrap_or(false) {
+                        all_noreturn = false;
+                        break;
+                    }
+                }
+                let else_br = node.children.iter().filter_map(crate::ast::node)
+                    .find(|child| child.r#type != "WHEN" && child.r#type != "IN" && child.r#type != "CASE_EXPR");
+                let else_noreturn = else_br.and_then(implicit_return_expression)
+                    .map(|inner| self.noreturn_body(inner))
+                    .unwrap_or(false);
+                has_when && all_noreturn && else_noreturn
+            }
+            "RESCUE" => {
+                child_nodes(node).iter().all(|child| self.noreturn_body(child))
+            }
+            "CALL" | "QCALL" | "FCALL" | "VCALL" => {
+                self.noreturn_call(node)
+            }
+            _ => false,
+        }
+    }
+
+    fn noreturn_call(&self, node: &crate::ast::Node) -> bool {
+        let name = match node.r#type.as_str() {
+            "VCALL" => node_symbol(node).unwrap_or_default(),
+            "FCALL" => node_symbol(node).unwrap_or_default(),
+            "CALL" | "QCALL" => {
+                let (_, method, _) = match_call(node).unwrap_or((node, String::new(), node));
+                method
+            }
+            _ => return false,
+        };
+        if name == "raise" || name == "fail" || name == "exit" || name == "abort" {
+            return true;
+        }
+        if name == "absurd" {
+            if let Some((receiver, _, _)) = match_call(node) {
+                if receiver.text == "T" {
+                    return true;
+                }
+            }
+        }
+        self.known_return_type(&name).as_deref() == Some("T.noreturn")
+    }
+
+    fn return_sources_for(
+        &self,
+        node: &crate::ast::Node,
+        blockers: &mut BTreeSet<String>,
+    ) -> Vec<Value> {
+        let node_line = node.first_lineno;
+        let code = node.text.clone();
+        if node.r#type == "RETURN" {
+            if let Some(arg) = child_node(node, 0) {
+                return self.return_sources_for(arg, blockers);
+            }
+            return vec![json!({"kind": "nil", "type": "NilClass", "line": Value::Null, "code": "return"})];
+        }
+        if matches!(node.r#type.as_str(), "BLOCK" | "STATEMENTS" | "BEGIN" | "ELSE" | "PAREN" | "SCOPE" | "ROOT") {
+            if let Some(expr) = implicit_return_expression(node) {
+                return self.return_sources_for(expr, blockers);
+            }
+        }
+        if matches!(node.r#type.as_str(), "IVAR" | "CVAR" | "GVAR") {
+            blockers.insert(format!("untyped instance variable {code} at {}:{node_line}", self.path));
+            return vec![json!({"kind": "ivar_read", "line": node_line, "code": code})];
+        }
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            let mut out = Vec::new();
+            if let Some(then_branch) = child_node(node, 1) {
+                if let Some(expr) = implicit_return_expression(then_branch) {
+                    out.extend(self.return_sources_for(expr, blockers));
+                }
+            }
+            if let Some(else_branch) = child_node(node, 2) {
+                if let Some(expr) = implicit_return_expression(else_branch) {
+                    out.extend(self.return_sources_for(expr, blockers));
+                }
+            } else {
+                out.push(json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": "implicit else"}));
+            }
+            return out;
+        }
+        if matches!(node.r#type.as_str(), "CASE" | "CASE2") {
+            let mut out = Vec::new();
+            let when_arms = node.children.iter().filter_map(crate::ast::node)
+                .filter(|child| child.r#type == "WHEN" || child.r#type == "IN");
+            for arm in when_arms {
+                if let Some(body) = child_node(arm, 1) {
+                    if let Some(expr) = implicit_return_expression(body) {
+                        out.extend(self.return_sources_for(expr, blockers));
+                    }
+                }
+            }
+            let else_br = node.children.iter().filter_map(crate::ast::node)
+                .find(|child| child.r#type != "WHEN" && child.r#type != "IN" && child.r#type != "CASE_EXPR");
+            if let Some(alt) = else_br {
+                if let Some(expr) = implicit_return_expression(alt) {
+                    out.extend(self.return_sources_for(expr, blockers));
+                }
+            }
+            if out.is_empty() {
+                blockers.insert(format!("case return without exhaustive static branch type at {}:{node_line}", self.path));
+            }
+            return out;
+        }
+        if matches!(node.r#type.as_str(), "WHILE" | "UNTIL") {
+            return vec![json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": code})];
+        }
+        if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "FCALL" || node.r#type == "VCALL" {
+            let callee = match node.r#type.as_str() {
+                "VCALL" | "FCALL" => node_symbol(node).unwrap_or_default(),
+                "CALL" | "QCALL" => {
+                    let (_, method, _) = match_call(node).unwrap_or((node, String::new(), node));
+                    method
+                }
+                _ => String::new(),
+            };
+            if node.r#type == "QCALL" {
+                if let Some(ret) = self.known_return_type(&callee) {
+                    if useful_type(&ret) {
+                        return vec![json!({"kind": "safe_call", "callee": callee, "type": format!("T.nilable({})", ret), "line": node_line, "code": code, "stdlib": Value::Null})];
+                    }
+                }
+                blockers.insert(format!("safe navigation return may be nil at {}:{node_line}", self.path));
+                return vec![
+                    json!({"kind": "nil", "type": "NilClass", "line": node_line, "code": code}),
+                    json!({"kind": "call_untyped", "callee": callee, "line": node_line, "code": code}),
+                ];
+            }
+            if let Some(ret) = self.known_return_type(&callee) {
+                if useful_type(&ret) {
+                    return vec![json!({"kind": "typed_call", "callee": callee, "type": ret, "line": node_line, "code": code, "stdlib": Value::Null})];
+                }
+            }
+            if let Some(expr_type) = self.expression_type(node) {
+                if useful_type(&expr_type) {
+                    return vec![json!({"kind": "static", "callee": callee, "type": expr_type, "line": node_line, "code": code})];
+                }
+            }
+            blockers.insert(format!("untyped callee {callee} at {}:{node_line}", self.path));
+            return vec![json!({"kind": "call_untyped", "callee": callee, "line": node_line, "code": code})];
+        }
+        if matches!(node.r#type.as_str(), "LASGN" | "DASGN" | "IASGN" | "CASGN" | "CVASGN" | "GVASGN") {
+            if let Some(value) = child_node(node, 1) {
+                return self.return_sources_for(value, blockers);
+            }
+        }
+        if let Some(ty) = self.expression_type(node) {
+            return vec![json!({"kind": if ty == "NilClass" { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code})];
+        }
+        blockers.insert(format!("unknown return expression {} at {}:{node_line}", node.r#type, self.path));
+        vec![json!({"kind": "unknown", "line": node_line, "code": code, "unknown_reasons": []})]
+    }
 }

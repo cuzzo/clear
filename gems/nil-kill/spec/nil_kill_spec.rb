@@ -2324,8 +2324,7 @@ RSpec.describe NilKill do
             "confidence" => "high",
             "path" => rel,
             "line" => 5,
-            # TODO: Investigate
-            "data" => a_hash_including("type" => "void", "source" => "unused_return")
+            "data" => a_hash_including("type" => "T.noreturn", "source" => "noreturn_body")
           )
         )
       end
@@ -3457,8 +3456,7 @@ RSpec.describe NilKill do
         )
         expect(rows["unused_wrapper"]).to include(
           "usage" => "unused via return-forwarding",
-          # TODO: Investigate
-          "source_kind" => "unknown source",
+          "source_kind" => "implicit/direct forwarded return",
         )
         expect(rows["used_leaf"]).to include("usage" => "used as value")
         expect(rows["run"]).to include("usage" => "declared void", "fixability" => "addressed: void")

@@ -34,7 +34,7 @@ module AutoType
     end
 
     def load_z3_solver
-      require "nil_kill/z3_solver"
+      require "nil_kill/inference/z3_solver"
     rescue LoadError, SyntaxError => e
       warn "auto-type: Z3 solver not loaded (#{e.message}); running without pre-filter"
     end

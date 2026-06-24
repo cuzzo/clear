@@ -3682,6 +3682,15 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return false;
         }
+        if let Some(parent) = node.parent() {
+            if self.normalization_adapter.check_node_role(parent, "assignment") {
+                if let Some(left) = self.assignment_left(parent) {
+                    if self.same_ts_node(left, node) {
+                        return true;
+                    }
+                }
+            }
+        }
         node.next_sibling()
             .map(|sibling| self.assignment_operator(node_text(sibling, self.source)))
             .unwrap_or(false)
@@ -5121,6 +5130,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "name");
+        }
         self.named_field(node, "left")
             .or_else(|| self.named_children(node).into_iter().next())
     }
@@ -5129,6 +5141,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "value");
+        }
         self.named_field(node, "right")
             .or_else(|| self.named_children(node).into_iter().nth(1))
     }
@@ -5321,9 +5336,12 @@ impl<'source> TreeSitterNormalizer<'source> {
         &mut self,
         node: TreeSitterNode<'_>,
     ) -> Option<Node> {
-        let right = node
-            .next_named_sibling()
-            .and_then(|sibling| self.normalize_node(sibling));
+        let right_node = if let Some(parent) = node.parent().filter(|p| self.normalization_adapter.check_node_role(*p, "assignment")) {
+            self.assignment_right(parent)
+        } else {
+            node.next_named_sibling()
+        };
+        let right = right_node.and_then(|sibling| self.normalize_node(sibling));
         let source = node.parent().unwrap_or(node);
         self.assignment_target(node, right.clone(), source)
             .or_else(|| {

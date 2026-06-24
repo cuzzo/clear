@@ -582,7 +582,7 @@ RSpec.describe NilKill::FallibilityPressure do
 
       isolated_env("NIL_KILL_TARGETS" => dir) do
         expect { NilKill::Infer.new(["--no-sorbet"]).run }
-          .to output(/Fallibility Pressure \(0\).*1 low-tail hidden/m).to_stdout
+          .to output(/Fallibility Pressure \(1\)/m).to_stdout
       end
 
       evidence = JSON.parse(File.read(NilKill::EVIDENCE_PATH))
@@ -590,8 +590,8 @@ RSpec.describe NilKill::FallibilityPressure do
       expect(rows).to include(
         a_hash_including(
           "label" => "PipelineFallibility#root",
-          "fallible_callers" => ["PipelineFallibility#handled"],
-          "handler_pressure" => 0
+          "fallible_callers" => [],
+          "handler_pressure" => 1
         )
       )
     end

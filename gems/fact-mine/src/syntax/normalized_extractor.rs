@@ -106,8 +106,8 @@ impl<'a> Extractor<'a> {
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         match node.r#type.as_str() {
-            "CLASS" | "MODULE" => self.scan_owner(node),
-            "DEFN" | "DEFS" => self.scan_function(node),
+            "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => self.scan_owner(node),
+            "DEFN" | "DEFS" | "METHOD_SIGNATURE" => self.scan_function(node),
             "HASH" => self.scan_children(node),
             "IF" | "UNLESS" => self.scan_if(node),
             "FOR" | "WHILE" | "UNTIL" => self.scan_loop(node),
@@ -414,7 +414,7 @@ impl<'a> Extractor<'a> {
         if let (Some(receiver), Some(field)) = (child_node(node, 0), child_symbol(node, 1)) {
             let field = field.trim_end_matches('=').to_string();
             let field = self.behavior.clean_identifier(&field);
-            if field != "[]" {
+            if field != "[]" || state_receiver_field(&self.receiver_text(receiver)).is_some() {
                 effect_detail = format!("{field}=");
                 let raw_receiver_name = self.receiver_text(receiver);
                 let receiver_name = self.behavior.clean_receiver(&raw_receiver_name);
@@ -623,7 +623,8 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_local_assignment(&mut self, node: &Node) {
-        let field = first_string_or_symbol(node);
+        let field = first_string_or_symbol(node)
+            .or_else(|| child_node(node, 0).map(|n| n.text.clone()));
         let field_clean = field.as_deref().map(|f| self.behavior.clean_identifier(f));
         let writes = self
             .behavior
@@ -1035,11 +1036,11 @@ impl<'a> Extractor<'a> {
     }
 
     fn collect_owner_fields_from_node(&mut self, owner: &str, node: &Node, in_method: bool) {
-        if matches!(node.r#type.as_str(), "CLASS" | "MODULE") {
+        if matches!(node.r#type.as_str(), "CLASS" | "MODULE" | "INTERFACE_DECLARATION") {
             return;
         }
 
-        let is_method = in_method || matches!(node.r#type.as_str(), "DEFN" | "DEFS");
+        let is_method = in_method || matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "METHOD_SIGNATURE");
 
         if let Some(mut declaration) = self.behavior.state_declaration_from_node(node, owner, is_method) {
             declaration.field = self.behavior.clean_identifier(&declaration.field);
@@ -1360,7 +1361,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn argument_values(&self, node: &Node) -> Vec<String> {
-        if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
+        if matches!(node.r#type.as_str(), "DEFN" | "DEFS" | "METHOD_SIGNATURE") {
             let mut out = Vec::new();
             if let Some(name) = function_name(node) {
                 out.push(name);
@@ -1626,6 +1627,17 @@ fn function_name_with_behavior(
     match name.as_deref() {
         Some("") | None => behavior.function_name_from_text(&node.text),
         Some(name) if name.contains(':') => name.split_once(':').map(|(_, tail)| tail.to_string()),
+        Some(name) if name.contains('.') => {
+            if let Some((receiver, tail)) = name.split_once('.') {
+                if receiver == "self" || receiver == "this" {
+                    Some(name.to_string())
+                } else {
+                    Some(tail.to_string())
+                }
+            } else {
+                Some(name.to_string())
+            }
+        }
         Some(_) => name,
     }
 }
@@ -1637,7 +1649,7 @@ fn function_scope(node: &Node) -> Option<&Node> {
 fn scope_child(node: &Node) -> Option<&Node> {
     child_nodes(node)
         .into_iter()
-        .find(|child| child.r#type == "SCOPE")
+        .find(|child| child.r#type == "SCOPE" || child.r#type == "INTERFACE_BODY")
 }
 
 fn scope_body(scope: &Node) -> Option<&Node> {
@@ -1956,9 +1968,9 @@ fn raw_kind(node: &Node) -> &str {
         "ROOT" => "program",
         "SCOPE" => "body",
         "ARGS" => "parameters",
-        "CLASS" => "class",
+        "CLASS" | "INTERFACE_DECLARATION" => "class",
         "MODULE" => "module",
-        "DEFN" | "DEFS" => "method",
+        "DEFN" | "DEFS" | "METHOD_SIGNATURE" => "method",
         "IF" => "if",
         "UNLESS" => "unless",
         "CASE" | "CASE2" => "case",
@@ -2217,42 +2229,64 @@ fn span_contains(outer: Span, inner: Span) -> bool {
 /// Children are typically [name, type?, value?] — the type is the child after the name.
 fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String> {
     let child_nodes = child_nodes(node);
-    // Find the field name child, then take the next child as the type
     for (i, child) in child_nodes.iter().enumerate() {
-        // Match the field name child: could be Symbol, LVAR, or identifier node
         let is_name = child.text.trim() == field_name
             || child.r#type == "LVAR"
             || child.r#type == "CVAR"
-            || child.r#type == "identifier";
-        if is_name && i + 1 < child_nodes.len() {
-            let type_child = child_nodes[i + 1];
-            let type_text = type_child.text.trim().to_string();
-            if !type_text.is_empty()
-                && type_text != ":"
-                && !type_text.starts_with('=')
-                && !type_text.starts_with('(')
-                && !type_text.starts_with('{')
-            {
-                return Some(type_text);
+            || child.r#type == "identifier"
+            || child.r#type == "field_identifier";
+        if is_name {
+            if i + 1 < child_nodes.len() {
+                let type_child = child_nodes[i + 1];
+                let type_text = type_child.text.trim().to_string();
+                if is_valid_type_text(&type_text) {
+                    return Some(type_text);
+                }
+            }
+            if i > 0 {
+                let type_child = child_nodes[i - 1];
+                let type_text = type_child.text.trim().to_string();
+                if is_valid_type_text(&type_text) {
+                    return Some(type_text);
+                }
             }
         }
     }
-    // Fallback: text-based extraction for languages where children aren't structured
-    let text = node.text.trim();
-    let after_name = text
-        .find(field_name)
-        .map(|idx| text[idx + field_name.len()..].trim_start())?;
-    let after_name = after_name.strip_prefix(':').unwrap_or(after_name).trim_start();
-    let type_text = after_name.split('=').next()?.trim();
-    if type_text.is_empty()
-        || type_text == ";"
-        || type_text.starts_with('(')
-        || type_text.starts_with("{")
-        || type_text == "?"
-    {
-        return None;
+    let text = node.text.trim().trim_end_matches(';').trim();
+    if let Some(idx) = text.find(field_name) {
+        let after_name = text[idx + field_name.len()..].trim_start();
+        let after_name = after_name.strip_prefix(':').unwrap_or(after_name).trim_start();
+        if let Some(postfix_type) = after_name.split('=').next() {
+            let postfix_type = postfix_type.trim();
+            if is_valid_type_text(postfix_type) {
+                return Some(postfix_type.to_string());
+            }
+        }
+        let before_name = text[..idx].trim_end();
+        if let Some(last_part) = before_name.split(|c| c == '=' || c == ':').last() {
+            let last_part = last_part.trim();
+            let mut parts = last_part.split_whitespace().collect::<Vec<_>>();
+            while !parts.is_empty() && matches!(parts[0], "const" | "public" | "private" | "protected" | "static" | "mutable" | "virtual") {
+                parts.remove(0);
+            }
+            let prefix_type = parts.join(" ");
+            if is_valid_type_text(&prefix_type) {
+                return Some(prefix_type);
+            }
+        }
     }
-    Some(type_text.to_string())
+    None
+}
+
+fn is_valid_type_text(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty()
+        && t != ":"
+        && !t.starts_with('=')
+        && !t.starts_with('(')
+        && !t.starts_with('{')
+        && t != ";"
+        && t != "?"
 }
 
 fn simple_identifier(value: &str) -> bool {
