@@ -3,12 +3,12 @@
   "fields": [
     {
       "declared_type": null,
-      "id": "ruby\u0000/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000total",
+      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb\u0000Calculator\u0000field\u0000total",
       "language": "ruby",
       "line": 5,
       "name": "total",
       "owner": "Calculator",
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
       "source": "syntax",
       "span": [
         5,
@@ -35,7 +35,7 @@
       "params": [
         "value"
       ],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
       "signature": "",
       "source": {},
       "span": [
@@ -57,7 +57,7 @@
       "name": "result",
       "owner": "Calculator",
       "params": [],
-      "path": "/home/yahn/litedb/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
       "signature": "",
       "source": {},
       "span": [

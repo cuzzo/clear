@@ -3,7 +3,7 @@
     {
       "branch_decisions": [
         {
-          "function": ":string",
+          "function": "process",
           "line": 23,
           "predicate": "(user.role())",
           "span": [
@@ -17,7 +17,7 @@
           ]
         },
         {
-          "function": ":string",
+          "function": "process",
           "line": 36,
           "predicate": "(status == Status::Idle && user.ready())",
           "span": [
@@ -39,7 +39,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 38,
           "message": "publish",
           "owner": "CppSyntaxFactsCore",
@@ -59,7 +59,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 40,
           "message": "warn",
           "owner": "CppSyntaxFactsCore",
@@ -100,7 +100,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": ":string",
+          "function": "process",
           "line": 21,
           "message": "callback",
           "owner": "CppSyntaxFactsCore",
@@ -120,7 +120,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 26,
           "message": "escalate",
           "owner": "CppSyntaxFactsCore",
@@ -140,7 +140,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 29,
           "message": "fallback",
           "owner": "CppSyntaxFactsCore",
@@ -160,7 +160,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 32,
           "message": "defaultCase",
           "owner": "CppSyntaxFactsCore",
@@ -178,7 +178,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": ":string",
+          "function": "process",
           "line": 19,
           "message": "name",
           "owner": "CppSyntaxFactsCore",
@@ -196,7 +196,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": ":string",
+          "function": "process",
           "line": 19,
           "message": "profile",
           "owner": "CppSyntaxFactsCore",
@@ -214,7 +214,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": ":string",
+          "function": "process",
           "line": 20,
           "message": "active",
           "owner": "CppSyntaxFactsCore",
@@ -232,7 +232,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 23,
           "message": "role",
           "owner": "CppSyntaxFactsCore",
@@ -250,7 +250,7 @@
           "block": false,
           "conditional": true,
           "control": "conditional",
-          "function": ":string",
+          "function": "process",
           "line": 36,
           "message": "ready",
           "owner": "CppSyntaxFactsCore",
@@ -268,7 +268,7 @@
           "block": false,
           "conditional": true,
           "control": "iterates",
-          "function": ":string",
+          "function": "process",
           "line": 44,
           "message": "children",
           "owner": "CppSyntaxFactsCore",
@@ -290,7 +290,7 @@
             34,
             5
           ],
-          "function": ":string",
+          "function": "process",
           "kind": "case_dispatch",
           "line": 23,
           "members": [
@@ -313,7 +313,7 @@
             41,
             5
           ],
-          "function": ":string",
+          "function": "process",
           "kind": "conjunction",
           "line": 36,
           "members": [
@@ -336,7 +336,7 @@
             "Role::Guest": [],
             "Role::Owner": []
           },
-          "function": ":string",
+          "function": "process",
           "line": 23,
           "outside": [],
           "span": [
@@ -372,7 +372,7 @@
         },
         {
           "line": 18,
-          "name": ":string",
+          "name": "process",
           "owner": "CppSyntaxFactsCore",
           "params": [
             "user",
@@ -435,7 +435,7 @@
       "state_reads": [
         {
           "field": "active",
-          "function": ":string",
+          "function": "process",
           "line": 20,
           "owner": "CppSyntaxFactsCore",
           "receiver": "user",
@@ -448,7 +448,7 @@
         },
         {
           "field": "children",
-          "function": ":string",
+          "function": "process",
           "line": 44,
           "owner": "CppSyntaxFactsCore",
           "receiver": "item",
@@ -487,7 +487,7 @@
         },
         {
           "field": "name",
-          "function": ":string",
+          "function": "process",
           "line": 19,
           "owner": "CppSyntaxFactsCore",
           "receiver": "user.profile()",
@@ -500,7 +500,7 @@
         },
         {
           "field": "profile",
-          "function": ":string",
+          "function": "process",
           "line": 19,
           "owner": "CppSyntaxFactsCore",
           "receiver": "user",
@@ -513,7 +513,7 @@
         },
         {
           "field": "ready",
-          "function": ":string",
+          "function": "process",
           "line": 36,
           "owner": "CppSyntaxFactsCore",
           "receiver": "user",
@@ -526,7 +526,7 @@
         },
         {
           "field": "role",
-          "function": ":string",
+          "function": "process",
           "line": 23,
           "owner": "CppSyntaxFactsCore",
           "receiver": "user",
@@ -565,19 +565,6 @@
         },
         {
           "field": "status",
-          "function": ":string",
-          "line": 36,
-          "owner": "CppSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            36,
-            8,
-            36,
-            14
-          ]
-        },
-        {
-          "field": "status",
           "function": "audit",
           "line": 54,
           "owner": "CppSyntaxFactsCore",
@@ -588,12 +575,25 @@
             54,
             17
           ]
+        },
+        {
+          "field": "status",
+          "function": "process",
+          "line": 36,
+          "owner": "CppSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            36,
+            8,
+            36,
+            14
+          ]
         }
       ],
       "state_writes": [
         {
           "field": "count",
-          "function": ":string",
+          "function": "process",
           "line": 37,
           "owner": "CppSyntaxFactsCore",
           "receiver": "self",

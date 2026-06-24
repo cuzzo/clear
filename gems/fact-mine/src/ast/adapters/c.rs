@@ -27,13 +27,15 @@ impl AstNormalizationAdapter for CAstAdapter {
 
     fn custom_function_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
         if node.kind() == "function_definition" {
-            let mut stack = named_children(node);
-            while !stack.is_empty() {
-                let child = stack.remove(0);
-                if child.kind() == "identifier" || child.kind() == "field_identifier" {
-                    return Some(super::super::node_text(child, source).to_string());
+            if let Some(decl) = node.child_by_field_name("declarator") {
+                let mut stack = vec![decl];
+                while !stack.is_empty() {
+                    let child = stack.remove(0);
+                    if child.kind() == "identifier" || child.kind() == "field_identifier" {
+                        return Some(super::super::node_text(child, source).to_string());
+                    }
+                    stack.extend(named_children(child));
                 }
-                stack.extend(named_children(child));
             }
         }
         None
