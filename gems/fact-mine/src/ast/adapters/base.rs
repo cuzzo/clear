@@ -94,6 +94,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             "constant" => matches!(kind, "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"),
             "block_or_do_block" => matches!(kind, "block" | "do_block"),
             "string_content_or_interpolation" => matches!(kind, "string_content" | "interpolation"),
+            "string_content" => matches!(kind, "string_content" | "string_fragment"),
             "regex_or_literal" => matches!(kind, "regex" | "regex_literal"),
             "assignment_or_augmented" => matches!(kind, "assignment" | "augmented_assignment"),
             "unary" => kind == "unary",
@@ -940,8 +941,193 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
-    fn block_node_kind(&self, _kind: &str) -> bool {
-        false
+    fn block_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "block"
+                | "body_statement"
+                | "statement_block"
+                | "statement_list"
+                | "class_body"
+                | "switch_body"
+                | "match_block"
+                | "then"
+                | "block_body"
+                | "control_structure_body"
+                | "compound_statement"
+                | "declaration_list"
+                | "function_body"
+                | "statements"
+        )
+    }
+
+    fn const_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "constant" | "scope_resolution" | "type_identifier" | "scoped_type_identifier"
+        )
+    }
+
+    fn call_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "call"
+                | "call_expression"
+                | "function_call_expression"
+                | "method_call"
+                | "method_call_expression"
+        )
+    }
+
+    fn case_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "case"
+                | "switch_statement"
+                | "expression_switch_statement"
+                | "switch_expression"
+                | "match_statement"
+                | "match_expression"
+                | "when_expression"
+        )
+    }
+
+    fn when_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "when"
+                | "switch_case"
+                | "case_clause"
+                | "expression_case"
+                | "case_statement"
+                | "switch_section"
+                | "switch_block_statement_group"
+                | "switch_entry"
+                | "when_entry"
+                | "match_arm"
+        )
+    }
+
+    fn statement_node_kind(&self, kind: &str) -> bool {
+        kind.ends_with("_statement")
+            || kind.ends_with("_expression")
+            || matches!(kind, "return" | "break" | "next")
+    }
+
+    fn is_pattern_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "pattern"
+                | "case_pattern"
+                | "match_pattern"
+                | "switch_pattern"
+                | "when_condition"
+        )
+    }
+
+    fn is_pattern_wrapper_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "pattern"
+                | "case_pattern"
+                | "match_pattern"
+                | "switch_pattern"
+                | "when_condition"
+                | "expression_list"
+        )
+    }
+
+    fn wrapped_return_block_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "body_statement" | "block_body" | "statement" | "block" | "statement_list"
+        )
+    }
+
+    fn is_command_call_wrapper_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "body_statement" | "block" | "block_body" | "statement"
+        )
+    }
+
+    fn is_terminal_statement_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "body_statement" | "block_body" | "statement" | "argument_list"
+        )
+    }
+
+    fn is_parameter_name_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "identifier"
+                | "hash_splat_parameter"
+                | "splat_parameter"
+                | "block_parameter"
+                | "keyword_parameter"
+                | "optional_parameter"
+        )
+    }
+
+    fn is_vcall_excluded_parent_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "method" | "method_parameters" | "parameter_list" | "argument_list" | "arguments"
+        )
+    }
+
+    fn is_inline_def_receiver_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "self" | "this" | "constant" | "scope_resolution"
+        )
+    }
+
+    fn is_boolean_statement_wrapper_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "body_statement" | "block_body" | "statement" | "argument_list" | "expression_list"
+        )
+    }
+
+    fn is_statement_wrapper_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "body_statement" | "block_body" | "statement" | "argument_list"
+        )
+    }
+
+    fn is_infix_target_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "binary" | "binary_expression" | "comparison_operator"
+        )
+    }
+
+    fn is_call_block_or_arg_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "block" | "do_block" | "argument_list" | "arguments"
+        )
+    }
+
+    fn is_member_read_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "call"
+                | "attribute"
+                | "member_expression"
+                | "member_access_expression"
+                | "dot_index_expression"
+                | "field"
+                | "field_access"
+                | "selector_expression"
+                | "field_expression"
+                | "navigation_expression"
+                | "directly_assignable_expression"
+                | "expression_list"
+        )
     }
 
     fn block_pass_argument(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {

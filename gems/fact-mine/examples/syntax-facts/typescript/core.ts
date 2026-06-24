@@ -54,6 +54,15 @@ export class TypeScriptSyntaxFactsCore {
   private audit(name: string): Status {
     console.log(name);
     this.sink.send("record", name);
+    const me = this;
+    const processItem = ({ name, active }: Account) => { console.log(name, active); };
+    try {
+      this.count += 1;
+    } catch (e) {
+      console.error(e);
+    } finally {
+      this.count = 0;
+    }
     return this.status;
   }
 
@@ -62,8 +71,8 @@ export class TypeScriptSyntaxFactsCore {
   }
 }
 
-export function normalizeValue(input?: string): string | undefined {
-  return input ?? undefined;
+export function normalizeValue(input?: string, defaultValue = "default", ...rest: any[]): string | undefined {
+  return input ?? defaultValue;
 }
 
 interface Sink {

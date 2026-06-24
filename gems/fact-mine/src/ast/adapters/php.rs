@@ -58,9 +58,6 @@ impl AstNormalizationAdapter for PhpAstAdapter {
         (!args.is_empty()).then_some(args)
     }
 
-    fn block_node_kind(&self, kind: &str) -> bool {
-        matches!(kind, "compound_statement" | "declaration_list")
-    }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         (kind == "foreach_statement").then_some("FOR")

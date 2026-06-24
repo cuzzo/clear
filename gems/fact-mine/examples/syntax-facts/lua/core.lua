@@ -40,6 +40,7 @@ end
 function LuaSyntaxFactsCore:audit(name)
   print(name)
   self.sink:send("record", name)
+  local tbl = { 1 }
   return self.status
 end
 

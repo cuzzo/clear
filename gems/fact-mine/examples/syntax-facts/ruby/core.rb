@@ -45,9 +45,11 @@ class RubySyntaxFactsCore
       warn("not ready")
     end
 
-    items.flat_map do |item|
-      item.children
+    items.each do |(a, b)|
+      puts a
     end
+
+    super(user, items, callback)
 
     @status
   end
@@ -58,11 +60,55 @@ class RubySyntaxFactsCore
     puts(name)
     send(:record, name)
     $GLOBAL_STATE
-    @source
+    $1
+    { count: }
+    `ls`
+    `ls #{@count}`
+    chained = "hello" "world"
+    heredoc = <<~EOF
+      hello
+    EOF
+    logical = nil
+    logical ||= 1
+    $GLOBAL_STATE += 1
+    local_val = 1
+    audit !name
+    return audit(name)
   end
 
   private def inline_private(value)
     helper(value)
+  end
+
+  private def self.inline_class_private(value)
+    helper(value)
+  end
+
+  private_class_method def self.inline_class_private2(value)
+    helper(value)
+  end
+
+  def one_line_return; return 42; end
+
+  def rescue_test
+    begin
+      foo
+    rescue => e
+    end
+    begin
+      foo
+    rescue => e
+      bar
+      baz
+    end
+  end
+
+  def ensure_only_test
+    begin
+      foo
+    ensure
+      bar
+    end
   end
 
   def ready?
@@ -70,4 +116,10 @@ class RubySyntaxFactsCore
   end
 
   def loaded? = @status == :ready
+end
+
+if $GLOBAL_STATE > 0
+  puts "active"
+else
+  puts "inactive"
 end

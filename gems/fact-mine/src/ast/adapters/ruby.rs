@@ -241,7 +241,7 @@ impl AstNormalizationAdapter for RubyAstAdapter {
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         match kind {
             "while" | "while_statement" | "while_modifier" => Some("WHILE"),
-            "until_modifier" => Some("UNTIL"),
+            "until" | "until_statement" | "until_modifier" => Some("UNTIL"),
             "for" | "for_statement" | "for_in_clause" => Some("FOR"),
             _ => None,
         }
