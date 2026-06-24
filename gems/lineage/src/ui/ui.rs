@@ -2576,24 +2576,38 @@ fn safe_join(repo: &Path, path: &str) -> Result<PathBuf> {
 fn file_versions(storage: &Storage, path: &str) -> Result<Vec<UiVersion>> {
     let mut stmt = storage.connection().prepare(
         r#"
-        WITH current_units AS (
-          SELECT
-            u.id,
-            COALESCE((
-              SELECT latest.path
-              FROM events latest
-              WHERE latest.unit_id = u.id
-              ORDER BY latest.timestamp DESC, latest.id DESC
-              LIMIT 1
-            ), u.original_path) AS current_path
+        WITH latest_events AS (
+          SELECT e.unit_id, e.path
+          FROM events e
+          WHERE e.id = (
+            SELECT latest.id
+            FROM events latest
+            WHERE latest.unit_id = e.unit_id
+            ORDER BY latest.timestamp DESC, latest.id DESC
+            LIMIT 1
+          )
+        ),
+        current_units AS (
+          SELECT u.id
           FROM logical_units u
+          LEFT JOIN latest_events le ON le.unit_id = u.id
+          WHERE COALESCE(le.path, u.original_path) = ?1
+        ),
+        union_query AS (
+          SELECT e.commit_hash, e.timestamp, e.event_type, e.path, e.name,
+                 e.start_line, e.end_line, e.semantic_change, e.id
+          FROM current_units cu
+          CROSS JOIN events e ON e.unit_id = cu.id
+          UNION
+          SELECT e.commit_hash, e.timestamp, e.event_type, e.path, e.name,
+                 e.start_line, e.end_line, e.semantic_change, e.id
+          FROM events e
+          WHERE e.path = ?1
         )
-        SELECT e.commit_hash, e.timestamp, e.event_type, e.path, e.name,
-               e.start_line, e.end_line, e.semantic_change
-        FROM events e
-        JOIN current_units cu ON cu.id = e.unit_id
-        WHERE cu.current_path = ?1 OR e.path = ?1
-        ORDER BY e.timestamp DESC, e.id DESC
+        SELECT commit_hash, timestamp, event_type, path, name,
+               start_line, end_line, semantic_change
+        FROM union_query
+        ORDER BY timestamp DESC, id DESC
         LIMIT 200
         "#,
     )?;
@@ -3742,7 +3756,7 @@ fn apply_semantic_churn(
                END AS mutation_hardening_factor
         FROM logical_units u
         LEFT JOIN latest_events le ON le.unit_id = u.id
-        JOIN events e ON e.unit_id = u.id
+        CROSS JOIN events e ON e.unit_id = u.id
         LEFT JOIN metadata m ON m.commit_hash = e.commit_hash
         LEFT JOIN fix_commit_profiles fp ON fp.commit_hash = e.commit_hash
         WHERE COALESCE(le.path, u.original_path) = ?1
